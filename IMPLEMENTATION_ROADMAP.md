@@ -283,6 +283,247 @@ Done when:
 
 - A long-running heartbeat can coordinate remote agents, wait for local device access, use an approved recipe, and keep all state reconstructible from SQL.
 
+## Verification gates
+
+Each version should end with a short written check report in the commit or PR description:
+
+- What was tested automatically.
+- What was tested manually.
+- What failed or was skipped.
+- What state was left running.
+- What credentials or providers were touched.
+
+### v0.1 checks: local proof of concept
+
+Automated checks:
+
+- `npm run typecheck`
+- `npm run build`
+- `npm run lint`
+- `npm test`
+
+Manual checks:
+
+- Start the server in dry-run mode.
+- Create a session through HTTP.
+- Create a heartbeat through HTTP.
+- Let a 30-second heartbeat fire naturally, without forcing it due.
+- Confirm one `heartbeat_runs` row is persisted.
+- Start the server with live Pi/DeepSeek and confirm `/api/runtime/pi` reports a real session id.
+- Run one tiny live heartbeat and confirm the persisted output is from DeepSeek.
+
+Human check:
+
+- Read the persisted prompt snapshot and verify it is the exact markdown-backed heartbeat the user intended to run.
+
+### v0.2 checks: reliable single-server harness
+
+Automated checks:
+
+- Unit tests for event-log writes.
+- Unit tests for timeout behavior.
+- Unit tests for missing markdown failures.
+- Unit tests for Pi reset behavior in dry-run/runtime-mock mode.
+- Regression test proving failed runs still advance `last_tick` and `next_tick`.
+
+Manual checks:
+
+- Run a one-hour local soak test with a short cadence heartbeat.
+- Trigger a manual Pi reset while the server remains up.
+- Temporarily point a heartbeat at a missing markdown file and confirm a failed run and event log are recorded.
+- Inspect `/health` and runtime endpoints during idle, active, failed, and reset states.
+
+Human check:
+
+- Read the event log for at least one successful run and one failed run and confirm it explains what happened without terminal logs.
+
+### v0.3 checks: hosted singular server agent
+
+Automated checks:
+
+- Local test suite passes before deploy.
+- Hosted `/health` check passes after deploy.
+- Schema initialization against Turso is idempotent.
+- API smoke test runs against the Railway URL.
+
+Manual checks:
+
+- Confirm Stripe Projects env was pulled and no Cloudflare env keys are needed by the app.
+- Create a hosted session.
+- Create a hosted heartbeat.
+- Let the hosted heartbeat execute twice on cadence.
+- Confirm both runs persist in Turso.
+- Restart the Railway service and confirm the heartbeat schedule resumes.
+
+Human check:
+
+- Inspect the hosted run outputs and decide whether the single hosted agent is acting coherently enough to leave running.
+
+### v0.4 checks: reliable hosted singular agent
+
+Automated checks:
+
+- Tests for SQL event ordering.
+- Tests for run lock behavior.
+- Tests for pause/resume/reset endpoints.
+- Tests for timeout and retry policy.
+- Tests for server restart recovery using an existing database.
+
+Manual checks:
+
+- Run a multi-hour hosted soak test.
+- Restart the hosted process during idle.
+- Restart the hosted process after a run completes.
+- Simulate model failure by using a bad model/provider config.
+- Verify the operator surface shows active run, last run, last error, and queue depth.
+
+Human check:
+
+- Review the last 10 hosted heartbeat cycles and verify the agent did not drift away from the intended markdown state.
+
+### v0.5 checks: task log and runtime refactor
+
+Automated checks:
+
+- Existing heartbeat API regression tests still pass.
+- Tests for task state transitions.
+- Tests for task event creation.
+- Tests for executor failure states.
+- Tests that direct heartbeat execution and task-based execution produce equivalent run records.
+
+Manual checks:
+
+- Create a heartbeat and verify it creates a task.
+- Watch the scheduler claim and complete the task.
+- Force a task failure and confirm it is terminal or retryable according to policy.
+- Confirm the same hosted single agent still runs normally after the refactor.
+
+Human check:
+
+- Read the task and event rows for a full run and confirm the lifecycle is understandable.
+
+### v0.6 checks: Modal persistent agent runtime
+
+Automated checks:
+
+- Unit tests for Modal runtime request builders.
+- Tests for agent status transitions.
+- Tests for volume metadata persistence.
+- Tests for task assignment to a Modal-backed agent.
+
+Manual checks:
+
+- Start one Modal-backed agent.
+- Assign it a task.
+- Confirm it writes output back to SQL.
+- Stop the agent.
+- Resume it and confirm filesystem state is still present.
+- Start two agents and confirm they do not share a Pi session or workspace.
+
+Human check:
+
+- Inspect the Modal workspace after resume and verify the files reflect the intended task history.
+
+### v0.7 checks: multi-agent orchestration
+
+Automated checks:
+
+- Tests for agent quota limits.
+- Tests for spawn/assign/pause/resume actions.
+- Tests for stuck-agent detection.
+- Tests for prompt context assembly from agent states and task events.
+
+Manual checks:
+
+- Run one control heartbeat that manages two agents.
+- Assign different tasks to each agent.
+- Pause one agent while the other continues.
+- Confirm the control heartbeat can summarize both agents.
+
+Human check:
+
+- Read the control heartbeat output and verify it makes correct decisions from SQL-visible state only.
+
+### v0.8 checks: on-device daemon
+
+Automated checks:
+
+- Tests for device registration.
+- Tests for capability lease creation and expiry.
+- Tests for local-required task queueing.
+- Tests for daemon disconnect/reconnect state.
+
+Manual checks:
+
+- Start the daemon and confirm the server sees the device online.
+- Stop the daemon and confirm local-required tasks wait.
+- Restart the daemon and confirm queued local tasks are claimed.
+- Disable a capability and confirm no new tasks are assigned to it.
+
+Human check:
+
+- Inspect local task outputs and confirm raw local-only data is not persisted remotely unless explicitly allowed.
+
+### v0.9 checks: capability policy
+
+Automated checks:
+
+- Tests for capability status changes.
+- Tests for residency labels.
+- Tests for revocation of active leases.
+- Tests for blocked task assignment after disabling a capability.
+
+Manual checks:
+
+- Enable a capability.
+- Run a task against it.
+- Disable it.
+- Confirm future tasks are blocked.
+- Confirm existing allowed derived results remain readable.
+
+Human check:
+
+- Review a sample local capability run and verify the persisted result matches the intended residency policy.
+
+### v0.10 checks: Poke/Kitchen recipe bridge
+
+Automated checks:
+
+- Tests for recipe registry loading.
+- Tests for enabled/disabled/approval-required modes.
+- Tests for webhook result ingestion.
+- Tests for recipe invocation rows tied to tasks and heartbeats.
+
+Manual checks:
+
+- Register one safe test recipe.
+- Invoke it from a heartbeat.
+- Receive the webhook result.
+- Disable the recipe and confirm invocation is blocked.
+
+Human check:
+
+- Review the recipe invocation and result rows and confirm they are safe to expose to later heartbeat context.
+
+### v1.0 checks: durable control plane
+
+Automated checks:
+
+- Full regression suite across sessions, heartbeats, tasks, agents, devices, capabilities, and recipes.
+- Restart recovery tests.
+- Duplicate scheduler prevention tests.
+- Long-running soak test fixtures.
+
+Manual checks:
+
+- Run a scenario where a heartbeat uses a Modal agent, waits for a local device capability, and invokes one approved recipe.
+- Restart the server during the scenario and confirm it resumes.
+- Confirm the operator surface shows the same state as SQL.
+
+Human check:
+
+- Reconstruct the full scenario from SQL rows and confirm no hidden state is required to understand what happened.
+
 ## 1. Pi + DeepSeek harness
 
 Goal: make the current harness reliable enough to run many heartbeat prompts over time.
