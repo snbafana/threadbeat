@@ -14,6 +14,7 @@ export type RuntimeStatus = {
   running: boolean;
   sessionId: string | null;
   resetCount: number;
+  runTimeoutMs: number;
   currentHeartbeatId: string | null;
   activeRun: RuntimeRunSnapshot | null;
   lastRun: RuntimeRunSnapshot | null;
@@ -97,24 +98,11 @@ export class PiSharedSessionRuntime implements RuntimeManager {
         durationMs: null,
       };
       try {
-        if (this.settings.piDryRun) {
-          const output = [
-            "[dry-run]",
-            `heartbeat_id: ${heartbeatId}`,
-            "observed: prompt materialized and would be sent through Pi SDK",
-            "next_action: keep scheduler running",
-            "",
-            prompt.slice(0, 500),
-          ].join("\n");
-          this.recordCompletedRun("succeeded", heartbeatId, startedAt, startedAtMs);
-          return output;
-        }
-
-        await this.start();
-        if (!this.session) throw new Error("Pi session did not start");
-        await this.session.prompt(prompt);
-        const text = this.session.getLastAssistantText();
-        if (!text) throw new Error("Pi completed without assistant text");
+        const text = await withTimeout(
+          this.executePrompt(prompt, heartbeatId),
+          this.settings.runTimeoutMs,
+          `heartbeat ${heartbeatId} timed out after ${this.settings.runTimeoutMs}ms`,
+        );
         this.recordCompletedRun("succeeded", heartbeatId, startedAt, startedAtMs);
         return text;
       } catch (error) {
@@ -134,6 +122,7 @@ export class PiSharedSessionRuntime implements RuntimeManager {
       running: this.settings.piDryRun || this.session !== null,
       sessionId: this.session?.sessionId ?? null,
       resetCount: this.resetCount,
+      runTimeoutMs: this.settings.runTimeoutMs,
       currentHeartbeatId: this.currentHeartbeatId,
       activeRun: this.activeRun,
       lastRun: this.lastRun,
@@ -141,6 +130,27 @@ export class PiSharedSessionRuntime implements RuntimeManager {
       lastError: this.lastError,
       model: `${this.settings.piProvider}/${this.settings.piModel}`,
     };
+  }
+
+  private async executePrompt(prompt: string, heartbeatId: string): Promise<string> {
+    if (this.settings.piDryRun) {
+      if (this.settings.piDryRunDelayMs > 0) await sleep(this.settings.piDryRunDelayMs);
+      return [
+        "[dry-run]",
+        `heartbeat_id: ${heartbeatId}`,
+        "observed: prompt materialized and would be sent through Pi SDK",
+        "next_action: keep scheduler running",
+        "",
+        prompt.slice(0, 500),
+      ].join("\n");
+    }
+
+    await this.start();
+    if (!this.session) throw new Error("Pi session did not start");
+    await this.session.prompt(prompt);
+    const text = this.session.getLastAssistantText();
+    if (!text) throw new Error("Pi completed without assistant text");
+    return text;
   }
 
   private recordCompletedRun(
@@ -159,6 +169,20 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     };
   }
 }
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+};
 
 class AsyncLock {
   private tail: Promise<unknown> = Promise.resolve();

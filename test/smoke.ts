@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { PiSharedSessionRuntime } from "../src/piRuntime.js";
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
 
@@ -17,7 +18,9 @@ const settings: Settings = {
   dbAuthToken: undefined,
   pollSeconds: 3600,
   maxDuePerPoll: 5,
+  runTimeoutMs: 300_000,
   piDryRun: true,
+  piDryRunDelayMs: 0,
   piProvider: "deepseek",
   piModel: "deepseek-v4-flash",
   piThinking: "off",
@@ -88,6 +91,7 @@ try {
   const runtimeAfterRun = await app.inject({ method: "GET", url: "/api/runtime/pi" });
   assert.equal(runtimeAfterRun.statusCode, 200);
   assert.equal(runtimeAfterRun.json().runtime.queueDepth, 0);
+  assert.equal(runtimeAfterRun.json().runtime.runTimeoutMs, 300_000);
   assert.equal(runtimeAfterRun.json().runtime.activeRun, null);
   assert.equal(runtimeAfterRun.json().runtime.lastRun.heartbeatId, heartbeatId);
   assert.equal(runtimeAfterRun.json().runtime.lastRun.status, "succeeded");
@@ -165,6 +169,20 @@ try {
   assert.equal(runtime.statusCode, 200);
   assert.equal(runtime.json().runtime.running, true);
   assert.equal(runtime.json().runtime.resetCount, 1);
+
+  const timeoutRuntime = new PiSharedSessionRuntime({
+    ...settings,
+    runTimeoutMs: 10,
+    piDryRunDelayMs: 50,
+  });
+  await assert.rejects(
+    timeoutRuntime.run("slow dry-run prompt", "hb_timeout"),
+    /timed out after 10ms/,
+  );
+  const timeoutStatus = timeoutRuntime.status();
+  assert.equal(timeoutStatus.lastRun?.heartbeatId, "hb_timeout");
+  assert.equal(timeoutStatus.lastRun?.status, "failed");
+  assert.match(timeoutStatus.lastError ?? "", /timed out after 10ms/);
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });

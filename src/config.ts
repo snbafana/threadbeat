@@ -25,7 +25,9 @@ export type Settings = {
   dbAuthToken?: string;
   pollSeconds: number;
   maxDuePerPoll: number;
+  runTimeoutMs: number;
   piDryRun: boolean;
+  piDryRunDelayMs: number;
   piProvider: string;
   piModel: string;
   piThinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -42,7 +44,9 @@ export const loadSettings = (): Settings => {
     dbAuthToken: process.env.THREADBEAT_DB_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN,
     pollSeconds: intEnv("THREADBEAT_POLL_SECONDS", 10),
     maxDuePerPoll: intEnv("THREADBEAT_MAX_DUE_PER_POLL", 5),
+    runTimeoutMs: intEnv("THREADBEAT_RUN_TIMEOUT_SECONDS", 300) * 1000,
     piDryRun: boolEnv("THREADBEAT_PI_DRY_RUN", false),
+    piDryRunDelayMs: intEnv("THREADBEAT_PI_DRY_RUN_DELAY_MS", 0),
     piProvider: process.env.THREADBEAT_PI_PROVIDER ?? "deepseek",
     piModel: process.env.THREADBEAT_PI_MODEL ?? "deepseek-v4-flash",
     piThinking: (process.env.THREADBEAT_PI_THINKING ?? "off") as Settings["piThinking"],

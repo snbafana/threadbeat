@@ -27,7 +27,9 @@ Useful env:
 - `THREADBEAT_REPO_ROOT`: markdown root, defaults to this repo
 - `THREADBEAT_POLL_SECONDS`: scheduler interval, defaults to `10`
 - `THREADBEAT_MAX_DUE_PER_POLL`: due heartbeat batch size, defaults to `5`
+- `THREADBEAT_RUN_TIMEOUT_SECONDS`: per-heartbeat Pi run timeout, defaults to `300`
 - `THREADBEAT_PI_DRY_RUN`: set `1` to skip Pi calls
+- `THREADBEAT_PI_DRY_RUN_DELAY_MS`: optional dry-run delay for timeout testing
 - `THREADBEAT_PI_PROVIDER`: defaults to `deepseek`
 - `THREADBEAT_PI_MODEL`: defaults to `deepseek-v4-flash`
 
