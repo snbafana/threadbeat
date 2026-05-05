@@ -4,7 +4,7 @@ Status: active
 
 Purpose: Cloudflare-first control plane for a Codex-native tmux:
 - durable sessions
-- durable heartbeat prompt objects
+- durable heartbeat objects
 - later attachment of local-only capabilities like `cued` and desktop/CUA
 
 Provisioned via Stripe Projects:
@@ -20,12 +20,11 @@ Current shape:
 - `wrangler.jsonc`: local Cloudflare worker config using the provisioned D1 name
 - heartbeat object shape:
   - `title`
-  - `kind`
-  - `cadence_seconds`
-  - `prompt`
+  - `cadence`
+  - `contents`
   - `status`
-  - `last_tick_at`
-  - `next_tick_at`
+  - `last_tick`
+  - `next_tick`
 
 Next step:
 - run `npm install`
@@ -34,7 +33,7 @@ Next step:
 
 Notes:
 - `stripe projects env --pull` has already populated `.env`
-- `R2` is not provisioned yet because Stripe Projects requires billing setup for usage-based storage
+- `R2` is not provisioned yet because Stripe Projects requires billing setup for usage-based object storage
 - Queue and Browser Run are provisioned but intentionally unused in the first cut
 - this is the hosted control-plane only; local brokered capabilities come later
-- a heartbeat is modeled as a prompt object that can be edited and then fed back into an agent on a deterministic cadence
+- a heartbeat stores a markdown file path in `contents`; the hosted worker schedules the pointer and a later executor will read the file body

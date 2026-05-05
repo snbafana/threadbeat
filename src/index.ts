@@ -11,18 +11,16 @@ type SessionRow = {
   updated_at: string;
 };
 
-type HeartbeatKind = "stake" | "review" | "watch" | "sweep";
-type HeartbeatStatus = "active" | "paused" | "archived";
+type HeartbeatStatus = "active" | "inactive";
 
 type HeartbeatRow = {
   id: string;
   session_id: string;
   title: string;
-  kind: HeartbeatKind;
-  cadence_seconds: number;
-  prompt: string;
-  last_tick_at: string | null;
-  next_tick_at: string | null;
+  cadence: number;
+  contents: string;
+  last_tick: string | null;
+  next_tick: string | null;
   status: HeartbeatStatus;
   created_at: string;
   updated_at: string;
@@ -56,12 +54,22 @@ const nowIso = () => new Date().toISOString();
 const randomId = (prefix: string) =>
   `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 
-function computeNextTickAt(
-  cadenceSeconds: number,
-  status: HeartbeatStatus,
-): string | null {
+function computeNextTickAt(cadence: number, status: HeartbeatStatus): string | null {
   if (status !== "active") return null;
-  return new Date(Date.now() + cadenceSeconds * 1000).toISOString();
+  return new Date(Date.now() + cadence * 1000).toISOString();
+}
+
+function normalizeCadence(value: number | undefined): number | null {
+  if (value === undefined) return 60;
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return Math.floor(value);
+}
+
+function normalizeContentsPath(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (!trimmed.endsWith(".md")) return null;
+  return trimmed.replace(/^\.\/+/, "");
 }
 
 async function parseJson<T>(request: Request): Promise<T | null> {
@@ -100,11 +108,10 @@ async function listHeartbeats(env: Env, sessionId?: string) {
          id,
          session_id,
          title,
-         kind,
-         cadence_seconds,
-         prompt,
-         last_tick_at,
-         next_tick_at,
+         cadence,
+         contents,
+         last_tick,
+         next_tick,
          status,
          created_at,
          updated_at
@@ -115,11 +122,10 @@ async function listHeartbeats(env: Env, sessionId?: string) {
          id,
          session_id,
          title,
-         kind,
-         cadence_seconds,
-         prompt,
-         last_tick_at,
-         next_tick_at,
+         cadence,
+         contents,
+         last_tick,
+         next_tick,
          status,
          created_at,
          updated_at
@@ -140,11 +146,10 @@ async function getHeartbeat(env: Env, heartbeatId: string) {
        id,
        session_id,
        title,
-       kind,
-       cadence_seconds,
-       prompt,
-       last_tick_at,
-       next_tick_at,
+       cadence,
+       contents,
+       last_tick,
+       next_tick,
        status,
        created_at,
        updated_at
@@ -162,44 +167,48 @@ async function createHeartbeat(
   input: {
     sessionId: string;
     title?: string;
-    kind?: HeartbeatKind;
-    cadenceSeconds?: number;
-    prompt: string;
+    cadence?: number;
+    contents: string;
     status?: HeartbeatStatus;
   },
 ) {
+  const cadence = normalizeCadence(input.cadence);
+  if (cadence === null) return { error: "cadence must be a positive number" } as const;
+
+  const contents = normalizeContentsPath(input.contents);
+  if (!contents) {
+    return { error: "contents must be a markdown file path ending in .md" } as const;
+  }
+
   const id = randomId("hb");
-  const cadenceSeconds = input.cadenceSeconds ?? 60;
   const status = input.status ?? "active";
-  const nextTickAt = computeNextTickAt(cadenceSeconds, status);
+  const nextTick = computeNextTickAt(cadence, status);
 
   await env.CONTROL_DB.prepare(
     `INSERT INTO heartbeats (
       id,
       session_id,
       title,
-      kind,
-      cadence_seconds,
-      prompt,
-      last_tick_at,
-      next_tick_at,
+      cadence,
+      contents,
+      last_tick,
+      next_tick,
       status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id,
       input.sessionId,
-      input.title ?? "heartbeat",
-       input.kind ?? "stake",
-      cadenceSeconds,
-      input.prompt,
+      input.title?.trim() || "heartbeat",
+      cadence,
+      contents,
       null,
-      nextTickAt,
+      nextTick,
       status,
     )
     .run();
 
-  return await getHeartbeat(env, id);
+  return { heartbeat: await getHeartbeat(env, id) } as const;
 }
 
 async function updateHeartbeat(
@@ -207,98 +216,66 @@ async function updateHeartbeat(
   heartbeatId: string,
   input: {
     title?: string;
-    kind?: HeartbeatKind;
-    cadenceSeconds?: number;
-    prompt?: string;
+    cadence?: number;
+    contents?: string;
     status?: HeartbeatStatus;
   },
 ) {
   const current = await getHeartbeat(env, heartbeatId);
   if (!current) return null;
 
-  const title = input.title ?? current.title;
-  const kind = input.kind ?? current.kind;
-  const cadenceSeconds = input.cadenceSeconds ?? current.cadence_seconds;
-  const prompt = input.prompt ?? current.prompt;
+  const cadence =
+    input.cadence === undefined ? current.cadence : normalizeCadence(input.cadence);
+  if (cadence === null) return { error: "cadence must be a positive number" } as const;
+
+  const contents =
+    input.contents === undefined
+      ? current.contents
+      : normalizeContentsPath(input.contents);
+  if (!contents) {
+    return { error: "contents must be a markdown file path ending in .md" } as const;
+  }
+
+  const title = input.title?.trim() || current.title;
   const status = input.status ?? current.status;
-  const nextTickAt =
-    status === "active"
-      ? computeNextTickAt(cadenceSeconds, status)
-      : null;
+  const nextTick = computeNextTickAt(cadence, status);
 
   await env.CONTROL_DB.prepare(
     `UPDATE heartbeats
      SET
        title = ?,
-       kind = ?,
-       cadence_seconds = ?,
-       prompt = ?,
-       next_tick_at = ?,
+       cadence = ?,
+       contents = ?,
+       next_tick = ?,
        status = ?,
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`,
   )
-    .bind(
-      title,
-      kind,
-      cadenceSeconds,
-      prompt,
-      nextTickAt,
-      status,
-      heartbeatId,
-    )
+    .bind(title, cadence, contents, nextTick, status, heartbeatId)
     .run();
 
-  return await getHeartbeat(env, heartbeatId);
+  return { heartbeat: await getHeartbeat(env, heartbeatId) } as const;
 }
 
 async function tickHeartbeatById(env: Env, heartbeatId: string) {
   const current = await getHeartbeat(env, heartbeatId);
   if (!current) return null;
 
-  const nextTickAt = computeNextTickAt(
-    current.cadence_seconds,
-    current.status,
-  );
+  const currentTime = nowIso();
+  const nextTick = computeNextTickAt(current.cadence, current.status);
 
   await env.CONTROL_DB.prepare(
     `UPDATE heartbeats
      SET
-       last_tick_at = ?,
-       next_tick_at = ?,
+       last_tick = ?,
+       next_tick = ?,
        updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND status = 'active'`,
   )
-    .bind(nowIso(), nextTickAt, heartbeatId)
+    .bind(currentTime, nextTick, heartbeatId)
     .run();
 
   return await getHeartbeat(env, heartbeatId);
-}
-
-async function dueHeartbeats(env: Env) {
-  const result = await env.CONTROL_DB.prepare(
-    `SELECT
-       id,
-       session_id,
-       title,
-       kind,
-       cadence_seconds,
-       prompt,
-       last_tick_at,
-       next_tick_at,
-       status,
-       created_at,
-       updated_at
-     FROM heartbeats
-     WHERE status = 'active'
-       AND next_tick_at IS NOT NULL
-       AND next_tick_at <= ?
-     ORDER BY next_tick_at ASC`,
-  )
-    .bind(nowIso())
-    .all<HeartbeatRow>();
-
-  return result.results;
 }
 
 async function tickHeartbeatsBySession(env: Env, sessionId: string) {
@@ -310,20 +287,45 @@ async function tickHeartbeatsBySession(env: Env, sessionId: string) {
     await env.CONTROL_DB.prepare(
       `UPDATE heartbeats
        SET
-         last_tick_at = ?,
-         next_tick_at = ?,
+         last_tick = ?,
+         next_tick = ?,
          updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
     )
       .bind(
         currentTime,
-        computeNextTickAt(heartbeat.cadence_seconds, heartbeat.status),
+        computeNextTickAt(heartbeat.cadence, heartbeat.status),
         heartbeat.id,
       )
       .run();
   }
 
   return await listHeartbeats(env, sessionId);
+}
+
+async function dueHeartbeats(env: Env) {
+  const result = await env.CONTROL_DB.prepare(
+    `SELECT
+       id,
+       session_id,
+       title,
+       cadence,
+       contents,
+       last_tick,
+       next_tick,
+       status,
+       created_at,
+       updated_at
+     FROM heartbeats
+     WHERE status = 'active'
+       AND next_tick IS NOT NULL
+       AND next_tick <= ?
+     ORDER BY next_tick ASC`,
+  )
+    .bind(nowIso())
+    .all<HeartbeatRow>();
+
+  return result.results;
 }
 
 function renderHomePage() {
@@ -380,7 +382,7 @@ function renderHomePage() {
         font-size: 12px;
         color: var(--muted);
       }
-      input, textarea, select, button {
+      input, select, button {
         width: 100%;
         box-sizing: border-box;
         border-radius: 10px;
@@ -389,10 +391,6 @@ function renderHomePage() {
         color: var(--text);
         padding: 10px 12px;
         font: inherit;
-      }
-      textarea {
-        min-height: 120px;
-        resize: vertical;
       }
       button {
         background: var(--accent);
@@ -424,12 +422,16 @@ function renderHomePage() {
         min-height: 20px;
         color: var(--muted);
       }
+      .note {
+        font-size: 12px;
+      }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1>codexmux</h1>
-      <p>Heartbeats are first-class prompt objects: typed, editable, and scheduled to be fed back into an agent at a deterministic moment.</p>
+      <p>Heartbeats are minimal deterministic objects: title, cadence, contents path, status, last tick, next tick.</p>
+      <p class="note">For this toy version, <code>contents</code> is a repo-relative markdown file path. The worker stores and schedules that pointer; a later executor or local broker will resolve and read the file body.</p>
       <div class="grid">
         <section class="card">
           <h2>Create Session</h2>
@@ -444,17 +446,15 @@ function renderHomePage() {
           <input id="session-id" placeholder="ses_..." />
           <label for="heartbeat-title">Title</label>
           <input id="heartbeat-title" value="daily stake check" />
-          <label for="heartbeat-kind">Kind</label>
-          <select id="heartbeat-kind">
-            <option value="stake">stake</option>
-            <option value="review">review</option>
-            <option value="watch">watch</option>
-            <option value="sweep">sweep</option>
+          <label for="cadence">Cadence (seconds)</label>
+          <input id="cadence" type="number" value="60" />
+          <label for="contents">Contents (.md path)</label>
+          <input id="contents" value="contents/default.md" />
+          <label for="status">Status</label>
+          <select id="status">
+            <option value="active">active</option>
+            <option value="inactive">inactive</option>
           </select>
-          <label for="cadence-seconds">Cadence seconds</label>
-          <input id="cadence-seconds" type="number" value="60" />
-          <label for="prompt">Prompt</label>
-          <textarea id="prompt">Current objective: keep this thread alive and inject determinism through time.</textarea>
           <button id="create-heartbeat">Create heartbeat</button>
           <div class="status" id="create-heartbeat-status"></div>
         </section>
@@ -464,23 +464,15 @@ function renderHomePage() {
           <input id="edit-heartbeat-id" placeholder="hb_..." />
           <label for="edit-heartbeat-title">Title</label>
           <input id="edit-heartbeat-title" placeholder="heartbeat title" />
-          <label for="edit-heartbeat-kind">Kind</label>
-          <select id="edit-heartbeat-kind">
-            <option value="stake">stake</option>
-            <option value="review">review</option>
-            <option value="watch">watch</option>
-            <option value="sweep">sweep</option>
-          </select>
-          <label for="edit-heartbeat-status">Status</label>
-          <select id="edit-heartbeat-status">
+          <label for="edit-cadence">Cadence (seconds)</label>
+          <input id="edit-cadence" type="number" value="60" />
+          <label for="edit-contents">Contents (.md path)</label>
+          <input id="edit-contents" placeholder="contents/default.md" />
+          <label for="edit-status">Status</label>
+          <select id="edit-status">
             <option value="active">active</option>
-            <option value="paused">paused</option>
-            <option value="archived">archived</option>
+            <option value="inactive">inactive</option>
           </select>
-          <label for="edit-cadence-seconds">Cadence seconds</label>
-          <input id="edit-cadence-seconds" type="number" value="60" />
-          <label for="edit-prompt">Prompt</label>
-          <textarea id="edit-prompt" placeholder="updated heartbeat prompt"></textarea>
           <button id="update-heartbeat">Update heartbeat</button>
           <button id="tick-heartbeat" class="secondary">Tick heartbeat</button>
           <button id="tick-session" class="secondary">Tick session heartbeats</button>
@@ -511,11 +503,12 @@ function renderHomePage() {
       }
 
       async function refresh() {
-        const [sessions, heartbeats] = await Promise.all([
+        const [sessions, heartbeats, due] = await Promise.all([
           call("GET", "/api/sessions"),
           call("GET", "/api/heartbeats"),
+          call("GET", "/api/heartbeats/due"),
         ]);
-        stateEl.textContent = JSON.stringify({ sessions, heartbeats }, null, 2);
+        stateEl.textContent = JSON.stringify({ sessions, heartbeats, due }, null, 2);
       }
 
       document.getElementById("create-session").addEventListener("click", async () => {
@@ -531,24 +524,23 @@ function renderHomePage() {
       document.getElementById("create-heartbeat").addEventListener("click", async () => {
         const sessionId = document.getElementById("session-id").value.trim();
         const title = document.getElementById("heartbeat-title").value.trim();
-        const kind = document.getElementById("heartbeat-kind").value;
-        const cadenceSeconds = Number(document.getElementById("cadence-seconds").value || "60");
-        const prompt = document.getElementById("prompt").value;
+        const cadence = Number(document.getElementById("cadence").value || "60");
+        const contents = document.getElementById("contents").value.trim();
+        const status = document.getElementById("status").value;
         const result = await call("POST", "/api/heartbeats", {
           sessionId,
           title,
-          kind,
-          cadenceSeconds,
-          prompt,
+          cadence,
+          contents,
+          status,
         });
         createHeartbeatStatus.textContent = result.ok ? "Created " + result.heartbeat.id : result.error;
         if (result.ok) {
           document.getElementById("edit-heartbeat-id").value = result.heartbeat.id;
           document.getElementById("edit-heartbeat-title").value = result.heartbeat.title;
-          document.getElementById("edit-heartbeat-kind").value = result.heartbeat.kind;
-          document.getElementById("edit-heartbeat-status").value = result.heartbeat.status;
-          document.getElementById("edit-cadence-seconds").value = String(result.heartbeat.cadence_seconds);
-          document.getElementById("edit-prompt").value = result.heartbeat.prompt;
+          document.getElementById("edit-cadence").value = String(result.heartbeat.cadence);
+          document.getElementById("edit-contents").value = result.heartbeat.contents;
+          document.getElementById("edit-status").value = result.heartbeat.status;
         }
         await refresh();
       });
@@ -557,10 +549,9 @@ function renderHomePage() {
         const heartbeatId = document.getElementById("edit-heartbeat-id").value.trim();
         const result = await call("PATCH", "/api/heartbeats/" + heartbeatId, {
           title: document.getElementById("edit-heartbeat-title").value.trim(),
-          kind: document.getElementById("edit-heartbeat-kind").value,
-          status: document.getElementById("edit-heartbeat-status").value,
-          cadenceSeconds: Number(document.getElementById("edit-cadence-seconds").value || "60"),
-          prompt: document.getElementById("edit-prompt").value,
+          cadence: Number(document.getElementById("edit-cadence").value || "60"),
+          contents: document.getElementById("edit-contents").value.trim(),
+          status: document.getElementById("edit-status").value,
         });
         editHeartbeatStatus.textContent = result.ok ? "Updated " + result.heartbeat.id : result.error;
         await refresh();
@@ -611,6 +602,14 @@ export default {
           browserRunProvisioned: true,
           localBroker: false,
         },
+        heartbeatShape: {
+          title: "string",
+          cadence: "seconds",
+          contents: "repo-relative markdown path",
+          status: ["active", "inactive"],
+          last_tick: "timestamp | null",
+          next_tick: "timestamp | null",
+        },
       });
     }
 
@@ -620,23 +619,17 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/api/sessions") {
       const body = await parseJson<{ name?: string }>(request);
-      if (!body?.name) return badRequest("name is required");
-      return json({ ok: true, session: await createSession(env, body.name) });
+      if (!body?.name?.trim()) return badRequest("name is required");
+      return json({ ok: true, session: await createSession(env, body.name.trim()) });
     }
 
     if (request.method === "GET" && url.pathname === "/api/heartbeats") {
       const sessionId = url.searchParams.get("sessionId") ?? undefined;
-      return json({
-        ok: true,
-        heartbeats: await listHeartbeats(env, sessionId),
-      });
+      return json({ ok: true, heartbeats: await listHeartbeats(env, sessionId) });
     }
 
     if (request.method === "GET" && url.pathname === "/api/heartbeats/due") {
-      return json({
-        ok: true,
-        heartbeats: await dueHeartbeats(env),
-      });
+      return json({ ok: true, heartbeats: await dueHeartbeats(env) });
     }
 
     if (request.method === "GET" && /^\/api\/heartbeats\/[^/]+$/.test(url.pathname)) {
@@ -652,51 +645,47 @@ export default {
       const body = await parseJson<{
         sessionId?: string;
         title?: string;
-        kind?: HeartbeatKind;
-        cadenceSeconds?: number;
-        prompt?: string;
+        cadence?: number;
+        contents?: string;
         status?: HeartbeatStatus;
       }>(request);
 
-      if (!body?.sessionId || !body.prompt) {
-        return badRequest("sessionId and prompt are required");
-      }
+      if (!body?.sessionId) return badRequest("sessionId is required");
+      if (!body.contents) return badRequest("contents is required");
 
-      return json({
-        ok: true,
-        heartbeat: await createHeartbeat(env, {
-          sessionId: body.sessionId,
-          title: body.title,
-          kind: body.kind,
-          cadenceSeconds: body.cadenceSeconds,
-          prompt: body.prompt,
-          status: body.status,
-        }),
+      const created = await createHeartbeat(env, {
+        sessionId: body.sessionId,
+        title: body.title,
+        cadence: body.cadence,
+        contents: body.contents,
+        status: body.status,
       });
+
+      if ("error" in created) return badRequest(created.error ?? "invalid heartbeat");
+      return json({ ok: true, heartbeat: created.heartbeat });
     }
 
-    if (request.method === "PATCH" && url.pathname.startsWith("/api/heartbeats/")) {
+    if (request.method === "PATCH" && /^\/api\/heartbeats\/[^/]+$/.test(url.pathname)) {
       const heartbeatId = heartbeatIdFromPath(url.pathname);
       if (!heartbeatId) return notFound();
 
       const body = await parseJson<{
         title?: string;
-        kind?: HeartbeatKind;
-        cadenceSeconds?: number;
-        prompt?: string;
+        cadence?: number;
+        contents?: string;
         status?: HeartbeatStatus;
       }>(request);
 
-      const heartbeat = await updateHeartbeat(env, heartbeatId, {
+      const updated = await updateHeartbeat(env, heartbeatId, {
         title: body?.title,
-        kind: body?.kind,
-        cadenceSeconds: body?.cadenceSeconds,
-        prompt: body?.prompt,
+        cadence: body?.cadence,
+        contents: body?.contents,
         status: body?.status,
       });
 
-      if (!heartbeat) return notFound();
-      return json({ ok: true, heartbeat });
+      if (!updated) return notFound();
+      if ("error" in updated) return badRequest(updated.error ?? "invalid heartbeat");
+      return json({ ok: true, heartbeat: updated.heartbeat });
     }
 
     if (request.method === "POST" && /^\/api\/heartbeats\/[^/]+\/tick$/.test(url.pathname)) {
@@ -710,9 +699,7 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/api/heartbeat/tick") {
       const body = await parseJson<{ sessionId?: string }>(request);
-      if (!body?.sessionId) {
-        return badRequest("sessionId is required");
-      }
+      if (!body?.sessionId) return badRequest("sessionId is required");
 
       const heartbeats = await tickHeartbeatsBySession(env, body.sessionId);
       return json({

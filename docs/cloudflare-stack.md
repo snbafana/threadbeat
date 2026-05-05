@@ -11,7 +11,7 @@ Provisioned resources:
 
 Current architecture:
 - Workers hosts a tiny HTTP control plane
-- D1 stores sessions and heartbeat prompt objects
+- D1 stores sessions and heartbeat objects
 - Queues and Browser Run are provisioned but not used in the first cut
 
 Not yet provisioned:
@@ -21,6 +21,7 @@ Why:
 
 Not yet implemented:
 - minute-tick queue loop
+- reading `contents` markdown bodies in a real executor
 - pane graph and executors
 - local broker for `cued`
 - local broker for desktop/CUA
