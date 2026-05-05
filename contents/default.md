@@ -1,6 +1,6 @@
 # Default Heartbeat Contents
 
-This is the default markdown file for the toy `codexmux` heartbeat model.
+This is the default markdown file for the toy `threadbeat` heartbeat model.
 
 Use this file as the first contents target for a heartbeat.
 

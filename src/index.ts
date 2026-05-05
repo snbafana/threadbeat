@@ -334,7 +334,7 @@ function renderHomePage() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>codexmux</title>
+    <title>threadbeat</title>
     <style>
       :root {
         color-scheme: dark;
@@ -429,7 +429,7 @@ function renderHomePage() {
   </head>
   <body>
     <div class="wrap">
-      <h1>codexmux</h1>
+      <h1>threadbeat</h1>
       <p>Heartbeats are minimal deterministic objects: title, cadence, contents path, status, last tick, next tick.</p>
       <p class="note">For this toy version, <code>contents</code> is a repo-relative markdown file path. The worker stores and schedules that pointer; a later executor or local broker will resolve and read the file body.</p>
       <div class="grid">

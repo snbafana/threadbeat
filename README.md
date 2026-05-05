@@ -1,8 +1,8 @@
-# codexmux
+# threadbeat
 
 Status: active
 
-Purpose: Cloudflare-first control plane for a Codex-native tmux:
+Purpose: Cloudflare-first control plane for thread heartbeats over time:
 - durable sessions
 - durable heartbeat objects
 - later attachment of local-only capabilities like `cued` and desktop/CUA

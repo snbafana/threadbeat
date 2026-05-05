@@ -1,13 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "codexmux-control-plane",
+  "name": "threadbeat-control-plane",
   "main": "src/index.ts",
   "compatibility_date": "2026-05-05",
   "observability": {
     "enabled": true
   },
   "vars": {
-    "PROJECT_NAME": "codexmux"
+    "PROJECT_NAME": "threadbeat"
   },
   "d1_databases": [
     {
