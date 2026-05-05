@@ -12,8 +12,8 @@
   "d1_databases": [
     {
       "binding": "CONTROL_DB",
-      "database_name": "codexmux-d1",
-      "database_id": "85d79a8c-d4f0-4a34-98b2-5cad52a9a64e"
+      "database_name": "threadbeat-d1",
+      "database_id": "788a664c-38de-4b74-b6b8-946b6f417ee0"
     }
   ]
 }
