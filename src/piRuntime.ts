@@ -6,6 +6,7 @@ import {
   SessionManager,
   type AgentSession,
 } from "@mariozechner/pi-coding-agent";
+import path from "node:path";
 
 import type { Settings } from "./config.js";
 
@@ -68,7 +69,7 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     if (this.settings.deepseekApiKey) {
       authStorage.setRuntimeApiKey(this.settings.piProvider, this.settings.deepseekApiKey);
     }
-    const modelRegistry = new ModelRegistry(authStorage);
+    const modelRegistry = new ModelRegistry(authStorage, path.join(this.settings.projectRoot, "pi-models.json"));
     const model = modelRegistry.find(this.settings.piProvider, this.settings.piModel);
 
     const { session } = await createAgentSession({
@@ -171,6 +172,8 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     if (!this.session) throw new Error("Pi session did not start");
     await this.session.prompt(prompt);
     const text = this.session.getLastAssistantText();
+    const lastError = getLastAssistantError(this.session);
+    if (lastError) throw new Error(lastError);
     if (!text) throw new Error("Pi completed without assistant text");
     return text;
   }
@@ -232,6 +235,14 @@ export class PiSharedSessionRuntime implements RuntimeManager {
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const getLastAssistantError = (session: AgentSession): string | undefined => {
+  const assistant = session.messages
+    .slice()
+    .reverse()
+    .find((message) => message.role === "assistant") as { errorMessage?: string } | undefined;
+  return assistant?.errorMessage;
+};
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
   let timeout: ReturnType<typeof setTimeout> | undefined;
