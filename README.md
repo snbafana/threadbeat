@@ -83,6 +83,36 @@ stripe projects env --pull
 
 After Turso is provisioned, set `THREADBEAT_DB_URL` and `THREADBEAT_DB_AUTH_TOKEN` from the pulled env names if Stripe Projects does not map them directly.
 
+## Railway Deploy
+
+Railway uses `railway.json`:
+
+- build: `npm run build`
+- start: `npm run start`
+- health check: `GET /health`
+- Node: `>=22`
+
+Required hosted env:
+
+- `DEEPSEEK_API_KEY`
+- `THREADBEAT_DB_URL`
+- `THREADBEAT_DB_AUTH_TOKEN`
+- `THREADBEAT_REPO_ROOT=/app`
+- `THREADBEAT_PI_DRY_RUN=0`
+
+Recommended hosted env:
+
+- `THREADBEAT_POLL_SECONDS=10`
+- `THREADBEAT_MAX_DUE_PER_POLL=1`
+- `THREADBEAT_RUN_TIMEOUT_SECONDS=300`
+- `THREADBEAT_LOG_REQUESTS=1`
+
+After deploy:
+
+```bash
+THREADBEAT_BASE_URL=https://your-railway-url npm run smoke:api
+```
+
 ## API
 
 - `GET /health`
