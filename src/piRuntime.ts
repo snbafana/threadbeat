@@ -1,0 +1,133 @@
+import {
+  AuthStorage,
+  createAgentSession,
+  createReadOnlyTools,
+  ModelRegistry,
+  SessionManager,
+  type AgentSession,
+} from "@mariozechner/pi-coding-agent";
+
+import type { Settings } from "./config.js";
+
+export type RuntimeStatus = {
+  mode: "dry-run" | "pi-sdk";
+  running: boolean;
+  sessionId: string | null;
+  resetCount: number;
+  currentHeartbeatId: string | null;
+  lastError: string | null;
+  model: string;
+};
+
+export interface RuntimeManager {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  reset(): Promise<void>;
+  run(prompt: string, heartbeatId: string): Promise<string>;
+  status(): RuntimeStatus;
+}
+
+export class PiSharedSessionRuntime implements RuntimeManager {
+  private session: AgentSession | null = null;
+  private resetCount = 0;
+  private currentHeartbeatId: string | null = null;
+  private lastError: string | null = null;
+  private readonly lock = new AsyncLock();
+
+  constructor(private readonly settings: Settings) {}
+
+  async start(): Promise<void> {
+    if (this.settings.piDryRun) return;
+    if (this.session) return;
+
+    const authStorage = AuthStorage.create();
+    if (this.settings.deepseekApiKey) {
+      authStorage.setRuntimeApiKey(this.settings.piProvider, this.settings.deepseekApiKey);
+    }
+    const modelRegistry = new ModelRegistry(authStorage);
+    const model = modelRegistry.find(this.settings.piProvider, this.settings.piModel);
+
+    const { session } = await createAgentSession({
+      cwd: this.settings.repoRoot,
+      authStorage,
+      modelRegistry,
+      model,
+      thinkingLevel: this.settings.piThinking,
+      tools: createReadOnlyTools(this.settings.repoRoot),
+      sessionManager: SessionManager.create(this.settings.repoRoot),
+    });
+    this.session = session;
+  }
+
+  async stop(): Promise<void> {
+    this.session?.dispose();
+    this.session = null;
+  }
+
+  async reset(): Promise<void> {
+    await this.stop();
+    this.resetCount += 1;
+    this.lastError = null;
+    await this.start();
+  }
+
+  async run(prompt: string, heartbeatId: string): Promise<string> {
+    return this.lock.run(async () => {
+      this.currentHeartbeatId = heartbeatId;
+      try {
+        if (this.settings.piDryRun) {
+          return [
+            "[dry-run]",
+            `heartbeat_id: ${heartbeatId}`,
+            "observed: prompt materialized and would be sent through Pi SDK",
+            "next_action: keep scheduler running",
+            "",
+            prompt.slice(0, 500),
+          ].join("\n");
+        }
+
+        await this.start();
+        if (!this.session) throw new Error("Pi session did not start");
+        await this.session.prompt(prompt);
+        const text = this.session.getLastAssistantText();
+        if (!text) throw new Error("Pi completed without assistant text");
+        return text;
+      } catch (error) {
+        this.lastError = error instanceof Error ? error.message : String(error);
+        throw error;
+      } finally {
+        this.currentHeartbeatId = null;
+      }
+    });
+  }
+
+  status(): RuntimeStatus {
+    return {
+      mode: this.settings.piDryRun ? "dry-run" : "pi-sdk",
+      running: this.settings.piDryRun || this.session !== null,
+      sessionId: this.session?.sessionId ?? null,
+      resetCount: this.resetCount,
+      currentHeartbeatId: this.currentHeartbeatId,
+      lastError: this.lastError,
+      model: `${this.settings.piProvider}/${this.settings.piModel}`,
+    };
+  }
+}
+
+class AsyncLock {
+  private tail: Promise<unknown> = Promise.resolve();
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    const previous = this.tail;
+    let release!: () => void;
+    this.tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+}

@@ -1,2 +1,0 @@
-ALTER TABLE heartbeats ADD COLUMN title TEXT NOT NULL DEFAULT 'heartbeat';
-ALTER TABLE heartbeats ADD COLUMN kind TEXT NOT NULL DEFAULT 'stake';

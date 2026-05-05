@@ -1,6 +1,7 @@
 .projects/state.local.json
 node_modules
-.wrangler
+dist
+.threadbeat
 
 .projects/cache
 .projects/vault

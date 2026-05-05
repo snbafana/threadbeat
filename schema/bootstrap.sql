@@ -20,7 +20,11 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_heartbeats_session_id ON heartbeats(session_id);
+CREATE INDEX IF NOT EXISTS idx_heartbeats_session_id
+  ON heartbeats(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_heartbeats_due
+  ON heartbeats(status, next_tick, created_at);
 
 CREATE TABLE IF NOT EXISTS heartbeat_runs (
   id TEXT PRIMARY KEY,

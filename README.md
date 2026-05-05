@@ -1,50 +1,60 @@
 # threadbeat
 
-Status: active
-
-Purpose: Cloudflare-first control plane for thread heartbeats over time:
-- durable sessions
-- durable heartbeat objects
-- later attachment of local-only capabilities like `cued` and desktop/CUA
-
-Provisioned via Stripe Projects:
-- Cloudflare Workers free plan
-- Cloudflare Workers service: `control-plane`
-- Cloudflare D1: `control-db`
-- Cloudflare Queue: `events-queue`
-- Cloudflare Browser Run: `remote-browser`
+`threadbeat` is a TypeScript server for deterministic heartbeat prompts over time.
 
 Current shape:
-- `src/index.ts`: minimal Worker with session routes plus first-class editable heartbeats
-- `schema/control-plane.sql`: initial D1 schema
-- `wrangler.jsonc`: local Cloudflare worker config using the provisioned D1 name
-- `scripts/run-due-heartbeats.mjs`: external runner that polls due heartbeats, reads markdown, invokes Pi, records runs, and ticks heartbeats
-- heartbeat object shape:
-  - `title`
-  - `cadence`
-  - `contents`
-  - `status`
-  - `last_tick`
-  - `next_tick`
-- heartbeat run shape:
-  - `heartbeat_id`
-  - `executor`
-  - `model`
-  - `status`
-  - `prompt_snapshot`
-  - `output`
-  - `error`
 
-Next step:
-- run `npm install`
-- initialize the D1 schema
-- start local dev with `npm run dev`
-- test the runner with `THREADBEAT_DRY_RUN=1 npm run run:due`
+- Fastify JSON API
+- raw SQL against libSQL/Turso
+- one background scheduler loop
+- one shared in-process Pi SDK session
+- DeepSeek through `DEEPSEEK_API_KEY`
+- repo-relative markdown files for heartbeat `contents`
 
-Notes:
-- `stripe projects env --pull` has already populated `.env`
-- `R2` is not provisioned yet because Stripe Projects requires billing setup for usage-based object storage
-- Queue and Browser Run are provisioned but intentionally unused in the first cut
-- the Worker is only the control plane; it stores schedules and runs but does not execute models itself
-- a heartbeat stores a markdown file path in `contents`; the runner reads the file body from the repo checkout
-- the Pi + DeepSeek path is intended for the runner process, not for the Worker runtime
+## Local run
+
+```bash
+npm install
+THREADBEAT_PI_DRY_RUN=1 npm run dev
+```
+
+Use dry-run mode for API and scheduler testing without model calls. For live execution, remove `THREADBEAT_PI_DRY_RUN=1` and make sure `DEEPSEEK_API_KEY` is present in `.env`.
+
+Useful env:
+
+- `DEEPSEEK_API_KEY`: DeepSeek key used by Pi
+- `THREADBEAT_DB_URL`: libSQL URL, defaults to `file:.threadbeat/threadbeat.db`
+- `THREADBEAT_REPO_ROOT`: markdown root, defaults to this repo
+- `THREADBEAT_POLL_SECONDS`: scheduler interval, defaults to `10`
+- `THREADBEAT_MAX_DUE_PER_POLL`: due heartbeat batch size, defaults to `5`
+- `THREADBEAT_PI_DRY_RUN`: set `1` to skip Pi calls
+- `THREADBEAT_PI_PROVIDER`: defaults to `deepseek`
+- `THREADBEAT_PI_MODEL`: defaults to `deepseek-v4-flash`
+
+## Stripe Projects hosting
+
+The app is ready for Stripe Projects managed hosting, but Railway and Turso both require provider ToS acceptance before provisioning.
+
+```bash
+stripe projects add turso/database --accept-tos --yes --config '{"name":"threadbeat","location":"aws-us-east-1"}'
+stripe projects add railway/hosting --accept-tos --yes
+stripe projects env --pull
+```
+
+After Turso is provisioned, set `THREADBEAT_DB_URL` and `THREADBEAT_DB_AUTH_TOKEN` from the pulled env names if Stripe Projects does not map them directly.
+
+## API
+
+- `GET /health`
+- `GET /api/sessions`
+- `POST /api/sessions`
+- `GET /api/heartbeats`
+- `GET /api/heartbeats/due`
+- `GET /api/heartbeats/:id`
+- `POST /api/heartbeats`
+- `PATCH /api/heartbeats/:id`
+- `POST /api/heartbeats/:id/tick`
+- `GET /api/runs`
+- `GET /api/runtime/pi`
+- `POST /api/runtime/pi/reset`
+- `POST /api/scheduler/run-once`
