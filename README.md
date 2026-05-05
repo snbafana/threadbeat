@@ -73,15 +73,21 @@ Set `THREADBEAT_API_SMOKE_RUN_HEARTBEAT=0` for a cheap create-only check.
 
 ## Stripe Projects hosting
 
-The app is ready for Stripe Projects managed hosting, but Railway and Turso both require provider ToS acceptance before provisioning.
+Turso is provisioned through Stripe Projects for this project. Railway is linked,
+but hosting provisioning requires a GitHub repository in `owner/repo` format.
 
 ```bash
-stripe projects add turso/database --accept-tos --yes --config '{"name":"threadbeat","location":"aws-us-east-1"}'
-stripe projects add railway/hosting --accept-tos --yes
+# Already completed:
+# stripe projects add turso/database --accept-tos --yes --config '{"name":"threadbeat","location":"aws-us-east-1"}'
+
+# Complete after this repo has a GitHub remote:
+stripe projects add railway/hosting --accept-tos --yes --resource-info '{"source_type":"GitHub repository"}'
+stripe projects add railway/hosting --accept-tos --yes --resource-info '{"repo":"OWNER/REPO","branch":"main"}'
 stripe projects env --pull
 ```
 
-After Turso is provisioned, set `THREADBEAT_DB_URL` and `THREADBEAT_DB_AUTH_TOKEN` from the pulled env names if Stripe Projects does not map them directly.
+After pulling env, set `THREADBEAT_DB_URL` and `THREADBEAT_DB_AUTH_TOKEN` from
+the pulled Turso env names if Stripe Projects does not map them directly.
 
 ## Railway Deploy
 
