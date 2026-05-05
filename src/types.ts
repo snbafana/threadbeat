@@ -15,6 +15,8 @@ export type HeartbeatRow = {
   title: string;
   cadence: number;
   contents: string;
+  provider: string;
+  model: string;
   last_tick: string | null;
   next_tick: string | null;
   status: HeartbeatStatus;

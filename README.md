@@ -33,6 +33,11 @@ Useful env:
 - `THREADBEAT_PI_PROVIDER`: defaults to `deepseek`
 - `THREADBEAT_PI_MODEL`: defaults to `deepseek-v4-flash`
 
+Heartbeat `provider` and `model` default to `THREADBEAT_PI_PROVIDER` and
+`THREADBEAT_PI_MODEL` when omitted. In v0.2 these fields are persisted on the
+heartbeat and copied into run records; the shared Pi runtime itself is still one
+configured session.
+
 ## Stripe Projects hosting
 
 The app is ready for Stripe Projects managed hosting, but Railway and Turso both require provider ToS acceptance before provisioning.

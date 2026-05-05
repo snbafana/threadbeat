@@ -9,7 +9,6 @@ export class HeartbeatExecutor {
     private readonly db: Database,
     private readonly contents: ContentsLoader,
     private readonly runtime: RuntimeManager,
-    private readonly model: string,
   ) {}
 
   async execute(heartbeat: HeartbeatRow): Promise<HeartbeatRunRow> {
@@ -63,7 +62,7 @@ export class HeartbeatExecutor {
       heartbeatId: heartbeat.id,
       sessionId: heartbeat.session_id,
       executor: "pi-shared-session",
-      model: this.model,
+      model: `${heartbeat.provider}/${heartbeat.model}`,
       status: result.status,
       promptSnapshot: result.promptSnapshot,
       output: result.output,
@@ -103,6 +102,8 @@ export const buildPrompt = (heartbeat: HeartbeatRow, markdown: string): string =
     `title: ${heartbeat.title}`,
     `cadence_seconds: ${heartbeat.cadence}`,
     `contents_path: ${heartbeat.contents}`,
+    `provider: ${heartbeat.provider}`,
+    `model: ${heartbeat.model}`,
     `last_tick: ${heartbeat.last_tick ?? "null"}`,
     `next_tick: ${heartbeat.next_tick ?? "null"}`,
     `now: ${nowIso()}`,

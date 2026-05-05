@@ -66,11 +66,13 @@ try {
   });
   assert.equal(heartbeatRes.statusCode, 200);
   const heartbeatId = heartbeatRes.json().heartbeat.id;
+  assert.equal(heartbeatRes.json().heartbeat.provider, "deepseek");
+  assert.equal(heartbeatRes.json().heartbeat.model, "deepseek-v4-flash");
 
   await app.inject({
     method: "PATCH",
     url: `/api/heartbeats/${heartbeatId}`,
-    payload: { cadence: 1 },
+    payload: { cadence: 1, model: "deepseek-smoke-model" },
   });
   await app.inject({ method: "POST", url: `/api/heartbeats/${heartbeatId}/tick` });
   await new Promise((resolve) => setTimeout(resolve, 1100));
@@ -87,6 +89,7 @@ try {
   assert.equal(runs.statusCode, 200);
   assert.equal(runs.json().runs.length, 1);
   assert.equal(runs.json().runs[0].status, "succeeded");
+  assert.equal(runs.json().runs[0].model, "deepseek/deepseek-smoke-model");
 
   const runtimeAfterRun = await app.inject({ method: "GET", url: "/api/runtime/pi" });
   assert.equal(runtimeAfterRun.statusCode, 200);
@@ -112,6 +115,8 @@ try {
       title: "missing markdown heartbeat",
       cadence: 1,
       contents: "contents/missing.md",
+      provider: "deepseek",
+      model: "deepseek-failure-model",
       status: "active",
     },
   });

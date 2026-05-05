@@ -37,6 +37,7 @@ export class Database {
     for (const statement of splitSql(schema)) {
       await this.client.execute(statement);
     }
+    await this.ensureHeartbeatColumns();
   }
 
   async createSession(name: string): Promise<SessionRow> {
@@ -68,14 +69,16 @@ export class Database {
     title: string;
     cadence: number;
     contents: string;
+    provider: string;
+    model: string;
     status: HeartbeatStatus;
   }): Promise<HeartbeatRow> {
     const id = randomId("hb");
     await this.client.execute({
       sql: `
         INSERT INTO heartbeats (
-          id, session_id, title, cadence, contents, last_tick, next_tick, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, session_id, title, cadence, contents, provider, model, last_tick, next_tick, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         id,
@@ -83,6 +86,8 @@ export class Database {
         input.title,
         input.cadence,
         input.contents,
+        input.provider,
+        input.model,
         null,
         nextTickIso(input.cadence, input.status),
         input.status,
@@ -96,7 +101,7 @@ export class Database {
   async getHeartbeat(id: string): Promise<HeartbeatRow | null> {
     return this.first<HeartbeatRow>(
       `
-        SELECT id, session_id, title, cadence, contents, last_tick, next_tick,
+        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
                status, created_at, updated_at
         FROM heartbeats
         WHERE id = ?
@@ -110,7 +115,7 @@ export class Database {
       return this.all<HeartbeatRow>(
         `
           SELECT id, session_id, title, cadence, contents, last_tick, next_tick,
-                 status, created_at, updated_at
+                 provider, model, status, created_at, updated_at
           FROM heartbeats
           WHERE session_id = ?
           ORDER BY created_at DESC
@@ -120,7 +125,7 @@ export class Database {
     }
     return this.all<HeartbeatRow>(
       `
-        SELECT id, session_id, title, cadence, contents, last_tick, next_tick,
+        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
                status, created_at, updated_at
         FROM heartbeats
         ORDER BY created_at DESC
@@ -130,12 +135,19 @@ export class Database {
 
   async updateHeartbeat(
     id: string,
-    input: { title: string; cadence: number; contents: string; status: HeartbeatStatus },
+    input: {
+      title: string;
+      cadence: number;
+      contents: string;
+      provider: string;
+      model: string;
+      status: HeartbeatStatus;
+    },
   ): Promise<HeartbeatRow | null> {
     await this.client.execute({
       sql: `
         UPDATE heartbeats
-        SET title = ?, cadence = ?, contents = ?, next_tick = ?,
+        SET title = ?, cadence = ?, contents = ?, provider = ?, model = ?, next_tick = ?,
             status = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `,
@@ -143,6 +155,8 @@ export class Database {
         input.title,
         input.cadence,
         input.contents,
+        input.provider,
+        input.model,
         nextTickIso(input.cadence, input.status),
         input.status,
         id,
@@ -168,7 +182,7 @@ export class Database {
   async listDueHeartbeats(limit: number): Promise<HeartbeatRow[]> {
     return this.all<HeartbeatRow>(
       `
-        SELECT id, session_id, title, cadence, contents, last_tick, next_tick,
+        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
                status, created_at, updated_at
         FROM heartbeats
         WHERE status = 'active'
@@ -340,6 +354,21 @@ export class Database {
   private async all<T>(sql: string, args: SqlValue[] = []): Promise<T[]> {
     const result = await this.client.execute({ sql, args });
     return result.rows as T[];
+  }
+
+  private async ensureHeartbeatColumns(): Promise<void> {
+    const columns = await this.all<{ name: string }>("PRAGMA table_info(heartbeats)");
+    const names = new Set(columns.map((column) => column.name));
+    if (!names.has("provider")) {
+      await this.client.execute(
+        "ALTER TABLE heartbeats ADD COLUMN provider TEXT NOT NULL DEFAULT 'deepseek'",
+      );
+    }
+    if (!names.has("model")) {
+      await this.client.execute(
+        "ALTER TABLE heartbeats ADD COLUMN model TEXT NOT NULL DEFAULT 'deepseek-v4-flash'",
+      );
+    }
   }
 }
 

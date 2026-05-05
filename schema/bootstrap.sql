@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS heartbeats (
   title TEXT NOT NULL DEFAULT 'heartbeat',
   cadence INTEGER NOT NULL DEFAULT 60,
   contents TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'deepseek',
+  model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
   last_tick TEXT,
   next_tick TEXT,
   status TEXT NOT NULL DEFAULT 'active',

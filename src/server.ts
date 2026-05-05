@@ -33,12 +33,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   const contents = new ContentsLoader(settings.repoRoot);
   const runtime = new PiSharedSessionRuntime(settings);
   await runtime.start();
-  const executor = new HeartbeatExecutor(
-    db,
-    contents,
-    runtime,
-    `${settings.piProvider}/${settings.piModel}`,
-  );
+  const executor = new HeartbeatExecutor(db, contents, runtime);
   const scheduler = new Scheduler(
     db,
     executor,
@@ -116,6 +111,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         title: body?.title === undefined ? "heartbeat" : parseString(body.title, "title"),
         cadence: parsePositiveInt(body?.cadence, "cadence", 60),
         contents: parseContentsPath(body?.contents),
+        provider:
+          body?.provider === undefined ? settings.piProvider : parseString(body.provider, "provider"),
+        model: body?.model === undefined ? settings.piModel : parseString(body.model, "model"),
         status: parseHeartbeatStatus(body?.status, "active"),
       });
       return { ok: true, heartbeat };
@@ -138,6 +136,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
             : parsePositiveInt(body.cadence, "cadence"),
         contents:
           body?.contents === undefined ? current.contents : parseContentsPath(body.contents),
+        provider:
+          body?.provider === undefined ? current.provider : parseString(body.provider, "provider"),
+        model: body?.model === undefined ? current.model : parseString(body.model, "model"),
         status: parseHeartbeatStatus(body?.status, current.status),
       });
       return { ok: true, heartbeat };
