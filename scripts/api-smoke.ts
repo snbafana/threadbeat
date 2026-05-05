@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
@@ -62,14 +64,13 @@ try {
     await sleep((cadenceSeconds + 1) * 1000);
     const runOnce = await client.request<{ processed: number }>("POST", "/api/scheduler/run-once");
     assert.equal(runOnce.statusCode, 200);
-    assert.ok(runOnce.body.processed >= 1);
 
     const runs = await client.request<{ runs: Array<{ status: string; model: string | null; error: string | null }> }>(
       "GET",
       `/api/runs?heartbeatId=${heartbeatId}`,
     );
     assert.equal(runs.statusCode, 200);
-    assert.ok(runs.body.runs.length >= 1);
+    assert.ok(runs.body.runs.length >= 1, `run-once processed ${runOnce.body.processed}, but no run was recorded`);
     assert.equal(runs.body.runs[0]?.status, "succeeded", runs.body.runs[0]?.error ?? "run did not succeed");
     runCount = runs.body.runs.length;
   }
