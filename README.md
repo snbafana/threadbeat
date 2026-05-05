@@ -41,6 +41,21 @@ configured session.
 Runtime reset lifecycle events are written to `heartbeat_events` with
 `source: "runtime"` so resets are visible without terminal logs.
 
+## Soak Test
+
+Use the soak harness for the v0.2 repeat-run gate. It defaults to a one-hour
+dry-run against a temporary DB and repo root:
+
+```bash
+npm run soak
+```
+
+Useful soak env:
+
+- `THREADBEAT_SOAK_SECONDS`: duration, defaults to `3600`
+- `THREADBEAT_SOAK_CADENCE_SECONDS`: heartbeat cadence, defaults to `5`
+- `THREADBEAT_PI_DRY_RUN`: defaults to `1`; set `0` for live Pi/DeepSeek
+
 ## Stripe Projects hosting
 
 The app is ready for Stripe Projects managed hosting, but Railway and Turso both require provider ToS acceptance before provisioning.
