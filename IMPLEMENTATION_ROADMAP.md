@@ -65,9 +65,9 @@ Done when:
 - Failed runs produce actionable SQL events.
 - Resetting the shared Pi session does not lose heartbeat state.
 
-### v0.3: hosted server and hosted state
+### v0.3: hosted singular server agent
 
-Goal: move the working single-server harness to managed infrastructure.
+Goal: move the working single-server harness to managed infrastructure and prove one long-lived agent can run on the server.
 
 Ships:
 
@@ -77,10 +77,14 @@ Ships:
 - Startup schema initialization against Turso.
 - Health checks suitable for Railway.
 - Deployment runbook for local-to-hosted cutover.
+- One hosted shared Pi SDK session running inside the server process.
+- One hosted heartbeat running repeatedly against the server-side agent.
 
 Does not ship:
 
 - Modal agent workers.
+- Task/executor abstraction.
+- Multi-agent runtime.
 - Multi-region or multi-instance scheduling.
 - Strong distributed locking.
 
@@ -88,34 +92,63 @@ Done when:
 
 - The same heartbeat API works against the Railway service.
 - A hosted heartbeat run persists into Turso.
+- A singular hosted Pi/DeepSeek agent executes a heartbeat at least twice on cadence.
 - Local `.env` still contains only project-scoped secrets.
 
-### v0.4: task log and executor abstraction
+### v0.4: reliable hosted singular agent
 
-Goal: separate "what should happen" from "which runtime does it."
+Goal: harden the single hosted agent before introducing any multi-agent runtime.
+
+Ships:
+
+- Hosted soak test for one agent running one or more heartbeats for several hours.
+- Event log for scheduler decisions, Pi session lifecycle, model calls, SQL writes, and reschedules.
+- Better runtime controls for reset, pause, resume, compaction, and active-run visibility.
+- Run locking so one hosted process cannot overlap a heartbeat with itself.
+- Clear failure policy for model errors, missing markdown, and timed-out runs.
+- Minimal operator surface for inspecting the single agent and recent heartbeat history.
+
+Does not ship:
+
+- Modal implementation.
+- Multiple agents.
+- On-device implementation.
+- Recipe/MCP bridge.
+
+Done when:
+
+- One hosted agent can run unattended for several hours.
+- Restarting the server preserves schedule state and resumes cleanly.
+- The SQL log can explain every heartbeat run without reading process logs.
+
+### v0.5: runtime refactor for future agents
+
+Goal: introduce the abstraction needed for Modal and multi-agent execution, without changing the product surface yet.
 
 Ships:
 
 - `tasks` table for work requested by heartbeats.
 - `task_events` table as the canonical append-only log.
 - Runtime interface for `start`, `execute`, `stop`, `reset`, and `status`.
-- Current shared Pi session represented as the first runtime.
+- Current hosted shared Pi session represented as the first runtime.
 - Heartbeats create tasks instead of calling Pi directly.
 - Scheduler claims tasks through SQL state transitions.
+- Compatibility path preserving the existing single-agent heartbeat behavior.
 
 Does not ship:
 
 - Modal implementation.
+- Multiple active agents.
 - On-device implementation.
 - Recipe/MCP bridge.
 
 Done when:
 
-- Existing heartbeat behavior is preserved through the new task abstraction.
+- Existing hosted single-agent behavior works through the new task/runtime abstraction.
 - The SQL log can reconstruct a run from queued to completed.
 - A failed executor leaves the task in a clear terminal or retryable state.
 
-### v0.5: Modal persistent agent runtime
+### v0.6: Modal persistent agent runtime
 
 Goal: make remote agents real execution targets with persistent filesystems.
 
@@ -139,7 +172,7 @@ Done when:
 - A heartbeat can start a Modal agent, assign it a task, observe completion, stop it, and later resume with its filesystem state still present.
 - Two Modal agents can run separate tasks without sharing one Pi session.
 
-### v0.6: multi-agent heartbeat orchestration
+### v0.7: multi-agent heartbeat orchestration
 
 Goal: let heartbeats coordinate multiple remote agents instead of only one executor.
 
@@ -161,7 +194,7 @@ Done when:
 - One control heartbeat can manage at least two Modal agents over multiple task cycles.
 - Agent state remains understandable from SQL rows and events alone.
 
-### v0.7: on-device daemon
+### v0.8: on-device daemon
 
 Goal: attach the user's device as a capability provider when it is online.
 
@@ -186,7 +219,7 @@ Done when:
 - Restarting the daemon causes queued local tasks to be claimed and logged.
 - Remote heartbeats keep running while local capabilities are unavailable.
 
-### v0.8: capability policy and local state boundaries
+### v0.9: capability policy and local state boundaries
 
 Goal: make hook-in and hook-out behavior explicit.
 
@@ -208,7 +241,7 @@ Done when:
 - A capability can be enabled, used, disabled, and prevented from receiving future tasks.
 - Raw local-only outputs are not persisted remotely unless the policy allows it.
 
-### v0.9: Poke/Kitchen recipe bridge
+### v0.10: Poke/Kitchen recipe bridge
 
 Goal: make external automations callable through controlled recipe tools.
 
@@ -329,10 +362,12 @@ Success criteria:
 
 ## Ordering
 
-1. Harden the Pi + DeepSeek harness.
-2. Add the SQL event log.
-3. Add Modal-backed agent runtime.
-4. Add on-device daemon.
-5. Add Kitchen/recipe/MCP bridge.
+1. Get one hosted Pi + DeepSeek agent running on Railway against Turso.
+2. Harden that singular hosted agent with event logs, resets, timeouts, and soak tests.
+3. Refactor into task/runtime abstractions only after the singular hosted agent is stable.
+4. Add Modal-backed persistent agents as the first multi-agent runtime.
+5. Add multi-agent heartbeat orchestration.
+6. Add on-device daemon and local capability policy.
+7. Add Kitchen/recipe/MCP bridge.
 
 The important invariant is that SQL remains the control log. Pi sessions, Modal sandboxes, local daemons, and external recipes are executors attached to that log, not separate sources of truth.
