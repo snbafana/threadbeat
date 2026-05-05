@@ -31,6 +31,9 @@ try {
   const health = await app.inject({ method: "GET", url: "/health" });
   assert.equal(health.statusCode, 200);
   assert.equal(health.json().runtime.mode, "dry-run");
+  assert.equal(health.json().runtime.queueDepth, 0);
+  assert.equal(health.json().runtime.activeRun, null);
+  assert.equal(health.json().runtime.lastRun, null);
 
   const sessionRes = await app.inject({
     method: "POST",
@@ -82,6 +85,14 @@ try {
   assert.equal(runs.json().runs.length, 1);
   assert.equal(runs.json().runs[0].status, "succeeded");
 
+  const runtimeAfterRun = await app.inject({ method: "GET", url: "/api/runtime/pi" });
+  assert.equal(runtimeAfterRun.statusCode, 200);
+  assert.equal(runtimeAfterRun.json().runtime.queueDepth, 0);
+  assert.equal(runtimeAfterRun.json().runtime.activeRun, null);
+  assert.equal(runtimeAfterRun.json().runtime.lastRun.heartbeatId, heartbeatId);
+  assert.equal(runtimeAfterRun.json().runtime.lastRun.status, "succeeded");
+  assert.equal(typeof runtimeAfterRun.json().runtime.lastRun.durationMs, "number");
+
   const events = await app.inject({
     method: "GET",
     url: `/api/events?heartbeatId=${heartbeatId}`,
@@ -97,6 +108,7 @@ try {
   const runtime = await app.inject({ method: "POST", url: "/api/runtime/pi/reset" });
   assert.equal(runtime.statusCode, 200);
   assert.equal(runtime.json().runtime.running, true);
+  assert.equal(runtime.json().runtime.resetCount, 1);
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
