@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "codexmux-control-plane",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-05",
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    "PROJECT_NAME": "codexmux"
+  },
+  "d1_databases": [
+    {
+      "binding": "CONTROL_DB",
+      "database_name": "codexmux-d1",
+      "database_id": "85d79a8c-d4f0-4a34-98b2-5cad52a9a64e"
+    }
+  ]
+}

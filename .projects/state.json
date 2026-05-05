@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "providers": {
+    "cloudflare": {
+      "name": "Cloudflare"
+    }
+  },
+  "resources": {
+    "cloudflare-plan": {
+      "name": "cloudflare-plan",
+      "providerName": "Cloudflare",
+      "serviceId": "workers:free"
+    },
+    "control-db": {
+      "name": "control-db",
+      "providerName": "Cloudflare",
+      "serviceId": "d1"
+    },
+    "control-plane": {
+      "name": "control-plane",
+      "providerName": "Cloudflare",
+      "serviceId": "workers"
+    },
+    "events-queue": {
+      "name": "events-queue",
+      "providerName": "Cloudflare",
+      "serviceId": "queues"
+    },
+    "remote-browser": {
+      "name": "remote-browser",
+      "providerName": "Cloudflare",
+      "serviceId": "browser-run"
+    }
+  }
+}

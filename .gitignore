@@ -1,0 +1,7 @@
+.projects/cache
+.projects/state.local.json
+.projects/vault
+.env
+.env.local
+node_modules
+.wrangler
