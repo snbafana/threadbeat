@@ -182,6 +182,8 @@ try {
   const timeoutStatus = timeoutRuntime.status();
   assert.equal(timeoutStatus.lastRun?.heartbeatId, "hb_timeout");
   assert.equal(timeoutStatus.lastRun?.status, "failed");
+  assert.equal(timeoutStatus.resetCount, 1);
+  assert.equal(timeoutStatus.running, true);
   assert.match(timeoutStatus.lastError ?? "", /timed out after 10ms/);
 } finally {
   await app.close();

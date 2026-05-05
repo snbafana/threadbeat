@@ -106,8 +106,10 @@ export class PiSharedSessionRuntime implements RuntimeManager {
         this.recordCompletedRun("succeeded", heartbeatId, startedAt, startedAtMs);
         return text;
       } catch (error) {
-        this.lastError = error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
+        this.lastError = message;
         this.recordCompletedRun("failed", heartbeatId, startedAt, startedAtMs);
+        await this.resetAfterFailure(message);
         throw error;
       } finally {
         this.currentHeartbeatId = null;
@@ -151,6 +153,18 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     const text = this.session.getLastAssistantText();
     if (!text) throw new Error("Pi completed without assistant text");
     return text;
+  }
+
+  private async resetAfterFailure(originalError: string): Promise<void> {
+    try {
+      await this.stop();
+      this.resetCount += 1;
+      await this.start();
+      this.lastError = originalError;
+    } catch (error) {
+      const resetError = error instanceof Error ? error.message : String(error);
+      this.lastError = `${originalError}; automatic reset failed: ${resetError}`;
+    }
   }
 
   private recordCompletedRun(
