@@ -3,7 +3,13 @@ import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
 
 import { nextTickIso, nowIso } from "./time.js";
-import type { HeartbeatRow, HeartbeatRunRow, HeartbeatStatus, SessionRow } from "./types.js";
+import type {
+  HeartbeatEventRow,
+  HeartbeatRow,
+  HeartbeatRunRow,
+  HeartbeatStatus,
+  SessionRow,
+} from "./types.js";
 
 type SqlValue = string | number | null;
 
@@ -208,6 +214,83 @@ export class Database {
     const row = await this.getRun(id);
     if (!row) throw new Error("created run could not be loaded");
     return row;
+  }
+
+  async createEvent(input: {
+    heartbeatId?: string | null;
+    runId?: string | null;
+    sessionId?: string | null;
+    source: string;
+    type: string;
+    message?: string | null;
+    data?: unknown;
+  }): Promise<HeartbeatEventRow> {
+    const id = randomId("evt");
+    await this.client.execute({
+      sql: `
+        INSERT INTO heartbeat_events (
+          id, heartbeat_id, run_id, session_id, source, type, message, data
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        id,
+        input.heartbeatId ?? null,
+        input.runId ?? null,
+        input.sessionId ?? null,
+        input.source,
+        input.type,
+        input.message ?? null,
+        input.data === undefined ? null : JSON.stringify(input.data),
+      ],
+    });
+    const row = await this.getEvent(id);
+    if (!row) throw new Error("created event could not be loaded");
+    return row;
+  }
+
+  async getEvent(id: string): Promise<HeartbeatEventRow | null> {
+    return this.first<HeartbeatEventRow>(
+      `
+        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
+        FROM heartbeat_events
+        WHERE id = ?
+      `,
+      [id],
+    );
+  }
+
+  async listEvents(filters: {
+    heartbeatId?: string;
+    runId?: string;
+    sessionId?: string;
+    limit?: number;
+  }): Promise<HeartbeatEventRow[]> {
+    const conditions: string[] = [];
+    const args: SqlValue[] = [];
+    if (filters.heartbeatId) {
+      conditions.push("heartbeat_id = ?");
+      args.push(filters.heartbeatId);
+    }
+    if (filters.runId) {
+      conditions.push("run_id = ?");
+      args.push(filters.runId);
+    }
+    if (filters.sessionId) {
+      conditions.push("session_id = ?");
+      args.push(filters.sessionId);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    args.push(filters.limit ?? 100);
+    return this.all<HeartbeatEventRow>(
+      `
+        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
+        FROM heartbeat_events
+        ${where}
+        ORDER BY created_at DESC
+        LIMIT ?
+      `,
+      args,
+    );
   }
 
   async getRun(id: string): Promise<HeartbeatRunRow | null> {

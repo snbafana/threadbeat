@@ -35,3 +35,15 @@ export type HeartbeatRunRow = {
   created_at: string;
   completed_at: string | null;
 };
+
+export type HeartbeatEventRow = {
+  id: string;
+  heartbeat_id: string | null;
+  run_id: string | null;
+  session_id: string | null;
+  source: string;
+  type: string;
+  message: string | null;
+  data: string | null;
+  created_at: string;
+};

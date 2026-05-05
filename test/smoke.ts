@@ -82,6 +82,18 @@ try {
   assert.equal(runs.json().runs.length, 1);
   assert.equal(runs.json().runs[0].status, "succeeded");
 
+  const events = await app.inject({
+    method: "GET",
+    url: `/api/events?heartbeatId=${heartbeatId}`,
+  });
+  assert.equal(events.statusCode, 200);
+  const eventTypes = events.json().events.map((event: { type: string }) => event.type);
+  assert.ok(eventTypes.includes("heartbeat_claimed"));
+  assert.ok(eventTypes.includes("run_started"));
+  assert.ok(eventTypes.includes("contents_loaded"));
+  assert.ok(eventTypes.includes("run_succeeded"));
+  assert.ok(eventTypes.includes("heartbeat_rescheduled"));
+
   const runtime = await app.inject({ method: "POST", url: "/api/runtime/pi/reset" });
   assert.equal(runtime.statusCode, 200);
   assert.equal(runtime.json().runtime.running, true);

@@ -164,6 +164,20 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     };
   });
 
+  app.get("/api/events", async (request) => {
+    const query = request.query as Record<string, string | undefined>;
+    const limit = query.limit ? Number.parseInt(query.limit, 10) : 100;
+    return {
+      ok: true,
+      events: await db.listEvents({
+        heartbeatId: query.heartbeatId,
+        runId: query.runId,
+        sessionId: query.sessionId,
+        limit: Number.isFinite(limit) ? limit : 100,
+      }),
+    };
+  });
+
   app.post("/api/runs", async (request, reply) => {
     try {
       const body = request.body as Record<string, unknown>;

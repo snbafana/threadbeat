@@ -47,3 +47,24 @@ CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_heartbeat_id
 
 CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_session_id
   ON heartbeat_runs(session_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS heartbeat_events (
+  id TEXT PRIMARY KEY,
+  heartbeat_id TEXT,
+  run_id TEXT,
+  session_id TEXT,
+  source TEXT NOT NULL,
+  type TEXT NOT NULL,
+  message TEXT,
+  data TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (heartbeat_id) REFERENCES heartbeats(id) ON DELETE CASCADE,
+  FOREIGN KEY (run_id) REFERENCES heartbeat_runs(id) ON DELETE SET NULL,
+  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_heartbeat_events_heartbeat_id
+  ON heartbeat_events(heartbeat_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_heartbeat_events_run_id
+  ON heartbeat_events(run_id, created_at DESC);

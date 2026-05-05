@@ -14,8 +14,23 @@ export class HeartbeatExecutor {
 
   async execute(heartbeat: HeartbeatRow): Promise<HeartbeatRunRow> {
     let promptSnapshot = "";
+    await this.db.createEvent({
+      heartbeatId: heartbeat.id,
+      sessionId: heartbeat.session_id,
+      source: "executor",
+      type: "run_started",
+      message: "Heartbeat execution started",
+    });
     try {
       const markdown = await this.contents.readMarkdown(heartbeat.contents);
+      await this.db.createEvent({
+        heartbeatId: heartbeat.id,
+        sessionId: heartbeat.session_id,
+        source: "executor",
+        type: "contents_loaded",
+        message: "Markdown contents loaded",
+        data: { contents: heartbeat.contents },
+      });
       promptSnapshot = buildPrompt(heartbeat, markdown);
       const output = await this.runtime.run(promptSnapshot, heartbeat.id);
       return await this.finish(heartbeat, {
@@ -55,6 +70,26 @@ export class HeartbeatExecutor {
       error: result.error,
     });
     await this.db.tickHeartbeat(heartbeat.id);
+    await this.db.createEvent({
+      heartbeatId: heartbeat.id,
+      runId: run.id,
+      sessionId: heartbeat.session_id,
+      source: "executor",
+      type: result.status === "succeeded" ? "run_succeeded" : "run_failed",
+      message:
+        result.status === "succeeded"
+          ? "Heartbeat execution succeeded"
+          : "Heartbeat execution failed",
+      data: { error: result.error },
+    });
+    await this.db.createEvent({
+      heartbeatId: heartbeat.id,
+      runId: run.id,
+      sessionId: heartbeat.session_id,
+      source: "executor",
+      type: "heartbeat_rescheduled",
+      message: "Heartbeat tick advanced after run",
+    });
     return run;
   }
 }
