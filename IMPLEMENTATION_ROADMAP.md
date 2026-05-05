@@ -67,6 +67,8 @@ Done when:
 
 ### v0.3: hosted singular server agent
 
+Status: implemented.
+
 Goal: move the working single-server harness to managed infrastructure and prove one long-lived agent can run on the server.
 
 Ships:
@@ -94,6 +96,15 @@ Done when:
 - A hosted heartbeat run persists into Turso.
 - A singular hosted Pi/DeepSeek agent executes a heartbeat at least twice on cadence.
 - Local `.env` still contains only project-scoped secrets.
+
+Verification report, 2026-05-05:
+
+- Automatic checks passed locally: `npm run typecheck`, `npm run build`, `npm run lint`, `npm test`, `npm run smoke:api`.
+- Live local check passed: `THREADBEAT_PI_DRY_RUN=0 THREADBEAT_RUN_TIMEOUT_SECONDS=60 npm run smoke:api`.
+- Hosted checks passed: Railway `/health` returned 200 with runtime mode `pi-sdk`; `THREADBEAT_BASE_URL=https://threadbeat-production.up.railway.app npm run smoke:api` created and ran a hosted heartbeat.
+- Cadence gate passed: hosted heartbeat `hb_75cccc0cb35f41338b8305a6cab5ae98` persisted seven successful Pi/DeepSeek runs in Turso, then was set inactive to stop spend.
+- Providers touched: Railway hosting and Turso database through Stripe Projects; Cloudflare remains present in project state but unused by the app.
+- State left running: Railway service online; no throwaway hosted smoke heartbeats left active.
 
 ### v0.4: reliable hosted singular agent
 
