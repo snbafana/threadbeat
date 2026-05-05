@@ -74,20 +74,20 @@ Set `THREADBEAT_API_SMOKE_RUN_HEARTBEAT=0` for a cheap create-only check.
 ## Stripe Projects hosting
 
 Turso is provisioned through Stripe Projects for this project. Railway is linked,
-but hosting provisioning requires a GitHub repository in `owner/repo` format.
+and hosting is provisioned from the private GitHub repo `snbafana/threadbeat`.
 
 ```bash
 # Already completed:
 # stripe projects add turso/database --accept-tos --yes --config '{"name":"threadbeat","location":"aws-us-east-1"}'
+# stripe projects add railway/hosting --accept-tos --yes --resource-info '{"source_type":"GitHub repository"}'
+# stripe projects add railway/hosting --resource-id <RESOURCE_ID> --resource-info '{"repo":"snbafana/threadbeat","branch":"main"}' --accept-tos --yes
 
-# Complete after this repo has a GitHub remote:
-stripe projects add railway/hosting --accept-tos --yes --resource-info '{"source_type":"GitHub repository"}'
-stripe projects add railway/hosting --accept-tos --yes --resource-info '{"repo":"OWNER/REPO","branch":"main"}'
 stripe projects env --pull
 ```
 
-After pulling env, set `THREADBEAT_DB_URL` and `THREADBEAT_DB_AUTH_TOKEN` from
-the pulled Turso env names if Stripe Projects does not map them directly.
+The server reads Stripe Projects' pulled Turso env directly:
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. `THREADBEAT_DB_URL` and
+`THREADBEAT_DB_AUTH_TOKEN` remain supported overrides.
 
 ## Railway Deploy
 
@@ -101,8 +101,8 @@ Railway uses `railway.json`:
 Required hosted env:
 
 - `DEEPSEEK_API_KEY`
-- `THREADBEAT_DB_URL`
-- `THREADBEAT_DB_AUTH_TOKEN`
+- `TURSO_DATABASE_URL` or `THREADBEAT_DB_URL`
+- `TURSO_AUTH_TOKEN` or `THREADBEAT_DB_AUTH_TOKEN`
 - `THREADBEAT_REPO_ROOT=/app`
 - `THREADBEAT_PI_DRY_RUN=0`
 

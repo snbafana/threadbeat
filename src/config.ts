@@ -41,7 +41,10 @@ export const loadSettings = (): Settings => {
   return {
     projectRoot,
     repoRoot,
-    dbUrl: process.env.THREADBEAT_DB_URL ?? `file:${path.join(repoRoot, ".threadbeat", "threadbeat.db")}`,
+    dbUrl:
+      process.env.THREADBEAT_DB_URL ??
+      process.env.TURSO_DATABASE_URL ??
+      `file:${path.join(repoRoot, ".threadbeat", "threadbeat.db")}`,
     dbAuthToken: process.env.THREADBEAT_DB_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN,
     pollSeconds: intEnv("THREADBEAT_POLL_SECONDS", 10),
     maxDuePerPoll: intEnv("THREADBEAT_MAX_DUE_PER_POLL", 5),

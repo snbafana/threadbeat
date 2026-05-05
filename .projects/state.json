@@ -42,6 +42,16 @@
       "providerName": "Railway",
       "serviceId": "hosting"
     },
+    "railway-hosting-3": {
+      "name": "railway-hosting-3",
+      "providerName": "Railway",
+      "serviceId": "hosting"
+    },
+    "railway-hosting-4": {
+      "name": "railway-hosting-4",
+      "providerName": "Railway",
+      "serviceId": "hosting"
+    },
     "remote-browser": {
       "name": "remote-browser",
       "providerName": "Cloudflare",
