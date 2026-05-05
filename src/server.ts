@@ -49,7 +49,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     settings.maxDuePerPoll,
   );
 
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: settings.logRequests });
 
   app.addHook("onClose", async () => {
     scheduler.stop();

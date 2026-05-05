@@ -32,6 +32,7 @@ Useful env:
 - `THREADBEAT_PI_DRY_RUN_DELAY_MS`: optional dry-run delay for timeout testing
 - `THREADBEAT_PI_PROVIDER`: defaults to `deepseek`
 - `THREADBEAT_PI_MODEL`: defaults to `deepseek-v4-flash`
+- `THREADBEAT_LOG_REQUESTS`: Fastify request logging, defaults to `1`
 
 Heartbeat `provider` and `model` default to `THREADBEAT_PI_PROVIDER` and
 `THREADBEAT_PI_MODEL` when omitted. In v0.2 these fields are persisted on the
@@ -55,6 +56,7 @@ Useful soak env:
 - `THREADBEAT_SOAK_SECONDS`: duration, defaults to `3600`
 - `THREADBEAT_SOAK_CADENCE_SECONDS`: heartbeat cadence, defaults to `5`
 - `THREADBEAT_PI_DRY_RUN`: defaults to `1`; set `0` for live Pi/DeepSeek
+- `THREADBEAT_SOAK_KEEP_ARTIFACTS`: set `1` to keep the temp DB/repo for event-log review
 
 ## Stripe Projects hosting
 

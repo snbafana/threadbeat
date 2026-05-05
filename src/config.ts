@@ -32,6 +32,7 @@ export type Settings = {
   piModel: string;
   piThinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
   deepseekApiKey?: string;
+  logRequests: boolean;
   port: number;
 };
 
@@ -51,6 +52,7 @@ export const loadSettings = (): Settings => {
     piModel: process.env.THREADBEAT_PI_MODEL ?? "deepseek-v4-flash",
     piThinking: (process.env.THREADBEAT_PI_THINKING ?? "off") as Settings["piThinking"],
     deepseekApiKey: process.env.DEEPSEEK_API_KEY,
+    logRequests: boolEnv("THREADBEAT_LOG_REQUESTS", true),
     port: intEnv("PORT", 8000),
   };
 };

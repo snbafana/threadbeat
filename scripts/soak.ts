@@ -24,6 +24,7 @@ const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-soak-"));
 const durationSeconds = intEnv("THREADBEAT_SOAK_SECONDS", 3600);
 const cadenceSeconds = intEnv("THREADBEAT_SOAK_CADENCE_SECONDS", 5);
 const dryRun = boolEnv("THREADBEAT_PI_DRY_RUN", true);
+const keepArtifacts = boolEnv("THREADBEAT_SOAK_KEEP_ARTIFACTS", false);
 
 await fs.mkdir(path.join(tempRoot, "contents"), { recursive: true });
 await fs.writeFile(
@@ -49,6 +50,7 @@ const settings: Settings = {
   piModel: process.env.THREADBEAT_PI_MODEL ?? "deepseek-v4-flash",
   piThinking: (process.env.THREADBEAT_PI_THINKING ?? "off") as Settings["piThinking"],
   deepseekApiKey: process.env.DEEPSEEK_API_KEY,
+  logRequests: boolEnv("THREADBEAT_LOG_REQUESTS", false),
   port: 0,
 };
 
@@ -84,6 +86,10 @@ try {
   let succeeded = 0;
   let failed = 0;
 
+  console.log(
+    `threadbeat soak started: duration=${durationSeconds}s cadence=${cadenceSeconds}s dryRun=${dryRun} db=${settings.dbUrl}`,
+  );
+
   while (Date.now() < deadline) {
     await sleep(cadenceSeconds * 1000);
     const runOnce = await app.inject({ method: "POST", url: "/api/scheduler/run-once" });
@@ -98,6 +104,10 @@ try {
     const runs = runsRes.json().runs as Array<{ status: string }>;
     succeeded = runs.filter((run) => run.status === "succeeded").length;
     failed = runs.filter((run) => run.status === "failed").length;
+    const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
+    console.log(
+      `soak progress: elapsed=${elapsedSeconds}s iterations=${iterations} succeeded=${succeeded} failed=${failed}`,
+    );
   }
 
   const eventsRes = await app.inject({
@@ -122,6 +132,9 @@ try {
         succeeded,
         failed,
         events: events.length,
+        repoRoot: tempRoot,
+        dbUrl: settings.dbUrl,
+        artifactsKept: keepArtifacts,
       },
       null,
       2,
@@ -129,7 +142,11 @@ try {
   );
 } finally {
   await app.close();
-  await fs.rm(tempRoot, { recursive: true, force: true });
+  if (keepArtifacts) {
+    console.log(`threadbeat soak artifacts kept at ${tempRoot}`);
+  } else {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
 }
 
 function sleep(ms: number): Promise<void> {

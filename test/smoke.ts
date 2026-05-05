@@ -25,6 +25,7 @@ const settings: Settings = {
   piModel: "deepseek-v4-flash",
   piThinking: "off",
   deepseekApiKey: "test",
+  logRequests: true,
   port: 0,
 };
 
