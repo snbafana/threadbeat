@@ -58,6 +58,19 @@ Useful soak env:
 - `THREADBEAT_PI_DRY_RUN`: defaults to `1`; set `0` for live Pi/DeepSeek
 - `THREADBEAT_SOAK_KEEP_ARTIFACTS`: set `1` to keep the temp DB/repo for event-log review
 
+## API Smoke
+
+Use the API smoke check against the in-process app or a deployed Railway URL.
+By default it creates a session, creates a heartbeat, waits for cadence, and
+executes one scheduler pass.
+
+```bash
+npm run smoke:api
+THREADBEAT_BASE_URL=https://your-railway-url npm run smoke:api
+```
+
+Set `THREADBEAT_API_SMOKE_RUN_HEARTBEAT=0` for a cheap create-only check.
+
 ## Stripe Projects hosting
 
 The app is ready for Stripe Projects managed hosting, but Railway and Turso both require provider ToS acceptance before provisioning.
