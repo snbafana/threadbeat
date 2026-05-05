@@ -93,6 +93,62 @@ try {
   assert.equal(runtimeAfterRun.json().runtime.lastRun.status, "succeeded");
   assert.equal(typeof runtimeAfterRun.json().runtime.lastRun.durationMs, "number");
 
+  const inactiveRes = await app.inject({
+    method: "PATCH",
+    url: `/api/heartbeats/${heartbeatId}`,
+    payload: { status: "inactive" },
+  });
+  assert.equal(inactiveRes.statusCode, 200);
+
+  const missingContentsRes = await app.inject({
+    method: "POST",
+    url: "/api/heartbeats",
+    payload: {
+      sessionId,
+      title: "missing markdown heartbeat",
+      cadence: 1,
+      contents: "contents/missing.md",
+      status: "active",
+    },
+  });
+  assert.equal(missingContentsRes.statusCode, 200);
+  const missingHeartbeatId = missingContentsRes.json().heartbeat.id;
+
+  await app.inject({ method: "POST", url: `/api/heartbeats/${missingHeartbeatId}/tick` });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+
+  const failedRunOnce = await app.inject({ method: "POST", url: "/api/scheduler/run-once" });
+  assert.equal(failedRunOnce.statusCode, 200);
+  assert.equal(failedRunOnce.json().processed, 1);
+
+  const failedRuns = await app.inject({
+    method: "GET",
+    url: `/api/runs?heartbeatId=${missingHeartbeatId}`,
+  });
+  assert.equal(failedRuns.statusCode, 200);
+  assert.equal(failedRuns.json().runs.length, 1);
+  assert.equal(failedRuns.json().runs[0].status, "failed");
+  assert.match(failedRuns.json().runs[0].error, /missing\.md/);
+
+  const rescheduledMissing = await app.inject({
+    method: "GET",
+    url: `/api/heartbeats/${missingHeartbeatId}`,
+  });
+  assert.equal(rescheduledMissing.statusCode, 200);
+  assert.equal(typeof rescheduledMissing.json().heartbeat.last_tick, "string");
+  assert.equal(typeof rescheduledMissing.json().heartbeat.next_tick, "string");
+
+  const failedEvents = await app.inject({
+    method: "GET",
+    url: `/api/events?heartbeatId=${missingHeartbeatId}`,
+  });
+  assert.equal(failedEvents.statusCode, 200);
+  const failedEventTypes = failedEvents.json().events.map((event: { type: string }) => event.type);
+  assert.ok(failedEventTypes.includes("heartbeat_claimed"));
+  assert.ok(failedEventTypes.includes("run_started"));
+  assert.ok(failedEventTypes.includes("run_failed"));
+  assert.ok(failedEventTypes.includes("heartbeat_rescheduled"));
+
   const events = await app.inject({
     method: "GET",
     url: `/api/events?heartbeatId=${heartbeatId}`,
