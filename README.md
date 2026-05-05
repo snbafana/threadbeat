@@ -38,6 +38,9 @@ Heartbeat `provider` and `model` default to `THREADBEAT_PI_PROVIDER` and
 heartbeat and copied into run records; the shared Pi runtime itself is still one
 configured session.
 
+Runtime reset lifecycle events are written to `heartbeat_events` with
+`source: "runtime"` so resets are visible without terminal logs.
+
 ## Stripe Projects hosting
 
 The app is ready for Stripe Projects managed hosting, but Railway and Turso both require provider ToS acceptance before provisioning.

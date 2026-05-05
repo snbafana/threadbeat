@@ -31,6 +31,13 @@ export type RuntimeRunSnapshot = {
   durationMs: number | null;
 };
 
+export type RuntimeLifecycleEvent = {
+  type: "runtime_reset_started" | "runtime_reset_completed" | "runtime_reset_failed";
+  heartbeatId?: string | null;
+  message: string;
+  data?: Record<string, unknown>;
+};
+
 export interface RuntimeManager {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -48,7 +55,10 @@ export class PiSharedSessionRuntime implements RuntimeManager {
   private lastError: string | null = null;
   private readonly lock = new AsyncLock();
 
-  constructor(private readonly settings: Settings) {}
+  constructor(
+    private readonly settings: Settings,
+    private readonly onLifecycleEvent?: (event: RuntimeLifecycleEvent) => Promise<void>,
+  ) {}
 
   async start(): Promise<void> {
     if (this.settings.piDryRun) return;
@@ -79,10 +89,20 @@ export class PiSharedSessionRuntime implements RuntimeManager {
   }
 
   async reset(): Promise<void> {
+    await this.emitLifecycleEvent({
+      type: "runtime_reset_started",
+      message: "Manual runtime reset started",
+      data: { reason: "manual", resetCount: this.resetCount },
+    });
     await this.stop();
     this.resetCount += 1;
     this.lastError = null;
     await this.start();
+    await this.emitLifecycleEvent({
+      type: "runtime_reset_completed",
+      message: "Manual runtime reset completed",
+      data: { reason: "manual", resetCount: this.resetCount },
+    });
   }
 
   async run(prompt: string, heartbeatId: string): Promise<string> {
@@ -109,7 +129,7 @@ export class PiSharedSessionRuntime implements RuntimeManager {
         const message = error instanceof Error ? error.message : String(error);
         this.lastError = message;
         this.recordCompletedRun("failed", heartbeatId, startedAt, startedAtMs);
-        await this.resetAfterFailure(message);
+        await this.resetAfterFailure(message, heartbeatId);
         throw error;
       } finally {
         this.currentHeartbeatId = null;
@@ -155,15 +175,38 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     return text;
   }
 
-  private async resetAfterFailure(originalError: string): Promise<void> {
+  private async resetAfterFailure(originalError: string, heartbeatId: string): Promise<void> {
+    await this.emitLifecycleEvent({
+      type: "runtime_reset_started",
+      heartbeatId,
+      message: "Automatic runtime reset started after failure",
+      data: { reason: "automatic", error: originalError, resetCount: this.resetCount },
+    });
     try {
       await this.stop();
       this.resetCount += 1;
       await this.start();
       this.lastError = originalError;
+      await this.emitLifecycleEvent({
+        type: "runtime_reset_completed",
+        heartbeatId,
+        message: "Automatic runtime reset completed after failure",
+        data: { reason: "automatic", error: originalError, resetCount: this.resetCount },
+      });
     } catch (error) {
       const resetError = error instanceof Error ? error.message : String(error);
       this.lastError = `${originalError}; automatic reset failed: ${resetError}`;
+      await this.emitLifecycleEvent({
+        type: "runtime_reset_failed",
+        heartbeatId,
+        message: "Automatic runtime reset failed",
+        data: {
+          reason: "automatic",
+          error: originalError,
+          resetError,
+          resetCount: this.resetCount,
+        },
+      });
     }
   }
 
@@ -181,6 +224,10 @@ export class PiSharedSessionRuntime implements RuntimeManager {
       completedAt: new Date(completedAtMs).toISOString(),
       durationMs: completedAtMs - startedAtMs,
     };
+  }
+
+  private async emitLifecycleEvent(event: RuntimeLifecycleEvent): Promise<void> {
+    await this.onLifecycleEvent?.(event);
   }
 }
 

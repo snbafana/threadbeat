@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { ContentsLoader } from "./contents.js";
 import { Database } from "./db.js";
 import { HeartbeatExecutor } from "./executor.js";
-import { PiSharedSessionRuntime } from "./piRuntime.js";
+import { PiSharedSessionRuntime, type RuntimeLifecycleEvent } from "./piRuntime.js";
 import { Scheduler } from "./scheduler.js";
 import type { Settings } from "./config.js";
 import {
@@ -31,7 +31,15 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   await db.initSchema();
 
   const contents = new ContentsLoader(settings.repoRoot);
-  const runtime = new PiSharedSessionRuntime(settings);
+  const runtime = new PiSharedSessionRuntime(settings, async (event: RuntimeLifecycleEvent) => {
+    await db.createEvent({
+      heartbeatId: event.heartbeatId,
+      source: "runtime",
+      type: event.type,
+      message: event.message,
+      data: event.data,
+    });
+  });
   await runtime.start();
   const executor = new HeartbeatExecutor(db, contents, runtime);
   const scheduler = new Scheduler(

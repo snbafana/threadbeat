@@ -174,11 +174,25 @@ try {
   assert.equal(runtime.statusCode, 200);
   assert.equal(runtime.json().runtime.running, true);
   assert.equal(runtime.json().runtime.resetCount, 1);
+  const runtimeEvents = await app.inject({
+    method: "GET",
+    url: "/api/events?limit=20",
+  });
+  assert.equal(runtimeEvents.statusCode, 200);
+  const runtimeEventTypes = runtimeEvents
+    .json()
+    .events.filter((event: { source: string }) => event.source === "runtime")
+    .map((event: { type: string }) => event.type);
+  assert.ok(runtimeEventTypes.includes("runtime_reset_started"));
+  assert.ok(runtimeEventTypes.includes("runtime_reset_completed"));
 
+  const timeoutLifecycleEvents: string[] = [];
   const timeoutRuntime = new PiSharedSessionRuntime({
     ...settings,
     runTimeoutMs: 10,
     piDryRunDelayMs: 50,
+  }, async (event) => {
+    timeoutLifecycleEvents.push(event.type);
   });
   await assert.rejects(
     timeoutRuntime.run("slow dry-run prompt", "hb_timeout"),
@@ -190,6 +204,10 @@ try {
   assert.equal(timeoutStatus.resetCount, 1);
   assert.equal(timeoutStatus.running, true);
   assert.match(timeoutStatus.lastError ?? "", /timed out after 10ms/);
+  assert.deepEqual(timeoutLifecycleEvents, [
+    "runtime_reset_started",
+    "runtime_reset_completed",
+  ]);
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
