@@ -11,7 +11,7 @@ Provisioned resources:
 
 Current architecture:
 - Workers hosts a tiny HTTP control plane
-- D1 stores sessions and heartbeat objects
+- D1 stores sessions, heartbeat objects, and heartbeat runs
 - Queues and Browser Run are provisioned but not used in the first cut
 
 Not yet provisioned:
@@ -21,8 +21,13 @@ Why:
 
 Not yet implemented:
 - minute-tick queue loop
-- reading `contents` markdown bodies in a real executor
 - pane graph and executors
 - local broker for `cued`
 - local broker for desktop/CUA
 - capability-lease reconciliation between hosted and on-device executors
+
+Current executor split:
+- Cloudflare Worker keeps the durable state and scheduling API
+- `scripts/run-due-heartbeats.mjs` is the first external runner
+- the runner reads the repo-local markdown file named by `contents`
+- the runner can call Pi with a DeepSeek provider and then POST the result back to `/api/runs`

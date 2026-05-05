@@ -11,7 +11,9 @@
     "db:reset-local": "wrangler d1 execute threadbeat-d1 --local --file schema/control-plane.sql",
     "db:migrate:heartbeat-object": "wrangler d1 execute threadbeat-d1 --remote --file schema/heartbeat-object-v2.sql",
     "db:migrate:prompt-column": "wrangler d1 execute threadbeat-d1 --remote --file schema/prompt-column-v3.sql",
-    "db:migrate:toy-heartbeats": "wrangler d1 execute threadbeat-d1 --remote --file schema/toy-heartbeats-v4.sql"
+    "db:migrate:toy-heartbeats": "wrangler d1 execute threadbeat-d1 --remote --file schema/toy-heartbeats-v4.sql",
+    "db:migrate:runs": "wrangler d1 execute threadbeat-d1 --remote --file schema/heartbeat-runs-v5.sql",
+    "run:due": "node scripts/run-due-heartbeats.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250501.0",

@@ -12,6 +12,7 @@ type SessionRow = {
 };
 
 type HeartbeatStatus = "active" | "inactive";
+type HeartbeatRunStatus = "succeeded" | "failed" | "skipped";
 
 type HeartbeatRow = {
   id: string;
@@ -24,6 +25,20 @@ type HeartbeatRow = {
   status: HeartbeatStatus;
   created_at: string;
   updated_at: string;
+};
+
+type HeartbeatRunRow = {
+  id: string;
+  heartbeat_id: string;
+  session_id: string;
+  executor: string;
+  model: string | null;
+  status: HeartbeatRunStatus;
+  prompt_snapshot: string;
+  output: string | null;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
 };
 
 const json = (data: unknown, init?: ResponseInit) =>
@@ -328,6 +343,150 @@ async function dueHeartbeats(env: Env) {
   return result.results;
 }
 
+async function listRuns(
+  env: Env,
+  input: { heartbeatId?: string; sessionId?: string; limit?: number },
+) {
+  const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+
+  if (input.heartbeatId) {
+    const result = await env.CONTROL_DB.prepare(
+      `SELECT
+         id,
+         heartbeat_id,
+         session_id,
+         executor,
+         model,
+         status,
+         prompt_snapshot,
+         output,
+         error,
+         created_at,
+         completed_at
+       FROM heartbeat_runs
+       WHERE heartbeat_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    )
+      .bind(input.heartbeatId, limit)
+      .all<HeartbeatRunRow>();
+    return result.results;
+  }
+
+  if (input.sessionId) {
+    const result = await env.CONTROL_DB.prepare(
+      `SELECT
+         id,
+         heartbeat_id,
+         session_id,
+         executor,
+         model,
+         status,
+         prompt_snapshot,
+         output,
+         error,
+         created_at,
+         completed_at
+       FROM heartbeat_runs
+       WHERE session_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    )
+      .bind(input.sessionId, limit)
+      .all<HeartbeatRunRow>();
+    return result.results;
+  }
+
+  const result = await env.CONTROL_DB.prepare(
+    `SELECT
+       id,
+       heartbeat_id,
+       session_id,
+       executor,
+       model,
+       status,
+       prompt_snapshot,
+       output,
+       error,
+       created_at,
+       completed_at
+     FROM heartbeat_runs
+     ORDER BY created_at DESC
+     LIMIT ?`,
+  )
+    .bind(limit)
+    .all<HeartbeatRunRow>();
+  return result.results;
+}
+
+async function createRun(
+  env: Env,
+  input: {
+    heartbeatId: string;
+    executor: string;
+    model?: string;
+    status: HeartbeatRunStatus;
+    promptSnapshot: string;
+    output?: string;
+    error?: string;
+  },
+) {
+  const heartbeat = await getHeartbeat(env, input.heartbeatId);
+  if (!heartbeat) return null;
+
+  const id = randomId("run");
+  const completedAt = nowIso();
+
+  await env.CONTROL_DB.prepare(
+    `INSERT INTO heartbeat_runs (
+      id,
+      heartbeat_id,
+      session_id,
+      executor,
+      model,
+      status,
+      prompt_snapshot,
+      output,
+      error,
+      completed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      id,
+      heartbeat.id,
+      heartbeat.session_id,
+      input.executor,
+      input.model ?? null,
+      input.status,
+      input.promptSnapshot,
+      input.output ?? null,
+      input.error ?? null,
+      completedAt,
+    )
+    .run();
+
+  const result = await env.CONTROL_DB.prepare(
+    `SELECT
+       id,
+       heartbeat_id,
+       session_id,
+       executor,
+       model,
+       status,
+       prompt_snapshot,
+       output,
+       error,
+       created_at,
+       completed_at
+     FROM heartbeat_runs
+     WHERE id = ?`,
+  )
+    .bind(id)
+    .first<HeartbeatRunRow>();
+
+  return result;
+}
+
 function renderHomePage() {
   return html(`<!doctype html>
 <html lang="en">
@@ -425,13 +584,18 @@ function renderHomePage() {
       .note {
         font-size: 12px;
       }
+      code {
+        background: #111827;
+        border-radius: 6px;
+        padding: 2px 5px;
+      }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1>threadbeat</h1>
       <p>Heartbeats are minimal deterministic objects: title, cadence, contents path, status, last tick, next tick.</p>
-      <p class="note">For this toy version, <code>contents</code> is a repo-relative markdown file path. The worker stores and schedules that pointer; a later executor or local broker will resolve and read the file body.</p>
+      <p class="note">The Worker is the control plane. A separate runner process reads the repo-local markdown file, calls a model, records a run, and then ticks the heartbeat.</p>
       <div class="grid">
         <section class="card">
           <h2>Create Session</h2>
@@ -484,6 +648,7 @@ function renderHomePage() {
           <h2 style="margin:0;">Current State</h2>
           <button id="refresh" class="secondary" style="max-width:180px;margin-top:0;">Refresh</button>
         </div>
+        <p class="note">Runner command: <code>THREADBEAT_DRY_RUN=1 npm run run:due</code></p>
         <pre id="state">Loading...</pre>
       </section>
     </div>
@@ -503,12 +668,13 @@ function renderHomePage() {
       }
 
       async function refresh() {
-        const [sessions, heartbeats, due] = await Promise.all([
+        const [sessions, heartbeats, due, runs] = await Promise.all([
           call("GET", "/api/sessions"),
           call("GET", "/api/heartbeats"),
           call("GET", "/api/heartbeats/due"),
+          call("GET", "/api/runs"),
         ]);
-        stateEl.textContent = JSON.stringify({ sessions, heartbeats, due }, null, 2);
+        stateEl.textContent = JSON.stringify({ sessions, heartbeats, due, runs }, null, 2);
       }
 
       document.getElementById("create-session").addEventListener("click", async () => {
@@ -610,6 +776,11 @@ export default {
           last_tick: "timestamp | null",
           next_tick: "timestamp | null",
         },
+        runner: {
+          type: "external",
+          expectedExecutor: "pi-deepseek",
+          recordsRuns: true,
+        },
       });
     }
 
@@ -708,6 +879,52 @@ export default {
         sessionId: body.sessionId,
         heartbeats,
       });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/runs") {
+      const heartbeatId = url.searchParams.get("heartbeatId") ?? undefined;
+      const sessionId = url.searchParams.get("sessionId") ?? undefined;
+      const limit = url.searchParams.get("limit");
+      return json({
+        ok: true,
+        runs: await listRuns(env, {
+          heartbeatId,
+          sessionId,
+          limit: limit ? Number(limit) : undefined,
+        }),
+      });
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/runs") {
+      const body = await parseJson<{
+        heartbeatId?: string;
+        executor?: string;
+        model?: string;
+        status?: HeartbeatRunStatus;
+        promptSnapshot?: string;
+        output?: string;
+        error?: string;
+      }>(request);
+
+      if (!body?.heartbeatId) return badRequest("heartbeatId is required");
+      if (!body.executor?.trim()) return badRequest("executor is required");
+      if (!body.status) return badRequest("status is required");
+      if (!body.promptSnapshot?.trim()) {
+        return badRequest("promptSnapshot is required");
+      }
+
+      const run = await createRun(env, {
+        heartbeatId: body.heartbeatId,
+        executor: body.executor.trim(),
+        model: body.model,
+        status: body.status,
+        promptSnapshot: body.promptSnapshot,
+        output: body.output,
+        error: body.error,
+      });
+
+      if (!run) return notFound();
+      return json({ ok: true, run });
     }
 
     return notFound();
