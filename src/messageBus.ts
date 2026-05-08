@@ -8,23 +8,32 @@ export type RuntimeMessageEvent =
       messageId: string;
       input: string;
       startedAt: string;
+      source?: "interactive" | "heartbeat";
+      heartbeatId?: string;
+      title?: string;
     }
   | {
       type: "message_delta";
       messageId: string;
       text: string;
+      source?: "interactive" | "heartbeat";
+      heartbeatId?: string;
     }
   | {
       type: "message_done";
       messageId: string;
       text: string;
       completedAt: string;
+      source?: "interactive" | "heartbeat";
+      heartbeatId?: string;
     }
   | {
       type: "message_error";
       messageId: string;
       error: string;
       completedAt: string;
+      source?: "interactive" | "heartbeat";
+      heartbeatId?: string;
     };
 
 export class RuntimeMessageBus {

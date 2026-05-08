@@ -1,5 +1,6 @@
 import type { ContentsLoader } from "./contents.js";
 import type { Database } from "./db.js";
+import type { RuntimeMessageEvent } from "./messageBus.js";
 import type { RuntimeManager } from "./piRuntime.js";
 import { nowIso } from "./time.js";
 import type { HeartbeatRow, HeartbeatRunRow } from "./types.js";
@@ -9,6 +10,7 @@ export class HeartbeatExecutor {
     private readonly db: Database,
     private readonly contents: ContentsLoader,
     private readonly runtime: RuntimeManager,
+    private readonly publishRuntimeMessage?: (event: RuntimeMessageEvent) => void,
   ) {}
 
   async execute(
@@ -17,6 +19,16 @@ export class HeartbeatExecutor {
   ): Promise<HeartbeatRunRow> {
     let promptSnapshot = "";
     const reschedule = options.reschedule ?? true;
+    const messageId = heartbeatMessageId(heartbeat.id);
+    this.publishRuntimeMessage?.({
+      type: "message_started",
+      messageId,
+      input: `heartbeat: ${heartbeat.title} (${heartbeat.id})`,
+      startedAt: nowIso(),
+      source: "heartbeat",
+      heartbeatId: heartbeat.id,
+      title: heartbeat.title,
+    });
     await this.db.createEvent({
       heartbeatId: heartbeat.id,
       sessionId: heartbeat.session_id,
@@ -36,6 +48,21 @@ export class HeartbeatExecutor {
       });
       promptSnapshot = buildPrompt(heartbeat, markdown);
       const output = await this.runtime.run(promptSnapshot, heartbeat.id);
+      this.publishRuntimeMessage?.({
+        type: "message_delta",
+        messageId,
+        text: output,
+        source: "heartbeat",
+        heartbeatId: heartbeat.id,
+      });
+      this.publishRuntimeMessage?.({
+        type: "message_done",
+        messageId,
+        text: output,
+        completedAt: nowIso(),
+        source: "heartbeat",
+        heartbeatId: heartbeat.id,
+      });
       return await this.finish(heartbeat, {
         status: "succeeded",
         promptSnapshot,
@@ -45,6 +72,14 @@ export class HeartbeatExecutor {
       });
     } catch (error) {
       if (!promptSnapshot) promptSnapshot = buildPrompt(heartbeat, "");
+      this.publishRuntimeMessage?.({
+        type: "message_error",
+        messageId,
+        error: error instanceof Error ? error.message : String(error),
+        completedAt: nowIso(),
+        source: "heartbeat",
+        heartbeatId: heartbeat.id,
+      });
       return this.finish(heartbeat, {
         status: "failed",
         promptSnapshot,
@@ -127,3 +162,6 @@ export const buildPrompt = (heartbeat: HeartbeatRow, markdown: string): string =
     "",
     markdown,
   ].join("\n");
+
+const heartbeatMessageId = (heartbeatId: string): string =>
+  `heartbeat_${heartbeatId}_${Date.now()}`;

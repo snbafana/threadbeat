@@ -150,6 +150,25 @@ try {
   ]);
   assert.match(listenerEvents[2].text ?? "", /server-side Pi SDK/);
 
+  const heartbeatListenerEventsPromise = collectListenerEvents(baseUrl, 5_000);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const broadcastHeartbeatRun = await app.inject({
+    method: "POST",
+    url: `/api/heartbeats/${heartbeatId}/run-now`,
+    payload: { preserveCadence: true },
+  });
+  assert.equal(broadcastHeartbeatRun.statusCode, 200);
+  const heartbeatListenerEvents = await heartbeatListenerEventsPromise;
+  assert.deepEqual(heartbeatListenerEvents.map((event) => event.type), [
+    "listener_connected",
+    "message_started",
+    "message_delta",
+    "message_done",
+  ]);
+  assert.equal(heartbeatListenerEvents[1].source, "heartbeat");
+  assert.equal(heartbeatListenerEvents[1].heartbeatId, heartbeatId);
+  assert.match(heartbeatListenerEvents[2].text ?? "", /heartbeat_id/);
+
   const inactiveRes = await app.inject({
     method: "PATCH",
     url: `/api/heartbeats/${heartbeatId}`,
@@ -291,7 +310,7 @@ try {
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
-type ListenerEvent = { type: string; text?: string };
+type ListenerEvent = { type: string; text?: string; source?: string; heartbeatId?: string };
 
 async function collectListenerEvents(baseUrl: string, timeoutMs: number): Promise<ListenerEvent[]> {
   const controller = new AbortController();

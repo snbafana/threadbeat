@@ -44,7 +44,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   });
   await runtime.start();
   const messageBus = new RuntimeMessageBus();
-  const executor = new HeartbeatExecutor(db, contents, runtime);
+  const executor = new HeartbeatExecutor(db, contents, runtime, (event) => {
+    messageBus.publish(event);
+  });
   const scheduler = new Scheduler(
     db,
     executor,

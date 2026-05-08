@@ -253,7 +253,8 @@ async function listen(): Promise<void> {
     if (event.type === "listener_connected") {
       console.log(`[connected] ${baseUrl}`);
     } else if (event.type === "message_started") {
-      console.log(`\n[user:${event.messageId}] ${event.input}`);
+      const source = event.source === "heartbeat" ? "heartbeat" : "user";
+      console.log(`\n[${source}:${event.messageId}] ${event.input}`);
       process.stdout.write(`[pi:${event.messageId}] `);
     } else if (event.type === "message_delta") {
       process.stdout.write(event.text);
