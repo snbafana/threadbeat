@@ -70,3 +70,9 @@ CREATE INDEX IF NOT EXISTS idx_heartbeat_events_heartbeat_id
 
 CREATE INDEX IF NOT EXISTS idx_heartbeat_events_run_id
   ON heartbeat_events(run_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_heartbeat_events_session_id
+  ON heartbeat_events(session_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_heartbeat_events_created_at
+  ON heartbeat_events(created_at DESC);

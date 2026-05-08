@@ -36,12 +36,14 @@ export class Scheduler {
     try {
       const due = await this.db.listDueHeartbeats(this.maxDuePerPoll);
       this.lastError = null;
-      await this.db.createEvent({
-        source: "scheduler",
-        type: "poll_completed",
-        message: `Scheduler found ${due.length} due heartbeat(s)`,
-        data: { count: due.length, maxDuePerPoll: this.maxDuePerPoll },
-      });
+      if (due.length > 0) {
+        await this.db.createEvent({
+          source: "scheduler",
+          type: "poll_completed",
+          message: `Scheduler found ${due.length} due heartbeat(s)`,
+          data: { count: due.length, maxDuePerPoll: this.maxDuePerPoll },
+        });
+      }
       for (const heartbeat of due) {
         await this.db.createEvent({
           heartbeatId: heartbeat.id,
@@ -63,9 +65,10 @@ export class Scheduler {
     }
   }
 
-  status(): { running: boolean; lastError: string | null } {
+  status(): { loopActive: boolean; pollRunning: boolean; lastError: string | null } {
     return {
-      running: this.running,
+      loopActive: this.timer !== null,
+      pollRunning: this.running,
       lastError: this.lastError,
     };
   }
