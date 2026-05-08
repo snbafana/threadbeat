@@ -192,7 +192,13 @@ Recommendation:
 
 Goal: introduce the abstraction needed for Modal and multi-agent execution, without changing the product surface yet.
 
-Architecture note: see `docs/v0.5-runtime-abstraction.md`.
+Architecture notes:
+
+- `docs/v0.5-runtime-abstraction.md` captures the narrow compatibility
+  migration from heartbeats to task-shaped execution.
+- `docs/sandbox-agent-runtime-plan.md` captures the active sandbox branch
+  direction: durable agents, sandboxes, tasks/goals, runs, event streams, and
+  git/file history before Modal or multi-agent deployment.
 
 Ships:
 
