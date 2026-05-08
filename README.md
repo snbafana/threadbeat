@@ -1,6 +1,12 @@
 # threadbeat
 
-`threadbeat` is a TypeScript server for deterministic heartbeat prompts over time.
+`threadbeat` is a TypeScript server for running deterministic heartbeat prompts
+through a long-lived server-side Pi agent session.
+
+The current prototype is intentionally small: one HTTP server, one SQL database,
+one scheduler loop, and one shared Pi runtime backed by DeepSeek. It is a
+control-plane experiment for agents that need both interactive terminal access
+and timed prompts that re-enter the same server-side agent over time.
 
 Current shape:
 
@@ -10,15 +16,33 @@ Current shape:
 - one shared in-process Pi SDK session
 - DeepSeek through `DEEPSEEK_API_KEY`
 - repo-relative markdown files for heartbeat `contents`
+- terminal CLI/TUI commands for sending, listening, inspecting, and controlling
+  heartbeats
+
+Current non-goals:
+
+- no Modal/multi-agent runtime yet
+- no on-device daemon yet
+- no browser/CUA bridge yet
+- no durable interactive chat transcript yet
 
 ## Local run
+
+Copy the example env first:
+
+```bash
+cp .env.example .env
+```
+
+For API-only development with no model calls:
 
 ```bash
 npm install
 THREADBEAT_PI_DRY_RUN=1 npm run dev
 ```
 
-Use dry-run mode for API and scheduler testing without model calls. For live execution, remove `THREADBEAT_PI_DRY_RUN=1` and make sure `DEEPSEEK_API_KEY` is present in `.env`.
+For live execution, set `DEEPSEEK_API_KEY` in `.env` and either unset
+`THREADBEAT_PI_DRY_RUN` or set it to `0`.
 
 Useful env:
 
@@ -102,12 +126,12 @@ npm run cli -- send --stateless "Say only: isolated hello"
 npm run tui
 ```
 
-By default, `npm run cli` and `npm run tui` target the hosted Railway service.
-Override the target with `THREADBEAT_BASE_URL`.
+By default, `npm run cli` and `npm run tui` target
+`http://127.0.0.1:8000`. Override the target with `THREADBEAT_BASE_URL`.
 
 ```bash
-THREADBEAT_BASE_URL=http://127.0.0.1:8000 npm run cli -- listen
-THREADBEAT_BASE_URL=http://127.0.0.1:8000 npm run cli -- send "local test"
+THREADBEAT_BASE_URL=https://your-railway-url npm run cli -- listen
+THREADBEAT_BASE_URL=https://your-railway-url npm run cli -- send "hosted test"
 ```
 
 Heartbeat operations are also available through the CLI:
@@ -142,21 +166,22 @@ See `TUI_CONTROL_PLANE_PLAN.md` for the staged terminal control-plane plan.
 
 ## Stripe Projects hosting
 
-Turso is provisioned through Stripe Projects for this project. Railway is linked,
-and hosting is provisioned from the private GitHub repo `snbafana/threadbeat`.
+The hosted prototype has used Stripe Projects to provision Turso and Railway.
+This repo does not commit Stripe Projects local state or vault/cache files.
 
 ```bash
-# Already completed:
-# stripe projects add turso/database --accept-tos --yes --config '{"name":"threadbeat","location":"aws-us-east-1"}'
-# stripe projects add railway/hosting --accept-tos --yes --resource-info '{"source_type":"GitHub repository"}'
-# stripe projects add railway/hosting --resource-id <RESOURCE_ID> --resource-info '{"repo":"snbafana/threadbeat","branch":"main"}' --accept-tos --yes
-
+stripe projects init --yes --accept-tos
+stripe projects add turso/database --accept-tos --yes
+stripe projects add railway/hosting --accept-tos --yes
 stripe projects env --pull
 ```
 
 The server reads Stripe Projects' pulled Turso env directly:
 `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`. `THREADBEAT_DB_URL` and
 `THREADBEAT_DB_AUTH_TOKEN` remain supported overrides.
+
+Do not commit `.env`, `.projects/state*.json`, `.projects/cache`, or
+`.projects/vault`.
 
 ## Railway Deploy
 

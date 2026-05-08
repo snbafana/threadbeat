@@ -1,9 +1,7 @@
-.projects/state.local.json
 node_modules
 dist
 .threadbeat
 
-.projects/cache
-.projects/vault
+.projects/
 .env
 .env.local

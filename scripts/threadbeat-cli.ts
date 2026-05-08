@@ -3,7 +3,7 @@ import "dotenv/config";
 const baseUrl = normalizeBaseUrl(
   process.env.THREADBEAT_BASE_URL ??
     process.env.RAILWAY_URL ??
-    "https://threadbeat-production.up.railway.app",
+    "http://127.0.0.1:8000",
 );
 
 const [command, subcommand, ...rest] = process.argv.slice(2);
