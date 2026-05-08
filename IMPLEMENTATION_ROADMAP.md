@@ -166,19 +166,21 @@ Readiness report, 2026-05-08:
 - Current hosted runtime is healthy: latest check showed `pi-sdk` running,
   active run empty, queue `0`, and no last error.
 - All throwaway hosted test heartbeats are inactive after verification.
+- Restart-resume is proven: Railway deployment `57590f9c` replaced the prior
+  service instance, `/health` returned a new Pi session id, Turso-backed
+  heartbeat state was still readable through the CLI, and scheduler
+  `poll_completed` events continued after restart.
 
 Remaining v0.4 gaps before marking complete:
 
 - A multi-hour hosted unattended soak has not been rerun after the terminal
   control-plane additions.
-- Restart-resume is mostly implied by Railway/Turso persistence but should get
-  one explicit restart check before v0.4 is marked complete.
 
 Recommendation:
 
 - Do not start the v0.5 task/runtime refactor until either the user accepts the
-  current v0.4 proof as sufficient for a POC, or the two remaining checks above
-  are completed.
+  current v0.4 proof as sufficient for a POC, or the remaining hosted soak
+  check above is completed.
 
 ### v0.5: runtime refactor for future agents
 
