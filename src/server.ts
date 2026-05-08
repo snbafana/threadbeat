@@ -219,6 +219,31 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return { ok: true, runtime: runtime.status() };
   });
 
+  app.post("/api/runtime/pi/message/stream", async (request, reply) => {
+    const body = request.body as Record<string, unknown>;
+    const message = parseString(body?.message, "message");
+
+    reply.raw.writeHead(200, {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-cache",
+      "x-accel-buffering": "no",
+    });
+
+    const write = (payload: Record<string, unknown>): void => {
+      reply.raw.write(`${JSON.stringify(payload)}\n`);
+    };
+
+    write({ type: "start", runtime: runtime.status() });
+    try {
+      const text = await runtime.streamMessage(message, (delta) => write({ type: "delta", text: delta }));
+      write({ type: "done", text, runtime: runtime.status() });
+    } catch (error) {
+      write({ type: "error", error: messageOf(error), runtime: runtime.status() });
+    } finally {
+      reply.raw.end();
+    }
+  });
+
   app.post("/api/scheduler/run-once", async () => ({
     ok: true,
     processed: await scheduler.runOnce(),

@@ -44,6 +44,7 @@ export interface RuntimeManager {
   stop(): Promise<void>;
   reset(): Promise<void>;
   run(prompt: string, heartbeatId: string): Promise<string>;
+  streamMessage(prompt: string, onDelta: (delta: string) => void): Promise<string>;
   status(): RuntimeStatus;
 }
 
@@ -139,6 +140,40 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     });
   }
 
+  async streamMessage(prompt: string, onDelta: (delta: string) => void): Promise<string> {
+    return this.lock.run(async () => {
+      const heartbeatId = "interactive";
+      const startedAtMs = Date.now();
+      const startedAt = new Date(startedAtMs).toISOString();
+      this.currentHeartbeatId = heartbeatId;
+      this.activeRun = {
+        heartbeatId,
+        status: "running",
+        startedAt,
+        completedAt: null,
+        durationMs: null,
+      };
+      try {
+        const text = await withTimeout(
+          this.executePromptStreaming(prompt, onDelta),
+          this.settings.runTimeoutMs,
+          `interactive message timed out after ${this.settings.runTimeoutMs}ms`,
+        );
+        this.recordCompletedRun("succeeded", heartbeatId, startedAt, startedAtMs);
+        return text;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.lastError = message;
+        this.recordCompletedRun("failed", heartbeatId, startedAt, startedAtMs);
+        await this.resetAfterFailure(message, heartbeatId);
+        throw error;
+      } finally {
+        this.currentHeartbeatId = null;
+        this.activeRun = null;
+      }
+    });
+  }
+
   status(): RuntimeStatus {
     return {
       mode: this.settings.piDryRun ? "dry-run" : "pi-sdk",
@@ -174,6 +209,37 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     const text = this.session.getLastAssistantText();
     const lastError = getLastAssistantError(this.session);
     if (lastError) throw new Error(lastError);
+    if (!text) throw new Error("Pi completed without assistant text");
+    return text;
+  }
+
+  private async executePromptStreaming(prompt: string, onDelta: (delta: string) => void): Promise<string> {
+    if (this.settings.piDryRun) {
+      const text = `[dry-run]\nobserved: message would be sent through server-side Pi SDK\n\n${prompt.slice(0, 500)}`;
+      onDelta(text);
+      return text;
+    }
+
+    await this.start();
+    if (!this.session) throw new Error("Pi session did not start");
+
+    let streamedText = "";
+    const unsubscribe = this.session.subscribe((event) => {
+      if (event.type !== "message_update") return;
+      if (event.assistantMessageEvent.type !== "text_delta") return;
+      streamedText += event.assistantMessageEvent.delta;
+      onDelta(event.assistantMessageEvent.delta);
+    });
+    try {
+      await this.session.prompt(prompt);
+    } finally {
+      unsubscribe();
+    }
+
+    const lastError = getLastAssistantError(this.session);
+    if (lastError) throw new Error(lastError);
+
+    const text = this.session.getLastAssistantText() ?? streamedText.trim();
     if (!text) throw new Error("Pi completed without assistant text");
     return text;
   }

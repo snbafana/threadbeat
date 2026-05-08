@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "tsx test/smoke.ts",
+    "tui": "tsx scripts/server-tui.ts",
     "smoke:api": "tsx scripts/api-smoke.ts",
     "soak": "tsx scripts/soak.ts"
   },

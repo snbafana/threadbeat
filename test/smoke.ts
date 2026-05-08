@@ -101,6 +101,20 @@ try {
   assert.equal(runtimeAfterRun.json().runtime.lastRun.status, "succeeded");
   assert.equal(typeof runtimeAfterRun.json().runtime.lastRun.durationMs, "number");
 
+  const streamRes = await app.inject({
+    method: "POST",
+    url: "/api/runtime/pi/message/stream",
+    payload: { message: "stream smoke" },
+  });
+  assert.equal(streamRes.statusCode, 200);
+  const streamEvents = streamRes
+    .body
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { type: string; text?: string });
+  assert.deepEqual(streamEvents.map((event) => event.type), ["start", "delta", "done"]);
+  assert.match(streamEvents[1].text ?? "", /server-side Pi SDK/);
+
   const inactiveRes = await app.inject({
     method: "PATCH",
     url: `/api/heartbeats/${heartbeatId}`,
