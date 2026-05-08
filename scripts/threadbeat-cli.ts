@@ -35,12 +35,14 @@ async function main(commandName?: string, subcommandName?: string, args: string[
   }
 
   if (commandName === "status") {
-    await printJson(await requestJson("GET", "/api/runtime/pi"));
+    const options = parseOptions([subcommandName, ...args].filter((value): value is string => Boolean(value)));
+    await printResult(await requestJson("GET", "/api/runtime/pi"), options, "status");
     return;
   }
 
   if (commandName === "reset") {
-    await printJson(await requestJson("POST", "/api/runtime/pi/reset"));
+    const options = parseOptions([subcommandName, ...args].filter((value): value is string => Boolean(value)));
+    await printResult(await requestJson("POST", "/api/runtime/pi/reset"), options, "status");
     return;
   }
 
@@ -62,7 +64,7 @@ async function main(commandName?: string, subcommandName?: string, args: string[
   if (commandName === "runs") {
     const options = parseOptions([subcommandName, ...args].filter((value): value is string => Boolean(value)));
     const query = options.heartbeat ? `?heartbeatId=${encodeURIComponent(options.heartbeat)}` : "";
-    await printJson(await requestJson("GET", `/api/runs${query}`));
+    await printResult(await requestJson("GET", `/api/runs${query}`), options, "runs");
     return;
   }
 
@@ -72,7 +74,7 @@ async function main(commandName?: string, subcommandName?: string, args: string[
     if (options.heartbeat) params.set("heartbeatId", options.heartbeat);
     if (options.limit) params.set("limit", options.limit);
     const query = params.size ? `?${params.toString()}` : "";
-    await printJson(await requestJson("GET", `/api/events${query}`));
+    await printResult(await requestJson("GET", `/api/events${query}`), options, "events");
     return;
   }
 
@@ -81,7 +83,8 @@ async function main(commandName?: string, subcommandName?: string, args: string[
 
 async function sessions(subcommandName?: string, args: string[] = []): Promise<void> {
   if (!subcommandName || subcommandName === "list") {
-    await printJson(await requestJson("GET", "/api/sessions"));
+    const options = parseOptions(args);
+    await printResult(await requestJson("GET", "/api/sessions"), options, "sessions");
     return;
   }
   if (subcommandName === "create") {
@@ -95,12 +98,14 @@ async function sessions(subcommandName?: string, args: string[] = []): Promise<v
 
 async function heartbeats(subcommandName?: string, args: string[] = []): Promise<void> {
   if (!subcommandName || subcommandName === "list") {
-    await printJson(await requestJson("GET", "/api/heartbeats"));
+    const options = parseOptions(args);
+    await printResult(await requestJson("GET", "/api/heartbeats"), options, "heartbeats");
     return;
   }
 
   if (subcommandName === "due") {
-    await printJson(await requestJson("GET", "/api/heartbeats/due"));
+    const options = parseOptions(args);
+    await printResult(await requestJson("GET", "/api/heartbeats/due"), options, "heartbeats");
     return;
   }
 
@@ -165,9 +170,10 @@ async function heartbeats(subcommandName?: string, args: string[] = []): Promise
   }
 
   if (subcommandName === "runs") {
-    const id = args[0];
+    const [id, ...optionArgs] = args;
     if (!id) throw new Error("heartbeats runs requires an id");
-    await printJson(await requestJson("GET", `/api/runs?heartbeatId=${encodeURIComponent(id)}`));
+    const options = parseOptions(optionArgs);
+    await printResult(await requestJson("GET", `/api/runs?heartbeatId=${encodeURIComponent(id)}`), options, "runs");
     return;
   }
 
@@ -180,8 +186,8 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "inactive") {
-      options.inactive = "1";
+    if (key === "inactive" || key === "table" || key === "json") {
+      options[key] = "1";
       continue;
     }
     const value = args[index + 1];
@@ -271,6 +277,89 @@ async function printJson(value: unknown): Promise<void> {
   console.log(JSON.stringify(value, null, 2));
 }
 
+async function printResult(value: unknown, options: Record<string, string>, tableKind?: TableKind): Promise<void> {
+  if (options.table === "1" && options.json !== "1" && tableKind) {
+    printTable(value, tableKind);
+    return;
+  }
+  await printJson(value);
+}
+
+type TableKind = "status" | "sessions" | "heartbeats" | "runs" | "events";
+
+function printTable(value: unknown, kind: TableKind): void {
+  if (!isRecord(value)) {
+    console.log(String(value));
+    return;
+  }
+
+  if (kind === "status") {
+    const runtime = isRecord(value.runtime) ? value.runtime : value;
+    printRows([
+      ["mode", runtime.mode],
+      ["running", runtime.running],
+      ["session", runtime.sessionId],
+      ["active", runtime.activeRun ? "yes" : "no"],
+      ["queue", runtime.queueDepth],
+      ["resets", runtime.resetCount],
+      ["last_error", runtime.lastError],
+    ], ["field", "value"]);
+    return;
+  }
+
+  const rows = extractRows(value, kind).map((row) => tableRow(row, kind));
+  const headers = tableHeaders(kind);
+  printRows(rows, headers);
+}
+
+function extractRows(value: Record<string, unknown>, kind: TableKind): Record<string, unknown>[] {
+  const key = kind === "sessions" ? "sessions" : kind === "heartbeats" ? "heartbeats" : kind;
+  const rows = value[key];
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(isRecord);
+}
+
+function tableHeaders(kind: TableKind): string[] {
+  if (kind === "sessions") return ["id", "name", "created"];
+  if (kind === "heartbeats") return ["id", "status", "cadence", "next_tick", "title"];
+  if (kind === "runs") return ["id", "heartbeat", "status", "model", "created"];
+  if (kind === "events") return ["created", "source", "type", "heartbeat", "run"];
+  return ["field", "value"];
+}
+
+function tableRow(row: Record<string, unknown>, kind: TableKind): unknown[] {
+  if (kind === "sessions") return [row.id, row.name, row.created_at];
+  if (kind === "heartbeats") return [row.id, row.status, row.cadence, row.next_tick, row.title];
+  if (kind === "runs") return [row.id, row.heartbeat_id, row.status, row.model, row.created_at];
+  if (kind === "events") return [row.created_at, row.source, row.type, row.heartbeat_id, row.run_id];
+  return [];
+}
+
+function printRows(rows: unknown[][], headers: string[]): void {
+  const stringRows = rows.map((row) => row.map(formatCell));
+  const widths = headers.map((header, index) => Math.max(
+    header.length,
+    ...stringRows.map((row) => row[index]?.length ?? 0),
+  ));
+  console.log(formatLine(headers, widths));
+  console.log(formatLine(widths.map((width) => "-".repeat(width)), widths));
+  for (const row of stringRows) console.log(formatLine(row, widths));
+}
+
+function formatLine(row: string[], widths: number[]): string {
+  return row.map((cell, index) => cell.padEnd(widths[index] ?? 0)).join("  ").trimEnd();
+}
+
+function formatCell(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "string") return value.replace(/\s+/g, " ").slice(0, 80);
+  return String(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function normalizeBaseUrl(raw: string): string {
   return raw.endsWith("/") ? raw.slice(0, -1) : raw;
 }
@@ -290,17 +379,17 @@ Messaging:
   npm run tui
 
 Runtime:
-  npm run cli -- status
+  npm run cli -- status --table
   npm run cli -- reset
   npm run cli -- scheduler run-once
 
 Sessions:
-  npm run cli -- sessions list
+  npm run cli -- sessions list --table
   npm run cli -- sessions create "name"
 
 Heartbeats:
-  npm run cli -- heartbeats list
-  npm run cli -- heartbeats due
+  npm run cli -- heartbeats list --table
+  npm run cli -- heartbeats due --table
   npm run cli -- heartbeats get <id>
   npm run cli -- heartbeats create --session <id> --title "name" --cadence 60 --contents contents/file.md
   npm run cli -- heartbeats patch <id> --cadence 120 --contents contents/file.md
@@ -310,12 +399,13 @@ Heartbeats:
   npm run cli -- heartbeats resume <id>
   npm run cli -- heartbeats run-now <id>
   npm run cli -- heartbeats tick <id>
-  npm run cli -- heartbeats runs <id>
+  npm run cli -- heartbeats runs <id> --table
 
 Events:
-  npm run cli -- runs --heartbeat <id>
-  npm run cli -- events --heartbeat <id> --limit 20
+  npm run cli -- runs --heartbeat <id> --table
+  npm run cli -- events --heartbeat <id> --limit 20 --table
 
 Set THREADBEAT_BASE_URL to target local or hosted servers.
+JSON remains the default; pass --table for compact terminal output.
 `);
 }

@@ -95,6 +95,7 @@ you explicitly point it at a local server.
 
 ```bash
 npm run cli -- status
+npm run cli -- status --table
 npm run cli -- listen
 npm run cli -- send "Say only: hello"
 npm run cli -- send --stateless "Say only: isolated hello"
@@ -118,9 +119,13 @@ npm run cli -- heartbeats pause <heartbeat_id>
 npm run cli -- heartbeats resume <heartbeat_id>
 npm run cli -- heartbeats run-now <heartbeat_id>
 npm run cli -- heartbeats deactivate <heartbeat_id>
-npm run cli -- heartbeats runs <heartbeat_id>
-npm run cli -- events --heartbeat <heartbeat_id> --limit 20
+npm run cli -- heartbeats list --table
+npm run cli -- heartbeats runs <heartbeat_id> --table
+npm run cli -- events --heartbeat <heartbeat_id> --limit 20 --table
 ```
+
+JSON remains the default output for scripts. Add `--table` to status, sessions,
+heartbeats, runs, or events commands for compact terminal output.
 
 See `TUI_CONTROL_PLANE_PLAN.md` for the staged terminal control-plane plan.
 

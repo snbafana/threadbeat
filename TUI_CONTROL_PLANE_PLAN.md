@@ -70,6 +70,8 @@ Implemented:
 - `npm run cli -- heartbeats ...`
   - Lists, creates, patches, pauses, resumes, runs now, ticks, and inspects
     heartbeat runs.
+- `--table` output for status, sessions, heartbeats, runs, and events.
+  - JSON remains the default for scripts; table mode is for terminal operators.
 
 ## Intended operator commands
 
@@ -142,8 +144,8 @@ Human checks:
 ## Next implementation units
 
 1. CLI ergonomics.
-   - Add compact table output in addition to JSON.
-   - Add `--json` for machine-readable mode.
+   - Compact table output in addition to JSON is implemented.
+   - JSON remains the default machine-readable mode.
    - Add `--follow` for runs/events.
 2. TUI process split.
    - Keep `send` and `listen` as composable CLI commands.
