@@ -54,7 +54,9 @@ The current server uses one shared, long-lived Pi `AgentSession`.
 
 This means SQL run records are separate, but model context is shared. Use
 `npm run cli -- reset` when you want to clear the current hosted Pi session.
-Future runtime modes should make this explicit: shared, per-heartbeat, or
+Interactive sends support `--stateless` for a one-off isolated Pi session that
+does not read from or write to the shared hosted Pi conversation. Future
+heartbeat runtime modes should make this explicit: shared, per-heartbeat, or
 stateless/reset-each-run.
 
 ## Soak Test
@@ -95,6 +97,7 @@ you explicitly point it at a local server.
 npm run cli -- status
 npm run cli -- listen
 npm run cli -- send "Say only: hello"
+npm run cli -- send --stateless "Say only: isolated hello"
 npm run tui
 ```
 

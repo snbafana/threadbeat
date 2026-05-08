@@ -293,6 +293,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/runtime/pi/message/stream", async (request, reply) => {
     const body = request.body as Record<string, unknown>;
     const message = parseString(body?.message, "message");
+    const memoryMode = parseMemoryMode(body?.memoryMode ?? body?.memory_mode);
     const messageId = randomId("msg");
 
     reply.raw.writeHead(200, {
@@ -307,13 +308,13 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
     const startedAt = new Date().toISOString();
     messageBus.publish({ type: "message_started", messageId, input: message, startedAt });
-    write({ type: "start", messageId, runtime: runtime.status() });
+    write({ type: "start", messageId, memoryMode, runtime: runtime.status() });
     try {
       const text = await runtime.streamMessage(message, (delta) => {
         const event = { type: "message_delta" as const, messageId, text: delta };
         messageBus.publish(event);
         write({ type: "delta", messageId, text: delta });
-      });
+      }, memoryMode);
       const completedAt = new Date().toISOString();
       messageBus.publish({ type: "message_done", messageId, text, completedAt });
       write({ type: "done", messageId, text, runtime: runtime.status() });
@@ -340,3 +341,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const randomId = (prefix: string): string => `${prefix}_${randomUUID().replaceAll("-", "")}`;
+
+const parseMemoryMode = (value: unknown): "shared" | "stateless" => {
+  if (value === undefined) return "shared";
+  if (value === "shared" || value === "stateless") return value;
+  throw new Error("memoryMode must be shared or stateless");
+};

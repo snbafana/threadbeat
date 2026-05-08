@@ -44,9 +44,15 @@ export interface RuntimeManager {
   stop(): Promise<void>;
   reset(): Promise<void>;
   run(prompt: string, heartbeatId: string): Promise<string>;
-  streamMessage(prompt: string, onDelta: (delta: string) => void): Promise<string>;
+  streamMessage(
+    prompt: string,
+    onDelta: (delta: string) => void,
+    memoryMode?: RuntimeMemoryMode,
+  ): Promise<string>;
   status(): RuntimeStatus;
 }
+
+export type RuntimeMemoryMode = "shared" | "stateless";
 
 export class PiSharedSessionRuntime implements RuntimeManager {
   private session: AgentSession | null = null;
@@ -65,24 +71,7 @@ export class PiSharedSessionRuntime implements RuntimeManager {
   async start(): Promise<void> {
     if (this.settings.piDryRun) return;
     if (this.session) return;
-
-    const authStorage = AuthStorage.create();
-    if (this.settings.deepseekApiKey) {
-      authStorage.setRuntimeApiKey(this.settings.piProvider, this.settings.deepseekApiKey);
-    }
-    const modelRegistry = new ModelRegistry(authStorage, path.join(this.settings.projectRoot, "pi-models.json"));
-    const model = modelRegistry.find(this.settings.piProvider, this.settings.piModel);
-
-    const { session } = await createAgentSession({
-      cwd: this.settings.repoRoot,
-      authStorage,
-      modelRegistry,
-      model,
-      thinkingLevel: this.settings.piThinking,
-      tools: createReadOnlyTools(this.settings.repoRoot),
-      sessionManager: SessionManager.create(this.settings.repoRoot),
-    });
-    this.session = session;
+    this.session = await this.createSession();
   }
 
   async stop(): Promise<void> {
@@ -140,9 +129,13 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     });
   }
 
-  async streamMessage(prompt: string, onDelta: (delta: string) => void): Promise<string> {
+  async streamMessage(
+    prompt: string,
+    onDelta: (delta: string) => void,
+    memoryMode: RuntimeMemoryMode = "shared",
+  ): Promise<string> {
     return this.lock.run(async () => {
-      const heartbeatId = "interactive";
+      const heartbeatId = memoryMode === "stateless" ? "interactive-stateless" : "interactive";
       const startedAtMs = Date.now();
       const startedAt = new Date(startedAtMs).toISOString();
       this.currentHeartbeatId = heartbeatId;
@@ -155,7 +148,9 @@ export class PiSharedSessionRuntime implements RuntimeManager {
       };
       try {
         const text = await withTimeout(
-          this.executePromptStreaming(prompt, onDelta),
+          memoryMode === "stateless"
+            ? this.executePromptStreamingStateless(prompt, onDelta)
+            : this.executePromptStreaming(prompt, onDelta),
           this.settings.runTimeoutMs,
           `interactive message timed out after ${this.settings.runTimeoutMs}ms`,
         );
@@ -242,6 +237,56 @@ export class PiSharedSessionRuntime implements RuntimeManager {
     const text = this.session.getLastAssistantText() ?? streamedText.trim();
     if (!text) throw new Error("Pi completed without assistant text");
     return text;
+  }
+
+  private async executePromptStreamingStateless(prompt: string, onDelta: (delta: string) => void): Promise<string> {
+    if (this.settings.piDryRun) {
+      const text = `[dry-run]\nobserved: message would be sent through a stateless server-side Pi SDK session\n\n${prompt.slice(0, 500)}`;
+      onDelta(text);
+      return text;
+    }
+
+    const session = await this.createSession();
+    let streamedText = "";
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type !== "message_update") return;
+      if (event.assistantMessageEvent.type !== "text_delta") return;
+      streamedText += event.assistantMessageEvent.delta;
+      onDelta(event.assistantMessageEvent.delta);
+    });
+    try {
+      await session.prompt(prompt);
+    } finally {
+      unsubscribe();
+      session.dispose();
+    }
+
+    const lastError = getLastAssistantError(session);
+    if (lastError) throw new Error(lastError);
+
+    const text = session.getLastAssistantText() ?? streamedText.trim();
+    if (!text) throw new Error("Pi completed without assistant text");
+    return text;
+  }
+
+  private async createSession(): Promise<AgentSession> {
+    const authStorage = AuthStorage.create();
+    if (this.settings.deepseekApiKey) {
+      authStorage.setRuntimeApiKey(this.settings.piProvider, this.settings.deepseekApiKey);
+    }
+    const modelRegistry = new ModelRegistry(authStorage, path.join(this.settings.projectRoot, "pi-models.json"));
+    const model = modelRegistry.find(this.settings.piProvider, this.settings.piModel);
+
+    const { session } = await createAgentSession({
+      cwd: this.settings.repoRoot,
+      authStorage,
+      modelRegistry,
+      model,
+      thinkingLevel: this.settings.piThinking,
+      tools: createReadOnlyTools(this.settings.repoRoot),
+      sessionManager: SessionManager.create(this.settings.repoRoot),
+    });
+    return session;
   }
 
   private async resetAfterFailure(originalError: string, heartbeatId: string): Promise<void> {

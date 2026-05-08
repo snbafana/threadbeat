@@ -22,8 +22,10 @@ async function main(commandName?: string, subcommandName?: string, args: string[
   }
 
   if (commandName === "send") {
-    const message = await messageFromArgs([subcommandName, ...args].filter((value): value is string => Boolean(value)));
-    await streamMessage(message);
+    const sendArgs = [subcommandName, ...args].filter((value): value is string => Boolean(value));
+    const memoryMode = sendArgs.includes("--stateless") ? "stateless" : "shared";
+    const message = await messageFromArgs(sendArgs.filter((arg) => arg !== "--stateless"));
+    await streamMessage(message, memoryMode);
     return;
   }
 
@@ -202,11 +204,11 @@ async function messageFromArgs(args: string[]): Promise<string> {
   return message;
 }
 
-async function streamMessage(message: string): Promise<void> {
+async function streamMessage(message: string, memoryMode: "shared" | "stateless"): Promise<void> {
   const response = await fetch(`${baseUrl}/api/runtime/pi/message/stream`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, memoryMode }),
   });
   if (!response.ok || !response.body) {
     throw new Error(`send failed: ${response.status} ${await response.text()}`);
@@ -283,6 +285,7 @@ function printHelp(): void {
 
 Messaging:
   npm run cli -- send "message"
+  npm run cli -- send --stateless "message"
   npm run cli -- listen
   npm run tui
 

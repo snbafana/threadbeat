@@ -111,9 +111,25 @@ try {
     .body
     .trim()
     .split("\n")
-    .map((line) => JSON.parse(line) as { type: string; text?: string });
+    .map((line) => JSON.parse(line) as { type: string; text?: string; memoryMode?: string });
   assert.deepEqual(streamEvents.map((event) => event.type), ["start", "delta", "done"]);
+  assert.equal(streamEvents[0].memoryMode, "shared");
   assert.match(streamEvents[1].text ?? "", /server-side Pi SDK/);
+
+  const statelessStreamRes = await app.inject({
+    method: "POST",
+    url: "/api/runtime/pi/message/stream",
+    payload: { message: "stateless stream smoke", memoryMode: "stateless" },
+  });
+  assert.equal(statelessStreamRes.statusCode, 200);
+  const statelessEvents = statelessStreamRes
+    .body
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { type: string; text?: string; memoryMode?: string });
+  assert.deepEqual(statelessEvents.map((event) => event.type), ["start", "delta", "done"]);
+  assert.equal(statelessEvents[0].memoryMode, "stateless");
+  assert.match(statelessEvents[1].text ?? "", /stateless server-side Pi SDK/);
 
   const baseUrl = await app.listen({ port: 0, host: "127.0.0.1" });
   const listenerEventsPromise = collectListenerEvents(baseUrl, 5_000);

@@ -31,12 +31,15 @@ This is useful for v0.4 because the goal is a singular hosted agent. It is not
 the right default for all future workloads. Before v0.5/v0.6, choose explicit
 runtime memory modes:
 
-- `shared`: current behavior; one long-lived Pi session for all heartbeats and
+- `shared`: default behavior; one long-lived Pi session for all heartbeats and
   interactive messages.
+- `stateless` interactive sends: implemented for `npm run cli -- send --stateless`;
+  uses a one-off Pi session without reading from or writing to the shared
+  hosted conversation.
 - `per-heartbeat`: one long-lived Pi session per heartbeat id, preserving local
   continuity without cross-heartbeat or interactive bleed.
-- `stateless`: reset or recreate the Pi session per execution; slower but most
-  deterministic.
+- `stateless` heartbeat runs: not implemented yet; reset or recreate the Pi
+  session per execution, slower but most deterministic.
 
 Open policy decisions:
 
