@@ -61,6 +61,7 @@ export class PiSharedSessionRuntime implements RuntimeManager {
   private activeRun: RuntimeRunSnapshot | null = null;
   private lastRun: RuntimeRunSnapshot | null = null;
   private lastError: string | null = null;
+  private startPromise: Promise<void> | null = null;
   private readonly lock = new AsyncLock();
 
   constructor(
@@ -71,7 +72,24 @@ export class PiSharedSessionRuntime implements RuntimeManager {
   async start(): Promise<void> {
     if (this.settings.piDryRun) return;
     if (this.session) return;
-    this.session = await this.createSession();
+    if (this.startPromise) return this.startPromise;
+    const timeoutMs = Math.min(this.settings.runTimeoutMs, 60_000);
+    this.startPromise = withTimeout(
+      this.createSession(),
+      timeoutMs,
+      `Pi session start timed out after ${timeoutMs}ms`,
+    )
+      .then((session) => {
+        this.session = session;
+      })
+      .catch((error: unknown) => {
+        this.lastError = error instanceof Error ? error.message : String(error);
+        throw error;
+      })
+      .finally(() => {
+        this.startPromise = null;
+      });
+    return this.startPromise;
   }
 
   async stop(): Promise<void> {

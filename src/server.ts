@@ -44,7 +44,6 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       data: event.data,
     });
   });
-  await runtime.start();
   const messageBus = new RuntimeMessageBus();
   const executor = new HeartbeatExecutor(db, contents, runtime, (event) => {
     messageBus.publish(event);
@@ -57,6 +56,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   );
 
   const app = Fastify({ logger: settings.logRequests });
+
+  void runtime.start().catch(async (error: unknown) => {
+    const message = messageOf(error);
+    app.log.error({ err: error }, "Pi runtime failed to start in background");
+    await recordBackgroundFailure(db, "runtime", "runtime_start_failed", message);
+  });
 
   app.addHook("onClose", async () => {
     scheduler.stop();
@@ -72,6 +77,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     scheduler: {
       pollSeconds: settings.pollSeconds,
       maxDuePerPoll: settings.maxDuePerPoll,
+      ...scheduler.status(),
     },
     runtime: runtime.status(),
   }));
@@ -342,6 +348,19 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const randomId = (prefix: string): string => `${prefix}_${randomUUID().replaceAll("-", "")}`;
+
+const recordBackgroundFailure = async (
+  db: Database,
+  source: string,
+  type: string,
+  message: string,
+): Promise<void> => {
+  try {
+    await db.createEvent({ source, type, message });
+  } catch {
+    // Do not let observability failures crash the control plane.
+  }
+};
 
 const requestBody = (body: unknown): Record<string, unknown> => {
   if (typeof body === "object" && body !== null && !Array.isArray(body)) return body as Record<string, unknown>;
