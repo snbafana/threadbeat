@@ -108,10 +108,16 @@ Verification report, 2026-05-05:
 
 ### v0.4: reliable hosted singular agent
 
+Status: in progress.
+
 Goal: harden the single hosted agent before introducing any multi-agent runtime.
 
 Ships:
 
+- Server-streaming terminal control surface for the hosted Pi session.
+- Multiple terminal listeners for interactive server-side Pi message events.
+- CLI commands for sending messages, listening, runtime status/reset, sessions,
+  heartbeats, runs, and events.
 - Hosted soak test for one agent running one or more heartbeats for several hours.
 - Event log for scheduler decisions, Pi session lifecycle, model calls, SQL writes, and reschedules.
 - Better runtime controls for reset, pause, resume, compaction, and active-run visibility.
@@ -129,6 +135,8 @@ Does not ship:
 Done when:
 
 - One hosted agent can run unattended for several hours.
+- Multiple terminals can observe and send messages through the same hosted Pi
+  runtime without starting local Pi sessions.
 - Restarting the server preserves schedule state and resumes cleanly.
 - The SQL log can explain every heartbeat run without reading process logs.
 

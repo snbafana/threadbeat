@@ -71,6 +71,38 @@ THREADBEAT_BASE_URL=https://your-railway-url npm run smoke:api
 
 Set `THREADBEAT_API_SMOKE_RUN_HEARTBEAT=0` for a cheap create-only check.
 
+## CLI and TUI
+
+The CLI talks to the server. It does not start Pi or DeepSeek locally unless
+you explicitly point it at a local server.
+
+```bash
+npm run cli -- status
+npm run cli -- listen
+npm run cli -- send "Say only: hello"
+npm run tui
+```
+
+By default, `npm run cli` and `npm run tui` target the hosted Railway service.
+Override the target with `THREADBEAT_BASE_URL`.
+
+```bash
+THREADBEAT_BASE_URL=http://127.0.0.1:8000 npm run cli -- listen
+THREADBEAT_BASE_URL=http://127.0.0.1:8000 npm run cli -- send "local test"
+```
+
+Heartbeat operations are also available through the CLI:
+
+```bash
+npm run cli -- sessions create "operator"
+npm run cli -- heartbeats create --session <session_id> --title "loop" --cadence 60 --contents contents/file.md
+npm run cli -- heartbeats deactivate <heartbeat_id>
+npm run cli -- heartbeats runs <heartbeat_id>
+npm run cli -- events --heartbeat <heartbeat_id> --limit 20
+```
+
+See `TUI_CONTROL_PLANE_PLAN.md` for the staged terminal control-plane plan.
+
 ## Stripe Projects hosting
 
 Turso is provisioned through Stripe Projects for this project. Railway is linked,
@@ -133,4 +165,6 @@ THREADBEAT_BASE_URL=https://your-railway-url npm run smoke:api
 - `GET /api/runs`
 - `GET /api/runtime/pi`
 - `POST /api/runtime/pi/reset`
+- `GET /api/runtime/pi/messages/listen`
+- `POST /api/runtime/pi/message/stream`
 - `POST /api/scheduler/run-once`

@@ -115,6 +115,25 @@ try {
   assert.deepEqual(streamEvents.map((event) => event.type), ["start", "delta", "done"]);
   assert.match(streamEvents[1].text ?? "", /server-side Pi SDK/);
 
+  const baseUrl = await app.listen({ port: 0, host: "127.0.0.1" });
+  const listenerEventsPromise = collectListenerEvents(baseUrl, 5_000);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const broadcastSend = await fetch(`${baseUrl}/api/runtime/pi/message/stream`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "listener smoke" }),
+  });
+  assert.equal(broadcastSend.status, 200);
+  await broadcastSend.text();
+  const listenerEvents = await listenerEventsPromise;
+  assert.deepEqual(listenerEvents.map((event) => event.type), [
+    "listener_connected",
+    "message_started",
+    "message_delta",
+    "message_done",
+  ]);
+  assert.match(listenerEvents[2].text ?? "", /server-side Pi SDK/);
+
   const inactiveRes = await app.inject({
     method: "PATCH",
     url: `/api/heartbeats/${heartbeatId}`,
@@ -226,4 +245,42 @@ try {
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
+}
+
+type ListenerEvent = { type: string; text?: string };
+
+async function collectListenerEvents(baseUrl: string, timeoutMs: number): Promise<ListenerEvent[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const events: ListenerEvent[] = [];
+  try {
+    const response = await fetch(`${baseUrl}/api/runtime/pi/messages/listen?limit=4`, {
+      signal: controller.signal,
+    });
+    assert.equal(response.status, 200);
+    assert.ok(response.body);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return events;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line) as ListenerEvent;
+        events.push(event);
+        if (event.type === "message_done") {
+          await reader.cancel();
+          return events;
+        }
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+    controller.abort();
+  }
 }

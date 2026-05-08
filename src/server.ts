@@ -1,9 +1,11 @@
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { ContentsLoader } from "./contents.js";
 import { Database } from "./db.js";
 import { HeartbeatExecutor } from "./executor.js";
+import { RuntimeMessageBus, type RuntimeMessageEvent } from "./messageBus.js";
 import { PiSharedSessionRuntime, type RuntimeLifecycleEvent } from "./piRuntime.js";
 import { Scheduler } from "./scheduler.js";
 import type { Settings } from "./config.js";
@@ -41,6 +43,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     });
   });
   await runtime.start();
+  const messageBus = new RuntimeMessageBus();
   const executor = new HeartbeatExecutor(db, contents, runtime);
   const scheduler = new Scheduler(
     db,
@@ -219,9 +222,33 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return { ok: true, runtime: runtime.status() };
   });
 
+  app.get("/api/runtime/pi/messages/listen", async (request, reply) => {
+    const query = request.query as Record<string, string | undefined>;
+    const limit = query.limit ? Number.parseInt(query.limit, 10) : null;
+    let count = 0;
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "content-type": "application/x-ndjson; charset=utf-8",
+      "cache-control": "no-cache",
+      "x-accel-buffering": "no",
+    });
+
+    const write = (payload: RuntimeMessageEvent): void => {
+      reply.raw.write(`${JSON.stringify(payload)}\n`);
+      count += 1;
+      if (limit !== null && Number.isFinite(limit) && count >= limit) {
+        unsubscribe();
+        reply.raw.end();
+      }
+    };
+    const unsubscribe = messageBus.subscribe(write);
+    request.raw.on("close", unsubscribe);
+  });
+
   app.post("/api/runtime/pi/message/stream", async (request, reply) => {
     const body = request.body as Record<string, unknown>;
     const message = parseString(body?.message, "message");
+    const messageId = randomId("msg");
 
     reply.raw.writeHead(200, {
       "content-type": "application/x-ndjson; charset=utf-8",
@@ -233,12 +260,23 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       reply.raw.write(`${JSON.stringify(payload)}\n`);
     };
 
-    write({ type: "start", runtime: runtime.status() });
+    const startedAt = new Date().toISOString();
+    messageBus.publish({ type: "message_started", messageId, input: message, startedAt });
+    write({ type: "start", messageId, runtime: runtime.status() });
     try {
-      const text = await runtime.streamMessage(message, (delta) => write({ type: "delta", text: delta }));
-      write({ type: "done", text, runtime: runtime.status() });
+      const text = await runtime.streamMessage(message, (delta) => {
+        const event = { type: "message_delta" as const, messageId, text: delta };
+        messageBus.publish(event);
+        write({ type: "delta", messageId, text: delta });
+      });
+      const completedAt = new Date().toISOString();
+      messageBus.publish({ type: "message_done", messageId, text, completedAt });
+      write({ type: "done", messageId, text, runtime: runtime.status() });
     } catch (error) {
-      write({ type: "error", error: messageOf(error), runtime: runtime.status() });
+      const completedAt = new Date().toISOString();
+      const errorMessage = messageOf(error);
+      messageBus.publish({ type: "message_error", messageId, error: errorMessage, completedAt });
+      write({ type: "error", messageId, error: errorMessage, runtime: runtime.status() });
     } finally {
       reply.raw.end();
     }
@@ -255,3 +293,5 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 };
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+const randomId = (prefix: string): string => `${prefix}_${randomUUID().replaceAll("-", "")}`;
