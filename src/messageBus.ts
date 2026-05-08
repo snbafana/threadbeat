@@ -1,3 +1,5 @@
+import { nowIso } from "./time.js";
+
 export type RuntimeMessageEvent =
   | {
       type: "listener_connected";
@@ -43,7 +45,7 @@ export class RuntimeMessageBus {
     this.subscribers.add(listener);
     listener({
       type: "listener_connected",
-      connectedAt: new Date().toISOString(),
+      connectedAt: nowIso(),
     });
     return () => {
       this.subscribers.delete(listener);

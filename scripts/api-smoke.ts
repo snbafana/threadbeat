@@ -8,6 +8,7 @@ import path from "node:path";
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
 import { boolEnv, intEnv } from "../src/env.js";
+import { nowIso } from "../src/time.js";
 
 type ApiResponse<T> = {
   statusCode: number;
@@ -32,7 +33,7 @@ try {
   assert.equal(health.body.ok, true);
 
   const session = await client.request<{ session: { id: string } }>("POST", "/api/sessions", {
-    name: `api-smoke-${new Date().toISOString()}`,
+    name: `api-smoke-${nowIso()}`,
   });
   assert.equal(session.statusCode, 200);
   const sessionId = session.body.session.id;

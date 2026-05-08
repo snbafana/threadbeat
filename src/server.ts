@@ -3,13 +3,14 @@ import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { ContentsLoader } from "./contents.js";
-import { Database } from "./db.js";
+import { Database, type HeartbeatUpdateInput } from "./db.js";
 import { HeartbeatExecutor } from "./executor.js";
 import { RuntimeMessageBus, type RuntimeMessageEvent } from "./messageBus.js";
 import { PiSharedSessionRuntime, type RuntimeLifecycleEvent } from "./piRuntime.js";
 import { Scheduler } from "./scheduler.js";
 import { nowIso } from "./time.js";
 import type { Settings } from "./config.js";
+import type { HeartbeatRow, HeartbeatStatus } from "./types.js";
 import {
   parseContentsPath,
   parseHeartbeatStatus,
@@ -82,7 +83,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.post("/api/sessions", async (request, reply) => {
     try {
-      const body = request.body as Record<string, unknown>;
+      const body = requestBody(request.body);
       const session = await db.createSession(parseString(body?.name, "name"));
       return { ok: true, session };
     } catch (error) {
@@ -100,10 +101,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.get("/api/heartbeats/due", async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    const limit = query.limit ? Number.parseInt(query.limit, 10) : settings.maxDuePerPoll;
     return {
       ok: true,
-      heartbeats: await db.listDueHeartbeats(Number.isFinite(limit) ? limit : settings.maxDuePerPoll),
+      heartbeats: await db.listDueHeartbeats(parseLimit(query.limit, settings.maxDuePerPoll)),
     };
   });
 
@@ -116,7 +116,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.post("/api/heartbeats", async (request, reply) => {
     try {
-      const body = request.body as Record<string, unknown>;
+      const body = requestBody(request.body);
       const sessionId = parseString(body?.sessionId ?? body?.session_id, "sessionId");
       const session = await db.getSession(sessionId);
       if (!session) return reply.code(404).send({ ok: false, error: "session not found" });
@@ -141,20 +141,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { id } = request.params as { id: string };
       const current = await db.getHeartbeat(id);
       if (!current) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
-      const body = request.body as Record<string, unknown>;
-      const heartbeat = await db.updateHeartbeat(id, {
-        title: body?.title === undefined ? current.title : parseString(body.title, "title"),
-        cadence:
-          body?.cadence === undefined
-            ? current.cadence
-            : parsePositiveInt(body.cadence, "cadence"),
-        contents:
-          body?.contents === undefined ? current.contents : parseContentsPath(body.contents),
-        provider:
-          body?.provider === undefined ? current.provider : parseString(body.provider, "provider"),
-        model: body?.model === undefined ? current.model : parseString(body.model, "model"),
-        status: parseHeartbeatStatus(body?.status, current.status),
-      });
+      const heartbeat = await db.updateHeartbeat(id, heartbeatUpdateFromBody(current, requestBody(request.body)));
       return { ok: true, heartbeat };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -165,14 +152,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     const { id } = request.params as { id: string };
     const current = await db.getHeartbeat(id);
     if (!current) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
-    const heartbeat = await db.updateHeartbeat(id, {
-      title: current.title,
-      cadence: current.cadence,
-      contents: current.contents,
-      provider: current.provider,
-      model: current.model,
-      status: "inactive",
-    });
+    const heartbeat = await updateHeartbeatStatus(db, current, "inactive");
     return { ok: true, heartbeat };
   });
 
@@ -180,20 +160,13 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     const { id } = request.params as { id: string };
     const current = await db.getHeartbeat(id);
     if (!current) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
-    const heartbeat = await db.updateHeartbeat(id, {
-      title: current.title,
-      cadence: current.cadence,
-      contents: current.contents,
-      provider: current.provider,
-      model: current.model,
-      status: "active",
-    });
+    const heartbeat = await updateHeartbeatStatus(db, current, "active");
     return { ok: true, heartbeat };
   });
 
   app.post("/api/heartbeats/:id/run-now", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const body = (request.body ?? {}) as Record<string, unknown>;
+    const body = requestBody(request.body);
     const preserveCadence = parseBoolean(body.preserveCadence ?? body.preserve_cadence, false);
     const heartbeat = await db.getHeartbeat(id);
     if (!heartbeat) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
@@ -229,21 +202,20 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.get("/api/events", async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    const limit = query.limit ? Number.parseInt(query.limit, 10) : 100;
     return {
       ok: true,
       events: await db.listEvents({
         heartbeatId: query.heartbeatId,
         runId: query.runId,
         sessionId: query.sessionId,
-        limit: Number.isFinite(limit) ? limit : 100,
+        limit: parseLimit(query.limit, 100),
       }),
     };
   });
 
   app.post("/api/runs", async (request, reply) => {
     try {
-      const body = request.body as Record<string, unknown>;
+      const body = requestBody(request.body);
       const heartbeatId = parseString(body?.heartbeatId ?? body?.heartbeat_id, "heartbeatId");
       const heartbeat = await db.getHeartbeat(heartbeatId);
       if (!heartbeat) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
@@ -275,7 +247,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.get("/api/runtime/pi/messages/listen", async (request, reply) => {
     const query = request.query as Record<string, string | undefined>;
-    const limit = query.limit ? Number.parseInt(query.limit, 10) : null;
+    const limit = query.limit ? parseLimit(query.limit, Number.POSITIVE_INFINITY) : null;
     let count = 0;
     reply.hijack();
     reply.raw.writeHead(200, {
@@ -297,7 +269,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   });
 
   app.post("/api/runtime/pi/message/stream", async (request, reply) => {
-    const body = request.body as Record<string, unknown>;
+    const body = requestBody(request.body);
     const message = parseString(body?.message, "message");
     const memoryMode = parseMemoryMode(body?.memoryMode ?? body?.memory_mode);
     const messageId = randomId("msg");
@@ -370,6 +342,44 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const randomId = (prefix: string): string => `${prefix}_${randomUUID().replaceAll("-", "")}`;
+
+const requestBody = (body: unknown): Record<string, unknown> => {
+  if (typeof body === "object" && body !== null && !Array.isArray(body)) return body as Record<string, unknown>;
+  return {};
+};
+
+const parseLimit = (value: string | undefined, fallback: number): number => {
+  if (value === undefined) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+};
+
+const heartbeatUpdateFromBody = (
+  current: HeartbeatRow,
+  body: Record<string, unknown>,
+): HeartbeatUpdateInput => ({
+  title: body.title === undefined ? current.title : parseString(body.title, "title"),
+  cadence: body.cadence === undefined ? current.cadence : parsePositiveInt(body.cadence, "cadence"),
+  contents: body.contents === undefined ? current.contents : parseContentsPath(body.contents),
+  provider: body.provider === undefined ? current.provider : parseString(body.provider, "provider"),
+  model: body.model === undefined ? current.model : parseString(body.model, "model"),
+  status: parseHeartbeatStatus(body.status, current.status),
+});
+
+const updateHeartbeatStatus = (
+  db: Database,
+  heartbeat: HeartbeatRow,
+  status: HeartbeatStatus,
+): Promise<HeartbeatRow | null> =>
+  db.updateHeartbeat(heartbeat.id, {
+    title: heartbeat.title,
+    cadence: heartbeat.cadence,
+    contents: heartbeat.contents,
+    provider: heartbeat.provider,
+    model: heartbeat.model,
+    status,
+  });
 
 const parseMemoryMode = (value: unknown): "shared" | "stateless" => {
   if (value === undefined) return "shared";

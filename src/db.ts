@@ -8,10 +8,20 @@ import type {
   HeartbeatRow,
   HeartbeatRunRow,
   HeartbeatStatus,
+  RunStatus,
   SessionRow,
 } from "./types.js";
 
 type SqlValue = string | number | null;
+
+export type HeartbeatUpdateInput = {
+  title: string;
+  cadence: number;
+  contents: string;
+  provider: string;
+  model: string;
+  status: HeartbeatStatus;
+};
 
 export class Database {
   private readonly client: Client;
@@ -135,14 +145,7 @@ export class Database {
 
   async updateHeartbeat(
     id: string,
-    input: {
-      title: string;
-      cadence: number;
-      contents: string;
-      provider: string;
-      model: string;
-      status: HeartbeatStatus;
-    },
+    input: HeartbeatUpdateInput,
   ): Promise<HeartbeatRow | null> {
     await this.client.execute({
       sql: `
@@ -199,7 +202,7 @@ export class Database {
     sessionId: string;
     executor: string;
     model: string | null;
-    status: string;
+    status: RunStatus;
     promptSnapshot: string;
     output: string | null;
     error: string | null;

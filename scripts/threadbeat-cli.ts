@@ -5,6 +5,7 @@ const baseUrl = normalizeBaseUrl(
     process.env.RAILWAY_URL ??
     "http://127.0.0.1:8000",
 );
+const defaultHeartbeatCadence = 60;
 
 const [command, subcommand, ...rest] = process.argv.slice(2);
 
@@ -121,7 +122,7 @@ async function heartbeats(subcommandName?: string, args: string[] = []): Promise
     const payload = {
       sessionId: required(options.session, "--session"),
       title: options.title ?? "heartbeat",
-      cadence: Number.parseInt(options.cadence ?? "60", 10),
+      cadence: parsePositiveIntOption(options.cadence, "--cadence", defaultHeartbeatCadence),
       contents: required(options.contents, "--contents"),
       provider: options.provider,
       model: options.model,
@@ -137,7 +138,7 @@ async function heartbeats(subcommandName?: string, args: string[] = []): Promise
     const options = parseOptions(optionArgs);
     const payload: Record<string, unknown> = {};
     if (options.title) payload.title = options.title;
-    if (options.cadence) payload.cadence = Number.parseInt(options.cadence, 10);
+    if (options.cadence) payload.cadence = parsePositiveIntOption(options.cadence, "--cadence");
     if (options.contents) payload.contents = options.contents;
     if (options.provider) payload.provider = options.provider;
     if (options.model) payload.model = options.model;
@@ -423,6 +424,18 @@ function parsePositiveNumber(value: string, name: string): number {
   const numberValue = Number.parseFloat(value);
   if (!Number.isFinite(numberValue) || numberValue <= 0) {
     throw new Error(`${name} must be a positive number`);
+  }
+  return numberValue;
+}
+
+function parsePositiveIntOption(value: string | undefined, name: string, fallback?: number): number {
+  if (value === undefined) {
+    if (fallback !== undefined) return fallback;
+    throw new Error(`${name} is required`);
+  }
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue <= 0) {
+    throw new Error(`${name} must be a positive integer`);
   }
   return numberValue;
 }
