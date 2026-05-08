@@ -146,7 +146,8 @@ Human checks:
 1. CLI ergonomics.
    - Compact table output in addition to JSON is implemented.
    - JSON remains the default machine-readable mode.
-   - Add `--follow` for runs/events.
+   - `--follow` for runs/events is implemented as client-side polling, with
+     `--count <n>` for bounded checks.
 2. TUI process split.
    - Keep `send` and `listen` as composable CLI commands.
    - Later replace the simple readline TUI with a richer curses-style interface

@@ -121,11 +121,15 @@ npm run cli -- heartbeats run-now <heartbeat_id>
 npm run cli -- heartbeats deactivate <heartbeat_id>
 npm run cli -- heartbeats list --table
 npm run cli -- heartbeats runs <heartbeat_id> --table
+npm run cli -- heartbeats runs <heartbeat_id> --follow --poll 2
 npm run cli -- events --heartbeat <heartbeat_id> --limit 20 --table
+npm run cli -- events --heartbeat <heartbeat_id> --limit 20 --follow --poll 2
 ```
 
 JSON remains the default output for scripts. Add `--table` to status, sessions,
 heartbeats, runs, or events commands for compact terminal output.
+Use `--follow` on runs or events to poll until stopped; pass `--count <n>` for
+bounded checks.
 
 See `TUI_CONTROL_PLANE_PLAN.md` for the staged terminal control-plane plan.
 

@@ -64,7 +64,7 @@ async function main(commandName?: string, subcommandName?: string, args: string[
   if (commandName === "runs") {
     const options = parseOptions([subcommandName, ...args].filter((value): value is string => Boolean(value)));
     const query = options.heartbeat ? `?heartbeatId=${encodeURIComponent(options.heartbeat)}` : "";
-    await printResult(await requestJson("GET", `/api/runs${query}`), options, "runs");
+    await printQueryResult(`/api/runs${query}`, options, "runs");
     return;
   }
 
@@ -74,7 +74,7 @@ async function main(commandName?: string, subcommandName?: string, args: string[
     if (options.heartbeat) params.set("heartbeatId", options.heartbeat);
     if (options.limit) params.set("limit", options.limit);
     const query = params.size ? `?${params.toString()}` : "";
-    await printResult(await requestJson("GET", `/api/events${query}`), options, "events");
+    await printQueryResult(`/api/events${query}`, options, "events");
     return;
   }
 
@@ -173,7 +173,7 @@ async function heartbeats(subcommandName?: string, args: string[] = []): Promise
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("heartbeats runs requires an id");
     const options = parseOptions(optionArgs);
-    await printResult(await requestJson("GET", `/api/runs?heartbeatId=${encodeURIComponent(id)}`), options, "runs");
+    await printQueryResult(`/api/runs?heartbeatId=${encodeURIComponent(id)}`, options, "runs");
     return;
   }
 
@@ -186,7 +186,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "inactive" || key === "table" || key === "json") {
+    if (key === "inactive" || key === "table" || key === "json" || key === "follow") {
       options[key] = "1";
       continue;
     }
@@ -271,6 +271,29 @@ async function requestJson(method: string, path: string, payload?: unknown): Pro
   const body = await response.json() as { ok?: boolean; error?: string };
   if (!response.ok || body.ok === false) throw new Error(body.error ?? `${method} ${path} failed`);
   return body;
+}
+
+async function printQueryResult(path: string, options: Record<string, string>, tableKind: TableKind): Promise<void> {
+  if (options.follow !== "1") {
+    await printResult(await requestJson("GET", path), options, tableKind);
+    return;
+  }
+
+  const followOptions = { ...options };
+  if (followOptions.json !== "1") followOptions.table = "1";
+  const pollMs = parsePositiveNumber(followOptions.poll ?? "2", "--poll") * 1000;
+  const count = followOptions.count === undefined
+    ? Number.POSITIVE_INFINITY
+    : parsePositiveNumber(followOptions.count, "--count");
+
+  for (let iteration = 0; iteration < count; iteration += 1) {
+    if (iteration > 0) {
+      await sleep(pollMs);
+      process.stdout.write("\n");
+    }
+    console.log(`# ${new Date().toISOString()}`);
+    await printResult(await requestJson("GET", path), followOptions, tableKind);
+  }
 }
 
 async function printJson(value: unknown): Promise<void> {
@@ -369,6 +392,18 @@ function required(value: string | undefined, name: string): string {
   return value;
 }
 
+function parsePositiveNumber(value: string, name: string): number {
+  const numberValue = Number.parseFloat(value);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
+  return numberValue;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function printHelp(): void {
   console.log(`threadbeat CLI -> ${baseUrl}
 
@@ -403,9 +438,12 @@ Heartbeats:
 
 Events:
   npm run cli -- runs --heartbeat <id> --table
+  npm run cli -- runs --heartbeat <id> --follow --poll 2
   npm run cli -- events --heartbeat <id> --limit 20 --table
+  npm run cli -- events --heartbeat <id> --limit 20 --follow --poll 2
 
 Set THREADBEAT_BASE_URL to target local or hosted servers.
 JSON remains the default; pass --table for compact terminal output.
+Use --follow on runs/events to poll until stopped; pass --count <n> for bounded checks.
 `);
 }
