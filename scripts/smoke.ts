@@ -3,11 +3,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import "./agentGitStore.test.js";
-import "./agentLocalE2E.test.js";
-import "./agentLocal.test.js";
-import "./agentService.js";
-import "./db-agents.js";
+import "../test/agentGitStore.test.js";
+import "../test/agentLocalE2E.test.js";
+import "../test/agentLocal.test.js";
+import "../test/agentPiExecutor.test.js";
+import "../test/agentService.js";
+import "../test/db-agents.js";
 import { PiSharedSessionRuntime } from "../src/piRuntime.js";
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";

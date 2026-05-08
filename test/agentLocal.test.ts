@@ -8,7 +8,6 @@ import {
   copyAgentTemplate,
   writeRunInput,
 } from "../src/agentTemplate.js";
-import { runFakeAgentExecutor } from "../src/agentFakeExecutor.js";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-agent-local-"));
 const repoPath = path.join(tempRoot, "agent-repo");
@@ -43,30 +42,6 @@ assert.equal(inputResult.relativePath, "work/inputs/task.md");
 const taskMarkdown = await fs.readFile(inputResult.inputPath, "utf8");
 assert.match(taskMarkdown, /## Objective\n\nProve local E2E works without Pi\./);
 assert.match(taskMarkdown, /"runId": "run_local_1"/);
-
-const executorResult = await runFakeAgentExecutor(repoPath, {
-  now: new Date("2026-05-08T12:00:00.000Z"),
-});
-assert.equal(executorResult.status, "succeeded");
-assert.equal(executorResult.objective, "Prove local E2E works without Pi.");
-assert.deepEqual(executorResult.metadata, { runId: "run_local_1", priority: 2 });
-
-const resultMarkdown = await fs.readFile(path.join(repoPath, "work", "outputs", "result.md"), "utf8");
-assert.match(resultMarkdown, /# Threadbeat fake executor result/);
-assert.match(resultMarkdown, /executor: threadbeat-fake-executor/);
-assert.match(resultMarkdown, /local E2E output without Pi/);
-
-const summary = JSON.parse(
-  await fs.readFile(path.join(repoPath, "work", "outputs", "run-summary.json"), "utf8"),
-) as Record<string, unknown>;
-assert.equal(summary.status, "succeeded");
-assert.equal(summary.completedAt, "2026-05-08T12:00:00.000Z");
-assert.equal(summary.objective, "Prove local E2E works without Pi.");
-
-await assert.rejects(
-  runFakeAgentExecutor(path.join(tempRoot, "missing-input-repo")),
-  /Missing run input/,
-);
 
 async function assertFileExists(filePath: string): Promise<void> {
   const stat = await fs.stat(filePath);

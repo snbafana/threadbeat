@@ -162,7 +162,7 @@ existing schedule.
 already-active Pi run in v0.4; active runs finish and are visible through
 `runs` and `events`.
 
-See `TUI_CONTROL_PLANE_PLAN.md` for the staged terminal control-plane plan.
+See `docs/tui-control-plane-plan.md` for the staged terminal control-plane plan.
 
 ## Stripe Projects hosting
 

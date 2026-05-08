@@ -12,7 +12,7 @@
     "start": "node dist/src/index.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "tsx test/smoke.ts",
+    "test": "tsx scripts/smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts",
     "tui": "tsx scripts/server-tui.ts",
     "smoke:api": "tsx scripts/api-smoke.ts",
