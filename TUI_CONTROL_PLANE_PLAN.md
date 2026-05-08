@@ -12,6 +12,41 @@ session:
 - all later work should move toward SQL-backed state rather than hidden process
   memory
 
+## Runtime memory model
+
+Current behavior is intentionally one shared persistent Pi session:
+
+- Every heartbeat creates a new `heartbeat_runs` SQL row.
+- Every heartbeat prompt is sent to the same server-side Pi `AgentSession`.
+- Every interactive CLI message is also sent to that same `AgentSession`.
+- Calls are serialized by the runtime lock, so one call runs at a time.
+- The Pi session is only disposed on server shutdown, manual reset, or automatic
+  reset after a runtime failure.
+
+Implication: SQL runs are separate records, but Pi memory is shared. Heartbeats
+can behave like a persistent agent mind across ticks, and interactive messages
+can affect later heartbeat context.
+
+This is useful for v0.4 because the goal is a singular hosted agent. It is not
+the right default for all future workloads. Before v0.5/v0.6, choose explicit
+runtime memory modes:
+
+- `shared`: current behavior; one long-lived Pi session for all heartbeats and
+  interactive messages.
+- `per-heartbeat`: one long-lived Pi session per heartbeat id, preserving local
+  continuity without cross-heartbeat or interactive bleed.
+- `stateless`: reset or recreate the Pi session per execution; slower but most
+  deterministic.
+
+Open policy decisions:
+
+- Whether interactive CLI messages should share the same session as scheduler
+  heartbeats by default.
+- Whether `run-now` should use scheduler semantics, interactive semantics, or a
+  separate manual-run mode.
+- Whether pausing/deactivating an active heartbeat should allow the in-flight
+  run to finish, cancel it, or finish but avoid rescheduling from stale state.
+
 ## Current v0.4 slice
 
 Implemented:

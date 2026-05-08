@@ -42,6 +42,21 @@ configured session.
 Runtime reset lifecycle events are written to `heartbeat_events` with
 `source: "runtime"` so resets are visible without terminal logs.
 
+## Runtime Memory
+
+The current server uses one shared, long-lived Pi `AgentSession`.
+
+- Each heartbeat tick creates a separate `heartbeat_runs` row.
+- Heartbeat prompts and interactive CLI messages are sent to the same Pi session.
+- Calls are serialized by the runtime lock.
+- The Pi session is only disposed on server shutdown, manual reset, or automatic
+  reset after runtime failure.
+
+This means SQL run records are separate, but model context is shared. Use
+`npm run cli -- reset` when you want to clear the current hosted Pi session.
+Future runtime modes should make this explicit: shared, per-heartbeat, or
+stateless/reset-each-run.
+
 ## Soak Test
 
 Use the soak harness for the v0.2 repeat-run gate. It defaults to a one-hour

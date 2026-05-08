@@ -121,6 +121,9 @@ Ships:
 - Hosted soak test for one agent running one or more heartbeats for several hours.
 - Event log for scheduler decisions, Pi session lifecycle, model calls, SQL writes, and reschedules.
 - Better runtime controls for reset, pause, resume, compaction, and active-run visibility.
+- Documented runtime memory semantics for the current shared persistent Pi
+  session, plus explicit future modes for shared, per-heartbeat, and stateless
+  execution.
 - Run locking so one hosted process cannot overlap a heartbeat with itself.
 - Clear failure policy for model errors, missing markdown, and timed-out runs.
 - Minimal operator surface for inspecting the single agent and recent heartbeat history.
