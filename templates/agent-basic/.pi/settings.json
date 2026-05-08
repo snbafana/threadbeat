@@ -1,0 +1,7 @@
+{
+  "runtime": "pi-native",
+  "prompt": ".pi/prompts/heartbeat.md",
+  "memory": "agent/state/memory.md",
+  "input": "work/inputs/task.md",
+  "output": "work/outputs/result.md"
+}

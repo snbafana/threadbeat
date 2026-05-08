@@ -23,6 +23,41 @@ export type HeartbeatUpdateInput = {
   status: HeartbeatStatus;
 };
 
+export type AgentRunKind = "run" | "edit";
+
+export type AgentRow = {
+  id: string;
+  name: string;
+  repo_url: string;
+  current_version: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentRunRow = {
+  id: string;
+  agent_id: string;
+  kind: AgentRunKind;
+  input_branch: string;
+  run_branch: string;
+  output_branch: string | null;
+  status: string;
+  objective: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentEventRow = {
+  id: string;
+  agent_id: string;
+  run_id: string | null;
+  type: string;
+  message: string | null;
+  data: string | null;
+  created_at: string;
+};
+
 export class Database {
   private readonly client: Client;
 
@@ -346,6 +381,224 @@ export class Database {
         ORDER BY created_at DESC
       `,
       args,
+    );
+  }
+
+  async createAgent(input: {
+    id?: string;
+    name: string;
+    repoUrl: string;
+    currentVersion?: string | null;
+    status?: string;
+  }): Promise<AgentRow> {
+    const id = input.id ?? randomId("agt");
+    await this.client.execute({
+      sql: `
+        INSERT INTO agents (id, name, repo_url, current_version, status)
+        VALUES (?, ?, ?, ?, ?)
+      `,
+      args: [
+        id,
+        input.name,
+        input.repoUrl,
+        input.currentVersion ?? null,
+        input.status ?? "active",
+      ],
+    });
+    const row = await this.getAgent(id);
+    if (!row) throw new Error("created agent could not be loaded");
+    return row;
+  }
+
+  async listAgents(): Promise<AgentRow[]> {
+    return this.all<AgentRow>(
+      `
+        SELECT id, name, repo_url, current_version, status, created_at, updated_at
+        FROM agents
+        ORDER BY created_at DESC
+      `,
+    );
+  }
+
+  async getAgent(id: string): Promise<AgentRow | null> {
+    return this.first<AgentRow>(
+      `
+        SELECT id, name, repo_url, current_version, status, created_at, updated_at
+        FROM agents
+        WHERE id = ?
+      `,
+      [id],
+    );
+  }
+
+  async updateAgentCurrentVersion(
+    id: string,
+    currentVersion: string | null,
+  ): Promise<AgentRow | null> {
+    await this.client.execute({
+      sql: `
+        UPDATE agents
+        SET current_version = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [currentVersion, id],
+    });
+    return this.getAgent(id);
+  }
+
+  async createAgentRun(input: {
+    id?: string;
+    agentId: string;
+    kind: AgentRunKind;
+    inputBranch: string;
+    runBranch: string;
+    outputBranch?: string | null;
+    status?: string;
+    objective: string;
+  }): Promise<AgentRunRow> {
+    const id = input.id ?? randomId("arun");
+    await this.client.execute({
+      sql: `
+        INSERT INTO agent_runs (
+          id, agent_id, kind, input_branch, run_branch, output_branch, status, objective
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        id,
+        input.agentId,
+        input.kind,
+        input.inputBranch,
+        input.runBranch,
+        input.outputBranch ?? null,
+        input.status ?? "queued",
+        input.objective,
+      ],
+    });
+    const row = await this.getAgentRun(id);
+    if (!row) throw new Error("created agent run could not be loaded");
+    return row;
+  }
+
+  async getAgentRun(id: string): Promise<AgentRunRow | null> {
+    return this.first<AgentRunRow>(
+      `
+        SELECT id, agent_id, kind, input_branch, run_branch, output_branch, status,
+               objective, created_at, updated_at
+        FROM agent_runs
+        WHERE id = ?
+      `,
+      [id],
+    );
+  }
+
+  async listAgentRuns(agentId: string): Promise<AgentRunRow[]> {
+    return this.all<AgentRunRow>(
+      `
+        SELECT id, agent_id, kind, input_branch, run_branch, output_branch, status,
+               objective, created_at, updated_at
+        FROM agent_runs
+        WHERE agent_id = ?
+        ORDER BY created_at DESC
+      `,
+      [agentId],
+    );
+  }
+
+  async updateAgentRunStatus(
+    id: string,
+    status: string,
+  ): Promise<AgentRunRow | null> {
+    await this.client.execute({
+      sql: `
+        UPDATE agent_runs
+        SET status = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [status, id],
+    });
+    return this.getAgentRun(id);
+  }
+
+  async updateAgentRunOutputBranch(
+    id: string,
+    outputBranch: string | null,
+  ): Promise<AgentRunRow | null> {
+    await this.client.execute({
+      sql: `
+        UPDATE agent_runs
+        SET output_branch = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [outputBranch, id],
+    });
+    return this.getAgentRun(id);
+  }
+
+  async appendAgentEvent(input: {
+    id?: string;
+    agentId: string;
+    runId?: string | null;
+    type: string;
+    message?: string | null;
+    data?: unknown;
+  }): Promise<AgentEventRow> {
+    const id = input.id ?? randomId("aevt");
+    await this.client.execute({
+      sql: `
+        INSERT INTO agent_events (id, agent_id, run_id, type, message, data)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        id,
+        input.agentId,
+        input.runId ?? null,
+        input.type,
+        input.message ?? null,
+        input.data === undefined ? null : JSON.stringify(input.data),
+      ],
+    });
+    const row = await this.getAgentEvent(id);
+    if (!row) throw new Error("created agent event could not be loaded");
+    return row;
+  }
+
+  async listAgentEvents(filters: {
+    agentId?: string;
+    runId?: string;
+    limit?: number;
+  }): Promise<AgentEventRow[]> {
+    const conditions: string[] = [];
+    const args: SqlValue[] = [];
+    if (filters.agentId) {
+      conditions.push("agent_id = ?");
+      args.push(filters.agentId);
+    }
+    if (filters.runId) {
+      conditions.push("run_id = ?");
+      args.push(filters.runId);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    args.push(filters.limit ?? 100);
+    return this.all<AgentEventRow>(
+      `
+        SELECT id, agent_id, run_id, type, message, data, created_at
+        FROM agent_events
+        ${where}
+        ORDER BY created_at DESC
+        LIMIT ?
+      `,
+      args,
+    );
+  }
+
+  private async getAgentEvent(id: string): Promise<AgentEventRow | null> {
+    return this.first<AgentEventRow>(
+      `
+        SELECT id, agent_id, run_id, type, message, data, created_at
+        FROM agent_events
+        WHERE id = ?
+      `,
+      [id],
     );
   }
 

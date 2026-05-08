@@ -76,3 +76,57 @@ CREATE INDEX IF NOT EXISTS idx_heartbeat_events_session_id
 
 CREATE INDEX IF NOT EXISTS idx_heartbeat_events_created_at
   ON heartbeat_events(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agents (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  repo_url TEXT NOT NULL,
+  current_version TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_agents_status
+  ON agents(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('run', 'edit')),
+  input_branch TEXT NOT NULL,
+  run_branch TEXT NOT NULL,
+  output_branch TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  objective TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_id
+  ON agent_runs(agent_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status
+  ON agent_runs(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_events (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  run_id TEXT,
+  type TEXT NOT NULL,
+  message TEXT,
+  data TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+  FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_agent_id
+  ON agent_events(agent_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_run_id
+  ON agent_events(run_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_created_at
+  ON agent_events(created_at DESC);
