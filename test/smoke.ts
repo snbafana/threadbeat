@@ -141,6 +141,19 @@ try {
   });
   assert.equal(inactiveRes.statusCode, 200);
 
+  const resumeRes = await app.inject({ method: "POST", url: `/api/heartbeats/${heartbeatId}/resume` });
+  assert.equal(resumeRes.statusCode, 200);
+  assert.equal(resumeRes.json().heartbeat.status, "active");
+
+  const pauseRes = await app.inject({ method: "POST", url: `/api/heartbeats/${heartbeatId}/pause` });
+  assert.equal(pauseRes.statusCode, 200);
+  assert.equal(pauseRes.json().heartbeat.status, "inactive");
+
+  const runNowRes = await app.inject({ method: "POST", url: `/api/heartbeats/${heartbeatId}/run-now` });
+  assert.equal(runNowRes.statusCode, 200);
+  assert.equal(runNowRes.json().run.status, "succeeded");
+  assert.equal(runNowRes.json().heartbeat.status, "inactive");
+
   const missingContentsRes = await app.inject({
     method: "POST",
     url: "/api/heartbeats",

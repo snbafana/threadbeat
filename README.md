@@ -96,6 +96,9 @@ Heartbeat operations are also available through the CLI:
 ```bash
 npm run cli -- sessions create "operator"
 npm run cli -- heartbeats create --session <session_id> --title "loop" --cadence 60 --contents contents/file.md
+npm run cli -- heartbeats pause <heartbeat_id>
+npm run cli -- heartbeats resume <heartbeat_id>
+npm run cli -- heartbeats run-now <heartbeat_id>
 npm run cli -- heartbeats deactivate <heartbeat_id>
 npm run cli -- heartbeats runs <heartbeat_id>
 npm run cli -- events --heartbeat <heartbeat_id> --limit 20
@@ -161,6 +164,9 @@ THREADBEAT_BASE_URL=https://your-railway-url npm run smoke:api
 - `GET /api/heartbeats/:id`
 - `POST /api/heartbeats`
 - `PATCH /api/heartbeats/:id`
+- `POST /api/heartbeats/:id/pause`
+- `POST /api/heartbeats/:id/resume`
+- `POST /api/heartbeats/:id/run-now`
 - `POST /api/heartbeats/:id/tick`
 - `GET /api/runs`
 - `GET /api/runtime/pi`

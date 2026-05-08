@@ -30,7 +30,7 @@ Implemented:
 - `npm run cli -- listen`
   - Subscribes to server-side message events.
 - `npm run cli -- heartbeats ...`
-  - Lists, creates, patches, activates, deactivates, ticks, and inspects
+  - Lists, creates, patches, pauses, resumes, runs now, ticks, and inspects
     heartbeat runs.
 
 ## Intended operator commands
@@ -61,6 +61,9 @@ npm run cli -- heartbeats create \
   --contents contents/tui-control-loop.md
 npm run cli -- heartbeats deactivate <heartbeat_id>
 npm run cli -- heartbeats activate <heartbeat_id>
+npm run cli -- heartbeats pause <heartbeat_id>
+npm run cli -- heartbeats resume <heartbeat_id>
+npm run cli -- heartbeats run-now <heartbeat_id>
 npm run cli -- heartbeats tick <heartbeat_id>
 npm run cli -- heartbeats runs <heartbeat_id>
 npm run cli -- events --heartbeat <heartbeat_id> --limit 20
@@ -100,25 +103,24 @@ Human checks:
 
 ## Next implementation units
 
-1. Durable interactive message log.
-   - Add `runtime_messages` and `runtime_message_events` tables.
-   - Replay recent history when a listener connects.
-   - Make listener state survive Railway restart.
-2. CLI ergonomics.
+1. CLI ergonomics.
    - Add compact table output in addition to JSON.
    - Add `--json` for machine-readable mode.
    - Add `--follow` for runs/events.
-3. TUI process split.
+2. TUI process split.
    - Keep `send` and `listen` as composable CLI commands.
    - Later replace the simple readline TUI with a richer curses-style interface
      only after the control API stabilizes.
-4. Heartbeat actions.
-   - Add explicit pause/resume/reset endpoints instead of overloading PATCH.
-   - Add manual `run-now` that executes a heartbeat immediately without
-     perturbing cadence unless requested.
-5. SQL-first control plane.
+3. Heartbeat action hardening.
+   - Add optional `run-now` behavior that does not perturb cadence.
+   - Add reset or compact actions once the runtime policy is clearer.
+4. SQL-first control plane.
    - Move interactive sends into task rows.
    - Make heartbeats and interactive sends share the same task/runtime pipeline.
+5. Durable interactive message history, if it becomes necessary.
+   - Defer until process-local broadcast is insufficient.
+   - Prefer implementing it as part of the later task/runtime log instead of a
+     separate chat transcript.
 
 ## Non-goals for this layer
 

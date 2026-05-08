@@ -158,6 +158,51 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/heartbeats/:id/pause", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const current = await db.getHeartbeat(id);
+    if (!current) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
+    const heartbeat = await db.updateHeartbeat(id, {
+      title: current.title,
+      cadence: current.cadence,
+      contents: current.contents,
+      provider: current.provider,
+      model: current.model,
+      status: "inactive",
+    });
+    return { ok: true, heartbeat };
+  });
+
+  app.post("/api/heartbeats/:id/resume", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const current = await db.getHeartbeat(id);
+    if (!current) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
+    const heartbeat = await db.updateHeartbeat(id, {
+      title: current.title,
+      cadence: current.cadence,
+      contents: current.contents,
+      provider: current.provider,
+      model: current.model,
+      status: "active",
+    });
+    return { ok: true, heartbeat };
+  });
+
+  app.post("/api/heartbeats/:id/run-now", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const heartbeat = await db.getHeartbeat(id);
+    if (!heartbeat) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
+    await db.createEvent({
+      heartbeatId: heartbeat.id,
+      sessionId: heartbeat.session_id,
+      source: "api",
+      type: "heartbeat_run_now_requested",
+      message: "Manual heartbeat run requested",
+    });
+    const run = await executor.execute(heartbeat);
+    return { ok: true, run, heartbeat: await db.getHeartbeat(id) };
+  });
+
   app.post("/api/heartbeats/:id/tick", async (request, reply) => {
     const { id } = request.params as { id: string };
     const heartbeat = await db.tickHeartbeat(id);

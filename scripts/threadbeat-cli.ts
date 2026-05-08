@@ -148,6 +148,13 @@ async function heartbeats(subcommandName?: string, args: string[] = []): Promise
     return;
   }
 
+  if (subcommandName === "pause" || subcommandName === "resume" || subcommandName === "run-now") {
+    const id = args[0];
+    if (!id) throw new Error(`heartbeats ${subcommandName} requires an id`);
+    await printJson(await requestJson("POST", `/api/heartbeats/${encodeURIComponent(id)}/${subcommandName}`));
+    return;
+  }
+
   if (subcommandName === "tick") {
     const id = args[0];
     if (!id) throw new Error("heartbeats tick requires an id");
@@ -296,6 +303,9 @@ Heartbeats:
   npm run cli -- heartbeats patch <id> --cadence 120 --contents contents/file.md
   npm run cli -- heartbeats activate <id>
   npm run cli -- heartbeats deactivate <id>
+  npm run cli -- heartbeats pause <id>
+  npm run cli -- heartbeats resume <id>
+  npm run cli -- heartbeats run-now <id>
   npm run cli -- heartbeats tick <id>
   npm run cli -- heartbeats runs <id>
 
