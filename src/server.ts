@@ -190,6 +190,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.post("/api/heartbeats/:id/run-now", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const body = (request.body ?? {}) as Record<string, unknown>;
+    const preserveCadence = parseBoolean(body.preserveCadence ?? body.preserve_cadence, false);
     const heartbeat = await db.getHeartbeat(id);
     if (!heartbeat) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
     await db.createEvent({
@@ -198,8 +200,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       source: "api",
       type: "heartbeat_run_now_requested",
       message: "Manual heartbeat run requested",
+      data: { preserveCadence },
     });
-    const run = await executor.execute(heartbeat);
+    const run = await executor.execute(heartbeat, { reschedule: !preserveCadence });
     return { ok: true, run, heartbeat: await db.getHeartbeat(id) };
   });
 
@@ -346,4 +349,12 @@ const parseMemoryMode = (value: unknown): "shared" | "stateless" => {
   if (value === undefined) return "shared";
   if (value === "shared" || value === "stateless") return value;
   throw new Error("memoryMode must be shared or stateless");
+};
+
+const parseBoolean = (value: unknown, fallback: boolean): boolean => {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value !== "string") return fallback;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 };

@@ -118,6 +118,7 @@ npm run cli -- heartbeats create --session <session_id> --title "loop" --cadence
 npm run cli -- heartbeats pause <heartbeat_id>
 npm run cli -- heartbeats resume <heartbeat_id>
 npm run cli -- heartbeats run-now <heartbeat_id>
+npm run cli -- heartbeats run-now <heartbeat_id> --preserve-cadence
 npm run cli -- heartbeats deactivate <heartbeat_id>
 npm run cli -- heartbeats list --table
 npm run cli -- heartbeats runs <heartbeat_id> --table
@@ -130,6 +131,9 @@ JSON remains the default output for scripts. Add `--table` to status, sessions,
 heartbeats, runs, or events commands for compact terminal output.
 Use `--follow` on runs or events to poll until stopped; pass `--count <n>` for
 bounded checks.
+By default, `run-now` uses scheduler semantics and advances `last_tick` and
+`next_tick`. Add `--preserve-cadence` to run immediately without changing the
+existing schedule.
 
 See `TUI_CONTROL_PLANE_PLAN.md` for the staged terminal control-plane plan.
 

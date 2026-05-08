@@ -170,6 +170,21 @@ try {
   assert.equal(runNowRes.json().run.status, "succeeded");
   assert.equal(runNowRes.json().heartbeat.status, "inactive");
 
+  const preserveResumeRes = await app.inject({ method: "POST", url: `/api/heartbeats/${heartbeatId}/resume` });
+  assert.equal(preserveResumeRes.statusCode, 200);
+  const preserveBefore = preserveResumeRes.json().heartbeat;
+  const preserveRunNowRes = await app.inject({
+    method: "POST",
+    url: `/api/heartbeats/${heartbeatId}/run-now`,
+    payload: { preserveCadence: true },
+  });
+  assert.equal(preserveRunNowRes.statusCode, 200);
+  assert.equal(preserveRunNowRes.json().run.status, "succeeded");
+  assert.equal(preserveRunNowRes.json().heartbeat.next_tick, preserveBefore.next_tick);
+  assert.equal(preserveRunNowRes.json().heartbeat.last_tick, preserveBefore.last_tick);
+  const preservePauseRes = await app.inject({ method: "POST", url: `/api/heartbeats/${heartbeatId}/pause` });
+  assert.equal(preservePauseRes.statusCode, 200);
+
   const missingContentsRes = await app.inject({
     method: "POST",
     url: "/api/heartbeats",

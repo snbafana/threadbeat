@@ -155,10 +155,20 @@ async function heartbeats(subcommandName?: string, args: string[] = []): Promise
     return;
   }
 
-  if (subcommandName === "pause" || subcommandName === "resume" || subcommandName === "run-now") {
+  if (subcommandName === "pause" || subcommandName === "resume") {
     const id = args[0];
     if (!id) throw new Error(`heartbeats ${subcommandName} requires an id`);
     await printJson(await requestJson("POST", `/api/heartbeats/${encodeURIComponent(id)}/${subcommandName}`));
+    return;
+  }
+
+  if (subcommandName === "run-now") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("heartbeats run-now requires an id");
+    const options = parseOptions(optionArgs);
+    await printJson(await requestJson("POST", `/api/heartbeats/${encodeURIComponent(id)}/run-now`, {
+      preserveCadence: options["preserve-cadence"] === "1",
+    }));
     return;
   }
 
@@ -186,7 +196,13 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "inactive" || key === "table" || key === "json" || key === "follow") {
+    if (
+      key === "inactive" ||
+      key === "table" ||
+      key === "json" ||
+      key === "follow" ||
+      key === "preserve-cadence"
+    ) {
       options[key] = "1";
       continue;
     }
@@ -433,6 +449,7 @@ Heartbeats:
   npm run cli -- heartbeats pause <id>
   npm run cli -- heartbeats resume <id>
   npm run cli -- heartbeats run-now <id>
+  npm run cli -- heartbeats run-now <id> --preserve-cadence
   npm run cli -- heartbeats tick <id>
   npm run cli -- heartbeats runs <id> --table
 

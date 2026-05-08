@@ -11,8 +11,12 @@ export class HeartbeatExecutor {
     private readonly runtime: RuntimeManager,
   ) {}
 
-  async execute(heartbeat: HeartbeatRow): Promise<HeartbeatRunRow> {
+  async execute(
+    heartbeat: HeartbeatRow,
+    options: { reschedule?: boolean } = {},
+  ): Promise<HeartbeatRunRow> {
     let promptSnapshot = "";
+    const reschedule = options.reschedule ?? true;
     await this.db.createEvent({
       heartbeatId: heartbeat.id,
       sessionId: heartbeat.session_id,
@@ -37,6 +41,7 @@ export class HeartbeatExecutor {
         promptSnapshot,
         output,
         error: null,
+        reschedule,
       });
     } catch (error) {
       if (!promptSnapshot) promptSnapshot = buildPrompt(heartbeat, "");
@@ -45,6 +50,7 @@ export class HeartbeatExecutor {
         promptSnapshot,
         output: null,
         error: error instanceof Error ? error.message : String(error),
+        reschedule,
       });
     }
   }
@@ -56,6 +62,7 @@ export class HeartbeatExecutor {
       promptSnapshot: string;
       output: string | null;
       error: string | null;
+      reschedule: boolean;
     },
   ): Promise<HeartbeatRunRow> {
     const run = await this.db.createRun({
@@ -68,7 +75,7 @@ export class HeartbeatExecutor {
       output: result.output,
       error: result.error,
     });
-    await this.db.tickHeartbeat(heartbeat.id);
+    if (result.reschedule) await this.db.tickHeartbeat(heartbeat.id);
     await this.db.createEvent({
       heartbeatId: heartbeat.id,
       runId: run.id,
@@ -86,8 +93,10 @@ export class HeartbeatExecutor {
       runId: run.id,
       sessionId: heartbeat.session_id,
       source: "executor",
-      type: "heartbeat_rescheduled",
-      message: "Heartbeat tick advanced after run",
+      type: result.reschedule ? "heartbeat_rescheduled" : "heartbeat_schedule_preserved",
+      message: result.reschedule
+        ? "Heartbeat tick advanced after run"
+        : "Manual run completed without changing heartbeat schedule",
     });
     return run;
   }

@@ -45,8 +45,6 @@ Open policy decisions:
 
 - Whether interactive CLI messages should share the same session as scheduler
   heartbeats by default.
-- Whether `run-now` should use scheduler semantics, interactive semantics, or a
-  separate manual-run mode.
 - Whether pausing/deactivating an active heartbeat should allow the in-flight
   run to finish, cancel it, or finish but avoid rescheduling from stale state.
 
@@ -70,6 +68,9 @@ Implemented:
 - `npm run cli -- heartbeats ...`
   - Lists, creates, patches, pauses, resumes, runs now, ticks, and inspects
     heartbeat runs.
+- `npm run cli -- heartbeats run-now <id> --preserve-cadence`
+  - Executes immediately without advancing `last_tick` or `next_tick`.
+  - Plain `run-now` keeps scheduler semantics and advances cadence.
 - `--table` output for status, sessions, heartbeats, runs, and events.
   - JSON remains the default for scripts; table mode is for terminal operators.
 
@@ -153,7 +154,7 @@ Human checks:
    - Later replace the simple readline TUI with a richer curses-style interface
      only after the control API stabilizes.
 3. Heartbeat action hardening.
-   - Add optional `run-now` behavior that does not perturb cadence.
+   - Optional `run-now` behavior that does not perturb cadence is implemented.
    - Add reset or compact actions once the runtime policy is clearer.
 4. SQL-first control plane.
    - Move interactive sends into task rows.
