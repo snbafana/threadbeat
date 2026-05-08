@@ -192,6 +192,8 @@ Recommendation:
 
 Goal: introduce the abstraction needed for Modal and multi-agent execution, without changing the product surface yet.
 
+Architecture note: see `docs/v0.5-runtime-abstraction.md`.
+
 Ships:
 
 - `tasks` table for work requested by heartbeats.
