@@ -8,6 +8,7 @@ import { HeartbeatExecutor } from "./executor.js";
 import { RuntimeMessageBus, type RuntimeMessageEvent } from "./messageBus.js";
 import { PiSharedSessionRuntime, type RuntimeLifecycleEvent } from "./piRuntime.js";
 import { Scheduler } from "./scheduler.js";
+import { nowIso } from "./time.js";
 import type { Settings } from "./config.js";
 import {
   parseContentsPath,
@@ -311,22 +312,45 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       reply.raw.write(`${JSON.stringify(payload)}\n`);
     };
 
-    const startedAt = new Date().toISOString();
-    messageBus.publish({ type: "message_started", messageId, input: message, startedAt });
+    const startedAt = nowIso();
+    messageBus.publish({
+      type: "message_started",
+      messageId,
+      input: message,
+      startedAt,
+      source: "interactive",
+    });
     write({ type: "start", messageId, memoryMode, runtime: runtime.status() });
     try {
       const text = await runtime.streamMessage(message, (delta) => {
-        const event = { type: "message_delta" as const, messageId, text: delta };
+        const event = {
+          type: "message_delta" as const,
+          messageId,
+          text: delta,
+          source: "interactive" as const,
+        };
         messageBus.publish(event);
         write({ type: "delta", messageId, text: delta });
       }, memoryMode);
-      const completedAt = new Date().toISOString();
-      messageBus.publish({ type: "message_done", messageId, text, completedAt });
+      const completedAt = nowIso();
+      messageBus.publish({
+        type: "message_done",
+        messageId,
+        text,
+        completedAt,
+        source: "interactive",
+      });
       write({ type: "done", messageId, text, runtime: runtime.status() });
     } catch (error) {
-      const completedAt = new Date().toISOString();
+      const completedAt = nowIso();
       const errorMessage = messageOf(error);
-      messageBus.publish({ type: "message_error", messageId, error: errorMessage, completedAt });
+      messageBus.publish({
+        type: "message_error",
+        messageId,
+        error: errorMessage,
+        completedAt,
+        source: "interactive",
+      });
       write({ type: "error", messageId, error: errorMessage, runtime: runtime.status() });
     } finally {
       reply.raw.end();

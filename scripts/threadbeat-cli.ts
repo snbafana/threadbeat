@@ -285,9 +285,19 @@ async function requestJson(method: string, path: string, payload?: unknown): Pro
     headers: payload === undefined ? undefined : { "content-type": "application/json" },
     body: payload === undefined ? undefined : JSON.stringify(payload),
   });
-  const body = await response.json() as { ok?: boolean; error?: string };
+  const body = await parseJsonResponse(response);
   if (!response.ok || body.ok === false) throw new Error(body.error ?? `${method} ${path} failed`);
   return body;
+}
+
+async function parseJsonResponse(response: Response): Promise<{ ok?: boolean; error?: string }> {
+  const text = await response.text();
+  if (!text.trim()) return {};
+  try {
+    return JSON.parse(text) as { ok?: boolean; error?: string };
+  } catch {
+    return { ok: response.ok, error: text };
+  }
 }
 
 async function printQueryResult(path: string, options: Record<string, string>, tableKind: TableKind): Promise<void> {

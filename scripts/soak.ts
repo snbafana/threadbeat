@@ -5,19 +5,7 @@ import path from "node:path";
 
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
-
-const intEnv = (name: string, fallback: number): number => {
-  const value = process.env[name];
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const boolEnv = (name: string, fallback: boolean): boolean => {
-  const value = process.env[name];
-  if (value === undefined) return fallback;
-  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
-};
+import { boolEnv, intEnv } from "../src/env.js";
 
 const projectRoot = path.resolve(".");
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-soak-"));

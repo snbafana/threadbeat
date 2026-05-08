@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
+import { boolEnv, intEnv } from "../src/env.js";
 
 type ApiResponse<T> = {
   statusCode: number;
@@ -18,19 +19,6 @@ type HttpMethod = "GET" | "POST" | "PATCH";
 type ApiClient = {
   request<T>(method: HttpMethod, url: string, payload?: Record<string, unknown>): Promise<ApiResponse<T>>;
   close(): Promise<void>;
-};
-
-const intEnv = (name: string, fallback: number): number => {
-  const value = process.env[name];
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const boolEnv = (name: string, fallback: boolean): boolean => {
-  const value = process.env[name];
-  if (value === undefined) return fallback;
-  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 };
 
 const baseUrl = process.env.THREADBEAT_BASE_URL;

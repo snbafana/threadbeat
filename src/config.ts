@@ -2,20 +2,9 @@ import "dotenv/config";
 
 import path from "node:path";
 
+import { boolEnv, intEnv } from "./env.js";
+
 const projectRoot = process.cwd();
-
-const boolEnv = (name: string, fallback = false): boolean => {
-  const value = process.env[name];
-  if (value === undefined) return fallback;
-  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
-};
-
-const intEnv = (name: string, fallback: number): number => {
-  const value = process.env[name];
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
-};
 
 export type Settings = {
   projectRoot: string;

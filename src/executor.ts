@@ -20,15 +20,7 @@ export class HeartbeatExecutor {
     let promptSnapshot = "";
     const reschedule = options.reschedule ?? true;
     const messageId = heartbeatMessageId(heartbeat.id);
-    this.publishRuntimeMessage?.({
-      type: "message_started",
-      messageId,
-      input: `heartbeat: ${heartbeat.title} (${heartbeat.id})`,
-      startedAt: nowIso(),
-      source: "heartbeat",
-      heartbeatId: heartbeat.id,
-      title: heartbeat.title,
-    });
+    this.publishHeartbeatStarted(heartbeat, messageId);
     await this.db.createEvent({
       heartbeatId: heartbeat.id,
       sessionId: heartbeat.session_id,
@@ -48,21 +40,7 @@ export class HeartbeatExecutor {
       });
       promptSnapshot = buildPrompt(heartbeat, markdown);
       const output = await this.runtime.run(promptSnapshot, heartbeat.id);
-      this.publishRuntimeMessage?.({
-        type: "message_delta",
-        messageId,
-        text: output,
-        source: "heartbeat",
-        heartbeatId: heartbeat.id,
-      });
-      this.publishRuntimeMessage?.({
-        type: "message_done",
-        messageId,
-        text: output,
-        completedAt: nowIso(),
-        source: "heartbeat",
-        heartbeatId: heartbeat.id,
-      });
+      this.publishHeartbeatSucceeded(heartbeat, messageId, output);
       return await this.finish(heartbeat, {
         status: "succeeded",
         promptSnapshot,
@@ -72,14 +50,7 @@ export class HeartbeatExecutor {
       });
     } catch (error) {
       if (!promptSnapshot) promptSnapshot = buildPrompt(heartbeat, "");
-      this.publishRuntimeMessage?.({
-        type: "message_error",
-        messageId,
-        error: error instanceof Error ? error.message : String(error),
-        completedAt: nowIso(),
-        source: "heartbeat",
-        heartbeatId: heartbeat.id,
-      });
+      this.publishHeartbeatFailed(heartbeat, messageId, error);
       return this.finish(heartbeat, {
         status: "failed",
         promptSnapshot,
@@ -134,6 +105,55 @@ export class HeartbeatExecutor {
         : "Manual run completed without changing heartbeat schedule",
     });
     return run;
+  }
+
+  private publishHeartbeatStarted(heartbeat: HeartbeatRow, messageId: string): void {
+    this.publishRuntimeMessage?.({
+      type: "message_started",
+      messageId,
+      input: `heartbeat: ${heartbeat.title} (${heartbeat.id})`,
+      startedAt: nowIso(),
+      source: "heartbeat",
+      heartbeatId: heartbeat.id,
+      title: heartbeat.title,
+    });
+  }
+
+  private publishHeartbeatSucceeded(
+    heartbeat: HeartbeatRow,
+    messageId: string,
+    output: string,
+  ): void {
+    this.publishRuntimeMessage?.({
+      type: "message_delta",
+      messageId,
+      text: output,
+      source: "heartbeat",
+      heartbeatId: heartbeat.id,
+    });
+    this.publishRuntimeMessage?.({
+      type: "message_done",
+      messageId,
+      text: output,
+      completedAt: nowIso(),
+      source: "heartbeat",
+      heartbeatId: heartbeat.id,
+    });
+  }
+
+  private publishHeartbeatFailed(
+    heartbeat: HeartbeatRow,
+    messageId: string,
+    error: unknown,
+  ): void {
+    this.publishRuntimeMessage?.({
+      type: "message_error",
+      messageId,
+      error: error instanceof Error ? error.message : String(error),
+      completedAt: nowIso(),
+      source: "heartbeat",
+      heartbeatId: heartbeat.id,
+    });
   }
 }
 
