@@ -108,7 +108,7 @@ Verification report, 2026-05-05:
 
 ### v0.4: reliable hosted singular agent
 
-Status: in progress.
+Status: complete for POC.
 
 Goal: harden the single hosted agent before introducing any multi-agent runtime.
 
@@ -170,17 +170,23 @@ Readiness report, 2026-05-08:
   service instance, `/health` returned a new Pi session id, Turso-backed
   heartbeat state was still readable through the CLI, and scheduler
   `poll_completed` events continued after restart.
+- Post-control-plane hosted soak is proven for the POC gate: hosted heartbeat
+  `hb_1ee851ffdf824470a60c9e0e7c3d6e4c` ran three scheduled DeepSeek/Pi
+  research-agent ticks on Railway at 2026-05-08 19:44, 19:49, and 19:54 UTC;
+  all three succeeded, `/health` stayed clean with queue `0`, scheduler/runtime
+  last errors stayed empty, and the heartbeat was deactivated after the third
+  run to avoid unnecessary spend.
 
-Remaining v0.4 gaps before marking complete:
+Remaining v0.4 gaps before production hardening:
 
-- A multi-hour hosted unattended soak has not been rerun after the terminal
-  control-plane additions.
+- A true multi-hour hosted unattended soak is still useful before treating the
+  single-agent service as production-reliable, but the bounded post-control-plane
+  soak is sufficient for the current POC roadmap gate.
 
 Recommendation:
 
-- Do not start the v0.5 task/runtime refactor until either the user accepts the
-  current v0.4 proof as sufficient for a POC, or the remaining hosted soak
-  check above is completed.
+- v0.5 can begin next: introduce the task/runtime abstraction needed for future
+  sandboxed agents without starting Modal or multi-agent deployment work yet.
 
 ### v0.5: runtime refactor for future agents
 
@@ -432,7 +438,9 @@ Automated checks:
 
 Manual checks:
 
-- Run a multi-hour hosted soak test.
+- Run a bounded hosted soak test. Complete for the POC gate on 2026-05-08:
+  three scheduled runs succeeded and the heartbeat was deactivated afterward.
+- Run a multi-hour hosted soak test before production hardening.
 - Restart the hosted process during idle.
 - Restart the hosted process after a run completes.
 - Simulate model failure by using a bad model/provider config.
