@@ -146,6 +146,40 @@ Done when:
 - Restarting the server preserves schedule state and resumes cleanly.
 - The SQL log can explain every heartbeat run without reading process logs.
 
+Readiness report, 2026-05-08:
+
+- Operator surface is working: hosted CLI `send`, `listen`, `status`, `reset`,
+  `sessions`, `heartbeats`, `runs`, and `events` commands all target the
+  Railway service without starting local Pi.
+- Multi-terminal behavior is proven: two hosted listeners observed the same
+  server-side Pi message stream while a separate terminal sent a prompt.
+- Shared memory behavior is proven: the hosted Pi session recalled prior
+  interactive markers across separate CLI sends.
+- Stateless interactive mode is proven: `send --stateless` did not see a marker
+  stored in the shared hosted session.
+- Heartbeat operator controls are working: pause/resume/run-now/deactivate were
+  verified locally and against Railway.
+- `run-now --preserve-cadence` is working: a hosted live run succeeded without
+  moving `next_tick`, and emitted `heartbeat_schedule_preserved`.
+- CLI inspection is usable: `--table` and bounded `--follow --count` checks work
+  against hosted Turso state.
+- Current hosted runtime is healthy: latest check showed `pi-sdk` running,
+  active run empty, queue `0`, and no last error.
+- All throwaway hosted test heartbeats are inactive after verification.
+
+Remaining v0.4 gaps before marking complete:
+
+- A multi-hour hosted unattended soak has not been rerun after the terminal
+  control-plane additions.
+- Restart-resume is mostly implied by Railway/Turso persistence but should get
+  one explicit restart check before v0.4 is marked complete.
+
+Recommendation:
+
+- Do not start the v0.5 task/runtime refactor until either the user accepts the
+  current v0.4 proof as sufficient for a POC, or the two remaining checks above
+  are completed.
+
 ### v0.5: runtime refactor for future agents
 
 Goal: introduce the abstraction needed for Modal and multi-agent execution, without changing the product surface yet.
