@@ -45,8 +45,8 @@ Open policy decisions:
 
 - Whether interactive CLI messages should share the same session as scheduler
   heartbeats by default.
-- Whether pausing/deactivating an active heartbeat should allow the in-flight
-  run to finish, cancel it, or finish but avoid rescheduling from stale state.
+- Whether in-flight heartbeat cancellation is needed later. v0.4 deliberately
+  does not cancel active Pi calls.
 
 ## Current v0.4 slice
 
@@ -71,6 +71,13 @@ Implemented:
 - `npm run cli -- heartbeats run-now <id> --preserve-cadence`
   - Executes immediately without advancing `last_tick` or `next_tick`.
   - Plain `run-now` keeps scheduler semantics and advances cadence.
+- Pause/deactivate semantics:
+  - `pause` and `deactivate` prevent future scheduler claims by setting status
+    inactive and clearing `next_tick`.
+  - They do not cancel an in-flight Pi run in v0.4.
+  - If a run is already active, it finishes under the snapshot that was claimed.
+  - The SQL event log records either `heartbeat_rescheduled` or
+    `heartbeat_schedule_preserved` for the completed run.
 - `--table` output for status, sessions, heartbeats, runs, and events.
   - JSON remains the default for scripts; table mode is for terminal operators.
 
@@ -155,6 +162,7 @@ Human checks:
      only after the control API stabilizes.
 3. Heartbeat action hardening.
    - Optional `run-now` behavior that does not perturb cadence is implemented.
+   - Pause/deactivate in-flight behavior is documented as finish-current-run.
    - Add reset or compact actions once the runtime policy is clearer.
 4. SQL-first control plane.
    - Move interactive sends into task rows.

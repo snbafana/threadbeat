@@ -134,6 +134,9 @@ bounded checks.
 By default, `run-now` uses scheduler semantics and advances `last_tick` and
 `next_tick`. Add `--preserve-cadence` to run immediately without changing the
 existing schedule.
+`pause` and `deactivate` stop future scheduler claims but do not cancel an
+already-active Pi run in v0.4; active runs finish and are visible through
+`runs` and `events`.
 
 See `TUI_CONTROL_PLANE_PLAN.md` for the staged terminal control-plane plan.
 

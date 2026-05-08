@@ -127,6 +127,9 @@ Ships:
 - Run locking so one hosted process cannot overlap a heartbeat with itself.
 - Clear failure policy for model errors, missing markdown, and timed-out runs.
 - Minimal operator surface for inspecting the single agent and recent heartbeat history.
+- Explicit v0.4 operator semantics: pause/deactivate stop future claims but do
+  not cancel an already-active Pi run; manual `run-now --preserve-cadence`
+  executes without moving `last_tick` or `next_tick`.
 
 Does not ship:
 
