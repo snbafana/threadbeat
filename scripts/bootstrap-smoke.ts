@@ -3,19 +3,24 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import type { Settings } from "../src/config.js";
 import { Database } from "../src/db.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
 import { buildSandboxBootstrapCommands } from "../src/sandboxBootstrap.js";
 import { SandboxService } from "../src/sandboxService.js";
-import { scriptSettings } from "./settings-utils.js";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-bootstrap-smoke-"));
 
-const settings = scriptSettings({
+const settings: Settings = {
+  projectRoot: path.resolve("."),
+  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
+  host: "127.0.0.1",
+  port: 0,
+  modalMode: "dry-run",
   modalAppName: "threadbeat-bootstrap-smoke",
-  tempRoot,
-});
+  modalImage: "python:3.13-slim",
+};
 
 const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
 
