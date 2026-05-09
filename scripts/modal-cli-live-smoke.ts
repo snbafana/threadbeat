@@ -3,7 +3,7 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 
 import { buildServer } from "../src/server.js";
-import { cliJson, stopRunSandboxes, type CliAgentResponse, type CliCommandResponse } from "./cli-smoke-utils.js";
+import { cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
 import { skipUnlessModalCredentials } from "./script-auth-utils.js";
 import { printJson } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
@@ -24,7 +24,7 @@ try {
   await app.listen({ host: settings.host, port: settings.port });
   const baseUrl = scriptServerBaseUrl(settings.host, app.server.address());
 
-  const agent = await cliJson<CliAgentResponse>(baseUrl, [
+  const agent = await cliJson<{ agent: { id: string } }>(baseUrl, [
     "agents",
     "create",
     "--name",
@@ -35,7 +35,8 @@ try {
     "master",
   ]);
 
-  const stepped = await cliJson<CliCommandResponse & {
+  const stepped = await cliJson<{
+    result: { exitCode: number; stderr: string; stdout: string };
     status: { run: { id: string }; sandboxes: Array<{ state: string }> };
   }>(baseUrl, [
     "runs",

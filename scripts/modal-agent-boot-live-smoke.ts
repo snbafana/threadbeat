@@ -5,15 +5,7 @@ import assert from "node:assert/strict";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
-import {
-  cliJsonLarge as cliJson,
-  stopRunSandboxes,
-  type CliCommandResponse,
-  type CliMessagesResponse,
-  type CliRunResponse,
-  type CliSandboxResponse,
-  type CliStdoutCommandResponse,
-} from "./cli-smoke-utils.js";
+import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
 import { skipUnlessGitHubToken, skipUnlessModalCredentials } from "./script-auth-utils.js";
 import { printJson } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
@@ -80,7 +72,7 @@ try {
   assert.ok(initialized.initialized?.filesWritten.includes("AGENTS.md"));
   assert.ok(initialized.initialized?.filesWritten.includes(".pi/prompts/heartbeat.md"));
 
-  const planned = await cliJson<CliRunResponse>(baseUrl, [
+  const planned = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -90,14 +82,16 @@ try {
   ]);
   runId = planned.run.id;
 
-  await cliJson<CliSandboxResponse>(baseUrl, [
+  await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "runs",
     "sandbox",
     runId,
     "--bootstrap",
   ]);
 
-  const runtime = await cliJson<CliStdoutCommandResponse>(baseUrl, [
+  const runtime = await cliJson<{
+    result: { exitCode: number; stdout: string };
+  }>(baseUrl, [
     "runs",
     "check-runtime",
     runId,
@@ -105,7 +99,7 @@ try {
   assert.equal(runtime.result.exitCode, 0);
   assert.match(runtime.result.stdout, /agent runtime ready/);
 
-  const messages = await cliJson<CliMessagesResponse>(baseUrl, [
+  const messages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
     "messages",
     "list",
     "--run",
@@ -114,7 +108,9 @@ try {
   assert.ok(messages.messages.some((message) => message.type === "agent_runtime_check_completed"));
 
   if (!useRealPiImage) {
-    const booted = await cliJson<CliCommandResponse>(baseUrl, [
+    const booted = await cliJson<{
+      result: { exitCode: number; stderr: string; stdout: string };
+    }>(baseUrl, [
       "runs",
       "boot",
       runId,
@@ -124,7 +120,7 @@ try {
     assert.match(booted.result.stdout, /sandbox-pi/);
     assert.match(booted.result.stdout, /--mode json -p/);
 
-    const bootMessages = await cliJson<CliMessagesResponse>(baseUrl, [
+    const bootMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
       "messages",
       "list",
       "--run",
