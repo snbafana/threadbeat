@@ -121,7 +121,7 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
     repoId: string;
     token: string;
   }): Promise<HostedGitRepository> {
-    const ownerType = this.settings.githubOwnerType ?? "org";
+    const ownerType = await this.resolveOwnerType(input.owner, input.token);
     const endpoint = ownerType === "user"
       ? "https://api.github.com/user/repos"
       : `https://api.github.com/orgs/${encodeURIComponent(input.owner)}/repos`;
@@ -161,6 +161,26 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
         webUrl: repo.htmlUrl,
       },
     };
+  }
+
+  private async resolveOwnerType(owner: string, token: string): Promise<"org" | "user"> {
+    const configured = this.settings.githubOwnerType ?? "auto";
+    if (configured === "org" || configured === "user") return configured;
+    const response = await this.fetchImpl("https://api.github.com/user", {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "user-agent": "threadbeat",
+        "x-github-api-version": "2022-11-28",
+      },
+      method: "GET",
+    });
+    const body = await parseGitHubJson(response);
+    if (response.status !== 200) {
+      throw new Error(`GitHub owner auto-detect failed (${response.status}): ${githubErrorMessage(body)}`);
+    }
+    const login = githubLogin(body);
+    return login.toLowerCase() === owner.toLowerCase() ? "user" : "org";
   }
 }
 
@@ -233,6 +253,13 @@ const githubErrorMessage = (body: unknown): string => {
   if (!body || typeof body !== "object") return "unknown error";
   const message = (body as Record<string, unknown>).message;
   return typeof message === "string" ? message : "unknown error";
+};
+
+const githubLogin = (body: unknown): string => {
+  if (!body || typeof body !== "object") throw new Error("GitHub /user returned an invalid response");
+  const login = (body as Record<string, unknown>).login;
+  if (typeof login !== "string" || !login.trim()) throw new Error("GitHub /user returned an invalid response");
+  return login.trim();
 };
 
 const parseGitHubCreateRepoResponse = (body: unknown): { fullName: string; htmlUrl: string; name: string } => {

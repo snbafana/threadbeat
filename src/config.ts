@@ -5,7 +5,7 @@ import { intEnv, stringEnv } from "./env.js";
 
 export type ModalMode = "dry-run" | "live";
 export type HostedGitProviderSetting = "code-storage" | "github";
-export type GitHubOwnerType = "org" | "user";
+export type GitHubOwnerType = "auto" | "org" | "user";
 
 export type Settings = {
   projectRoot: string;
@@ -33,9 +33,9 @@ export const loadSettings = (): Settings => {
   if (hostedGitProvider !== "code-storage" && hostedGitProvider !== "github") {
     throw new Error("THREADBEAT_GIT_PROVIDER must be code-storage or github");
   }
-  const githubOwnerType = stringEnv("THREADBEAT_GITHUB_OWNER_TYPE", "org");
-  if (githubOwnerType !== "org" && githubOwnerType !== "user") {
-    throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be org or user");
+  const githubOwnerType = stringEnv("THREADBEAT_GITHUB_OWNER_TYPE", "auto");
+  if (githubOwnerType !== "auto" && githubOwnerType !== "org" && githubOwnerType !== "user") {
+    throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be auto, org, or user");
   }
 
   return {

@@ -85,8 +85,9 @@ validate the remote URL, API template init, or CLI template init, and delete the
 intentionally leave smoke repos behind for manual inspection. Without
 credentials it exits successfully with a skip message.
 
-For personal-account repos, set `THREADBEAT_GITHUB_OWNER_TYPE=user`; org repos
-use `THREADBEAT_GITHUB_OWNER_TYPE=org`.
+`THREADBEAT_GITHUB_OWNER_TYPE=auto` detects personal-account repos by comparing
+`THREADBEAT_GITHUB_OWNER` with the authenticated GitHub login. Use `user` or
+`org` only when you want to force a specific creation endpoint.
 
 To use live Code.Storage repo creation, set:
 

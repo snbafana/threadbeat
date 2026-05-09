@@ -12,7 +12,7 @@ import type { Settings } from "../src/config.js";
 
 const execFileAsync = promisify(execFile);
 const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
-const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "org");
+const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
 const githubToken = await resolveGitHubToken();
 
 if (!githubOwner || !githubToken) {
@@ -90,9 +90,9 @@ console.log(JSON.stringify({
   repoPath,
 }, null, 2));
 
-function parseGitHubOwnerType(value: string): "org" | "user" {
-  if (value === "org" || value === "user") return value;
-  throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be org or user");
+function parseGitHubOwnerType(value: string): "auto" | "org" | "user" {
+  if (value === "auto" || value === "org" || value === "user") return value;
+  throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be auto, org, or user");
 }
 
 function githubHeaders(token: string): Record<string, string> {

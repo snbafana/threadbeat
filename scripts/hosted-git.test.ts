@@ -109,6 +109,7 @@ let now = 0;
 const liveFetchCalls: Array<{ body: unknown; headers: Record<string, string>; method: string; url: string }> = [];
 const liveProvider = new GitHubHostedGitProvider({
   ...githubSettings,
+  githubOwnerType: "org",
   githubToken: "token",
 }, new RateLimitGuard(() => now), async (url, init) => {
   liveFetchCalls.push({
@@ -146,6 +147,72 @@ assert.deepEqual(liveFetchCalls[0]?.body, {
 assert.equal(liveFetchCalls[0]?.headers.authorization, "Bearer token");
 assert.equal(liveFetchCalls[0]?.method, "POST");
 assert.equal(liveFetchCalls[0]?.url, "https://api.github.com/orgs/threadbeat-test/repos");
+
+const autoUserFetchCalls: Array<{ url: string }> = [];
+const autoUserProvider = new GitHubHostedGitProvider({
+  ...githubSettings,
+  githubOwner: "threadbeat-test",
+  githubOwnerType: "auto",
+  githubToken: "token",
+}, new RateLimitGuard(() => 20_000), async (url) => {
+  autoUserFetchCalls.push({ url: String(url) });
+  if (String(url) === "https://api.github.com/user") {
+    return new Response(JSON.stringify({ login: "threadbeat-test" }), { status: 200 });
+  }
+  return new Response(JSON.stringify({
+    full_name: "threadbeat-test/auto-user-repo",
+    html_url: "https://github.com/threadbeat-test/auto-user-repo",
+    name: "auto-user-repo",
+  }), { status: 201 });
+});
+await autoUserProvider.createRepository({
+  agent: {
+    id: "agt_auto_user",
+    name: "GitHub Auto User Agent",
+    repo_url: "https://github.com/example/github-agent.git",
+    default_branch: "main",
+    current_ref: "main",
+  },
+  dryRun: false,
+  repoId: "auto-user-repo",
+});
+assert.deepEqual(autoUserFetchCalls.map((call) => call.url), [
+  "https://api.github.com/user",
+  "https://api.github.com/user/repos",
+]);
+
+const autoOrgFetchCalls: Array<{ url: string }> = [];
+const autoOrgProvider = new GitHubHostedGitProvider({
+  ...githubSettings,
+  githubOwner: "threadbeat-org",
+  githubOwnerType: "auto",
+  githubToken: "token",
+}, new RateLimitGuard(() => 30_000), async (url) => {
+  autoOrgFetchCalls.push({ url: String(url) });
+  if (String(url) === "https://api.github.com/user") {
+    return new Response(JSON.stringify({ login: "threadbeat-user" }), { status: 200 });
+  }
+  return new Response(JSON.stringify({
+    full_name: "threadbeat-org/auto-org-repo",
+    html_url: "https://github.com/threadbeat-org/auto-org-repo",
+    name: "auto-org-repo",
+  }), { status: 201 });
+});
+await autoOrgProvider.createRepository({
+  agent: {
+    id: "agt_auto_org",
+    name: "GitHub Auto Org Agent",
+    repo_url: "https://github.com/example/github-agent.git",
+    default_branch: "main",
+    current_ref: "main",
+  },
+  dryRun: false,
+  repoId: "auto-org-repo",
+});
+assert.deepEqual(autoOrgFetchCalls.map((call) => call.url), [
+  "https://api.github.com/user",
+  "https://api.github.com/orgs/threadbeat-org/repos",
+]);
 
 await assert.rejects(
   () => liveProvider.createRepository({
