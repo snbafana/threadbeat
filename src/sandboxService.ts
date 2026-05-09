@@ -25,6 +25,12 @@ type SandboxBootstrapOptions = {
   repoUrlRedacted?: string;
 };
 
+export type SandboxFinalizeResult = {
+  commitSha: string;
+  results: Array<SandboxExecResult & { command: string[] }>;
+  statusText: string;
+};
+
 export class SandboxService {
   constructor(
     private readonly db: Database,
@@ -175,6 +181,66 @@ export class SandboxService {
     }
   }
 
+  async finalizeRunBranch(
+    sandbox: SandboxRow,
+    input: { commitMessage: string },
+  ): Promise<{ sandbox: SandboxRow; result: SandboxFinalizeResult }> {
+    const commitMessage = requireNonEmpty(input.commitMessage, "commitMessage");
+    const commands = [
+      ["git", "status", "--short"],
+      ["git", "add", "-A"],
+      [
+        "sh",
+        "-lc",
+        `git diff --cached --quiet || git commit -m ${shellQuote(commitMessage)}`,
+      ],
+      ["git", "push", "origin", `HEAD:${sandbox.branch}`],
+      ["git", "rev-parse", "HEAD"],
+    ];
+
+    await this.message({
+      agentId: sandbox.agent_id,
+      sandboxId: sandbox.id,
+      runId: sandbox.run_id,
+      source: "server",
+      type: "run_finalize_started",
+      text: `Finalizing run branch ${sandbox.branch}`,
+      data: { branch: sandbox.branch, commitMessage, workdir: sandbox.workdir },
+    });
+
+    const results = [];
+    for (const command of commands) {
+      const { result } = await this.exec(sandbox, command, { cwd: sandbox.workdir });
+      results.push({ command, ...result });
+      if (result.exitCode !== 0) {
+        await this.message({
+          agentId: sandbox.agent_id,
+          sandboxId: sandbox.id,
+          runId: sandbox.run_id,
+          source: "sandbox",
+          type: "run_finalize_failed",
+          text: result.stderr || result.stdout || `exit ${result.exitCode}`,
+          data: { command, result },
+        });
+        throw new Error(`run finalize command failed (${result.exitCode}): ${command.join(" ")}`);
+      }
+    }
+
+    const commitSha = requireCommitSha(results.at(-1)?.stdout.trim() ?? "");
+    const statusText = results[0]?.stdout ?? "";
+    const finalizeResult = { commitSha, results, statusText };
+    await this.message({
+      agentId: sandbox.agent_id,
+      sandboxId: sandbox.id,
+      runId: sandbox.run_id,
+      source: "sandbox",
+      type: "run_finalize_completed",
+      text: `Finalized run branch ${sandbox.branch} at ${commitSha}`,
+      data: finalizeResult,
+    });
+    return { sandbox, result: finalizeResult };
+  }
+
   async stop(sandbox: SandboxRow): Promise<SandboxRow> {
     if (sandbox.provider_sandbox_id && sandbox.state === "running") {
       await this.provider.stop(sandbox.provider_sandbox_id);
@@ -207,6 +273,18 @@ export class SandboxService {
 }
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const requireNonEmpty = (value: string, field: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) throw new Error(`${field} must be a non-empty string`);
+  return trimmed;
+};
+
+const requireCommitSha = (value: string): string => {
+  const trimmed = value.trim();
+  if (!/^[a-f0-9]{40}$/i.test(trimmed)) throw new Error(`invalid result commit sha: ${trimmed}`);
+  return trimmed;
+};
 
 const commandInCwd = (command: string[], cwd: string): string[] => [
   "sh",

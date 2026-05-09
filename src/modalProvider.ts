@@ -27,6 +27,13 @@ class DryRunSandboxProvider implements SandboxProvider {
   }
 
   async exec(_providerSandboxId: string, command: string[]): Promise<SandboxExecResult> {
+    if (command.join(" ").includes("git rev-parse HEAD")) {
+      return {
+        stdout: "0123456789abcdef0123456789abcdef01234567\n",
+        stderr: "",
+        exitCode: 0,
+      };
+    }
     return {
       stdout: `[dry-run] ${command.join(" ")}\n`,
       stderr: "",

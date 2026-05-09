@@ -235,6 +235,30 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/runs/:id/finalize", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const run = await db.getAgentRun(id);
+      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      const body = requestBody(request.body);
+      const commitMessage =
+        parseOptionalString(body.commitMessage ?? body.commit_message)
+        ?? `Finalize ${run.kind} ${run.id}`;
+      const finalized = await sandboxService.finalizeRunBranch(sandbox, { commitMessage });
+      const completed = await db.updateAgentRunCompleted({
+        id: run.id,
+        resultCommit: finalized.result.commitSha,
+        resultSummary: finalized.result.statusText.trim() || "No worktree changes reported before finalize",
+        status: "completed",
+      });
+      return { ok: true, run: completed, ...finalized };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   const resolveCloneUrl = async (
     agentId: string,
     baseRef: string,

@@ -250,6 +250,17 @@ try {
   ]);
   assert.match(cliRunExec.result.stdout, /\/workspace\/agent/);
 
+  const cliRunFinalize = await cliJson<{ run: { result_commit: string; status: string }; result: { commitSha: string } }>(baseUrl, [
+    "runs",
+    "finalize",
+    cliRunPlan.run.id,
+    "--message",
+    "Finalize smoke run",
+  ]);
+  assert.equal(cliRunFinalize.run.status, "completed");
+  assert.equal(cliRunFinalize.run.result_commit, cliRunFinalize.result.commitSha);
+  assert.match(cliRunFinalize.result.commitSha, /^[a-f0-9]{40}$/);
+
   const cliRunSandboxes = await cliJson<{ sandboxes: unknown[] }>(baseUrl, [
     "sandboxes",
     "list",

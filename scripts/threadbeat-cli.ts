@@ -223,6 +223,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     return;
   }
+  if (subcommandName === "finalize") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs finalize requires a run id");
+    const options = parseOptions(optionArgs);
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/finalize`, {
+      ...(option(options, "message", "commit-message") ? { commitMessage: option(options, "message", "commit-message") } : {}),
+    }));
+    return;
+  }
   throw new Error(`unknown runs command: ${subcommandName}`);
 }
 
@@ -367,6 +376,7 @@ Commands:
   runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
   runs sandbox <run_id> [--bootstrap]
   runs exec <run_id> [--cwd /workspace/agent] -- <command>
+  runs finalize <run_id> [--message "Finalize run"]
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>] [--run <run_id>]
   sandboxes get <sandbox_id>
