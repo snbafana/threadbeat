@@ -33,6 +33,13 @@ export const deleteGitHubRepo = async (token: string, repoPath: string): Promise
   assert.equal(response.status, 204, `GitHub smoke repo delete failed (${response.status}): ${await response.text()}`);
 };
 
+export const githubRepoPath = (namespace: string, repoId: string): string =>
+  `${namespace}/${repoId}`;
+
+export const deleteGitHubRepoIfCreated = async (token: string, repoPath: string | undefined): Promise<void> => {
+  if (repoPath) await deleteGitHubRepo(token, repoPath);
+};
+
 export const getGitHubFile = async (token: string, repoPath: string, filePath: string): Promise<string> => {
   const response = await fetch(`https://api.github.com/repos/${repoPath}/contents/${filePath}`, {
     headers: githubHeaders(token),
