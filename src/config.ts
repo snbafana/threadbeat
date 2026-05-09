@@ -18,6 +18,8 @@ export type Settings = {
   modalImage: string;
   modalInstallSandboxPi?: boolean;
   modalImageCommands?: string[];
+  sandboxEnv?: Record<string, string>;
+  sandboxEnvNames?: string[];
   agentPiCommand?: string;
   hostedGitProvider?: HostedGitProviderSetting;
   githubOwner?: string;
@@ -47,6 +49,8 @@ export const loadSettings = (): Settings => {
     installSandboxPi: modalInstallSandboxPi,
     extraCommands: linesEnv("THREADBEAT_MODAL_IMAGE_COMMANDS"),
   });
+  const sandboxEnvNames = listEnv("THREADBEAT_SANDBOX_ENV_ALLOWLIST");
+  const sandboxEnv = collectAllowedEnv(sandboxEnvNames, process.env);
 
   return {
     projectRoot,
@@ -61,6 +65,8 @@ export const loadSettings = (): Settings => {
     modalImage: stringEnv("THREADBEAT_MODAL_IMAGE", "python:3.13-slim"),
     modalInstallSandboxPi,
     modalImageCommands,
+    sandboxEnv,
+    sandboxEnvNames,
     agentPiCommand: stringEnv("THREADBEAT_AGENT_PI_COMMAND", "pi"),
     hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
@@ -79,3 +85,16 @@ const linesEnv = (name: string): string[] =>
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+
+const listEnv = (name: string): string[] =>
+  (process.env[name] ?? "")
+    .split(/[\s,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+const collectAllowedEnv = (names: string[], source: NodeJS.ProcessEnv): Record<string, string> =>
+  Object.fromEntries(names.flatMap((name) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`Invalid sandbox env name: ${name}`);
+    const value = source[name];
+    return value === undefined ? [] : [[name, value]];
+  }));

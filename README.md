@@ -47,6 +47,16 @@ the repo-local `.pi/prompts/heartbeat.md`, and pipes both into Pi with
 agent runs still require sandbox-side provider auth such as API-key environment
 variables or a Pi auth file.
 
+To pass model-provider credentials into agent sandboxes, opt in by name:
+
+```bash
+THREADBEAT_SANDBOX_ENV_ALLOWLIST=OPENAI_API_KEY,ANTHROPIC_API_KEY
+```
+
+Only listed variables that are present in the server environment are injected
+into Modal sandboxes. This is intentionally separate from server-side Pi and
+avoids copying the whole server environment into agent compute.
+
 To verify live Modal credentials:
 
 ```bash

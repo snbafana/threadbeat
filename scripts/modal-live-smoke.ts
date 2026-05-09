@@ -25,6 +25,10 @@ const settings: Settings = {
   modalMode: "live",
   modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-live-smoke",
   modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  sandboxEnv: {
+    THREADBEAT_SANDBOX_ENV_SMOKE: "present",
+  },
+  sandboxEnvNames: ["THREADBEAT_SANDBOX_ENV_SMOKE"],
 };
 
 const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
@@ -44,6 +48,9 @@ try {
   const { result } = await service.exec(sandbox, ["python", "--version"]);
   assert.equal(result.exitCode, 0);
   assert.match(`${result.stdout}${result.stderr}`, /Python/);
+  const envCheck = await service.exec(sandbox, ["bash", "-lc", "printf \"$THREADBEAT_SANDBOX_ENV_SMOKE\""]);
+  assert.equal(envCheck.result.exitCode, 0);
+  assert.equal(envCheck.result.stdout, "present");
   const stopped = await service.stop(sandbox);
   assert.equal(stopped.state, "stopped");
 

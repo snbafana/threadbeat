@@ -54,6 +54,7 @@ class ModalSandboxProvider implements SandboxProvider {
     const { modal, app, image } = await this.modalResources();
     const sandbox = await modal.sandboxes.create(app, image, {
       command: ["sleep", "86400"],
+      env: this.settings.sandboxEnv,
       name: input.sandboxName,
     });
     return { providerSandboxId: sandbox.sandboxId as string };
