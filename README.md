@@ -41,13 +41,13 @@ THREADBEAT_GIT_PROVIDER=code-storage
 # or
 THREADBEAT_GIT_PROVIDER=github
 THREADBEAT_GITHUB_OWNER=your-org
+THREADBEAT_GITHUB_OWNER_TYPE=org
 THREADBEAT_GITHUB_TOKEN=...
 ```
 
-`github` currently supports dry-run repository planning only; live creation is
-kept disabled until the GitHub App/PAT flow and rate-limit handling are explicit.
-The point of the boundary is to add live GitHub, Gitea, or GitLab without
-changing run planning or sandbox startup.
+`github` supports dry-run repository planning and live private repo creation
+when `THREADBEAT_GITHUB_TOKEN` is present. `THREADBEAT_GITHUB_OWNER_TYPE=user`
+switches creation from `/orgs/:owner/repos` to `/user/repos`.
 
 GitHub live creation is guarded before the network call. The initial policy is
 conservative: one create per owner per 10 seconds and six creates per owner per

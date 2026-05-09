@@ -5,6 +5,7 @@ import { intEnv, stringEnv } from "./env.js";
 
 export type ModalMode = "dry-run" | "live";
 export type HostedGitProviderSetting = "code-storage" | "github";
+export type GitHubOwnerType = "org" | "user";
 
 export type Settings = {
   projectRoot: string;
@@ -16,6 +17,7 @@ export type Settings = {
   modalImage: string;
   hostedGitProvider?: HostedGitProviderSetting;
   githubOwner?: string;
+  githubOwnerType?: GitHubOwnerType;
   githubToken?: string;
   codeStorageName?: string;
   codeStoragePrivateKey?: string;
@@ -31,6 +33,10 @@ export const loadSettings = (): Settings => {
   if (hostedGitProvider !== "code-storage" && hostedGitProvider !== "github") {
     throw new Error("THREADBEAT_GIT_PROVIDER must be code-storage or github");
   }
+  const githubOwnerType = stringEnv("THREADBEAT_GITHUB_OWNER_TYPE", "org");
+  if (githubOwnerType !== "org" && githubOwnerType !== "user") {
+    throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be org or user");
+  }
 
   return {
     projectRoot,
@@ -45,6 +51,7 @@ export const loadSettings = (): Settings => {
     modalImage: stringEnv("THREADBEAT_MODAL_IMAGE", "python:3.13-slim"),
     hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
+    githubOwnerType,
     githubToken: process.env.THREADBEAT_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN,
     codeStorageName: process.env.CODE_STORAGE_NAME ?? process.env.PIERRE_CODE_STORAGE_NAME,
     codeStoragePrivateKey:

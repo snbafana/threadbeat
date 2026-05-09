@@ -90,25 +90,46 @@ assert.deepEqual(githubRepo, {
 });
 
 let now = 0;
+const liveFetchCalls: Array<{ body: unknown; headers: Record<string, string>; method: string; url: string }> = [];
 const liveProvider = new GitHubHostedGitProvider({
   ...githubSettings,
   githubToken: "token",
-}, new RateLimitGuard(() => now));
+}, new RateLimitGuard(() => now), async (url, init) => {
+  liveFetchCalls.push({
+    body: JSON.parse(String(init?.body)),
+    headers: init?.headers as Record<string, string>,
+    method: init?.method ?? "GET",
+    url: String(url),
+  });
+  return new Response(JSON.stringify({
+    full_name: "threadbeat-test/github-agent-live-store",
+    html_url: "https://github.com/threadbeat-test/github-agent-live-store",
+    name: "github-agent-live-store",
+  }), { status: 201 });
+});
 
-await assert.rejects(
-  () => liveProvider.createRepository({
-    agent: {
-      id: "agt_github_live",
-      name: "GitHub Live Agent",
-      repo_url: "https://github.com/example/github-agent.git",
-      default_branch: "main",
-      current_ref: "main",
-    },
-    dryRun: false,
-    repoId: "github-agent-live-store",
-  }),
-  /live GitHub hosted Git creation is not implemented yet/,
-);
+const liveRepo = await liveProvider.createRepository({
+  agent: {
+    id: "agt_github_live",
+    name: "GitHub Live Agent",
+    repo_url: "https://github.com/example/github-agent.git",
+    default_branch: "main",
+    current_ref: "main",
+  },
+  dryRun: false,
+  repoId: "github-agent-live-store",
+});
+assert.equal(liveRepo.live, true);
+assert.equal(liveRepo.remoteUrlRedacted, "https://x-access-token:REDACTED@github.com/threadbeat-test/github-agent-live-store.git");
+assert.equal(liveFetchCalls.length, 1);
+assert.deepEqual(liveFetchCalls[0]?.body, {
+  auto_init: false,
+  name: "github-agent-live-store",
+  private: true,
+});
+assert.equal(liveFetchCalls[0]?.headers.authorization, "Bearer token");
+assert.equal(liveFetchCalls[0]?.method, "POST");
+assert.equal(liveFetchCalls[0]?.url, "https://api.github.com/orgs/threadbeat-test/repos");
 
 await assert.rejects(
   () => liveProvider.createRepository({
@@ -126,19 +147,17 @@ await assert.rejects(
 );
 
 now = 10_000;
-await assert.rejects(
-  () => liveProvider.createRepository({
-    agent: {
-      id: "agt_github_live_3",
-      name: "GitHub Live Agent 3",
-      repo_url: "https://github.com/example/github-agent.git",
-      default_branch: "main",
-      current_ref: "main",
-    },
-    dryRun: false,
-    repoId: "github-agent-live-store-3",
-  }),
-  /live GitHub hosted Git creation is not implemented yet/,
-);
+const thirdRepo = await liveProvider.createRepository({
+  agent: {
+    id: "agt_github_live_3",
+    name: "GitHub Live Agent 3",
+    repo_url: "https://github.com/example/github-agent.git",
+    default_branch: "main",
+    current_ref: "main",
+  },
+  dryRun: false,
+  repoId: "github-agent-live-store-3",
+});
+assert.equal(thirdRepo.live, true);
 
 console.log("hosted git tests passed");
