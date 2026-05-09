@@ -3,16 +3,18 @@ import "dotenv/config";
 import assert from "node:assert/strict";
 import path from "node:path";
 
+import { hasModalCredentials } from "../src/auth.js";
 import { Database } from "../src/db.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
 import { SandboxService } from "../src/sandboxService.js";
-import { skipUnlessModalCredentials } from "./script-auth-utils.js";
-import { printJson } from "./script-output-utils.js";
+import { printJson, skipSmoke } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 
-skipUnlessModalCredentials("Modal Pi image live smoke");
+if (!hasModalCredentials(process.env)) {
+  skipSmoke("Modal Pi image live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
+}
 
 const tempRoot = await createScriptTempRoot("threadbeat-modal-pi-image-live-smoke");
 const settings = scriptSettings({

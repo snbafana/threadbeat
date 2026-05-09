@@ -2,12 +2,12 @@ import "dotenv/config";
 
 import assert from "node:assert/strict";
 
+import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
-import { skipUnlessGitHubToken, skipUnlessModalCredentials } from "./script-auth-utils.js";
-import { printJson } from "./script-output-utils.js";
+import { printJson, skipSmoke, skipUnless } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -20,8 +20,11 @@ const githubOwner = DEFAULT_GITHUB_OWNER;
 const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
 
-skipUnlessModalCredentials("Modal agent boot live smoke");
-skipUnlessGitHubToken(githubToken, "Modal agent boot live smoke");
+if (!hasModalCredentials(process.env)) {
+  skipSmoke("Modal agent boot live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
+}
+
+skipUnless(githubToken, "Modal agent boot live smoke skipped: gh auth token is not available");
 
 await assertCanCleanUpSmokeRepo(githubToken, "Modal agent boot live smoke");
 
