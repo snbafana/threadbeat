@@ -241,6 +241,15 @@ try {
   ]);
   assert.ok(cliRunBootstrapMessages.messages.some((message) => message.type === "bootstrap_completed"));
 
+  const cliRunExec = await cliJson<{ result: { stdout: string } }>(baseUrl, [
+    "runs",
+    "exec",
+    cliRunPlan.run.id,
+    "--",
+    "pwd",
+  ]);
+  assert.match(cliRunExec.result.stdout, /\/workspace\/agent/);
+
   const cliRunSandboxes = await cliJson<{ sandboxes: unknown[] }>(baseUrl, [
     "sandboxes",
     "list",

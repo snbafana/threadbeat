@@ -218,6 +218,23 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/runs/:id/exec", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const run = await db.getAgentRun(id);
+      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      const body = requestBody(request.body);
+      const command = parseCommand(body.command);
+      const cwd = parseOptionalString(body.cwd) ?? sandbox.workdir;
+      const result = await sandboxService.exec(sandbox, command, { cwd });
+      return { ok: true, run, ...result };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   const resolveCloneUrl = async (
     agentId: string,
     baseRef: string,

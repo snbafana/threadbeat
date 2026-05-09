@@ -14,6 +14,7 @@ type SandboxStartOptions = {
 };
 
 type SandboxExecOptions = {
+  cwd?: string;
   redact?: Record<string, string>;
 };
 
@@ -84,6 +85,7 @@ export class SandboxService {
     if (!sandbox.provider_sandbox_id) throw new Error("sandbox has no provider id");
     if (sandbox.state !== "running") throw new Error(`sandbox is not running: ${sandbox.state}`);
     const redact = createRedactor(options.redact);
+    const execCommand = options.cwd ? commandInCwd(command, options.cwd) : command;
 
     await this.message({
       agentId: sandbox.agent_id,
@@ -91,10 +93,10 @@ export class SandboxService {
       runId: sandbox.run_id,
       source: "server",
       type: "exec_started",
-      text: redact(command.join(" ")),
-      data: { command: command.map(redact) },
+      text: redact(execCommand.join(" ")),
+      data: { command: execCommand.map(redact), cwd: options.cwd ?? null },
     });
-    const result = await this.provider.exec(sandbox.provider_sandbox_id, command);
+    const result = await this.provider.exec(sandbox.provider_sandbox_id, execCommand);
     const redactedResult = {
       exitCode: result.exitCode,
       stderr: redact(result.stderr),
@@ -206,6 +208,14 @@ export class SandboxService {
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
+const commandInCwd = (command: string[], cwd: string): string[] => [
+  "sh",
+  "-lc",
+  `cd ${shellQuote(cwd)} && exec "$@"`,
+  "threadbeat-exec",
+  ...command,
+];
+
 const createRedactor = (replacements: Record<string, string> | undefined): ((value: string) => string) => {
   const entries = Object.entries(replacements ?? {}).filter(([from]) => from.length > 0);
   if (entries.length === 0) return (value) => value;
@@ -214,3 +224,5 @@ const createRedactor = (replacements: Record<string, string> | undefined): ((val
     value,
   );
 };
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;

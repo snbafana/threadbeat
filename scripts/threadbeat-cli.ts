@@ -208,6 +208,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     return;
   }
+  if (subcommandName === "exec") {
+    const [id, ...commandArgs] = args;
+    if (!id) throw new Error("runs exec requires a run id");
+    const separatorIndex = commandArgs.indexOf("--");
+    const optionArgs = separatorIndex >= 0 ? commandArgs.slice(0, separatorIndex) : [];
+    const rawCommandArgs = separatorIndex >= 0 ? commandArgs.slice(separatorIndex + 1) : commandArgs;
+    const options = parseOptions(optionArgs);
+    const command = rawCommandArgs.join(" ");
+    if (!command.trim()) throw new Error("runs exec requires a command");
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/exec`, {
+      command,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    }));
+    return;
+  }
   throw new Error(`unknown runs command: ${subcommandName}`);
 }
 
@@ -351,6 +366,7 @@ Commands:
   runs get <run_id>
   runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
   runs sandbox <run_id> [--bootstrap]
+  runs exec <run_id> [--cwd /workspace/agent] -- <command>
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>] [--run <run_id>]
   sandboxes get <sandbox_id>

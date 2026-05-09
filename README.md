@@ -97,6 +97,7 @@ npm run cli -- agents repo <agent_id>
 npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
 npm run cli -- runs list --agent <agent_id>
 npm run cli -- runs sandbox <run_id> [--bootstrap]
+npm run cli -- runs exec <run_id> -- "pwd"
 npm run cli -- code-storage create --agent <agent_id> --id <repo_id>
 npm run cli -- code-storage list
 npm run cli -- heartbeats list --agent <agent_id>
@@ -123,12 +124,15 @@ Run planning is intentionally server-side and Pi-free for now:
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts.
+- `POST /api/runs/:id/exec` runs a bounded command in the run sandbox, defaulting
+  to the bootstrapped repo workdir.
 
 Read-only API inspection routes:
 
 - `GET /api/agents/:id/runs`
 - `GET /api/runs/:id`
 - `POST /api/runs/:id/sandbox`
+- `POST /api/runs/:id/exec`
 - `GET /api/heartbeats?agentId=<agent_id>`
 - `GET /api/heartbeats/:id`
 - `POST /api/agents/:id/code-storage`
