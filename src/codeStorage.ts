@@ -2,6 +2,7 @@ import { getAgentRepositoryMetadata, type AgentRepositoryRecord } from "./agentR
 import { parseGitHubHttpsRepoUrl } from "./gitLinks.js";
 import { assertValidBranchName, toBranchSegment } from "./git.js";
 import type { Settings } from "./config.js";
+import type { BaseRepo, CreateRepoOptions } from "@pierre/storage";
 
 export type CodeStorageCreateInput = {
   agent: AgentRepositoryRecord;
@@ -58,11 +59,11 @@ export class CodeStorageService {
       name: organizationName,
       key: privateKey,
     });
-    const createOptions = {
+    const createOptions: CreateRepoOptions = {
       id: codeStorageRepoId,
-      ...(source ? { baseRepo: sourceToBaseRepo(source) } : {}),
+      ...(source ? { baseRepo: sourceToBaseRepo(source) } : { defaultBranch }),
     };
-    const repo = await (store as any).createRepo(createOptions);
+    const repo = await store.createRepo(createOptions);
     const remoteUrl = await getRemoteUrl(repo);
 
     return {
@@ -112,7 +113,7 @@ const requireOrganizationName = (value: string | undefined): string => {
   return value.trim();
 };
 
-const sourceToBaseRepo = (source: CodeStorageSource): Record<string, unknown> => ({
+const sourceToBaseRepo = (source: CodeStorageSource): BaseRepo => ({
   provider: source.provider,
   owner: source.owner,
   name: source.name,

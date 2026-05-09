@@ -12,6 +12,7 @@
     "start": "node dist/src/index.js",
     "typecheck": "tsc --noEmit",
     "test": "tsx scripts/git-planning.test.ts && tsx scripts/code-storage.test.ts && tsx scripts/bootstrap-smoke.ts && tsx scripts/smoke.ts",
+    "smoke:code-storage": "tsx scripts/code-storage-live-smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts"
   },
   "dependencies": {

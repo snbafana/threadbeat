@@ -44,6 +44,18 @@ CODE_STORAGE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----..."
 Without a private key, Code.Storage creation endpoints run in explicit dry-run
 mode and store only a redacted remote URL.
 
+To verify live Code.Storage credentials without printing secrets:
+
+```bash
+npm run smoke:code-storage
+```
+
+The smoke creates a real Code.Storage repo from `octocat/Hello-World` when
+credentials are present, validates the remote URL, and deletes the repo by
+default. Set `CODE_STORAGE_LIVE_SMOKE_KEEP=1` to leave the smoke repo behind for
+manual inspection. Without credentials it exits successfully with a skip
+message.
+
 ## CLI
 
 ```bash
