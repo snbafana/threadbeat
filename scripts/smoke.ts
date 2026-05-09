@@ -5,20 +5,15 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildServer } from "../src/server.js";
-import type { Settings } from "../src/config.js";
 import { cliJson, cliRaw } from "./cli-smoke-utils.js";
+import { scriptSettings } from "./settings-utils.js";
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-smoke-"));
 
-const settings: Settings = {
-  projectRoot: path.resolve("."),
-  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
-  host: "127.0.0.1",
-  port: 0,
-  modalMode: "dry-run",
+const settings = scriptSettings({
   modalAppName: "threadbeat-smoke",
-  modalImage: "python:3.13-slim",
-  githubOwner: "threadbeat-smoke",
-};
+  tempRoot,
+  overrides: { githubOwner: "threadbeat-smoke" },
+});
 
 const { app } = await buildServer(settings);
 

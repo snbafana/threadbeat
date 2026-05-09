@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { buildAgentTemplate } from "../src/agentTemplate.js";
 import { buildServer } from "../src/server.js";
-import type { Settings } from "../src/config.js";
+import { scriptSettings } from "./settings-utils.js";
 
 const template = buildAgentTemplate({
   name: "Research Agent",
@@ -38,16 +38,11 @@ assert.throws(
   /id must start/,
 );
 
-const settings: Settings = {
-  projectRoot: process.cwd(),
+const settings = scriptSettings({
   dbUrl: ":memory:",
-  host: "127.0.0.1",
-  port: 0,
-  modalMode: "dry-run",
   modalAppName: "threadbeat-agent-template-test",
-  modalImage: "python:3.13-slim",
-  githubOwner: "threadbeat-agent-template-test",
-};
+  overrides: { githubOwner: "threadbeat-agent-template-test" },
+});
 
 const { app } = await buildServer(settings);
 

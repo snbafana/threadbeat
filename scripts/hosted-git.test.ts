@@ -2,18 +2,12 @@ import assert from "node:assert/strict";
 
 import { GitHubHostedGitProvider, normalizeGitHubRepoName, redactHostedGitRemoteUrl } from "../src/hostedGit.js";
 import { RateLimitGuard } from "../src/rateLimit.js";
-import type { Settings } from "../src/config.js";
+import { scriptSettings } from "./settings-utils.js";
 
-const settings: Settings = {
-  projectRoot: process.cwd(),
-  dbUrl: "file::memory:",
-  host: "127.0.0.1",
-  port: 0,
-  modalMode: "dry-run",
+const settings = scriptSettings({
   modalAppName: "threadbeat-hosted-git-test",
-  modalImage: "python:3.13-slim",
-  githubOwner: "threadbeat-test",
-};
+  overrides: { githubOwner: "threadbeat-test" },
+});
 
 const githubProvider = new GitHubHostedGitProvider(settings);
 assert.equal(normalizeGitHubRepoName("Agent Store!!"), "agent-store");

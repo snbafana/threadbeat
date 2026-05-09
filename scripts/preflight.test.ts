@@ -1,27 +1,24 @@
 import assert from "node:assert/strict";
 
-import type { Settings } from "../src/config.js";
 import { buildPreflightReport } from "../src/preflight.js";
+import { scriptSettings } from "./settings-utils.js";
 
-const baseSettings: Settings = {
-  projectRoot: ".",
-  dbUrl: "file::memory:",
-  host: "127.0.0.1",
-  port: 0,
+const baseSettings = scriptSettings({
   modalMode: "live",
   modalAppName: "threadbeat-test",
-  modalImage: "python:3.13-slim",
-  modalInstallSandboxPi: true,
-  sandboxEnv: { DEEPSEEK_API_KEY: "sk-test" },
-  sandboxEnvNames: ["DEEPSEEK_API_KEY"],
-  sandboxExecTimeoutMs: 120_000,
-  agentBootTimeoutMs: 600_000,
-  agentPiProvider: "deepseek",
-  agentPiModel: "deepseek-v4-flash",
-  agentPiApiKeyEnv: "DEEPSEEK_API_KEY",
-  githubOwner: "snbafana",
-  githubToken: "ghp-test",
-};
+  overrides: {
+    modalInstallSandboxPi: true,
+    sandboxEnv: { DEEPSEEK_API_KEY: "sk-test" },
+    sandboxEnvNames: ["DEEPSEEK_API_KEY"],
+    sandboxExecTimeoutMs: 120_000,
+    agentBootTimeoutMs: 600_000,
+    agentPiProvider: "deepseek",
+    agentPiModel: "deepseek-v4-flash",
+    agentPiApiKeyEnv: "DEEPSEEK_API_KEY",
+    githubOwner: "snbafana",
+    githubToken: "ghp-test",
+  },
+});
 
 const originalEnv = { ...process.env };
 
