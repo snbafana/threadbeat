@@ -448,7 +448,25 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         data: plan,
       });
       const executed = await sandboxService.exec(sandbox, plan.command, { cwd: sandbox.workdir });
-      return { ok: true, run, plan, ...executed };
+      const failed = executed.result.exitCode !== 0;
+      const updatedRun = failed
+        ? await db.updateAgentRunFailed({
+          id: run.id,
+          resultSummary: executed.result.stderr || executed.result.stdout || `agent boot exited ${executed.result.exitCode}`,
+        })
+        : run;
+      await db.appendMessage({
+        agentId: run.agent_id,
+        sandboxId: sandbox.id,
+        runId: run.id,
+        source: "sandbox",
+        type: failed ? "agent_boot_failed" : "agent_boot_completed",
+        text: failed
+          ? `Sandbox Pi boot failed with exit ${executed.result.exitCode}`
+          : `Sandbox Pi boot completed with ${plan.promptPath}`,
+        data: { plan, result: executed.result },
+      });
+      return { ok: true, run: updatedRun, plan, ...executed };
     } catch (error) {
       if (runId) await markRunFailed(runId, error);
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -476,7 +494,25 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         data: plan,
       });
       const executed = await sandboxService.exec(sandbox, plan.command, { cwd: sandbox.workdir });
-      return { ok: true, run, plan, ...executed };
+      const failed = executed.result.exitCode !== 0;
+      const updatedRun = failed
+        ? await db.updateAgentRunFailed({
+          id: run.id,
+          resultSummary: executed.result.stderr || executed.result.stdout || `agent runtime check exited ${executed.result.exitCode}`,
+        })
+        : run;
+      await db.appendMessage({
+        agentId: run.agent_id,
+        sandboxId: sandbox.id,
+        runId: run.id,
+        source: "sandbox",
+        type: failed ? "agent_runtime_check_failed" : "agent_runtime_check_completed",
+        text: failed
+          ? `Sandbox agent runtime check failed with exit ${executed.result.exitCode}`
+          : `Sandbox agent runtime check completed with ${plan.piCommand}`,
+        data: { plan, result: executed.result },
+      });
+      return { ok: true, run: updatedRun, plan, ...executed };
     } catch (error) {
       if (runId) await markRunFailed(runId, error);
       return reply.code(400).send({ ok: false, error: messageOf(error) });

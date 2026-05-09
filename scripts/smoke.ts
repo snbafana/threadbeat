@@ -382,6 +382,15 @@ try {
   assert.equal(cliRuntimeCheck.result.exitCode, 0);
   assert.match(cliRuntimeCheck.result.stdout, /agent runtime ready/);
 
+  const cliAgentBootMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    cliRunPlan.run.id,
+  ]);
+  assert.ok(cliAgentBootMessages.messages.some((message) => message.type === "agent_boot_completed"));
+  assert.ok(cliAgentBootMessages.messages.some((message) => message.type === "agent_runtime_check_completed"));
+
   const cliRunFinalize = await cliJson<{ run: { result_commit: string; status: string }; result: { commitSha: string } }>(baseUrl, [
     "runs",
     "finalize",

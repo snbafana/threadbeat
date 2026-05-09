@@ -130,6 +130,15 @@ try {
   assert.match(booted.result.stdout, /--prompt-file \.pi\/prompts\/heartbeat\.md/);
   assert.match(booted.result.stdout, /--message-file tasks\/inbox\/run_/);
 
+  const messages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    runId,
+  ]);
+  assert.ok(messages.messages.some((message) => message.type === "agent_runtime_check_completed"));
+  assert.ok(messages.messages.some((message) => message.type === "agent_boot_completed"));
+
   const cleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
     "sandboxes",
     "stop-running",
