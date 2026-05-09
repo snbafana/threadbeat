@@ -1,13 +1,12 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
-import type { AddressInfo } from "node:net";
 
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
 import { printJson, skipUnless } from "./script-output-utils.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
+import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepoIfCreated,
@@ -41,8 +40,7 @@ let repoPath: string | undefined;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
-  const address = app.server.address() as AddressInfo;
-  const baseUrl = `http://${settings.host}:${address.port}`;
+  const baseUrl = scriptServerBaseUrl(settings.host, app.server.address());
 
   const initialized = await cliJson<{
     agent: { id: string; repo_url: string };

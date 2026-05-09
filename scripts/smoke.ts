@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import type { AddressInfo } from "node:net";
 
 import { buildServer } from "../src/server.js";
 import { cliJson, cliRaw } from "./cli-smoke-utils.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
+import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 const tempRoot = await createScriptTempRoot("threadbeat-smoke");
 
 const settings = scriptSettings({
@@ -16,8 +15,7 @@ const { app } = await buildServer(settings);
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
-  const address = app.server.address() as AddressInfo;
-  const baseUrl = `http://${settings.host}:${address.port}`;
+  const baseUrl = scriptServerBaseUrl(settings.host, app.server.address());
 
   const preflightResponse = await app.inject({
     method: "GET",

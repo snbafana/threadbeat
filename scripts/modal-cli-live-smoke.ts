@@ -1,13 +1,12 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
-import type { AddressInfo } from "node:net";
 
 import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
 import { printJson, skipSmoke } from "./script-output-utils.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
+import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 
 if (!hasModalCredentials(process.env)) {
   skipSmoke("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
@@ -25,8 +24,7 @@ let runId: string | undefined;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
-  const address = app.server.address() as AddressInfo;
-  const baseUrl = `http://${settings.host}:${address.port}`;
+  const baseUrl = scriptServerBaseUrl(settings.host, app.server.address());
 
   const agent = await cliJson<{ agent: { id: string } }>(baseUrl, [
     "agents",
@@ -69,10 +67,7 @@ try {
 } finally {
   if (runId) {
     try {
-      const address = app.server.address() as AddressInfo | null;
-      if (address) {
-        await stopRunSandboxes(`http://${settings.host}:${address.port}`, runId);
-      }
+      await stopRunSandboxes(scriptServerBaseUrl(settings.host, app.server.address()), runId);
     } catch {}
   }
   await app.close();

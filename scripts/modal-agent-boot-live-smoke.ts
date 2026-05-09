@@ -1,7 +1,6 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
-import type { AddressInfo } from "node:net";
 
 import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
@@ -9,7 +8,7 @@ import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.j
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
 import { printJson, skipSmoke, skipUnless } from "./script-output-utils.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
+import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepoIfCreated,
@@ -53,8 +52,7 @@ let runId: string | undefined;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
-  const address = app.server.address() as AddressInfo;
-  const baseUrl = `http://${settings.host}:${address.port}`;
+  const baseUrl = scriptServerBaseUrl(settings.host, app.server.address());
 
   const initialized = await cliJson<{
     agent: { id: string };
@@ -143,10 +141,7 @@ try {
 } finally {
   if (runId) {
     try {
-      const address = app.server.address() as AddressInfo | null;
-      if (address) {
-        await stopRunSandboxes(`http://${settings.host}:${address.port}`, runId);
-      }
+      await stopRunSandboxes(scriptServerBaseUrl(settings.host, app.server.address()), runId);
     } catch {}
   }
   await app.close();
