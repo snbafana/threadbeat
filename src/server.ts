@@ -1,5 +1,5 @@
 import path from "node:path";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 
 import { buildAgentBootPlan, buildAgentRuntimeCheckPlan } from "./agentBoot.js";
 import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
@@ -141,7 +141,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/agents/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const agent = await db.getAgent(id);
-    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    if (!agent) return notFound(reply, "agent");
     return { ok: true, agent };
   });
 
@@ -149,7 +149,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { id } = request.params as { id: string };
       const agent = await db.getAgent(id);
-      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      if (!agent) return notFound(reply, "agent");
       return { ok: true, repository: getAgentRepositoryMetadata(agent) };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -159,7 +159,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/agents/:id/hosted-git", async (request, reply) => {
     const { id } = request.params as { id: string };
     const agent = await db.getAgent(id);
-    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    if (!agent) return notFound(reply, "agent");
     return { ok: true, hostedGitRepo: await db.getHostedGitRepoForAgent(id) };
   });
 
@@ -171,7 +171,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/agents/:id/runs", async (request, reply) => {
     const { id } = request.params as { id: string };
     const agent = await db.getAgent(id);
-    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    if (!agent) return notFound(reply, "agent");
     return { ok: true, runs: await db.listAgentRuns(id) };
   });
 
@@ -179,7 +179,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { id } = request.params as { id: string };
       const agent = await db.getAgent(id);
-      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      if (!agent) return notFound(reply, "agent");
       const body = requestBody(request.body);
       const objective = parseString(body.objective, "objective");
       const inputRef = parseOptionalString(body.inputRef) ?? agent.current_ref;
@@ -212,7 +212,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/runs/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const run = await db.getAgentRun(id);
-    if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+    if (!run) return notFound(reply, "run");
     return { ok: true, run };
   });
 
@@ -220,7 +220,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     const { id } = request.params as { id: string };
     const query = request.query as Record<string, string | undefined>;
     const run = await db.getAgentRun(id);
-    if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+    if (!run) return notFound(reply, "run");
     const [sandboxes, messages] = await Promise.all([
       db.listSandboxes({ runId: run.id }),
       db.listMessages({ runId: run.id, limit: parseOptionalInteger(query.limit) ?? 20 }),
@@ -240,10 +240,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       runId = id;
       const body = requestBody(request.body);
       const run = await db.getAgentRun(id);
-      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (!run) return notFound(reply, "run");
       await db.markAgentRunRunning(run.id);
       const agent = await db.getAgent(run.agent_id);
-      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      if (!agent) return notFound(reply, "agent");
       const bootstrapRequested = parseBoolean(body.bootstrap, false);
       const existingSandbox = await getRunSandbox(run.id);
       if (existingSandbox) {
@@ -276,15 +276,15 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       runId = id;
       const body = requestBody(request.body);
       const run = await db.getAgentRun(id);
-      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (!run) return notFound(reply, "run");
       if (run.status === "completed" || run.status === "failed") {
         return reply.code(409).send({ ok: false, error: `run is already ${run.status}` });
       }
       const agent = await db.getAgent(run.agent_id);
-      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      if (!agent) return notFound(reply, "agent");
       const existingSandbox = await getRunSandbox(run.id);
       if (!existingSandbox) {
-        return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+        return notFound(reply, "run sandbox");
       }
       if (existingSandbox.state === "running") {
         return reply.code(409).send({ ok: false, error: "run sandbox is already running" });
@@ -315,10 +315,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { id } = request.params as { id: string };
       runId = id;
       const run = await db.getAgentRun(id);
-      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (!run) return notFound(reply, "run");
       await db.markAgentRunRunning(run.id);
       const sandbox = await getRunSandbox(run.id);
-      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      if (!sandbox) return notFound(reply, "run sandbox");
       const body = requestBody(request.body);
       const command = parseCommand(body.command);
       const cwd = parseOptionalString(body.cwd) ?? SANDBOX_WORKDIR;
@@ -337,10 +337,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { id } = request.params as { id: string };
       runId = id;
       const run = await db.getAgentRun(id);
-      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (!run) return notFound(reply, "run");
       await db.markAgentRunRunning(run.id);
       const sandbox = await getRunSandbox(run.id);
-      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      if (!sandbox) return notFound(reply, "run sandbox");
       const body = requestBody(request.body);
       const plan = buildAgentBootPlan({
         agentPiCommand: settings.agentPiCommand ?? "pi",
@@ -380,10 +380,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { id } = request.params as { id: string };
       runId = id;
       const run = await db.getAgentRun(id);
-      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (!run) return notFound(reply, "run");
       await db.markAgentRunRunning(run.id);
       const sandbox = await getRunSandbox(run.id);
-      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      if (!sandbox) return notFound(reply, "run sandbox");
       const plan = buildAgentRuntimeCheckPlan({
         agentPiCommand: settings.agentPiCommand,
         agentPiProvider: settings.agentPiProvider,
@@ -417,9 +417,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { id } = request.params as { id: string };
       runId = id;
       const run = await db.getAgentRun(id);
-      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (!run) return notFound(reply, "run");
       const sandbox = await getRunSandbox(run.id);
-      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      if (!sandbox) return notFound(reply, "run sandbox");
       const body = requestBody(request.body);
       const commitMessage =
         parseOptionalString(body.commitMessage)
@@ -444,7 +444,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { id } = request.params as { id: string };
       const run = await db.getAgentRun(id);
-      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (!run) return notFound(reply, "run");
       if (run.status === "completed" || run.status === "failed") {
         return reply.code(409).send({ ok: false, error: `run is already ${run.status}` });
       }
@@ -498,7 +498,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/heartbeats/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const heartbeat = await db.getHeartbeat(id);
-    if (!heartbeat) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
+    if (!heartbeat) return notFound(reply, "heartbeat");
     return { ok: true, heartbeat };
   });
 
@@ -507,7 +507,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const body = requestBody(request.body);
       const agentId = parseString(body.agentId, "agentId");
       const agent = await db.getAgent(agentId);
-      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      if (!agent) return notFound(reply, "agent");
       const heartbeat = await db.createHeartbeat({
         agentId,
         title: parseOptionalString(body.title) ?? "heartbeat",
@@ -538,10 +538,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         return reply.code(400).send({ ok: false, error: "agentId or runId is required" });
       }
       if (agentId && !(await db.getAgent(agentId))) {
-        return reply.code(404).send({ ok: false, error: "agent not found" });
+        return notFound(reply, "agent");
       }
       if (runId && !(await db.getAgentRun(runId))) {
-        return reply.code(404).send({ ok: false, error: "run not found" });
+        return notFound(reply, "run");
       }
       const sandboxes = await db.listSandboxes({ agentId, runId });
       const running = sandboxes.filter((sandbox) => sandbox.state === "running");
@@ -559,7 +559,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/sandboxes/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const sandbox = await db.getSandbox(id);
-    if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
+    if (!sandbox) return notFound(reply, "sandbox");
     return { ok: true, sandbox };
   });
 
@@ -567,7 +567,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { id } = request.params as { id: string };
       const agent = await db.getAgent(id);
-      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      if (!agent) return notFound(reply, "agent");
       const sandbox = await sandboxService.startForAgent(agent);
       return { ok: true, sandbox };
     } catch (error) {
@@ -579,7 +579,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { id } = request.params as { id: string };
       const sandbox = await db.getSandbox(id);
-      if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
+      if (!sandbox) return notFound(reply, "sandbox");
       const body = requestBody(request.body);
       const command = parseCommand(body.command);
       const timeoutMs = parseOptionalInteger(body.timeoutMs) ?? settings.sandboxExecTimeoutMs;
@@ -594,7 +594,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { id } = request.params as { id: string };
       const sandbox = await db.getSandbox(id);
-      if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
+      if (!sandbox) return notFound(reply, "sandbox");
       return { ok: true, bootstrap: await sandboxService.bootstrap(sandbox) };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -605,7 +605,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { id } = request.params as { id: string };
       const sandbox = await db.getSandbox(id);
-      if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
+      if (!sandbox) return notFound(reply, "sandbox");
       await sandboxService.stop(sandbox);
       return { ok: true };
     } catch (error) {
@@ -656,6 +656,9 @@ const requestBody = (body: unknown): Record<string, unknown> => {
   }
   return {};
 };
+
+const notFound = (reply: FastifyReply, resource: string) =>
+  reply.code(404).send({ ok: false, error: `${resource} not found` });
 
 const parseString = (value: unknown, field: string): string => {
   if (typeof value !== "string" || value.trim() === "") {
