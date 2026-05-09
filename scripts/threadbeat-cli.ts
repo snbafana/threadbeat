@@ -217,6 +217,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     return;
   }
+  if (subcommandName === "restart-sandbox") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs restart-sandbox requires a run id");
+    const options = parseOptions(optionArgs);
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/restart-sandbox`, {
+      bootstrap: options.bootstrap === "1",
+    }));
+    return;
+  }
   if (subcommandName === "exec") {
     const [id, ...commandArgs] = args;
     if (!id) throw new Error("runs exec requires a run id");
@@ -391,6 +400,7 @@ Commands:
   runs status <run_id> [--limit 20]
   runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
   runs sandbox <run_id> [--bootstrap]
+  runs restart-sandbox <run_id> [--bootstrap]
   runs exec <run_id> [--cwd /workspace/agent] -- <command>
   runs finalize <run_id> [--message "Finalize run"]
   runs stop <run_id>

@@ -36,6 +36,7 @@ The branch is pushed to origin and was clean at this handoff.
 Latest commits:
 
 ```text
+pending next commit: Add explicit run sandbox restart
 688c993 Reuse running sandboxes for runs
 3305bad Add run status inspection endpoint
 d2b7d2b Add run stop lifecycle endpoint
@@ -179,7 +180,8 @@ Run lifecycle:
 Run sandbox behavior:
 
 - `POST /api/runs/:id/sandbox` now reuses an existing running sandbox for the run and returns `existing: true`.
-- If the run sandbox is already stopped or failed, it returns `409` until an explicit restart path is added.
+- If the run sandbox is already stopped or failed, `POST /api/runs/:id/sandbox` returns `409`.
+- `POST /api/runs/:id/restart-sandbox` starts a fresh sandbox for a stopped or failed run sandbox and preserves the old sandbox record.
 - This prevents accidental duplicate sandboxes for the same run.
 
 Run status:
@@ -204,28 +206,21 @@ git diff --check
 
 Good next small durable slices:
 
-1. Add explicit run sandbox restart:
-   - `POST /api/runs/:id/restart-sandbox`
-   - Requires stopped/failed sandbox.
-   - Starts a fresh sandbox for the same run branch.
-   - Emits restart messages.
-   - Be careful not to destroy old sandbox records.
-
-2. Add a combined `runs step` CLI:
+1. Add a combined `runs step` CLI:
    - Optionally plan/start/bootstrap/exec/finalize in one command.
    - Keep it CLI-side orchestration over existing server APIs.
    - Do not introduce Pi yet.
 
-3. Add run-level cleanup:
+2. Add run-level cleanup:
    - Stop all running sandboxes for a run or agent.
    - Useful before live Modal usage to avoid leaked long-running sandboxes.
 
-4. Add live Modal verification when credentials are available:
+3. Add live Modal verification when credentials are available:
    - Run `npm run smoke:modal`.
    - Fix any real Modal SDK issues.
    - Only then tell the user Modal sandbox implementation is done.
 
-5. Add an agent template phase:
+4. Add an agent template phase:
    - Generate a Pi-native repo skeleton with `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, `work/`.
    - Keep server Pi separate from sandbox Pi.
    - This should probably be a new phase after sandbox lifecycle is stable.

@@ -162,6 +162,19 @@ export class Database {
     return this.mustGetAgentRun(id);
   }
 
+  async updateAgentRunRestarted(id: string): Promise<AgentRunRow> {
+    await this.client.execute({
+      sql: `
+        UPDATE agent_runs
+        SET status = 'running', result_summary = NULL, completed_at = NULL,
+            started_at = COALESCE(started_at, ?), updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [nowIso(), id],
+    });
+    return this.mustGetAgentRun(id);
+  }
+
   async updateAgentRunCompleted(input: {
     id: string;
     status: string;
@@ -381,7 +394,7 @@ export class Database {
                started_at, stopped_at, created_at, updated_at
         FROM sandboxes
         ${where}
-        ORDER BY created_at DESC
+        ORDER BY started_at DESC, created_at DESC
       `,
       args,
     );

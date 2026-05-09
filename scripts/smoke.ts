@@ -142,6 +142,35 @@ try {
   assert.equal(restartStoppedRunSandboxResponse.statusCode, 409);
   assert.match(restartStoppedRunSandboxResponse.body, /already stopped/);
 
+  const runSandboxRestartResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${runPlanBody.run.id}/restart-sandbox`,
+  });
+  assert.equal(runSandboxRestartResponse.statusCode, 200);
+  const runSandboxRestartBody = JSON.parse(runSandboxRestartResponse.body) as {
+    previousSandbox: { id: string };
+    run: { status: string };
+    sandbox: { id: string; run_id: string | null; state: string };
+  };
+  assert.equal(runSandboxRestartBody.run.status, "running");
+  assert.equal(runSandboxRestartBody.previousSandbox.id, runSandboxBody.sandbox.id);
+  assert.notEqual(runSandboxRestartBody.sandbox.id, runSandboxBody.sandbox.id);
+  assert.equal(runSandboxRestartBody.sandbox.run_id, runPlanBody.run.id);
+  assert.equal(runSandboxRestartBody.sandbox.state, "running");
+
+  const runningRunSandboxRestartResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${runPlanBody.run.id}/restart-sandbox`,
+  });
+  assert.equal(runningRunSandboxRestartResponse.statusCode, 409);
+  assert.match(runningRunSandboxRestartResponse.body, /already running/);
+
+  const restartedRunSandboxStopResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${runPlanBody.run.id}/stop`,
+  });
+  assert.equal(restartedRunSandboxStopResponse.statusCode, 200);
+
   const heartbeatResponse = await app.inject({
     method: "POST",
     url: "/api/heartbeats",
@@ -348,6 +377,42 @@ try {
   ]);
   assert.equal(cliStoppedRun.run.status, "stopped");
   assert.match(cliStoppedRun.run.result_summary, /before sandbox start/);
+
+  const cliRestartPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli restarted run",
+  ]);
+  const cliRestartInitialSandbox = await cliJson<{ sandbox: { id: string } }>(baseUrl, [
+    "runs",
+    "sandbox",
+    cliRestartPlan.run.id,
+  ]);
+  await cliJson<{ run: { status: string } }>(baseUrl, [
+    "runs",
+    "stop",
+    cliRestartPlan.run.id,
+  ]);
+  const cliRestartedSandbox = await cliJson<{
+    previousSandbox: { id: string };
+    run: { status: string };
+    sandbox: { id: string };
+  }>(baseUrl, [
+    "runs",
+    "restart-sandbox",
+    cliRestartPlan.run.id,
+  ]);
+  assert.equal(cliRestartedSandbox.run.status, "running");
+  assert.equal(cliRestartedSandbox.previousSandbox.id, cliRestartInitialSandbox.sandbox.id);
+  assert.notEqual(cliRestartedSandbox.sandbox.id, cliRestartInitialSandbox.sandbox.id);
+  await cliJson<{ run: { status: string } }>(baseUrl, [
+    "runs",
+    "stop",
+    cliRestartPlan.run.id,
+  ]);
 
   await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",

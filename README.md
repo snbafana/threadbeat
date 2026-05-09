@@ -107,6 +107,7 @@ npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
 npm run cli -- runs list --agent <agent_id>
 npm run cli -- runs status <run_id>
 npm run cli -- runs sandbox <run_id> [--bootstrap]
+npm run cli -- runs restart-sandbox <run_id> [--bootstrap]
 npm run cli -- runs exec <run_id> -- "pwd"
 npm run cli -- runs finalize <run_id> --message "Finalize run"
 npm run cli -- runs stop <run_id>
@@ -138,8 +139,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts. Repeated calls return
-  the existing running sandbox; stopped or failed run sandboxes require a future
-  explicit restart path.
+  the existing running sandbox.
+- `POST /api/runs/:id/restart-sandbox` starts a fresh sandbox for a stopped or
+  failed run sandbox while preserving the old sandbox record.
 - `POST /api/runs/:id/exec` runs a bounded command in the run sandbox, defaulting
   to the bootstrapped repo workdir.
 - `POST /api/runs/:id/finalize` commits sandbox worktree changes, pushes the run
@@ -153,6 +155,7 @@ Read-only API inspection routes:
 - `GET /api/runs/:id`
 - `GET /api/runs/:id/status`
 - `POST /api/runs/:id/sandbox`
+- `POST /api/runs/:id/restart-sandbox`
 - `POST /api/runs/:id/exec`
 - `POST /api/runs/:id/finalize`
 - `POST /api/runs/:id/stop`

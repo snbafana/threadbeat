@@ -257,6 +257,61 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/runs/:id/restart-sandbox", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const body = requestBody(request.body);
+      const run = await db.getAgentRun(id);
+      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (run.status === "completed" || run.status === "failed") {
+        return reply.code(409).send({ ok: false, error: `run is already ${run.status}` });
+      }
+      const agent = await db.getAgent(run.agent_id);
+      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      const [existingSandbox] = await db.listSandboxes({ runId: run.id });
+      if (!existingSandbox) {
+        return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      }
+      if (existingSandbox.state === "running") {
+        return reply.code(409).send({ ok: false, error: "run sandbox is already running" });
+      }
+      if (existingSandbox.state !== "stopped" && existingSandbox.state !== "failed") {
+        return reply.code(409).send({
+          ok: false,
+          error: `run sandbox cannot restart from ${existingSandbox.state}`,
+        });
+      }
+      const restartedRun = await db.updateAgentRunRestarted(run.id);
+      const sandbox = await sandboxService.startForAgent(agent, {
+        branch: run.run_branch,
+        runId: run.id,
+      });
+      await db.appendMessage({
+        agentId: run.agent_id,
+        sandboxId: sandbox.id,
+        runId: run.id,
+        source: "server",
+        type: "agent_run_sandbox_restarted",
+        text: `Restarted run sandbox ${sandbox.id}`,
+        data: { previousSandbox: existingSandbox, sandbox },
+      });
+      if (!parseBoolean(body.bootstrap, false)) {
+        return { ok: true, run: restartedRun, sandbox, previousSandbox: existingSandbox };
+      }
+      const cloneUrl = await resolveCloneUrl(agent.id, run.input_ref);
+      const bootstrap = await sandboxService.bootstrap(sandbox, cloneUrl);
+      return {
+        ok: true,
+        run: restartedRun,
+        sandbox: bootstrap.sandbox,
+        previousSandbox: existingSandbox,
+        bootstrap,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/runs/:id/exec", async (request, reply) => {
     let runId: string | undefined;
     try {
