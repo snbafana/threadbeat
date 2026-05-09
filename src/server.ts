@@ -228,6 +228,21 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       await db.updateAgentRunStarted(run.id);
       const agent = await db.getAgent(run.agent_id);
       if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      const [existingSandbox] = await db.listSandboxes({ runId: run.id });
+      if (existingSandbox) {
+        if (existingSandbox.state !== "running") {
+          return reply.code(409).send({
+            ok: false,
+            error: `run sandbox is already ${existingSandbox.state}`,
+          });
+        }
+        if (!parseBoolean(body.bootstrap, false)) {
+          return { ok: true, run, sandbox: existingSandbox, existing: true };
+        }
+        const cloneUrl = await resolveCloneUrl(agent.id, run.input_ref);
+        const bootstrap = await sandboxService.bootstrap(existingSandbox, cloneUrl);
+        return { ok: true, run, sandbox: bootstrap.sandbox, bootstrap, existing: true };
+      }
       const sandbox = await sandboxService.startForAgent(agent, {
         branch: run.run_branch,
         runId: run.id,

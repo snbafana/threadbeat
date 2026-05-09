@@ -137,7 +137,9 @@ Run planning is intentionally server-side and Pi-free for now:
   latest messages.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
-  checkout the repo immediately after the sandbox starts.
+  checkout the repo immediately after the sandbox starts. Repeated calls return
+  the existing running sandbox; stopped or failed run sandboxes require a future
+  explicit restart path.
 - `POST /api/runs/:id/exec` runs a bounded command in the run sandbox, defaulting
   to the bootstrapped repo workdir.
 - `POST /api/runs/:id/finalize` commits sandbox worktree changes, pushes the run

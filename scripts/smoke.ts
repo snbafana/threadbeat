@@ -85,6 +85,18 @@ try {
   assert.equal(runSandboxBody.sandbox.run_id, runPlanBody.run.id);
   assert.equal(runSandboxBody.sandbox.state, "running");
 
+  const duplicateRunSandboxResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${runPlanBody.run.id}/sandbox`,
+  });
+  assert.equal(duplicateRunSandboxResponse.statusCode, 200);
+  const duplicateRunSandboxBody = JSON.parse(duplicateRunSandboxResponse.body) as {
+    existing: boolean;
+    sandbox: { id: string };
+  };
+  assert.equal(duplicateRunSandboxBody.existing, true);
+  assert.equal(duplicateRunSandboxBody.sandbox.id, runSandboxBody.sandbox.id);
+
   const runSandboxListResponse = await app.inject({
     method: "GET",
     url: `/api/sandboxes?run_id=${runPlanBody.run.id}`,
@@ -122,6 +134,13 @@ try {
   });
   assert.equal(stoppedRunResponse.statusCode, 200);
   assert.match(stoppedRunResponse.body, /"status":"stopped"/);
+
+  const restartStoppedRunSandboxResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${runPlanBody.run.id}/sandbox`,
+  });
+  assert.equal(restartStoppedRunSandboxResponse.statusCode, 409);
+  assert.match(restartStoppedRunSandboxResponse.body, /already stopped/);
 
   const heartbeatResponse = await app.inject({
     method: "POST",
