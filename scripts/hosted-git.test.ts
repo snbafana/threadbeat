@@ -46,6 +46,14 @@ assert.deepEqual(repo, {
     provider: "github",
   },
 });
+const codeStorageClone = await provider.getCloneUrl({
+  namespace: "threadbeat-test",
+  repoId: "hosted-git-store",
+});
+assert.deepEqual(codeStorageClone, {
+  remoteUrl: "https://t:DRY_RUN_TOKEN@threadbeat-test.code.storage/hosted-git-store.git",
+  remoteUrlRedacted: "https://t:REDACTED@threadbeat-test.code.storage/hosted-git-store.git",
+});
 
 const githubSettings: Settings = {
   ...settings,
@@ -87,6 +95,14 @@ assert.deepEqual(githubRepo, {
     repo: "github-agent-store",
     webUrl: "https://github.com/threadbeat-test/github-agent-store",
   },
+});
+const githubClone = await githubProvider.getCloneUrl({
+  namespace: "threadbeat-test",
+  repoId: "github-agent-store",
+});
+assert.deepEqual(githubClone, {
+  remoteUrl: "https://x-access-token:DRY_RUN_TOKEN@github.com/threadbeat-test/github-agent-store.git",
+  remoteUrlRedacted: "https://x-access-token:REDACTED@github.com/threadbeat-test/github-agent-store.git",
 });
 
 let now = 0;

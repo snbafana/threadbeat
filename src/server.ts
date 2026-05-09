@@ -210,12 +210,26 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         runId: run.id,
       });
       if (!parseBoolean(body.bootstrap, false)) return { ok: true, run, sandbox };
-      const bootstrap = await sandboxService.bootstrap(sandbox);
+      const cloneUrl = await resolveCloneUrl(agent.id);
+      const bootstrap = await sandboxService.bootstrap(sandbox, cloneUrl);
       return { ok: true, run, sandbox: bootstrap.sandbox, bootstrap };
     } catch (error) {
       return reply.code(500).send({ ok: false, error: messageOf(error) });
     }
   });
+
+  const resolveCloneUrl = async (agentId: string): Promise<{ repoUrl?: string; repoUrlRedacted?: string }> => {
+    const repo = await db.getCodeStorageRepoForAgent(agentId);
+    if (!repo) return {};
+    const cloneUrl = await hostedGit.getCloneUrl({
+      namespace: repo.organization_name,
+      repoId: repo.code_storage_repo_id,
+    });
+    return {
+      repoUrl: cloneUrl.remoteUrl,
+      repoUrlRedacted: cloneUrl.remoteUrlRedacted,
+    };
+  };
 
   app.get("/api/heartbeats", async (request) => {
     const query = request.query as Record<string, string | undefined>;

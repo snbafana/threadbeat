@@ -52,6 +52,17 @@ try {
   assert.ok(messages.some((message) => message.type === "bootstrap_started"));
   assert.ok(messages.some((message) => message.type === "bootstrap_completed"));
   assert.ok(messages.some((message) => message.type === "exec_completed" && message.text?.includes("git clone")));
+
+  const secretSandbox = await service.startForAgent(agent);
+  await service.bootstrap(secretSandbox, {
+    repoUrl: "https://t:SECRET@example.test/private-agent.git",
+    repoUrlRedacted: "https://t:REDACTED@example.test/private-agent.git",
+  });
+  const secretMessages = await db.listMessages({ sandboxId: secretSandbox.id, limit: 100 });
+  assert.ok(secretMessages.some((message) => message.type === "exec_started" && message.text?.includes("REDACTED")));
+  assert.ok(secretMessages.some((message) => message.type === "exec_completed" && message.text?.includes("REDACTED")));
+  assert.ok(secretMessages.every((message) => !message.text?.includes("SECRET")));
+  assert.ok(secretMessages.every((message) => !message.data_json?.includes("SECRET")));
 } finally {
   await db.close();
   await fs.rm(tempRoot, { recursive: true, force: true });

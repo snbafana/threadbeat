@@ -14,6 +14,16 @@ export type HostedGitCreateInput = {
   repoId?: string;
 };
 
+export type HostedGitCloneInput = {
+  namespace: string;
+  repoId: string;
+};
+
+export type HostedGitCloneUrl = {
+  remoteUrl: string;
+  remoteUrlRedacted: string;
+};
+
 export type HostedGitRepository = {
   defaultBranch: string;
   live: boolean;
@@ -28,6 +38,7 @@ export type HostedGitRepository = {
 export interface HostedGitProvider {
   readonly name: HostedGitProviderName;
   createRepository(input: HostedGitCreateInput): Promise<HostedGitRepository>;
+  getCloneUrl(input: HostedGitCloneInput): Promise<HostedGitCloneUrl>;
 }
 
 export class CodeStorageHostedGitProvider implements HostedGitProvider {
@@ -40,6 +51,14 @@ export class CodeStorageHostedGitProvider implements HostedGitProvider {
 
   async createRepository(input: HostedGitCreateInput): Promise<HostedGitRepository> {
     return fromCodeStorage(await this.codeStorage.createRepository(input));
+  }
+
+  async getCloneUrl(input: HostedGitCloneInput): Promise<HostedGitCloneUrl> {
+    const remoteUrl = await this.codeStorage.getRepositoryRemoteUrl(input.repoId);
+    return {
+      remoteUrl,
+      remoteUrlRedacted: redactHostedGitRemoteUrl(remoteUrl) ?? remoteUrl,
+    };
   }
 }
 
@@ -85,6 +104,17 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
     };
   }
 
+  async getCloneUrl(input: HostedGitCloneInput): Promise<HostedGitCloneUrl> {
+    const owner = requireGitHubOwner(input.namespace);
+    const repoId = normalizeGitHubRepoName(input.repoId);
+    const token = this.settings.githubToken?.trim() || "DRY_RUN_TOKEN";
+    const remoteUrl = githubRemoteUrl({ owner, repoId, token });
+    return {
+      remoteUrl,
+      remoteUrlRedacted: redactHostedGitRemoteUrl(remoteUrl) ?? remoteUrl,
+    };
+  }
+
   private async createLiveRepository(input: {
     defaultBranch: string;
     owner: string;
@@ -115,7 +145,7 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
       throw new Error(`GitHub repo create failed (${response.status}): ${githubErrorMessage(body)}`);
     }
     const repo = parseGitHubCreateRepoResponse(body);
-    const remoteUrl = `https://x-access-token:${encodeURIComponent(input.token)}@github.com/${repo.fullName}.git`;
+    const remoteUrl = githubRemoteUrl({ fullName: repo.fullName, token: input.token });
     return {
       defaultBranch: input.defaultBranch,
       live: true,
@@ -139,6 +169,11 @@ export const createHostedGitProvider = (settings: Settings): HostedGitProvider =
   if (provider === "code-storage") return new CodeStorageHostedGitProvider(settings);
   if (provider === "github") return new GitHubHostedGitProvider(settings);
   throw new Error(`unsupported hosted git provider: ${provider}`);
+};
+
+const githubRemoteUrl = (input: { fullName?: string; owner?: string; repoId?: string; token: string }): string => {
+  const fullName = input.fullName ?? `${input.owner}/${input.repoId}`;
+  return `https://x-access-token:${encodeURIComponent(input.token)}@github.com/${fullName}.git`;
 };
 
 const fromCodeStorage = (repo: CodeStorageCreateResult): HostedGitRepository => ({

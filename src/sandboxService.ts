@@ -13,6 +13,15 @@ type SandboxStartOptions = {
   runId?: string | null;
 };
 
+type SandboxExecOptions = {
+  redact?: Record<string, string>;
+};
+
+type SandboxBootstrapOptions = {
+  repoUrl?: string;
+  repoUrlRedacted?: string;
+};
+
 export class SandboxService {
   constructor(
     private readonly db: Database,
@@ -65,9 +74,14 @@ export class SandboxService {
     }
   }
 
-  async exec(sandbox: SandboxRow, command: string[]): Promise<{ sandbox: SandboxRow; result: SandboxExecResult }> {
+  async exec(
+    sandbox: SandboxRow,
+    command: string[],
+    options: SandboxExecOptions = {},
+  ): Promise<{ sandbox: SandboxRow; result: SandboxExecResult }> {
     if (!sandbox.provider_sandbox_id) throw new Error("sandbox has no provider id");
     if (sandbox.state !== "running") throw new Error(`sandbox is not running: ${sandbox.state}`);
+    const redact = createRedactor(options.redact);
 
     await this.message({
       agentId: sandbox.agent_id,
@@ -75,28 +89,41 @@ export class SandboxService {
       runId: sandbox.run_id,
       source: "server",
       type: "exec_started",
-      text: command.join(" "),
-      data: { command },
+      text: redact(command.join(" ")),
+      data: { command: command.map(redact) },
     });
     const result = await this.provider.exec(sandbox.provider_sandbox_id, command);
+    const redactedResult = {
+      exitCode: result.exitCode,
+      stderr: redact(result.stderr),
+      stdout: redact(result.stdout),
+    };
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
       runId: sandbox.run_id,
       source: "sandbox",
       type: "exec_completed",
-      text: result.stdout || result.stderr || `exit ${result.exitCode}`,
-      data: result,
+      text: redactedResult.stdout || redactedResult.stderr || `exit ${result.exitCode}`,
+      data: redactedResult,
     });
     return { sandbox, result };
   }
 
-  async bootstrap(sandbox: SandboxRow): Promise<{ sandbox: SandboxRow; results: SandboxBootstrapCommandResult[] }> {
+  async bootstrap(
+    sandbox: SandboxRow,
+    options: SandboxBootstrapOptions = {},
+  ): Promise<{ sandbox: SandboxRow; results: SandboxBootstrapCommandResult[] }> {
+    const repoUrl = options.repoUrl ?? sandbox.repo_url;
+    const repoUrlRedacted = options.repoUrlRedacted ?? repoUrl;
+    const redactMap = repoUrl === repoUrlRedacted ? undefined : { [repoUrl]: repoUrlRedacted };
+    const redact = createRedactor(redactMap);
     const input: SandboxBootstrapInput = {
-      repoUrl: sandbox.repo_url,
+      repoUrl,
       ref: sandbox.branch,
       workdir: sandbox.workdir,
     };
+    const redactedInput = { ...input, repoUrl: repoUrlRedacted };
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
@@ -104,14 +131,20 @@ export class SandboxService {
       source: "server",
       type: "bootstrap_started",
       text: `Bootstrapping sandbox workdir ${sandbox.workdir}`,
-      data: input,
+      data: redactedInput,
     });
 
     try {
       const results = await bootstrapSandbox(input, async (command) => {
-        const { result } = await this.exec(sandbox, command);
+        const { result } = await this.exec(sandbox, command, { redact: redactMap });
         return result;
       });
+      const redactedResults = results.map((result) => ({
+        ...result,
+        command: result.command.map(redact),
+        stderr: redact(result.stderr),
+        stdout: redact(result.stdout),
+      }));
       await this.message({
         agentId: sandbox.agent_id,
         sandboxId: sandbox.id,
@@ -119,7 +152,7 @@ export class SandboxService {
         source: "sandbox",
         type: "bootstrap_completed",
         text: `Sandbox bootstrap completed in ${sandbox.workdir}`,
-        data: { ...input, results },
+        data: { ...redactedInput, results: redactedResults },
       });
       return { sandbox, results };
     } catch (error) {
@@ -130,7 +163,7 @@ export class SandboxService {
         source: "sandbox",
         type: "bootstrap_failed",
         text: messageOf(error),
-        data: input,
+        data: redactedInput,
       });
       throw error;
     }
@@ -168,3 +201,12 @@ export class SandboxService {
 }
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const createRedactor = (replacements: Record<string, string> | undefined): ((value: string) => string) => {
+  const entries = Object.entries(replacements ?? {}).filter(([from]) => from.length > 0);
+  if (entries.length === 0) return (value) => value;
+  return (value) => entries.reduce(
+    (redacted, [from, to]) => redacted.split(from).join(to),
+    value,
+  );
+};

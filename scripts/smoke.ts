@@ -283,6 +283,31 @@ try {
   ]);
   assert.equal(codeStorageList.codeStorageRepos.length, 1);
 
+  const hostedRunPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "hosted clone bootstrap",
+  ]);
+  await cliJson<{ sandbox: { id: string } }>(baseUrl, [
+    "runs",
+    "sandbox",
+    hostedRunPlan.run.id,
+    "--bootstrap",
+  ]);
+  const hostedRunMessages = await cliJson<{ messages: Array<{ data_json: string | null; text: string | null; type: string }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    hostedRunPlan.run.id,
+  ]);
+  assert.ok(hostedRunMessages.messages.some((message) => message.type === "bootstrap_completed"));
+  assert.ok(hostedRunMessages.messages.some((message) => message.text?.includes("threadbeat-smoke.code.storage")));
+  assert.ok(hostedRunMessages.messages.every((message) => !message.text?.includes("DRY_RUN_TOKEN")));
+  assert.ok(hostedRunMessages.messages.every((message) => !message.data_json?.includes("DRY_RUN_TOKEN")));
+
   const cliSandbox = await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",
     "get",

@@ -76,6 +76,22 @@ export class CodeStorageService {
       source,
     };
   }
+
+  async getRepositoryRemoteUrl(repoId: string): Promise<string> {
+    const organizationName = requireOrganizationName(this.settings.codeStorageName);
+    const normalizedRepoId = normalizeCodeStorageRepoId(repoId);
+    const privateKey = this.settings.codeStoragePrivateKey;
+    if (!privateKey) return dryRunRemoteUrl(organizationName, normalizedRepoId);
+
+    const { GitStorage } = await import("@pierre/storage");
+    const store = new GitStorage({
+      name: organizationName,
+      key: privateKey,
+    });
+    const repo = await store.findOne({ id: normalizedRepoId });
+    if (!repo) throw new Error(`Code.Storage repo not found: ${normalizedRepoId}`);
+    return getRemoteUrl(repo);
+  }
 }
 
 export const sourceFromAgent = (agent: AgentRepositoryRecord): CodeStorageSource | null => {
