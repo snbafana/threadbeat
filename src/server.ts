@@ -1,8 +1,8 @@
 import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
-import { CodeStorageService } from "./codeStorage.js";
 import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
+import { createHostedGitProvider } from "./hostedGit.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
 import { MessageBus } from "./messageBus.js";
@@ -20,7 +20,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   await db.initSchema();
 
   const bus = new MessageBus();
-  const codeStorage = new CodeStorageService(settings);
+  const hostedGit = createHostedGitProvider(settings);
   const sandboxService = new SandboxService(db, createSandboxProvider(settings), bus);
   const app = Fastify({ logger: true });
 
@@ -102,27 +102,27 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const existing = await db.getCodeStorageRepoForAgent(id);
       if (existing) return reply.code(409).send({ ok: false, error: "agent already has a Code.Storage repo" });
       const body = requestBody(request.body);
-      const created = await codeStorage.createRepository({
+      const created = await hostedGit.createRepository({
         agent,
         dryRun: parseBoolean(body.dryRun ?? body.dry_run, !settings.codeStoragePrivateKey),
         repoId: parseOptionalString(body.repoId ?? body.repo_id),
       });
       const repo = await db.createCodeStorageRepo({
         agentId: agent.id,
-        codeStorageRepoId: created.codeStorageRepoId,
-        organizationName: created.organizationName,
+        codeStorageRepoId: created.providerRepoId,
+        organizationName: created.namespace,
         defaultBranch: created.defaultBranch,
         remoteUrlRedacted: created.remoteUrlRedacted,
-        sourceProvider: created.source?.provider,
-        sourceOwner: created.source?.owner,
-        sourceName: created.source?.name,
-        sourceDefaultBranch: created.source?.defaultBranch,
+        sourceProvider: codeStorageSourceValue(created.source, "provider"),
+        sourceOwner: codeStorageSourceValue(created.source, "owner"),
+        sourceName: codeStorageSourceValue(created.source, "name"),
+        sourceDefaultBranch: codeStorageSourceValue(created.source, "defaultBranch"),
       });
       await db.appendMessage({
         agentId: agent.id,
         source: "code.storage",
         type: created.live ? "code_storage_repo_created" : "code_storage_repo_dry_run_created",
-        text: `Code.Storage repo ${created.codeStorageRepoId} registered for ${agent.name}`,
+        text: `Code.Storage repo ${created.providerRepoId} registered for ${agent.name}`,
         data: { codeStorageRepo: repo, live: created.live },
       });
       return { ok: true, codeStorageRepo: repo, live: created.live };
@@ -398,3 +398,9 @@ const parseBoolean = (value: unknown, fallback: boolean): boolean => {
 };
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const codeStorageSourceValue = (source: unknown, key: string): string | undefined => {
+  if (!source || typeof source !== "object") return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : undefined;
+};

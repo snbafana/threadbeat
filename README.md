@@ -34,6 +34,16 @@ MODAL_TOKEN_SECRET=...
 
 Modal's JavaScript SDK is installed as `modal` and expects Node 22+.
 
+Hosted Git is behind a provider boundary:
+
+```bash
+THREADBEAT_GIT_PROVIDER=code-storage
+```
+
+Only `code-storage` is implemented right now. The point of the boundary is to
+add GitHub App, Gitea, or GitLab without changing run planning or sandbox
+startup.
+
 To use live Code.Storage repo creation, set:
 
 ```bash
