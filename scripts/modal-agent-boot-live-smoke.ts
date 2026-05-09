@@ -10,15 +10,32 @@ import { promisify } from "node:util";
 
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
+import {
+  assertCanCleanUpSmokeRepo,
+  deleteGitHubRepo,
+  parseGitHubOwnerType,
+  resolveGitHubToken,
+} from "./github-smoke-utils.js";
 
 const execFileAsync = promisify(execFile);
+const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
+const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
+const githubToken = await resolveGitHubToken();
 
 if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
   console.log("Modal agent boot live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }
 
+if (!githubOwner || !githubToken) {
+  console.log("Modal agent boot live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN/gh auth token are not set");
+  process.exit(0);
+}
+
+await assertCanCleanUpSmokeRepo(githubToken, "Modal agent boot live smoke");
+
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-agent-boot-live-smoke-"));
+const repoId = `threadbeat-modal-agent-boot-${Date.now().toString(36)}`;
 const settings: Settings = {
   projectRoot: path.resolve("."),
   dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
@@ -30,32 +47,48 @@ const settings: Settings = {
   modalImageCommands: [
     "RUN printf '#!/bin/sh\\necho sandbox-pi \"$@\"\\n' > /usr/local/bin/pi && chmod +x /usr/local/bin/pi",
   ],
+  hostedGitProvider: "github",
+  githubOwner,
+  githubOwnerType,
+  githubToken,
 };
 
 const { app } = await buildServer(settings);
+let repoPath: string | undefined;
 let runId: string | undefined;
+let deleted = false;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
   const baseUrl = `http://${settings.host}:${address.port}`;
 
-  const agent = await cliJson<{ agent: { id: string } }>(baseUrl, [
+  const initialized = await cliJson<{
+    agent: { current_commit: string | null; id: string; repo_url: string };
+    hostedRepo: { namespace: string; providerRepoId: string };
+    initialized: { commitSha: string; filesWritten: string[] } | null;
+  }>(baseUrl, [
     "agents",
-    "create",
+    "init",
     "--name",
     "modal-agent-boot-live-smoke-agent",
-    "--repo",
-    "https://github.com/octocat/Hello-World.git",
-    "--branch",
-    "master",
+    "--id",
+    repoId,
+    "--repo-id",
+    repoId,
   ]);
+  repoPath = `${githubOwner}/${repoId}`;
+  assert.equal(initialized.hostedRepo.namespace, githubOwner);
+  assert.equal(initialized.hostedRepo.providerRepoId, repoId);
+  assert.equal(initialized.agent.current_commit, initialized.initialized?.commitSha);
+  assert.ok(initialized.initialized?.filesWritten.includes("AGENTS.md"));
+  assert.ok(initialized.initialized?.filesWritten.includes(".pi/prompts/heartbeat.md"));
 
   const planned = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",
     "--agent",
-    agent.agent.id,
+    initialized.agent.id,
     "--objective",
     "modal agent boot live smoke",
   ]);
@@ -66,14 +99,6 @@ try {
     "sandbox",
     runId,
     "--bootstrap",
-  ]);
-
-  await cliJson<{ result: { exitCode: number } }>(baseUrl, [
-    "runs",
-    "exec",
-    runId,
-    "--",
-    "mkdir -p .pi/prompts .pi/skills && touch AGENTS.md .pi/prompts/heartbeat.md",
   ]);
 
   const runtime = await cliJson<{
@@ -118,6 +143,7 @@ try {
     ok: true,
     modalAppName: settings.modalAppName,
     modalImage: settings.modalImage,
+    repoPath,
     runId,
   }, null, 2));
 } finally {
@@ -133,12 +159,23 @@ try {
   }
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
+  if (repoPath && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
+    await deleteGitHubRepo(githubToken, repoPath);
+    deleted = true;
+  }
+  if (repoPath) {
+    console.log(JSON.stringify({ cleanup: { deleted, repoPath } }, null, 2));
+  }
 }
 
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
   const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
     cwd: path.resolve("."),
-    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+    env: {
+      ...process.env,
+      THREADBEAT_BASE_URL: baseUrl,
+      THREADBEAT_GITHUB_OWNER_TYPE: githubOwnerType,
+    },
     maxBuffer: 10 * 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
