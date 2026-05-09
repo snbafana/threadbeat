@@ -41,6 +41,8 @@ const provider = new GitHubHostedGitProvider(settings);
 let created: Awaited<ReturnType<typeof provider.createRepository>> | undefined;
 let deleted = false;
 
+await assertCanCleanUpSmokeRepo(githubToken);
+
 try {
   created = await provider.createRepository({ agent, dryRun: false, repoId });
 
@@ -83,6 +85,22 @@ function githubHeaders(token: string): Record<string, string> {
     "user-agent": "threadbeat",
     "x-github-api-version": "2022-11-28",
   };
+}
+
+async function assertCanCleanUpSmokeRepo(token: string): Promise<void> {
+  if (process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP === "1") return;
+  const response = await fetch("https://api.github.com/user", {
+    headers: githubHeaders(token),
+    method: "GET",
+  });
+  const scopes = response.headers.get("x-oauth-scopes") ?? "";
+  const scopeSet = new Set(scopes.split(",").map((scope) => scope.trim()).filter(Boolean));
+  if (!scopeSet.has("delete_repo")) {
+    throw new Error(
+      "GitHub live smoke requires a token with delete_repo scope so the temporary repo can be cleaned up. "
+      + "Set THREADBEAT_GITHUB_LIVE_SMOKE_KEEP=1 to intentionally keep the repo.",
+    );
+  }
 }
 
 function githubRepoPathFromRemoteUrl(remoteUrl: string | null): string {
