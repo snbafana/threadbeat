@@ -1,16 +1,19 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import type { Settings } from "../src/config.js";
 import { GitHubHostedGitProvider } from "../src/hostedGit.js";
 
+const execFileAsync = promisify(execFile);
 const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
 const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "org");
-const githubToken = process.env.THREADBEAT_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
+const githubToken = await resolveGitHubToken();
 
 if (!githubOwner || !githubToken) {
-  console.log("GitHub live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN are not set");
+  console.log("GitHub live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN/gh auth token are not set");
   process.exit(0);
 }
 
@@ -85,6 +88,18 @@ function githubHeaders(token: string): Record<string, string> {
     "user-agent": "threadbeat",
     "x-github-api-version": "2022-11-28",
   };
+}
+
+async function resolveGitHubToken(): Promise<string | undefined> {
+  const envToken = process.env.THREADBEAT_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
+  if (envToken?.trim()) return envToken.trim();
+  try {
+    const { stdout } = await execFileAsync("gh", ["auth", "token"], { maxBuffer: 1024 * 1024 });
+    const token = stdout.trim();
+    return token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function assertCanCleanUpSmokeRepo(token: string): Promise<void> {
