@@ -54,6 +54,11 @@ async function main(commandName?: string, subcommandName?: string, args: string[
     return;
   }
 
+  if (commandName === "preflight") {
+    await printJson(await requestJson("GET", "/api/preflight"));
+    return;
+  }
+
   throw new Error(`unknown command: ${commandName}`);
 }
 
@@ -524,6 +529,7 @@ function printHelp(): void {
 
 Commands:
   health
+  preflight
   agents template --name <name> [--id <agent_id>] [--description "..."] [--out ./agent-repo]
   agents init --name <name> [--id <agent_id>] [--repo-id <repo_id>] [--branch main] [--description "..."] [--live|--dry-run]
   agents create --name <name> --repo <url> [--branch main] [--ref main]

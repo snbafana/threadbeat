@@ -68,6 +68,16 @@ THREADBEAT_AGENT_BOOT_TIMEOUT_MS=600000
 `sandboxes exec`, runtime checks, and finalize commands use the sandbox exec
 timeout. CLI exec calls can override with `--timeout-ms`.
 
+To check live-run readiness without printing secrets:
+
+```bash
+npm run cli -- preflight
+```
+
+The preflight endpoint reports whether Modal credentials, hosted Git settings,
+sandbox auth allowlisting, Pi image setup, and timeout settings are present. It
+only returns booleans and environment variable names.
+
 To verify live Modal credentials:
 
 ```bash

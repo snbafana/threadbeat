@@ -30,6 +30,19 @@ try {
   const address = app.server.address() as AddressInfo;
   const baseUrl = `http://${settings.host}:${address.port}`;
 
+  const preflightResponse = await app.inject({
+    method: "GET",
+    url: "/api/preflight",
+  });
+  assert.equal(preflightResponse.statusCode, 200);
+  assert.match(preflightResponse.body, /sandbox_env_allowlist/);
+
+  const cliPreflight = await cliJson<{ preflight: { ok: boolean; checks: Array<{ name: string }> } }>(baseUrl, [
+    "preflight",
+  ]);
+  assert.equal(cliPreflight.preflight.ok, false);
+  assert.ok(cliPreflight.preflight.checks.some((check) => check.name === "hosted_git"));
+
   const agentResponse = await app.inject({
     method: "POST",
     url: "/api/agents",

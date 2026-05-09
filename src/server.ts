@@ -9,6 +9,7 @@ import { createInitialCommit } from "./gitRepositoryBootstrap.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
 import { MessageBus } from "./messageBus.js";
+import { buildPreflightReport } from "./preflight.js";
 import { runPlanFromRow } from "./runPlanning.js";
 import { SandboxService } from "./sandboxService.js";
 import type { Settings } from "./config.js";
@@ -37,6 +38,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     modalMode: settings.modalMode,
     modalAppName: settings.modalAppName,
     modalImage: settings.modalImage,
+  }));
+
+  app.get("/api/preflight", async () => ({
+    ok: true,
+    preflight: buildPreflightReport(settings),
   }));
 
   app.get("/api/agents", async () => ({

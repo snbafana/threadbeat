@@ -1,0 +1,76 @@
+import type { Settings } from "./config.js";
+
+export type PreflightCheck = {
+  name: string;
+  ok: boolean;
+  detail: string;
+};
+
+export type PreflightReport = {
+  ok: boolean;
+  checks: PreflightCheck[];
+  sandboxEnvNames: string[];
+  sandboxEnvResolvedNames: string[];
+};
+
+export const buildPreflightReport = (settings: Settings): PreflightReport => {
+  const sandboxEnv = settings.sandboxEnv ?? {};
+  const sandboxEnvNames = settings.sandboxEnvNames ?? [];
+  const sandboxEnvResolvedNames = Object.keys(sandboxEnv);
+  const checks: PreflightCheck[] = [
+    {
+      name: "modal_credentials",
+      ok: settings.modalMode !== "live" || Boolean(process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET),
+      detail: settings.modalMode === "live"
+        ? "live Modal mode requires MODAL_TOKEN_ID and MODAL_TOKEN_SECRET"
+        : "dry-run Modal mode does not require Modal credentials",
+    },
+    {
+      name: "hosted_git",
+      ok: hostedGitReady(settings),
+      detail: hostedGitDetail(settings),
+    },
+    {
+      name: "sandbox_env_allowlist",
+      ok: sandboxEnvNames.length > 0,
+      detail: sandboxEnvNames.length > 0
+        ? `${sandboxEnvResolvedNames.length}/${sandboxEnvNames.length} allowlisted env values are present`
+        : "THREADBEAT_SANDBOX_ENV_ALLOWLIST is empty",
+    },
+    {
+      name: "agent_pi_image",
+      ok: Boolean(settings.modalInstallSandboxPi || settings.modalImageCommands?.length),
+      detail: settings.modalInstallSandboxPi
+        ? "Modal image installs sandbox Pi"
+        : "set THREADBEAT_MODAL_INSTALL_SANDBOX_PI=1 or provide THREADBEAT_MODAL_IMAGE_COMMANDS",
+    },
+    {
+      name: "timeouts",
+      ok: positive(settings.sandboxExecTimeoutMs) && positive(settings.agentBootTimeoutMs),
+      detail: `sandbox exec timeout=${settings.sandboxExecTimeoutMs ?? "unset"}ms; agent boot timeout=${settings.agentBootTimeoutMs ?? "unset"}ms`,
+    },
+  ];
+
+  return {
+    ok: checks.every((check) => check.ok),
+    checks,
+    sandboxEnvNames,
+    sandboxEnvResolvedNames,
+  };
+};
+
+const hostedGitReady = (settings: Settings): boolean => {
+  if (settings.hostedGitProvider === "github") {
+    return Boolean(settings.githubOwner && settings.githubToken);
+  }
+  return Boolean(settings.codeStorageName && settings.codeStoragePrivateKey);
+};
+
+const hostedGitDetail = (settings: Settings): string => {
+  if (settings.hostedGitProvider === "github") {
+    return "GitHub mode requires THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN";
+  }
+  return "Code.Storage mode requires CODE_STORAGE_NAME/PIERRE_CODE_STORAGE_NAME and CODE_STORAGE_PRIVATE_KEY/PIERRE_PRIVATE_KEY";
+};
+
+const positive = (value: number | undefined): boolean => typeof value === "number" && value > 0;
