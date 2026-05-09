@@ -1,12 +1,15 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { cliJson as runCliJson } from "./cli-smoke-utils.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
+import { scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -25,7 +28,7 @@ if (!githubToken) {
 
 await assertCanCleanUpSmokeRepo(githubToken, "GitHub agent init CLI live smoke");
 
-const tempRoot = await createScriptTempRoot("threadbeat-github-agent-init-cli-smoke");
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-github-agent-init-cli-smoke-"));
 const repoId = `threadbeat-agent-init-cli-${Date.now().toString(36)}`;
 const settings = scriptSettings({
   modalAppName: "threadbeat-github-agent-init-cli-live-smoke",
@@ -106,7 +109,7 @@ try {
   assert.equal(cleanup.stoppedCount, 1);
 } finally {
   await app.close();
-  await removeScriptTempRoot(tempRoot);
+  await fs.rm(tempRoot, { recursive: true, force: true });
   if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }

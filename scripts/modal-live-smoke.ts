@@ -1,6 +1,8 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 import { hasModalCredentials } from "../src/auth.js";
@@ -8,14 +10,14 @@ import { Database } from "../src/db.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
 import { SandboxService } from "../src/sandboxService.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
+import { scriptSettings } from "./settings-utils.js";
 
 if (!hasModalCredentials(process.env)) {
   console.log("Modal live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }
 
-const tempRoot = await createScriptTempRoot("threadbeat-modal-live-smoke");
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-live-smoke-"));
 const settings = scriptSettings({
   modalMode: "live",
   modalAppName: "threadbeat-modal-live-smoke",
@@ -62,5 +64,5 @@ try {
     }
   }
   await db.close();
-  await removeScriptTempRoot(tempRoot);
+  await fs.rm(tempRoot, { recursive: true, force: true });
 }

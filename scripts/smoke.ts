@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
 
 import { buildServer } from "../src/server.js";
 import { cliJson, cliRaw } from "./cli-smoke-utils.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
-const tempRoot = await createScriptTempRoot("threadbeat-smoke");
+import { scriptSettings } from "./settings-utils.js";
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-smoke-"));
 
 const settings = scriptSettings({
   modalAppName: "threadbeat-smoke",
@@ -545,5 +548,5 @@ try {
   assert.ok(cliMessages.messages.length > 0);
 } finally {
   await app.close();
-  await removeScriptTempRoot(tempRoot);
+  await fs.rm(tempRoot, { recursive: true, force: true });
 }

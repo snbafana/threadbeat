@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildAgentTemplate } from "../src/agentTemplate.js";
 import { createInitialCommit } from "../src/gitRepositoryBootstrap.js";
-import { createScriptTempRoot, removeScriptTempRoot } from "./settings-utils.js";
 
 const execFileAsync = promisify(execFile);
-const tempRoot = await createScriptTempRoot("threadbeat-git-bootstrap-test");
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-git-bootstrap-test-"));
 
 try {
   await assert.rejects(
@@ -48,5 +48,5 @@ try {
   const branch = (await execFileAsync("git", ["-C", clone, "branch", "--show-current"])).stdout.trim();
   assert.equal(branch, "main");
 } finally {
-  await removeScriptTempRoot(tempRoot);
+  await fs.rm(tempRoot, { recursive: true, force: true });
 }
