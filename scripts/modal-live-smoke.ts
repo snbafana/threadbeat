@@ -1,15 +1,17 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
-import path from "node:path";
 
-import { Database } from "../src/db.js";
-import { createSandboxProvider } from "../src/modalProvider.js";
-import { MessageBus } from "../src/messageBus.js";
-import { SandboxService } from "../src/sandboxService.js";
 import { skipUnlessModalCredentials } from "./script-auth-utils.js";
 import { printJson } from "./script-output-utils.js";
-import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
+import {
+  createScriptTempRoot,
+  removeScriptTempRoot,
+  scriptDatabase,
+  scriptSandboxService,
+  scriptSettings,
+  stopScriptSandboxIfRunning,
+} from "./settings-utils.js";
 
 skipUnlessModalCredentials("Modal live smoke");
 
@@ -26,12 +28,12 @@ const settings = scriptSettings({
   },
 });
 
-const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
+const db = scriptDatabase(settings);
+const service = scriptSandboxService(db, settings);
 let sandboxId: string | undefined;
 
 try {
   await db.initSchema();
-  const service = new SandboxService(db, createSandboxProvider(settings), new MessageBus());
   const agent = await db.createAgent({
     name: "modal-live-smoke-agent",
     repoUrl: "https://github.com/octocat/Hello-World.git",
@@ -53,12 +55,7 @@ try {
     ok: true,
   });
 } finally {
-  if (sandboxId) {
-    const sandbox = await db.getSandbox(sandboxId);
-    if (sandbox?.state === "running") {
-      await new SandboxService(db, createSandboxProvider(settings), new MessageBus()).stop(sandbox);
-    }
-  }
+  await stopScriptSandboxIfRunning(db, service, sandboxId);
   await db.close();
   await removeScriptTempRoot(tempRoot);
 }
