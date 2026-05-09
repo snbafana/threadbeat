@@ -13,6 +13,8 @@ export type Settings = {
   modalMode: ModalMode;
   modalAppName: string;
   modalImage: string;
+  codeStorageName?: string;
+  codeStoragePrivateKey?: string;
 };
 
 export const loadSettings = (): Settings => {
@@ -33,5 +35,10 @@ export const loadSettings = (): Settings => {
     modalMode,
     modalAppName: stringEnv("THREADBEAT_MODAL_APP_NAME", "threadbeat-sandboxes"),
     modalImage: stringEnv("THREADBEAT_MODAL_IMAGE", "python:3.13-slim"),
+    codeStorageName: process.env.CODE_STORAGE_NAME ?? process.env.PIERRE_CODE_STORAGE_NAME,
+    codeStoragePrivateKey:
+      process.env.CODE_STORAGE_PRIVATE_KEY
+      ?? process.env.PIERRE_PRIVATE_KEY
+      ?? process.env.PIERRE_CODE_STORAGE_PRIVATE_KEY,
   };
 };

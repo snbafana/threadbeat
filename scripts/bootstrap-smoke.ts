@@ -19,6 +19,7 @@ const settings: Settings = {
   modalMode: "dry-run",
   modalAppName: "threadbeat-bootstrap-smoke",
   modalImage: "python:3.13-slim",
+  codeStorageName: "threadbeat-bootstrap-smoke",
 };
 
 const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));

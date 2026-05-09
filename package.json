@@ -11,11 +11,12 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/git-planning.test.ts && tsx scripts/bootstrap-smoke.ts && tsx scripts/smoke.ts",
+    "test": "tsx scripts/git-planning.test.ts && tsx scripts/code-storage.test.ts && tsx scripts/bootstrap-smoke.ts && tsx scripts/smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.15.15",
+    "@pierre/storage": "^1.4.4",
     "dotenv": "^17.2.3",
     "fastify": "^5.6.2",
     "modal": "^0.7.4"

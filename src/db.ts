@@ -3,7 +3,14 @@ import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
 
 import { nextTickIso, nowIso } from "./time.js";
-import type { AgentRow, AgentRunRow, HeartbeatRow, MessageRow, SandboxRow } from "./types.js";
+import type {
+  AgentRow,
+  AgentRunRow,
+  CodeStorageRepoRow,
+  HeartbeatRow,
+  MessageRow,
+  SandboxRow,
+} from "./types.js";
 
 type SqlValue = string | number | null;
 
@@ -30,6 +37,7 @@ export class Database {
       await this.client.execute(statement);
     }
     await this.ensureAgentColumns();
+    await this.ensureCodeStorageRepoColumns();
     await this.ensureAgentRunColumns();
   }
 
@@ -174,6 +182,84 @@ export class Database {
       ],
     });
     return this.mustGetAgentRun(input.id);
+  }
+
+  async createCodeStorageRepo(input: {
+    agentId: string;
+    codeStorageRepoId: string;
+    organizationName: string;
+    defaultBranch: string;
+    sourceProvider?: string | null;
+    sourceOwner?: string | null;
+    sourceName?: string | null;
+    sourceDefaultBranch?: string | null;
+    remoteUrlRedacted?: string | null;
+    status?: string;
+  }): Promise<CodeStorageRepoRow> {
+    const id = randomId("csr");
+    await this.client.execute({
+      sql: `
+        INSERT INTO code_storage_repos (
+          id, agent_id, code_storage_repo_id, organization_name, default_branch,
+          source_provider, source_owner, source_name, source_default_branch,
+          remote_url_redacted, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      args: [
+        id,
+        input.agentId,
+        input.codeStorageRepoId,
+        input.organizationName,
+        input.defaultBranch,
+        input.sourceProvider ?? null,
+        input.sourceOwner ?? null,
+        input.sourceName ?? null,
+        input.sourceDefaultBranch ?? null,
+        input.remoteUrlRedacted ?? null,
+        input.status ?? "active",
+      ],
+    });
+    return this.mustGetCodeStorageRepo(id);
+  }
+
+  async getCodeStorageRepo(id: string): Promise<CodeStorageRepoRow | null> {
+    return this.first<CodeStorageRepoRow>(
+      `
+        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
+               source_provider, source_owner, source_name, source_default_branch,
+               remote_url_redacted, status, created_at, updated_at
+        FROM code_storage_repos
+        WHERE id = ?
+      `,
+      [id],
+    );
+  }
+
+  async getCodeStorageRepoForAgent(agentId: string): Promise<CodeStorageRepoRow | null> {
+    return this.first<CodeStorageRepoRow>(
+      `
+        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
+               source_provider, source_owner, source_name, source_default_branch,
+               remote_url_redacted, status, created_at, updated_at
+        FROM code_storage_repos
+        WHERE agent_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [agentId],
+    );
+  }
+
+  async listCodeStorageRepos(): Promise<CodeStorageRepoRow[]> {
+    return this.all<CodeStorageRepoRow>(
+      `
+        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
+               source_provider, source_owner, source_name, source_default_branch,
+               remote_url_redacted, status, created_at, updated_at
+        FROM code_storage_repos
+        ORDER BY created_at DESC
+      `,
+    );
   }
 
   async createHeartbeat(input: {
@@ -389,6 +475,12 @@ export class Database {
     return run;
   }
 
+  private async mustGetCodeStorageRepo(id: string): Promise<CodeStorageRepoRow> {
+    const repo = await this.getCodeStorageRepo(id);
+    if (!repo) throw new Error(`Code.Storage repo not found after write: ${id}`);
+    return repo;
+  }
+
   private async getMessage(id: string): Promise<MessageRow | null> {
     return this.first<MessageRow>(
       `
@@ -448,6 +540,34 @@ export class Database {
     }
     if (!names.has("completed_at")) {
       await this.client.execute("ALTER TABLE agent_runs ADD COLUMN completed_at TEXT");
+    }
+  }
+
+  private async ensureCodeStorageRepoColumns(): Promise<void> {
+    const names = await this.tableColumnNames("code_storage_repos");
+    if (!names.has("code_storage_repo_id")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN code_storage_repo_id TEXT NOT NULL DEFAULT ''");
+    }
+    if (!names.has("organization_name")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN organization_name TEXT NOT NULL DEFAULT ''");
+    }
+    if (!names.has("default_branch")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN default_branch TEXT NOT NULL DEFAULT 'main'");
+    }
+    if (!names.has("source_provider")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_provider TEXT");
+    }
+    if (!names.has("source_owner")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_owner TEXT");
+    }
+    if (!names.has("source_name")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_name TEXT");
+    }
+    if (!names.has("source_default_branch")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_default_branch TEXT");
+    }
+    if (!names.has("remote_url_redacted")) {
+      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN remote_url_redacted TEXT");
     }
   }
 

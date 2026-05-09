@@ -34,12 +34,25 @@ MODAL_TOKEN_SECRET=...
 
 Modal's JavaScript SDK is installed as `modal` and expects Node 22+.
 
+To use live Code.Storage repo creation, set:
+
+```bash
+CODE_STORAGE_NAME=your-org
+CODE_STORAGE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----..."
+```
+
+Without a private key, Code.Storage creation endpoints run in explicit dry-run
+mode and store only a redacted remote URL.
+
 ## CLI
 
 ```bash
 npm run cli -- health
 npm run cli -- agents create --name research --repo https://github.com/org/repo.git --branch main
 npm run cli -- agents list
+npm run cli -- agents repo <agent_id>
+npm run cli -- code-storage create --agent <agent_id> --id <repo_id>
+npm run cli -- code-storage list
 npm run cli -- heartbeats list --agent <agent_id>
 npm run cli -- heartbeats get <heartbeat_id>
 npm run cli -- sandboxes start --agent <agent_id>
@@ -60,6 +73,9 @@ Read-only API inspection routes:
 
 - `GET /api/heartbeats?agentId=<agent_id>`
 - `GET /api/heartbeats/:id`
+- `POST /api/agents/:id/code-storage`
+- `GET /api/agents/:id/code-storage`
+- `GET /api/code-storage/repos`
 - `GET /api/sandboxes?agentId=<agent_id>`
 - `GET /api/sandboxes/:id`
 - `GET /api/messages?agentId=<agent_id>&sandboxId=<sandbox_id>&limit=50`

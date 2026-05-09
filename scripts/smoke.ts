@@ -20,6 +20,7 @@ const settings: Settings = {
   modalMode: "dry-run",
   modalAppName: "threadbeat-smoke",
   modalImage: "python:3.13-slim",
+  codeStorageName: "threadbeat-smoke",
 };
 
 const { app } = await buildServer(settings);
@@ -140,6 +141,26 @@ try {
     agentBody.agent.id,
   ]);
   assert.equal(cliRepository.repository.repoWebUrl, "https://github.com/example/agent");
+
+  const codeStorageCreate = await cliJson<{ codeStorageRepo: { code_storage_repo_id: string; remote_url_redacted: string } }>(baseUrl, [
+    "code-storage",
+    "create",
+    "--agent",
+    agentBody.agent.id,
+    "--id",
+    "smoke-agent-store",
+  ]);
+  assert.equal(codeStorageCreate.codeStorageRepo.code_storage_repo_id, "smoke-agent-store");
+  assert.equal(
+    codeStorageCreate.codeStorageRepo.remote_url_redacted,
+    "https://t:REDACTED@threadbeat-smoke.code.storage/smoke-agent-store.git",
+  );
+
+  const codeStorageList = await cliJson<{ codeStorageRepos: unknown[] }>(baseUrl, [
+    "code-storage",
+    "list",
+  ]);
+  assert.equal(codeStorageList.codeStorageRepos.length, 1);
 
   const cliSandbox = await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",

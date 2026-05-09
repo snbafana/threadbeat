@@ -32,6 +32,11 @@ async function main(commandName?: string, subcommandName?: string, args: string[
     return;
   }
 
+  if (commandName === "code-storage") {
+    await codeStorage(subcommandName, args);
+    return;
+  }
+
   if (commandName === "messages") {
     await messages(subcommandName, args);
     return;
@@ -72,7 +77,41 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/repository`));
     return;
   }
+  if (subcommandName === "code-storage") {
+    const [id, action, ...optionArgs] = args;
+    if (!id) throw new Error("agents code-storage requires an agent id");
+    if (!action || action === "get") {
+      await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/code-storage`));
+      return;
+    }
+    if (action === "create") {
+      const options = parseOptions(optionArgs);
+      await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(id)}/code-storage`, {
+        dryRun: options.live === "1" ? false : true,
+        repoId: options.id,
+      }));
+      return;
+    }
+    throw new Error(`unknown agents code-storage action: ${action}`);
+  }
   throw new Error(`unknown agents command: ${subcommandName}`);
+}
+
+async function codeStorage(subcommandName?: string, args: string[] = []): Promise<void> {
+  if (!subcommandName || subcommandName === "repos" || subcommandName === "list") {
+    await printJson(await requestJson("GET", "/api/code-storage/repos"));
+    return;
+  }
+  if (subcommandName === "create") {
+    const options = parseOptions(args);
+    const agentId = required(option(options, "agent", "agent-id"), "--agent");
+    await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/code-storage`, {
+      dryRun: options.live === "1" ? false : true,
+      repoId: options.id,
+    }));
+    return;
+  }
+  throw new Error(`unknown code-storage command: ${subcommandName}`);
 }
 
 async function sandboxes(subcommandName?: string, args: string[] = []): Promise<void> {
@@ -166,7 +205,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "follow") {
+    if (key === "follow" || key === "live") {
       options[key] = "1";
       continue;
     }
@@ -237,6 +276,10 @@ Commands:
   agents list
   agents get <agent_id>
   agents repo <agent_id>
+  agents code-storage <agent_id> [get]
+  agents code-storage <agent_id> create [--id <code_storage_repo_id>] [--live]
+  code-storage list
+  code-storage create --agent <agent_id> [--id <code_storage_repo_id>] [--live]
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>]
   sandboxes get <sandbox_id>

@@ -55,10 +55,14 @@ This is a separate phase before AI execution.
 
 Goals:
 
-- Decide where agent repos live when they are not running.
-- Clone or fork a template agent repo into a durable agent repo.
+- Use Code.Storage (`@pierre/storage`) as the durable Git infrastructure for
+  agent bodies when configured with `CODE_STORAGE_NAME` and
+  `CODE_STORAGE_PRIVATE_KEY`.
+- Clone or fork a template agent repo into a durable Code.Storage repo.
 - Store `repo_url`, `default_branch`, `current_ref`, and visible Git links on
   the agent row.
+- Store each agent's Code.Storage repo id and redacted remote URL separately
+  from the authenticated remote URL.
 - Add run branch planning and git status/diff/commit metadata.
 - Add a bootstrap action that starts a sandbox, installs git if needed, clones
   the agent repo into `/workspace/agent`, checks out the current ref, and emits
@@ -67,14 +71,16 @@ Goals:
 Important invariant:
 
 ```text
-Git is durable state.
+Code.Storage/Git is durable state.
 Modal is disposable compute.
-Code storage/cache can accelerate startup, but promotion happens through Git.
+Authenticated Code.Storage remote URLs are generated on demand and not stored.
+Promotion happens through Git refs and commits.
 ```
 
-Possible storage layers:
+Storage layers:
 
-- GitHub or local bare repo as the canonical agent body.
+- Code.Storage repo as the canonical agent body.
+- GitHub sync/public sync as a source or mirror when needed.
 - Modal Volume for dependency caches or large reusable artifacts.
 - Modal snapshots later for warm starts.
 

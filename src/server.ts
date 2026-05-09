@@ -1,6 +1,7 @@
 import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import { CodeStorageService } from "./codeStorage.js";
 import { getAgentRepositoryMetadata } from "./agentRepository.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
@@ -18,6 +19,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   await db.initSchema();
 
   const bus = new MessageBus();
+  const codeStorage = new CodeStorageService(settings);
   const sandboxService = new SandboxService(db, createSandboxProvider(settings), bus);
   const app = Fastify({ logger: true });
 
@@ -83,6 +85,55 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
   });
+
+  app.get("/api/agents/:id/code-storage", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const agent = await db.getAgent(id);
+    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    return { ok: true, codeStorageRepo: await db.getCodeStorageRepoForAgent(id) };
+  });
+
+  app.post("/api/agents/:id/code-storage", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const agent = await db.getAgent(id);
+      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      const existing = await db.getCodeStorageRepoForAgent(id);
+      if (existing) return reply.code(409).send({ ok: false, error: "agent already has a Code.Storage repo" });
+      const body = requestBody(request.body);
+      const created = await codeStorage.createRepository({
+        agent,
+        dryRun: parseBoolean(body.dryRun ?? body.dry_run, !settings.codeStoragePrivateKey),
+        repoId: parseOptionalString(body.repoId ?? body.repo_id),
+      });
+      const repo = await db.createCodeStorageRepo({
+        agentId: agent.id,
+        codeStorageRepoId: created.codeStorageRepoId,
+        organizationName: created.organizationName,
+        defaultBranch: created.defaultBranch,
+        remoteUrlRedacted: created.remoteUrlRedacted,
+        sourceProvider: created.source?.provider,
+        sourceOwner: created.source?.owner,
+        sourceName: created.source?.name,
+        sourceDefaultBranch: created.source?.defaultBranch,
+      });
+      await db.appendMessage({
+        agentId: agent.id,
+        source: "code.storage",
+        type: created.live ? "code_storage_repo_created" : "code_storage_repo_dry_run_created",
+        text: `Code.Storage repo ${created.codeStorageRepoId} registered for ${agent.name}`,
+        data: { codeStorageRepo: repo, live: created.live },
+      });
+      return { ok: true, codeStorageRepo: repo, live: created.live };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/code-storage/repos", async () => ({
+    ok: true,
+    codeStorageRepos: await db.listCodeStorageRepos(),
+  }));
 
   app.get("/api/heartbeats", async (request) => {
     const query = request.query as Record<string, string | undefined>;
@@ -247,5 +298,13 @@ const parseCommand = (value: unknown): string[] => {
 
 const queryValue = (query: Record<string, string | undefined>, camelKey: string, snakeKey: string): string | undefined =>
   parseOptionalString(query[camelKey] ?? query[snakeKey]);
+
+const parseBoolean = (value: unknown, fallback: boolean): boolean => {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+  return fallback;
+};
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
