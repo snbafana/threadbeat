@@ -6,7 +6,7 @@ import { buildModalImageCommands } from "./modalImage.js";
 import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_FLASH_MODEL, DEEPSEEK_PROVIDER } from "./piModels.js";
 
 export type ModalMode = "dry-run" | "live";
-export type HostedGitProviderSetting = "code-storage" | "github";
+export type HostedGitProviderSetting = "github";
 export type GitHubOwnerType = "auto" | "org" | "user";
 
 export type Settings = {
@@ -31,8 +31,6 @@ export type Settings = {
   githubOwner?: string;
   githubOwnerType?: GitHubOwnerType;
   githubToken?: string;
-  codeStorageName?: string;
-  codeStoragePrivateKey?: string;
 };
 
 export const loadSettings = (): Settings => {
@@ -41,9 +39,9 @@ export const loadSettings = (): Settings => {
   if (modalMode !== "dry-run" && modalMode !== "live") {
     throw new Error("THREADBEAT_MODAL_MODE must be dry-run or live");
   }
-  const hostedGitProvider = stringEnv("THREADBEAT_GIT_PROVIDER", "code-storage");
-  if (hostedGitProvider !== "code-storage" && hostedGitProvider !== "github") {
-    throw new Error("THREADBEAT_GIT_PROVIDER must be code-storage or github");
+  const hostedGitProvider = stringEnv("THREADBEAT_GIT_PROVIDER", "github");
+  if (hostedGitProvider !== "github") {
+    throw new Error("THREADBEAT_GIT_PROVIDER must be github");
   }
   const githubOwnerType = stringEnv("THREADBEAT_GITHUB_OWNER_TYPE", "auto");
   if (githubOwnerType !== "auto" && githubOwnerType !== "org" && githubOwnerType !== "user") {
@@ -83,11 +81,6 @@ export const loadSettings = (): Settings => {
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
     githubOwnerType,
     githubToken: process.env.THREADBEAT_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN,
-    codeStorageName: process.env.CODE_STORAGE_NAME ?? process.env.PIERRE_CODE_STORAGE_NAME,
-    codeStoragePrivateKey:
-      process.env.CODE_STORAGE_PRIVATE_KEY
-      ?? process.env.PIERRE_PRIVATE_KEY
-      ?? process.env.PIERRE_CODE_STORAGE_PRIVATE_KEY,
   };
 };
 

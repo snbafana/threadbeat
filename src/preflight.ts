@@ -75,17 +75,11 @@ export const buildPreflightReport = (settings: Settings): PreflightReport => {
 };
 
 const hostedGitReady = (settings: Settings): boolean => {
-  if (settings.hostedGitProvider === "github") {
-    return Boolean(settings.githubOwner && settings.githubToken);
-  }
-  return Boolean(settings.codeStorageName && settings.codeStoragePrivateKey);
+  return Boolean(settings.githubOwner && settings.githubToken);
 };
 
 const hostedGitDetail = (settings: Settings): string => {
-  if (settings.hostedGitProvider === "github") {
-    return "GitHub mode requires THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN";
-  }
-  return "Code.Storage mode requires CODE_STORAGE_NAME/PIERRE_CODE_STORAGE_NAME and CODE_STORAGE_PRIVATE_KEY/PIERRE_PRIVATE_KEY";
+  return "GitHub mode requires THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN";
 };
 
 const positive = (value: number | undefined): boolean => typeof value === "number" && value > 0;

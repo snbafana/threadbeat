@@ -39,8 +39,8 @@ async function main(commandName?: string, subcommandName?: string, args: string[
     return;
   }
 
-  if (commandName === "code-storage") {
-    await codeStorage(subcommandName, args);
+  if (commandName === "hosted-git") {
+    await hostedGit(subcommandName);
     return;
   }
 
@@ -127,22 +127,11 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/repository`));
     return;
   }
-  if (subcommandName === "code-storage") {
-    const [id, action, ...optionArgs] = args;
-    if (!id) throw new Error("agents code-storage requires an agent id");
-    if (!action || action === "get") {
-      await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/code-storage`));
-      return;
-    }
-    if (action === "create") {
-      const options = parseOptions(optionArgs);
-      await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(id)}/code-storage`, {
-        dryRun: options.live === "1" ? false : true,
-        repoId: options.id,
-      }));
-      return;
-    }
-    throw new Error(`unknown agents code-storage action: ${action}`);
+  if (subcommandName === "hosted-git") {
+    const id = args[0];
+    if (!id) throw new Error("agents hosted-git requires an agent id");
+    await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/hosted-git`));
+    return;
   }
   if (subcommandName === "runs") {
     const [id, action, ...optionArgs] = args;
@@ -161,21 +150,12 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
   throw new Error(`unknown agents command: ${subcommandName}`);
 }
 
-async function codeStorage(subcommandName?: string, args: string[] = []): Promise<void> {
+async function hostedGit(subcommandName?: string): Promise<void> {
   if (!subcommandName || subcommandName === "repos" || subcommandName === "list") {
-    await printJson(await requestJson("GET", "/api/code-storage/repos"));
+    await printJson(await requestJson("GET", "/api/hosted-git/repos"));
     return;
   }
-  if (subcommandName === "create") {
-    const options = parseOptions(args);
-    const agentId = required(option(options, "agent", "agent-id"), "--agent");
-    await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/code-storage`, {
-      dryRun: options.live === "1" ? false : true,
-      repoId: options.id,
-    }));
-    return;
-  }
-  throw new Error(`unknown code-storage command: ${subcommandName}`);
+  throw new Error(`unknown hosted-git command: ${subcommandName}`);
 }
 
 async function sandboxes(subcommandName?: string, args: string[] = []): Promise<void> {
@@ -536,12 +516,10 @@ Commands:
   agents list
   agents get <agent_id>
   agents repo <agent_id>
-  agents code-storage <agent_id> [get]
-  agents code-storage <agent_id> create [--id <code_storage_repo_id>] [--live]
+  agents hosted-git <agent_id>
   agents runs <agent_id> [list]
   agents runs <agent_id> plan --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
-  code-storage list
-  code-storage create --agent <agent_id> [--id <code_storage_repo_id>] [--live]
+  hosted-git list
   runs list --agent <agent_id>
   runs get <run_id>
   runs status <run_id> [--limit 20]

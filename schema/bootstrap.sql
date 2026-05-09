@@ -14,16 +14,13 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE INDEX IF NOT EXISTS idx_agents_status
   ON agents(status, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS code_storage_repos (
+CREATE TABLE IF NOT EXISTS hosted_git_repos (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL,
-  code_storage_repo_id TEXT NOT NULL,
-  organization_name TEXT NOT NULL,
+  provider TEXT NOT NULL DEFAULT 'github',
+  owner TEXT NOT NULL,
+  repo TEXT NOT NULL,
   default_branch TEXT NOT NULL DEFAULT 'main',
-  source_provider TEXT,
-  source_owner TEXT,
-  source_name TEXT,
-  source_default_branch TEXT,
   remote_url_redacted TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -31,11 +28,11 @@ CREATE TABLE IF NOT EXISTS code_storage_repos (
   FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_code_storage_repos_agent_id
-  ON code_storage_repos(agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hosted_git_repos_agent_id
+  ON hosted_git_repos(agent_id);
 
-CREATE INDEX IF NOT EXISTS idx_code_storage_repos_repo_id
-  ON code_storage_repos(code_storage_repo_id);
+CREATE INDEX IF NOT EXISTS idx_hosted_git_repos_owner_repo
+  ON hosted_git_repos(owner, repo);
 
 CREATE TABLE IF NOT EXISTS agent_runs (
   id TEXT PRIMARY KEY,

@@ -20,7 +20,7 @@ const settings: Settings = {
   modalMode: "dry-run",
   modalAppName: "threadbeat-smoke",
   modalImage: "python:3.13-slim",
-  codeStorageName: "threadbeat-smoke",
+  githubOwner: "threadbeat-smoke",
 };
 
 const { app } = await buildServer(settings);
@@ -531,52 +531,11 @@ try {
     cliRunSandbox.sandbox.id,
   ]);
 
-  const codeStorageCreate = await cliJson<{ codeStorageRepo: { code_storage_repo_id: string; remote_url_redacted: string } }>(baseUrl, [
-    "code-storage",
-    "create",
-    "--agent",
-    agentBody.agent.id,
-    "--id",
-    "smoke-agent-store",
-  ]);
-  assert.equal(codeStorageCreate.codeStorageRepo.code_storage_repo_id, "smoke-agent-store");
-  assert.equal(
-    codeStorageCreate.codeStorageRepo.remote_url_redacted,
-    "https://t:REDACTED@threadbeat-smoke.code.storage/smoke-agent-store.git",
-  );
-
-  const codeStorageList = await cliJson<{ codeStorageRepos: unknown[] }>(baseUrl, [
-    "code-storage",
+  const hostedGitList = await cliJson<{ hostedGitRepos: unknown[] }>(baseUrl, [
+    "hosted-git",
     "list",
   ]);
-  assert.equal(codeStorageList.codeStorageRepos.length, 1);
-
-  const hostedRunPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
-    "runs",
-    "plan",
-    "--agent",
-    agentBody.agent.id,
-    "--objective",
-    "hosted clone bootstrap",
-  ]);
-  await cliJson<{ sandbox: { id: string } }>(baseUrl, [
-    "runs",
-    "sandbox",
-    hostedRunPlan.run.id,
-    "--bootstrap",
-  ]);
-  const hostedRunMessages = await cliJson<{ messages: Array<{ data_json: string | null; text: string | null; type: string }> }>(baseUrl, [
-    "messages",
-    "list",
-    "--run",
-    hostedRunPlan.run.id,
-  ]);
-  assert.ok(hostedRunMessages.messages.some((message) => message.type === "bootstrap_completed"));
-  assert.ok(hostedRunMessages.messages.some((message) => message.text?.includes("threadbeat-smoke.code.storage")));
-  assert.ok(hostedRunMessages.messages.some((message) => message.text?.includes("checkout -B")));
-  assert.ok(hostedRunMessages.messages.some((message) => message.text?.includes("push -u origin HEAD:threadbeat/runs/")));
-  assert.ok(hostedRunMessages.messages.every((message) => !message.text?.includes("DRY_RUN_TOKEN")));
-  assert.ok(hostedRunMessages.messages.every((message) => !message.data_json?.includes("DRY_RUN_TOKEN")));
+  assert.equal(hostedGitList.hostedGitRepos.length, 0);
 
   const cliSandbox = await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",

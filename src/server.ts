@@ -108,16 +108,13 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         currentRef: hostedRepo.defaultBranch,
         currentCommit: initialized?.commitSha,
       });
-      const repo = await db.createCodeStorageRepo({
+      const repo = await db.createHostedGitRepo({
         agentId: agent.id,
-        codeStorageRepoId: hostedRepo.providerRepoId,
-        organizationName: hostedRepo.namespace,
+        provider: hostedRepo.provider,
+        owner: hostedRepo.namespace,
+        repo: hostedRepo.providerRepoId,
         defaultBranch: hostedRepo.defaultBranch,
         remoteUrlRedacted: hostedRepo.remoteUrlRedacted,
-        sourceProvider: hostedRepo.provider,
-        sourceOwner: hostedGitSourceValue(hostedRepo.source, "owner") ?? hostedRepo.namespace,
-        sourceName: hostedGitSourceValue(hostedRepo.source, "repo") ?? hostedGitSourceValue(hostedRepo.source, "name"),
-        sourceDefaultBranch: hostedGitSourceValue(hostedRepo.source, "defaultBranch") ?? hostedRepo.defaultBranch,
       });
       await db.appendMessage({
         agentId: agent.id,
@@ -128,7 +125,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           : `Planned hosted agent repo ${hostedRepo.providerRepoId} from template`,
         data: { agent, hostedRepo: { ...hostedRepo, remoteUrl: hostedRepo.remoteUrlRedacted }, template, initialized },
       });
-      return { ok: true, agent, codeStorageRepo: repo, hostedRepo: { ...hostedRepo, remoteUrl: hostedRepo.remoteUrlRedacted }, initialized, template };
+      return { ok: true, agent, hostedGitRepo: repo, hostedRepo: { ...hostedRepo, remoteUrl: hostedRepo.remoteUrlRedacted }, initialized, template };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -180,53 +177,16 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
-  app.get("/api/agents/:id/code-storage", async (request, reply) => {
+  app.get("/api/agents/:id/hosted-git", async (request, reply) => {
     const { id } = request.params as { id: string };
     const agent = await db.getAgent(id);
     if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-    return { ok: true, codeStorageRepo: await db.getCodeStorageRepoForAgent(id) };
+    return { ok: true, hostedGitRepo: await db.getHostedGitRepoForAgent(id) };
   });
 
-  app.post("/api/agents/:id/code-storage", async (request, reply) => {
-    try {
-      const { id } = request.params as { id: string };
-      const agent = await db.getAgent(id);
-      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-      const existing = await db.getCodeStorageRepoForAgent(id);
-      if (existing) return reply.code(409).send({ ok: false, error: "agent already has a Code.Storage repo" });
-      const body = requestBody(request.body);
-      const created = await hostedGit.createRepository({
-        agent,
-        dryRun: parseBoolean(body.dryRun ?? body.dry_run, !settings.codeStoragePrivateKey),
-        repoId: parseOptionalString(body.repoId ?? body.repo_id),
-      });
-      const repo = await db.createCodeStorageRepo({
-        agentId: agent.id,
-        codeStorageRepoId: created.providerRepoId,
-        organizationName: created.namespace,
-        defaultBranch: created.defaultBranch,
-        remoteUrlRedacted: created.remoteUrlRedacted,
-        sourceProvider: codeStorageSourceValue(created.source, "provider"),
-        sourceOwner: codeStorageSourceValue(created.source, "owner"),
-        sourceName: codeStorageSourceValue(created.source, "name"),
-        sourceDefaultBranch: codeStorageSourceValue(created.source, "defaultBranch"),
-      });
-      await db.appendMessage({
-        agentId: agent.id,
-        source: "code.storage",
-        type: created.live ? "code_storage_repo_created" : "code_storage_repo_dry_run_created",
-        text: `Code.Storage repo ${created.providerRepoId} registered for ${agent.name}`,
-        data: { codeStorageRepo: repo, live: created.live },
-      });
-      return { ok: true, codeStorageRepo: repo, live: created.live };
-    } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
-    }
-  });
-
-  app.get("/api/code-storage/repos", async () => ({
+  app.get("/api/hosted-git/repos", async () => ({
     ok: true,
-    codeStorageRepos: await db.listCodeStorageRepos(),
+    hostedGitRepos: await db.listHostedGitRepos(),
   }));
 
   app.get("/api/agents/:id/runs", async (request, reply) => {
@@ -605,11 +565,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     agentId: string,
     baseRef: string,
   ): Promise<{ baseRef: string; pushRef?: boolean; repoUrl?: string; repoUrlRedacted?: string }> => {
-    const repo = await db.getCodeStorageRepoForAgent(agentId);
+    const repo = await db.getHostedGitRepoForAgent(agentId);
     if (!repo) return { baseRef };
     const cloneUrl = await hostedGit.getCloneUrl({
-      namespace: repo.organization_name,
-      repoId: repo.code_storage_repo_id,
+      namespace: repo.owner,
+      repoId: repo.repo,
     });
     return {
       baseRef,
@@ -858,24 +818,16 @@ const parseBoolean = (value: unknown, fallback: boolean): boolean => {
 };
 
 const defaultAgentTemplateDryRun = (settings: Settings): boolean => {
-  if (settings.hostedGitProvider === "github") {
-    return !settings.githubOwner?.trim() || !settings.githubToken?.trim();
-  }
-  if (settings.hostedGitProvider === "code-storage") {
-    return !settings.codeStoragePrivateKey?.trim();
-  }
-  return true;
+  return !settings.githubOwner?.trim() || !settings.githubToken?.trim();
 };
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-const codeStorageSourceValue = (source: unknown, key: string): string | undefined => {
+const hostedGitSourceValue = (source: unknown, key: string): string | undefined => {
   if (!source || typeof source !== "object") return undefined;
   const value = (source as Record<string, unknown>)[key];
   return typeof value === "string" ? value : undefined;
 };
-
-const hostedGitSourceValue = codeStorageSourceValue;
 
 const hostedAgentRepoUrl = (hostedRepo: {
   provider: string;

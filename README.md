@@ -153,15 +153,13 @@ and deletes the temporary GitHub repo by default.
 Hosted Git is behind a provider boundary:
 
 ```bash
-THREADBEAT_GIT_PROVIDER=code-storage
-# or
 THREADBEAT_GIT_PROVIDER=github
 THREADBEAT_GITHUB_OWNER=your-org
 THREADBEAT_GITHUB_OWNER_TYPE=org
 THREADBEAT_GITHUB_TOKEN=...
 ```
 
-`github` supports dry-run repository planning and live private repo creation
+GitHub is the only enabled hosted Git backend for now. It supports dry-run repository planning and live private repo creation
 when `THREADBEAT_GITHUB_TOKEN` is present. `THREADBEAT_GITHUB_OWNER_TYPE=user`
 switches creation from `/orgs/:owner/repos` to `/user/repos`.
 
@@ -187,28 +185,6 @@ credentials it exits successfully with a skip message.
 `THREADBEAT_GITHUB_OWNER` with the authenticated GitHub login. Use `user` or
 `org` only when you want to force a specific creation endpoint.
 
-To use live Code.Storage repo creation, set:
-
-```bash
-CODE_STORAGE_NAME=your-org
-CODE_STORAGE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----..."
-```
-
-Without a private key, Code.Storage creation endpoints run in explicit dry-run
-mode and store only a redacted remote URL.
-
-To verify live Code.Storage credentials without printing secrets:
-
-```bash
-npm run smoke:code-storage
-```
-
-The smoke creates a real Code.Storage repo from `octocat/Hello-World` when
-credentials are present, validates the remote URL, and deletes the repo by
-default. Set `CODE_STORAGE_LIVE_SMOKE_KEEP=1` to leave the smoke repo behind for
-manual inspection. Without credentials it exits successfully with a skip
-message.
-
 ## CLI
 
 ```bash
@@ -228,8 +204,8 @@ npm run cli -- runs restart-sandbox <run_id> [--bootstrap]
 npm run cli -- runs exec <run_id> -- "pwd"
 npm run cli -- runs finalize <run_id> --message "Finalize run"
 npm run cli -- runs stop <run_id>
-npm run cli -- code-storage create --agent <agent_id> --id <repo_id>
-npm run cli -- code-storage list
+npm run cli -- agents hosted-git <agent_id>
+npm run cli -- hosted-git list
 npm run cli -- heartbeats list --agent <agent_id>
 npm run cli -- heartbeats get <heartbeat_id>
 npm run cli -- sandboxes start --agent <agent_id>
@@ -293,9 +269,8 @@ Read-only API inspection routes:
 - `POST /api/sandboxes/stop-running`
 - `GET /api/heartbeats?agentId=<agent_id>`
 - `GET /api/heartbeats/:id`
-- `POST /api/agents/:id/code-storage`
-- `GET /api/agents/:id/code-storage`
-- `GET /api/code-storage/repos`
+- `GET /api/agents/:id/hosted-git`
+- `GET /api/hosted-git/repos`
 - `GET /api/sandboxes?agentId=<agent_id>&runId=<run_id>`
 - `GET /api/sandboxes/:id`
 - `GET /api/messages?agentId=<agent_id>&runId=<run_id>&sandboxId=<sandbox_id>&limit=50`

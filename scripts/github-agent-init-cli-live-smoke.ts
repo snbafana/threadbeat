@@ -44,7 +44,6 @@ const settings: Settings = {
   githubOwner,
   githubOwnerType,
   githubToken,
-  codeStorageName: "threadbeat-github-agent-init-cli-live-smoke",
 };
 
 const { app } = await buildServer(settings);

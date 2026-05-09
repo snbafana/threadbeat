@@ -28,16 +28,13 @@ export type AgentRunRow = {
   updated_at: string;
 };
 
-export type CodeStorageRepoRow = {
+export type HostedGitRepoRow = {
   id: string;
   agent_id: string;
-  code_storage_repo_id: string;
-  organization_name: string;
+  provider: string;
+  owner: string;
+  repo: string;
   default_branch: string;
-  source_provider: string | null;
-  source_owner: string | null;
-  source_name: string | null;
-  source_default_branch: string | null;
   remote_url_redacted: string | null;
   status: string;
   created_at: string;

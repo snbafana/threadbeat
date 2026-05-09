@@ -46,7 +46,7 @@ const settings: Settings = {
   modalMode: "dry-run",
   modalAppName: "threadbeat-agent-template-test",
   modalImage: "python:3.13-slim",
-  codeStorageName: "threadbeat-agent-template-test",
+  githubOwner: "threadbeat-agent-template-test",
 };
 
 const { app } = await buildServer(settings);
@@ -82,7 +82,8 @@ try {
     },
   });
   assert.equal(initResponse.statusCode, 200);
-  assert.match(initResponse.body, /"repo_url":"https:\/\/t:REDACTED@threadbeat-agent-template-test\.code\.storage\/fresh-agent-repo\.git"/);
+  assert.match(initResponse.body, /"repo_url":"https:\/\/github\.com\/threadbeat-agent-template-test\/fresh-agent-repo\.git"/);
+  assert.match(initResponse.body, /"hostedGitRepo":/);
   assert.match(initResponse.body, /"path":"AGENTS.md"/);
   assert.match(initResponse.body, /"initialized":null/);
 } finally {

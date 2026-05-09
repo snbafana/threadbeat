@@ -6,8 +6,8 @@ import { nextTickIso, nowIso } from "./time.js";
 import type {
   AgentRow,
   AgentRunRow,
-  CodeStorageRepoRow,
   HeartbeatRow,
+  HostedGitRepoRow,
   MessageRow,
   SandboxRow,
 } from "./types.js";
@@ -37,7 +37,7 @@ export class Database {
       await this.client.execute(statement);
     }
     await this.ensureAgentColumns();
-    await this.ensureCodeStorageRepoColumns();
+    await this.ensureHostedGitRepoColumns();
     await this.ensureAgentRunColumns();
     await this.ensureSandboxColumns();
   }
@@ -215,64 +215,54 @@ export class Database {
     return this.mustGetAgentRun(input.id);
   }
 
-  async createCodeStorageRepo(input: {
+  async createHostedGitRepo(input: {
     agentId: string;
-    codeStorageRepoId: string;
-    organizationName: string;
+    provider?: string;
+    owner: string;
+    repo: string;
     defaultBranch: string;
-    sourceProvider?: string | null;
-    sourceOwner?: string | null;
-    sourceName?: string | null;
-    sourceDefaultBranch?: string | null;
     remoteUrlRedacted?: string | null;
     status?: string;
-  }): Promise<CodeStorageRepoRow> {
-    const id = randomId("csr");
+  }): Promise<HostedGitRepoRow> {
+    const id = randomId("hgr");
     await this.client.execute({
       sql: `
-        INSERT INTO code_storage_repos (
-          id, agent_id, code_storage_repo_id, organization_name, default_branch,
-          source_provider, source_owner, source_name, source_default_branch,
-          remote_url_redacted, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO hosted_git_repos (
+          id, agent_id, provider, owner, repo, default_branch, remote_url_redacted, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         id,
         input.agentId,
-        input.codeStorageRepoId,
-        input.organizationName,
+        input.provider ?? "github",
+        input.owner,
+        input.repo,
         input.defaultBranch,
-        input.sourceProvider ?? null,
-        input.sourceOwner ?? null,
-        input.sourceName ?? null,
-        input.sourceDefaultBranch ?? null,
         input.remoteUrlRedacted ?? null,
         input.status ?? "active",
       ],
     });
-    return this.mustGetCodeStorageRepo(id);
+    return this.mustGetHostedGitRepo(id);
   }
 
-  async getCodeStorageRepo(id: string): Promise<CodeStorageRepoRow | null> {
-    return this.first<CodeStorageRepoRow>(
+  async getHostedGitRepo(id: string): Promise<HostedGitRepoRow | null> {
+    return this.first<HostedGitRepoRow>(
       `
-        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
-               source_provider, source_owner, source_name, source_default_branch,
-               remote_url_redacted, status, created_at, updated_at
-        FROM code_storage_repos
+        SELECT id, agent_id, provider, owner, repo, default_branch, remote_url_redacted,
+               status, created_at, updated_at
+        FROM hosted_git_repos
         WHERE id = ?
       `,
       [id],
     );
   }
 
-  async getCodeStorageRepoForAgent(agentId: string): Promise<CodeStorageRepoRow | null> {
-    return this.first<CodeStorageRepoRow>(
+  async getHostedGitRepoForAgent(agentId: string): Promise<HostedGitRepoRow | null> {
+    return this.first<HostedGitRepoRow>(
       `
-        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
-               source_provider, source_owner, source_name, source_default_branch,
-               remote_url_redacted, status, created_at, updated_at
-        FROM code_storage_repos
+        SELECT id, agent_id, provider, owner, repo, default_branch, remote_url_redacted,
+               status, created_at, updated_at
+        FROM hosted_git_repos
         WHERE agent_id = ?
         ORDER BY created_at DESC
         LIMIT 1
@@ -281,13 +271,12 @@ export class Database {
     );
   }
 
-  async listCodeStorageRepos(): Promise<CodeStorageRepoRow[]> {
-    return this.all<CodeStorageRepoRow>(
+  async listHostedGitRepos(): Promise<HostedGitRepoRow[]> {
+    return this.all<HostedGitRepoRow>(
       `
-        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
-               source_provider, source_owner, source_name, source_default_branch,
-               remote_url_redacted, status, created_at, updated_at
-        FROM code_storage_repos
+        SELECT id, agent_id, provider, owner, repo, default_branch, remote_url_redacted,
+               status, created_at, updated_at
+        FROM hosted_git_repos
         ORDER BY created_at DESC
       `,
     );
@@ -520,9 +509,9 @@ export class Database {
     return run;
   }
 
-  private async mustGetCodeStorageRepo(id: string): Promise<CodeStorageRepoRow> {
-    const repo = await this.getCodeStorageRepo(id);
-    if (!repo) throw new Error(`Code.Storage repo not found after write: ${id}`);
+  private async mustGetHostedGitRepo(id: string): Promise<HostedGitRepoRow> {
+    const repo = await this.getHostedGitRepo(id);
+    if (!repo) throw new Error(`hosted Git repo not found after write: ${id}`);
     return repo;
   }
 
@@ -596,31 +585,22 @@ export class Database {
     await this.client.execute("CREATE INDEX IF NOT EXISTS idx_sandboxes_run_id ON sandboxes(run_id, created_at DESC)");
   }
 
-  private async ensureCodeStorageRepoColumns(): Promise<void> {
-    const names = await this.tableColumnNames("code_storage_repos");
-    if (!names.has("code_storage_repo_id")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN code_storage_repo_id TEXT NOT NULL DEFAULT ''");
+  private async ensureHostedGitRepoColumns(): Promise<void> {
+    const names = await this.tableColumnNames("hosted_git_repos");
+    if (!names.has("provider")) {
+      await this.client.execute("ALTER TABLE hosted_git_repos ADD COLUMN provider TEXT NOT NULL DEFAULT 'github'");
     }
-    if (!names.has("organization_name")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN organization_name TEXT NOT NULL DEFAULT ''");
+    if (!names.has("owner")) {
+      await this.client.execute("ALTER TABLE hosted_git_repos ADD COLUMN owner TEXT NOT NULL DEFAULT ''");
+    }
+    if (!names.has("repo")) {
+      await this.client.execute("ALTER TABLE hosted_git_repos ADD COLUMN repo TEXT NOT NULL DEFAULT ''");
     }
     if (!names.has("default_branch")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN default_branch TEXT NOT NULL DEFAULT 'main'");
-    }
-    if (!names.has("source_provider")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_provider TEXT");
-    }
-    if (!names.has("source_owner")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_owner TEXT");
-    }
-    if (!names.has("source_name")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_name TEXT");
-    }
-    if (!names.has("source_default_branch")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_default_branch TEXT");
+      await this.client.execute("ALTER TABLE hosted_git_repos ADD COLUMN default_branch TEXT NOT NULL DEFAULT 'main'");
     }
     if (!names.has("remote_url_redacted")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN remote_url_redacted TEXT");
+      await this.client.execute("ALTER TABLE hosted_git_repos ADD COLUMN remote_url_redacted TEXT");
     }
   }
 
