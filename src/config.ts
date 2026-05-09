@@ -1,7 +1,8 @@
 import "dotenv/config";
 
 import path from "node:path";
-import { intEnv, stringEnv } from "./env.js";
+import { boolEnv, intEnv, stringEnv } from "./env.js";
+import { buildModalImageCommands } from "./modalImage.js";
 
 export type ModalMode = "dry-run" | "live";
 export type HostedGitProviderSetting = "code-storage" | "github";
@@ -15,6 +16,7 @@ export type Settings = {
   modalMode: ModalMode;
   modalAppName: string;
   modalImage: string;
+  modalInstallSandboxPi?: boolean;
   modalImageCommands?: string[];
   agentPiCommand?: string;
   hostedGitProvider?: HostedGitProviderSetting;
@@ -40,6 +42,12 @@ export const loadSettings = (): Settings => {
     throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be auto, org, or user");
   }
 
+  const modalInstallSandboxPi = boolEnv("THREADBEAT_MODAL_INSTALL_SANDBOX_PI", false);
+  const modalImageCommands = buildModalImageCommands({
+    installSandboxPi: modalInstallSandboxPi,
+    extraCommands: linesEnv("THREADBEAT_MODAL_IMAGE_COMMANDS"),
+  });
+
   return {
     projectRoot,
     dbUrl: stringEnv(
@@ -51,7 +59,8 @@ export const loadSettings = (): Settings => {
     modalMode,
     modalAppName: stringEnv("THREADBEAT_MODAL_APP_NAME", "threadbeat-sandboxes"),
     modalImage: stringEnv("THREADBEAT_MODAL_IMAGE", "python:3.13-slim"),
-    modalImageCommands: linesEnv("THREADBEAT_MODAL_IMAGE_COMMANDS"),
+    modalInstallSandboxPi,
+    modalImageCommands,
     agentPiCommand: stringEnv("THREADBEAT_AGENT_PI_COMMAND", "pi"),
     hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,

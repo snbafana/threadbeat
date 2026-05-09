@@ -33,10 +33,12 @@ MODAL_TOKEN_SECRET=...
 ```
 
 Modal's JavaScript SDK is installed as `modal` and expects Node 22+.
-`THREADBEAT_MODAL_IMAGE` is the base sandbox image. Add newline-separated
-Dockerfile layers through `THREADBEAT_MODAL_IMAGE_COMMANDS` when the agent
-sandbox needs runtime tools such as Pi. The server does not embed Pi for agent
-runs; `THREADBEAT_AGENT_PI_COMMAND` is executed inside the sandbox workdir by
+`THREADBEAT_MODAL_IMAGE` is the base sandbox image. Set
+`THREADBEAT_MODAL_INSTALL_SANDBOX_PI=1` to layer the Pi CLI into the Modal
+sandbox image with `npm install -g @mariozechner/pi-coding-agent`. Add
+newline-separated Dockerfile layers through `THREADBEAT_MODAL_IMAGE_COMMANDS`
+for any extra sandbox-only tools. The server does not embed Pi for agent runs;
+`THREADBEAT_AGENT_PI_COMMAND` is executed inside the sandbox workdir by
 `runs boot`.
 
 To verify live Modal credentials:
@@ -56,6 +58,17 @@ npm run smoke:modal-cli
 
 This starts the server in live Modal mode, drives it through `threadbeat-cli`,
 executes `python --version`, and cleans up with `sandboxes stop-running`.
+
+To verify that the sandbox image can install the real Pi CLI:
+
+```bash
+npm run smoke:modal-pi-image
+```
+
+This smoke starts a real Modal sandbox with
+`THREADBEAT_MODAL_INSTALL_SANDBOX_PI` equivalent image layers, runs
+`command -v pi && pi --help`, and terminates the sandbox. It only verifies the
+sandbox Pi binary; it does not load server-side Pi.
 
 To verify the sandbox-agent boot path against a real Modal sandbox:
 
