@@ -62,7 +62,6 @@ try {
     repoId,
     "--repo-id",
     repoId,
-    "--live",
   ]);
 
   assert.equal(initialized.hostedRepo.namespace, githubOwner);

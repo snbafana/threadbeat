@@ -91,13 +91,21 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
   }
   if (subcommandName === "init") {
     const options = parseOptions(args);
+    if (options.live === "1" && option(options, "dry-run", "dryRun") === "1") {
+      throw new Error("agents init cannot use both --live and --dry-run");
+    }
+    const dryRun = options.live === "1"
+      ? false
+      : option(options, "dry-run", "dryRun") === "1"
+        ? true
+        : undefined;
     await printJson(await requestJson("POST", "/api/agents/from-template", {
       name: required(options.name, "--name"),
       ...(options.id ? { id: options.id } : {}),
       ...(option(options, "repo-id", "repo") ? { repoId: option(options, "repo-id", "repo") } : {}),
       ...(options.description ? { description: options.description } : {}),
       ...(options.branch ? { defaultBranch: options.branch } : {}),
-      dryRun: options.live === "1" ? false : true,
+      ...(dryRun === undefined ? {} : { dryRun }),
       ...(option(options, "message", "commit-message") ? { commitMessage: option(options, "message", "commit-message") } : {}),
     }));
     return;
@@ -375,7 +383,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "finalize" || key === "follow" || key === "live") {
+    if (key === "bootstrap" || key === "finalize" || key === "follow" || key === "live" || key === "dry-run") {
       options[key] = "1";
       continue;
     }
@@ -494,7 +502,7 @@ function printHelp(): void {
 Commands:
   health
   agents template --name <name> [--id <agent_id>] [--description "..."] [--out ./agent-repo]
-  agents init --name <name> [--id <agent_id>] [--repo-id <repo_id>] [--branch main] [--description "..."] [--live]
+  agents init --name <name> [--id <agent_id>] [--repo-id <repo_id>] [--branch main] [--description "..."] [--live|--dry-run]
   agents create --name <name> --repo <url> [--branch main] [--ref main]
   agents list
   agents get <agent_id>

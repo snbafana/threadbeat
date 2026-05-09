@@ -220,7 +220,9 @@ Good next small durable slices:
    - Changed GitHub owner type default to `auto`: live creation checks the authenticated `/user` login and uses `/user/repos` when `THREADBEAT_GITHUB_OWNER` is the current user, otherwise `/orgs/:owner/repos`.
    - Verified with `THREADBEAT_GITHUB_OWNER_TYPE=auto npm run smoke:github-init-cli`; it created `snbafana/threadbeat-agent-init-cli-moxvwuxh`, verified `AGENTS.md`, and deleted it.
    - Local `.env` still explicitly has `THREADBEAT_GITHUB_OWNER_TYPE=org`; remove it or set it to `auto`/`user` for personal-account repo creation.
-   - Next: decide whether `agents init --live` should become the default path for GitHub-backed agents.
+   - Promoted `agents init` default behavior: CLI no longer forces dry-run by default, and the server creates a live hosted repo when provider credentials are present. Use `--dry-run` to force planning without cloud calls.
+   - Updated `npm run smoke:github-init-cli` to omit `--live`, so it verifies the default live path when credentials are present.
+   - Next: start wiring initialized agents into run bootstrap.
 
 ## Conceptual Decisions To Preserve
 

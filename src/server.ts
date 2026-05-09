@@ -73,7 +73,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         default_branch: defaultBranch,
         current_ref: defaultBranch,
       };
-      const dryRun = parseBoolean(body.dryRun ?? body.dry_run, true);
+      const dryRun = parseBoolean(body.dryRun ?? body.dry_run, defaultAgentTemplateDryRun(settings));
       const hostedRepo = await hostedGit.createRepository({
         agent: provisionalAgent,
         dryRun,
@@ -724,6 +724,16 @@ const parseBoolean = (value: unknown, fallback: boolean): boolean => {
   if (typeof value === "number") return value !== 0;
   if (typeof value === "string") return ["1", "true", "yes", "on"].includes(value.toLowerCase());
   return fallback;
+};
+
+const defaultAgentTemplateDryRun = (settings: Settings): boolean => {
+  if (settings.hostedGitProvider === "github") {
+    return !settings.githubOwner?.trim() || !settings.githubToken?.trim();
+  }
+  if (settings.hostedGitProvider === "code-storage") {
+    return !settings.codeStoragePrivateKey?.trim();
+  }
+  return true;
 };
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
