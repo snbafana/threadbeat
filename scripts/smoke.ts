@@ -368,7 +368,7 @@ try {
   assert.match(cliRunBoot.plan.taskPath, /^tasks\/inbox\/run_/);
   assert.equal(cliRunBoot.result.exitCode, 0);
   assert.match(cliRunBoot.result.stdout, /\[dry-run\]/);
-  assert.match(cliRunBoot.result.stdout, /pi --prompt-file/);
+  assert.match(cliRunBoot.result.stdout, /pi --mode json -p/);
 
   const cliRuntimeCheck = await cliJson<{
     plan: { piCommand: string };

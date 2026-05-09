@@ -9,12 +9,16 @@ const plan = buildAgentBootPlan({
 
 assert.equal(plan.promptPath, ".pi/prompts/heartbeat.md");
 assert.equal(plan.piCommand, "pi");
+assert.equal(plan.piExecutable, "pi");
 assert.equal(plan.taskPath, "tasks/inbox/run_123.md");
 assert.deepEqual(plan.command.slice(0, 2), ["bash", "-lc"]);
+assert.match(plan.command[2] ?? "", /test -f '\.pi\/prompts\/heartbeat\.md'/);
 assert.match(plan.command[2] ?? "", /cat > 'tasks\/inbox\/run_123\.md'/);
 assert.match(plan.command[2] ?? "", /continue research on git-backed agents/);
-assert.match(plan.command[2] ?? "", /command -v pi/);
-assert.match(plan.command[2] ?? "", /pi --prompt-file '\.pi\/prompts\/heartbeat\.md' --message-file 'tasks\/inbox\/run_123\.md'/);
+assert.match(plan.command[2] ?? "", /command -v 'pi'/);
+assert.match(plan.command[2] ?? "", /cat '\.pi\/prompts\/heartbeat\.md'/);
+assert.match(plan.command[2] ?? "", /cat 'tasks\/inbox\/run_123\.md'/);
+assert.match(plan.command[2] ?? "", /pi --mode json -p/);
 
 const customPlan = buildAgentBootPlan({
   agentPiCommand: "npx --yes @example/pi",
@@ -26,6 +30,7 @@ const customPlan = buildAgentBootPlan({
 
 assert.equal(customPlan.promptPath, ".pi/prompts/self-review.md");
 assert.equal(customPlan.piCommand, "npx --yes @example/pi");
+assert.equal(customPlan.piExecutable, "npx");
 assert.equal(customPlan.taskPath, "tasks/inbox/self-review.md");
 
 assert.throws(
@@ -45,7 +50,11 @@ const runtimeCheck = buildAgentRuntimeCheckPlan({ agentPiCommand: "pi" });
 assert.equal(runtimeCheck.piCommand, "pi");
 assert.match(runtimeCheck.command[2] ?? "", /test -f AGENTS\.md/);
 assert.match(runtimeCheck.command[2] ?? "", /test -f \.pi\/prompts\/heartbeat\.md/);
-assert.match(runtimeCheck.command[2] ?? "", /command -v pi/);
+assert.match(runtimeCheck.command[2] ?? "", /command -v 'pi'/);
 assert.match(runtimeCheck.command[2] ?? "", /agent runtime ready/);
+
+const customRuntimeCheck = buildAgentRuntimeCheckPlan({ agentPiCommand: "npx --yes @example/pi" });
+assert.match(customRuntimeCheck.command[2] ?? "", /command -v 'npx'/);
+assert.match(customRuntimeCheck.command[2] ?? "", /npx --yes @example\/pi --help/);
 
 console.log("agent boot tests passed");

@@ -139,8 +139,7 @@ try {
     assert.equal(booted.plan.promptPath, ".pi/prompts/heartbeat.md");
     assert.match(booted.plan.taskPath, /^tasks\/inbox\/run_/);
     assert.match(booted.result.stdout, /sandbox-pi/);
-    assert.match(booted.result.stdout, /--prompt-file \.pi\/prompts\/heartbeat\.md/);
-    assert.match(booted.result.stdout, /--message-file tasks\/inbox\/run_/);
+    assert.match(booted.result.stdout, /--mode json -p/);
 
     const bootMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
       "messages",

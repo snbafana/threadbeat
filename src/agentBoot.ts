@@ -9,6 +9,7 @@ export type AgentBootInput = {
 export type AgentBootPlan = {
   command: string[];
   piCommand: string;
+  piExecutable: string;
   objective: string;
   promptPath: string;
   runId: string;
@@ -26,22 +27,30 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
   const runId = requireSafeRunId(input.runId);
   const objective = requireNonEmpty(input.objective, "objective");
   const piCommand = requireSafeShellCommand(input.agentPiCommand ?? "pi", "agentPiCommand");
+  const piExecutable = firstCommandWord(piCommand);
   const promptPath = requireSafeRelativePath(input.promptPath ?? DEFAULT_PROMPT_PATH, "promptPath");
   const taskPath = requireSafeRelativePath(input.taskPath ?? `tasks/inbox/${runId}.md`, "taskPath");
   const script = [
     `mkdir -p ${shellQuote(parentDirectory(taskPath))}`,
+    `test -f ${shellQuote(promptPath)}`,
     `cat > ${shellQuote(taskPath)} <<'THREADBEAT_TASK'`,
     renderTaskFile({ objective, runId }),
     "THREADBEAT_TASK",
-    "if ! command -v pi >/dev/null 2>&1; then",
+    `if ! command -v ${shellQuote(piExecutable)} >/dev/null 2>&1; then`,
     "  echo 'Pi CLI is not installed in this sandbox image. Install Pi in the Modal image before live agent boots.' >&2",
     "  exit 127",
     "fi",
-    `${piCommand} --prompt-file ${shellQuote(promptPath)} --message-file ${shellQuote(taskPath)}`,
+    "{",
+    "  printf 'Use the project instructions in AGENTS.md and the prompt template below.\\n\\n'",
+    `  cat ${shellQuote(promptPath)}`,
+    "  printf '\\n\\nThreadbeat run task follows. Do one bounded step, update repo files as needed, then stop.\\n\\n'",
+    `  cat ${shellQuote(taskPath)}`,
+    `} | ${piCommand} --mode json -p`,
   ].join("\n");
   return {
     command: ["bash", "-lc", script],
     piCommand,
+    piExecutable,
     objective,
     promptPath,
     runId,
@@ -51,13 +60,14 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
 
 export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string } = {}): AgentRuntimeCheckPlan => {
   const piCommand = requireSafeShellCommand(input.agentPiCommand ?? "pi", "agentPiCommand");
+  const piExecutable = firstCommandWord(piCommand);
   return {
     command: ["bash", "-lc", [
       "set -e",
       "test -f AGENTS.md",
       "test -f .pi/prompts/heartbeat.md",
       "test -d .pi/skills",
-      `command -v ${piCommand}`,
+      `command -v ${shellQuote(piExecutable)}`,
       `${piCommand} --help >/tmp/threadbeat-pi-help.txt 2>&1 || true`,
       "printf 'agent runtime ready\\n'",
     ].join("\n")],
@@ -98,6 +108,13 @@ const requireSafeShellCommand = (value: string, field: string): string => {
   const command = requireNonEmpty(value, field);
   if (/[\n\r\0]/.test(command)) throw new Error(`${field} must be a single shell command line`);
   return command;
+};
+
+const firstCommandWord = (command: string): string => {
+  const [word] = command.trim().split(/\s+/);
+  if (!word) throw new Error("agentPiCommand must start with an executable");
+  if (word.includes("'") || word.includes("\"")) throw new Error("agentPiCommand executable must not be quoted");
+  return word;
 };
 
 const parentDirectory = (value: string): string => {

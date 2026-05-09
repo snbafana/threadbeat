@@ -41,6 +41,12 @@ for any extra sandbox-only tools. The server does not embed Pi for agent runs;
 `THREADBEAT_AGENT_PI_COMMAND` is executed inside the sandbox workdir by
 `runs boot`.
 
+`runs boot` writes the Threadbeat objective to `tasks/inbox/<run_id>.md`, reads
+the repo-local `.pi/prompts/heartbeat.md`, and pipes both into Pi with
+`pi --mode json -p`. That is the documented noninteractive Pi path; autonomous
+agent runs still require sandbox-side provider auth such as API-key environment
+variables or a Pi auth file.
+
 To verify live Modal credentials:
 
 ```bash
