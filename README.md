@@ -109,6 +109,7 @@ message.
 
 ```bash
 npm run cli -- health
+npm run cli -- agents template --name research --out ./agents/research
 npm run cli -- agents create --name research --repo https://github.com/org/repo.git --branch main
 npm run cli -- agents list
 npm run cli -- agents repo <agent_id>
@@ -139,6 +140,12 @@ npm run cli -- messages listen --sandbox <sandbox_id>
 `sandboxes bootstrap` calls `POST /api/sandboxes/:id/bootstrap`. The route uses
 the sandbox service bootstrap implementation when present, and otherwise returns
 a clear `501` without requiring database changes.
+
+Agent template generation is Pi-native but does not run Pi:
+
+- `POST /api/agent-template` returns a file manifest for a git-backed agent repo.
+- `agents template --name <name> --out <dir>` materializes `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, and `.gitignore`.
+- Server-side Pi and sandbox-agent Pi remain separate; this only creates the sandbox-agent repo shape.
 
 Run planning is intentionally server-side and Pi-free for now:
 

@@ -209,10 +209,10 @@ git diff --check
 
 Good next small durable slices:
 
-1. Add an agent template phase:
-   - Generate a Pi-native repo skeleton with `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, `work/`.
-   - Keep server Pi separate from sandbox Pi.
-   - This should probably be a new phase after sandbox lifecycle is stable.
+1. Continue agent template phase:
+   - Added `POST /api/agent-template` and `agents template --name <name> --out <dir>`.
+   - The generated skeleton is Pi-native: `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, ignored `work/`.
+   - Next: wire hosted Git repo creation plus an initial template commit so `agents create` can optionally create a fresh git-backed agent body instead of only registering an existing repo.
 
 ## Conceptual Decisions To Preserve
 

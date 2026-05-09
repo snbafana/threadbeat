@@ -2,6 +2,7 @@ import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
+import { buildAgentTemplate } from "./agentTemplate.js";
 import { createHostedGitProvider } from "./hostedGit.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
@@ -40,6 +41,20 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     ok: true,
     agents: await db.listAgents(),
   }));
+
+  app.post("/api/agent-template", async (request, reply) => {
+    try {
+      const body = requestBody(request.body);
+      const template = buildAgentTemplate({
+        name: parseString(body.name, "name"),
+        id: parseOptionalString(body.id),
+        description: parseOptionalString(body.description),
+      });
+      return { ok: true, template };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
 
   app.post("/api/agents", async (request, reply) => {
     try {

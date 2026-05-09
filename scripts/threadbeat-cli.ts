@@ -1,4 +1,6 @@
 import "dotenv/config";
+import fs from "node:fs/promises";
+import path from "node:path";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 
@@ -68,6 +70,23 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
       defaultBranch: options.branch,
       currentRef: options.ref,
     }));
+    return;
+  }
+  if (subcommandName === "template") {
+    const options = parseOptions(args);
+    const response = await requestJson("POST", "/api/agent-template", {
+      name: required(options.name, "--name"),
+      ...(options.id ? { id: options.id } : {}),
+      ...(options.description ? { description: options.description } : {}),
+    });
+    const outDir = option(options, "out", "dir");
+    if (!outDir) {
+      await printJson(response);
+      return;
+    }
+    const template = readTemplateResponse(response);
+    const written = await materializeTemplate(template, outDir);
+    await printJson({ ok: true, template: { id: template.id, name: template.name }, outDir: path.resolve(outDir), written });
     return;
   }
   if (subcommandName === "get") {
@@ -400,6 +419,39 @@ async function planRunForStep(options: Record<string, string>): Promise<string> 
   return run.id;
 }
 
+type AgentTemplateResponse = {
+  template: {
+    id: string;
+    name: string;
+    files: Array<{ path: string; content: string }>;
+  };
+};
+
+function readTemplateResponse(value: unknown): AgentTemplateResponse["template"] {
+  const template = (value as AgentTemplateResponse).template;
+  if (!template || typeof template.id !== "string" || typeof template.name !== "string" || !Array.isArray(template.files)) {
+    throw new Error("template response did not include template files");
+  }
+  return template;
+}
+
+async function materializeTemplate(template: AgentTemplateResponse["template"], outDir: string): Promise<string[]> {
+  const root = path.resolve(outDir);
+  const written: string[] = [];
+  for (const file of template.files) {
+    if (!isSafeRelativePath(file.path)) throw new Error(`unsafe template path: ${file.path}`);
+    const target = path.join(root, file.path);
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, file.content, { encoding: "utf8", flag: "wx" });
+    written.push(file.path);
+  }
+  return written;
+}
+
+function isSafeRelativePath(value: string): boolean {
+  return value !== "" && !path.isAbsolute(value) && !value.split(/[\\/]/).includes("..");
+}
+
 function runPlanPayload(options: Record<string, string>): Record<string, string> {
   return {
     objective: required(options.objective, "--objective"),
@@ -428,6 +480,7 @@ function printHelp(): void {
 
 Commands:
   health
+  agents template --name <name> [--id <agent_id>] [--description "..."] [--out ./agent-repo]
   agents create --name <name> --repo <url> [--branch main] [--ref main]
   agents list
   agents get <agent_id>
