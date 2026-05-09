@@ -3,60 +3,9 @@ import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
 
 import { nextTickIso, nowIso } from "./time.js";
-import type {
-  HeartbeatEventRow,
-  HeartbeatRow,
-  HeartbeatRunRow,
-  HeartbeatStatus,
-  RunStatus,
-  SessionRow,
-} from "./types.js";
+import type { AgentRow, HeartbeatRow, MessageRow, SandboxRow } from "./types.js";
 
 type SqlValue = string | number | null;
-
-export type HeartbeatUpdateInput = {
-  title: string;
-  cadence: number;
-  contents: string;
-  provider: string;
-  model: string;
-  status: HeartbeatStatus;
-};
-
-export type AgentRunKind = "run" | "edit";
-
-export type AgentRow = {
-  id: string;
-  name: string;
-  repo_url: string;
-  current_version: string | null;
-  status: string;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AgentRunRow = {
-  id: string;
-  agent_id: string;
-  kind: AgentRunKind;
-  input_branch: string;
-  run_branch: string;
-  output_branch: string | null;
-  status: string;
-  objective: string;
-  created_at: string;
-  updated_at: string;
-};
-
-export type AgentEventRow = {
-  id: string;
-  agent_id: string;
-  run_id: string | null;
-  type: string;
-  message: string | null;
-  data: string | null;
-  created_at: string;
-};
 
 export class Database {
   private readonly client: Client;
@@ -64,13 +13,11 @@ export class Database {
   constructor(
     private readonly dbUrl: string,
     private readonly schemaPath: string,
-    authToken?: string,
   ) {
     if (dbUrl.startsWith("file:")) {
-      const filePath = dbUrl.slice("file:".length);
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.mkdirSync(path.dirname(dbUrl.slice("file:".length)), { recursive: true });
     }
-    this.client = createClient({ url: dbUrl, authToken });
+    this.client = createClient({ url: dbUrl });
   }
 
   async close(): Promise<void> {
@@ -82,338 +29,30 @@ export class Database {
     for (const statement of splitSql(schema)) {
       await this.client.execute(statement);
     }
-    await this.ensureHeartbeatColumns();
-  }
-
-  async createSession(name: string): Promise<SessionRow> {
-    const id = randomId("ses");
-    await this.client.execute({
-      sql: "INSERT INTO sessions (id, name, status) VALUES (?, ?, 'active')",
-      args: [id, name],
-    });
-    const row = await this.getSession(id);
-    if (!row) throw new Error("created session could not be loaded");
-    return row;
-  }
-
-  async getSession(id: string): Promise<SessionRow | null> {
-    return this.first<SessionRow>(
-      "SELECT id, name, status, created_at, updated_at FROM sessions WHERE id = ?",
-      [id],
-    );
-  }
-
-  async listSessions(): Promise<SessionRow[]> {
-    return this.all<SessionRow>(
-      "SELECT id, name, status, created_at, updated_at FROM sessions ORDER BY created_at DESC",
-    );
-  }
-
-  async createHeartbeat(input: {
-    sessionId: string;
-    title: string;
-    cadence: number;
-    contents: string;
-    provider: string;
-    model: string;
-    status: HeartbeatStatus;
-  }): Promise<HeartbeatRow> {
-    const id = randomId("hb");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeats (
-          id, session_id, title, cadence, contents, provider, model, last_tick, next_tick, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.sessionId,
-        input.title,
-        input.cadence,
-        input.contents,
-        input.provider,
-        input.model,
-        null,
-        nextTickIso(input.cadence, input.status),
-        input.status,
-      ],
-    });
-    const row = await this.getHeartbeat(id);
-    if (!row) throw new Error("created heartbeat could not be loaded");
-    return row;
-  }
-
-  async getHeartbeat(id: string): Promise<HeartbeatRow | null> {
-    return this.first<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listHeartbeats(sessionId?: string): Promise<HeartbeatRow[]> {
-    if (sessionId) {
-      return this.all<HeartbeatRow>(
-        `
-          SELECT id, session_id, title, cadence, contents, last_tick, next_tick,
-                 provider, model, status, created_at, updated_at
-          FROM heartbeats
-          WHERE session_id = ?
-          ORDER BY created_at DESC
-        `,
-        [sessionId],
-      );
-    }
-    return this.all<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        ORDER BY created_at DESC
-      `,
-    );
-  }
-
-  async updateHeartbeat(
-    id: string,
-    input: HeartbeatUpdateInput,
-  ): Promise<HeartbeatRow | null> {
-    await this.client.execute({
-      sql: `
-        UPDATE heartbeats
-        SET title = ?, cadence = ?, contents = ?, provider = ?, model = ?, next_tick = ?,
-            status = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [
-        input.title,
-        input.cadence,
-        input.contents,
-        input.provider,
-        input.model,
-        nextTickIso(input.cadence, input.status),
-        input.status,
-        id,
-      ],
-    });
-    return this.getHeartbeat(id);
-  }
-
-  async tickHeartbeat(id: string): Promise<HeartbeatRow | null> {
-    const heartbeat = await this.getHeartbeat(id);
-    if (!heartbeat) return null;
-    await this.client.execute({
-      sql: `
-        UPDATE heartbeats
-        SET last_tick = ?, next_tick = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [nowIso(), nextTickIso(heartbeat.cadence, heartbeat.status), id],
-    });
-    return this.getHeartbeat(id);
-  }
-
-  async listDueHeartbeats(limit: number): Promise<HeartbeatRow[]> {
-    return this.all<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        WHERE status = 'active'
-          AND (next_tick IS NULL OR next_tick <= ?)
-        ORDER BY COALESCE(next_tick, created_at) ASC, created_at ASC
-        LIMIT ?
-      `,
-      [nowIso(), limit],
-    );
-  }
-
-  async createRun(input: {
-    heartbeatId: string;
-    sessionId: string;
-    executor: string;
-    model: string | null;
-    status: RunStatus;
-    promptSnapshot: string;
-    output: string | null;
-    error: string | null;
-  }): Promise<HeartbeatRunRow> {
-    const id = randomId("run");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeat_runs (
-          id, heartbeat_id, session_id, executor, model, status,
-          prompt_snapshot, output, error, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.heartbeatId,
-        input.sessionId,
-        input.executor,
-        input.model,
-        input.status,
-        input.promptSnapshot,
-        input.output,
-        input.error,
-        nowIso(),
-      ],
-    });
-    const row = await this.getRun(id);
-    if (!row) throw new Error("created run could not be loaded");
-    return row;
-  }
-
-  async createEvent(input: {
-    heartbeatId?: string | null;
-    runId?: string | null;
-    sessionId?: string | null;
-    source: string;
-    type: string;
-    message?: string | null;
-    data?: unknown;
-  }): Promise<HeartbeatEventRow> {
-    const id = randomId("evt");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeat_events (
-          id, heartbeat_id, run_id, session_id, source, type, message, data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.heartbeatId ?? null,
-        input.runId ?? null,
-        input.sessionId ?? null,
-        input.source,
-        input.type,
-        input.message ?? null,
-        input.data === undefined ? null : JSON.stringify(input.data),
-      ],
-    });
-    const row = await this.getEvent(id);
-    if (!row) throw new Error("created event could not be loaded");
-    return row;
-  }
-
-  async getEvent(id: string): Promise<HeartbeatEventRow | null> {
-    return this.first<HeartbeatEventRow>(
-      `
-        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
-        FROM heartbeat_events
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listEvents(filters: {
-    heartbeatId?: string;
-    runId?: string;
-    sessionId?: string;
-    limit?: number;
-  }): Promise<HeartbeatEventRow[]> {
-    const conditions: string[] = [];
-    const args: SqlValue[] = [];
-    if (filters.heartbeatId) {
-      conditions.push("heartbeat_id = ?");
-      args.push(filters.heartbeatId);
-    }
-    if (filters.runId) {
-      conditions.push("run_id = ?");
-      args.push(filters.runId);
-    }
-    if (filters.sessionId) {
-      conditions.push("session_id = ?");
-      args.push(filters.sessionId);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    args.push(filters.limit ?? 100);
-    return this.all<HeartbeatEventRow>(
-      `
-        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
-        FROM heartbeat_events
-        ${where}
-        ORDER BY created_at DESC
-        LIMIT ?
-      `,
-      args,
-    );
-  }
-
-  async getRun(id: string): Promise<HeartbeatRunRow | null> {
-    return this.first<HeartbeatRunRow>(
-      `
-        SELECT id, heartbeat_id, session_id, executor, model, status,
-               prompt_snapshot, output, error, created_at, completed_at
-        FROM heartbeat_runs
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listRuns(filters: {
-    heartbeatId?: string;
-    sessionId?: string;
-  }): Promise<HeartbeatRunRow[]> {
-    const conditions: string[] = [];
-    const args: SqlValue[] = [];
-    if (filters.heartbeatId) {
-      conditions.push("heartbeat_id = ?");
-      args.push(filters.heartbeatId);
-    }
-    if (filters.sessionId) {
-      conditions.push("session_id = ?");
-      args.push(filters.sessionId);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    return this.all<HeartbeatRunRow>(
-      `
-        SELECT id, heartbeat_id, session_id, executor, model, status,
-               prompt_snapshot, output, error, created_at, completed_at
-        FROM heartbeat_runs
-        ${where}
-        ORDER BY created_at DESC
-      `,
-      args,
-    );
   }
 
   async createAgent(input: {
-    id?: string;
     name: string;
     repoUrl: string;
-    currentVersion?: string | null;
-    status?: string;
+    defaultBranch?: string;
+    currentRef?: string;
   }): Promise<AgentRow> {
-    const id = input.id ?? randomId("agt");
+    const id = randomId("agt");
+    const defaultBranch = input.defaultBranch ?? "main";
     await this.client.execute({
       sql: `
-        INSERT INTO agents (id, name, repo_url, current_version, status)
+        INSERT INTO agents (id, name, repo_url, default_branch, current_ref)
         VALUES (?, ?, ?, ?, ?)
       `,
-      args: [
-        id,
-        input.name,
-        input.repoUrl,
-        input.currentVersion ?? null,
-        input.status ?? "active",
-      ],
+      args: [id, input.name, input.repoUrl, defaultBranch, input.currentRef ?? defaultBranch],
     });
-    const row = await this.getAgent(id);
-    if (!row) throw new Error("created agent could not be loaded");
-    return row;
+    return this.mustGetAgent(id);
   }
 
   async listAgents(): Promise<AgentRow[]> {
     return this.all<AgentRow>(
       `
-        SELECT id, name, repo_url, current_version, status, created_at, updated_at
+        SELECT id, name, repo_url, default_branch, current_ref, status, created_at, updated_at
         FROM agents
         ORDER BY created_at DESC
       `,
@@ -423,7 +62,7 @@ export class Database {
   async getAgent(id: string): Promise<AgentRow | null> {
     return this.first<AgentRow>(
       `
-        SELECT id, name, repo_url, current_version, status, created_at, updated_at
+        SELECT id, name, repo_url, default_branch, current_ref, status, created_at, updated_at
         FROM agents
         WHERE id = ?
       `,
@@ -431,158 +70,193 @@ export class Database {
     );
   }
 
-  async updateAgentCurrentVersion(
-    id: string,
-    currentVersion: string | null,
-  ): Promise<AgentRow | null> {
-    await this.client.execute({
-      sql: `
-        UPDATE agents
-        SET current_version = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [currentVersion, id],
-    });
-    return this.getAgent(id);
-  }
-
-  async createAgentRun(input: {
-    id?: string;
+  async createHeartbeat(input: {
     agentId: string;
-    kind: AgentRunKind;
-    inputBranch: string;
-    runBranch: string;
-    outputBranch?: string | null;
+    title: string;
+    cadenceSeconds: number;
+    action: string;
     status?: string;
-    objective: string;
-  }): Promise<AgentRunRow> {
-    const id = input.id ?? randomId("arun");
+  }): Promise<HeartbeatRow> {
+    const id = randomId("hb");
+    const status = input.status ?? "active";
     await this.client.execute({
       sql: `
-        INSERT INTO agent_runs (
-          id, agent_id, kind, input_branch, run_branch, output_branch, status, objective
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO heartbeats (
+          id, agent_id, title, cadence_seconds, action, status, next_tick
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         id,
         input.agentId,
-        input.kind,
-        input.inputBranch,
-        input.runBranch,
-        input.outputBranch ?? null,
-        input.status ?? "queued",
-        input.objective,
+        input.title,
+        input.cadenceSeconds,
+        input.action,
+        status,
+        nextTickIso(input.cadenceSeconds, status),
       ],
     });
-    const row = await this.getAgentRun(id);
-    if (!row) throw new Error("created agent run could not be loaded");
-    return row;
+    const heartbeat = await this.getHeartbeat(id);
+    if (!heartbeat) throw new Error("created heartbeat could not be loaded");
+    return heartbeat;
   }
 
-  async getAgentRun(id: string): Promise<AgentRunRow | null> {
-    return this.first<AgentRunRow>(
+  async listHeartbeats(agentId?: string): Promise<HeartbeatRow[]> {
+    if (agentId) {
+      return this.all<HeartbeatRow>(
+        `
+          SELECT id, agent_id, title, cadence_seconds, action, status, last_tick, next_tick,
+                 created_at, updated_at
+          FROM heartbeats
+          WHERE agent_id = ?
+          ORDER BY created_at DESC
+        `,
+        [agentId],
+      );
+    }
+    return this.all<HeartbeatRow>(
       `
-        SELECT id, agent_id, kind, input_branch, run_branch, output_branch, status,
-               objective, created_at, updated_at
-        FROM agent_runs
+        SELECT id, agent_id, title, cadence_seconds, action, status, last_tick, next_tick,
+               created_at, updated_at
+        FROM heartbeats
+        ORDER BY created_at DESC
+      `,
+    );
+  }
+
+  async getHeartbeat(id: string): Promise<HeartbeatRow | null> {
+    return this.first<HeartbeatRow>(
+      `
+        SELECT id, agent_id, title, cadence_seconds, action, status, last_tick, next_tick,
+               created_at, updated_at
+        FROM heartbeats
         WHERE id = ?
       `,
       [id],
     );
   }
 
-  async listAgentRuns(agentId: string): Promise<AgentRunRow[]> {
-    return this.all<AgentRunRow>(
+  async createSandbox(input: {
+    agentId: string;
+    repoUrl: string;
+    branch: string;
+    workdir?: string;
+  }): Promise<SandboxRow> {
+    const id = randomId("sbx");
+    await this.client.execute({
+      sql: `
+        INSERT INTO sandboxes (id, agent_id, repo_url, branch, workdir)
+        VALUES (?, ?, ?, ?, ?)
+      `,
+      args: [id, input.agentId, input.repoUrl, input.branch, input.workdir ?? "/workspace/agent"],
+    });
+    return this.mustGetSandbox(id);
+  }
+
+  async listSandboxes(filters: { agentId?: string } = {}): Promise<SandboxRow[]> {
+    const args: SqlValue[] = [];
+    const where = filters.agentId ? "WHERE agent_id = ?" : "";
+    if (filters.agentId) args.push(filters.agentId);
+    return this.all<SandboxRow>(
       `
-        SELECT id, agent_id, kind, input_branch, run_branch, output_branch, status,
-               objective, created_at, updated_at
-        FROM agent_runs
-        WHERE agent_id = ?
+        SELECT id, agent_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
+               started_at, stopped_at, created_at, updated_at
+        FROM sandboxes
+        ${where}
         ORDER BY created_at DESC
       `,
-      [agentId],
+      args,
     );
   }
 
-  async updateAgentRunStatus(
-    id: string,
-    status: string,
-  ): Promise<AgentRunRow | null> {
-    await this.client.execute({
-      sql: `
-        UPDATE agent_runs
-        SET status = ?, updated_at = CURRENT_TIMESTAMP
+  async getSandbox(id: string): Promise<SandboxRow | null> {
+    return this.first<SandboxRow>(
+      `
+        SELECT id, agent_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
+               started_at, stopped_at, created_at, updated_at
+        FROM sandboxes
         WHERE id = ?
       `,
-      args: [status, id],
-    });
-    return this.getAgentRun(id);
+      [id],
+    );
   }
 
-  async updateAgentRunOutputBranch(
-    id: string,
-    outputBranch: string | null,
-  ): Promise<AgentRunRow | null> {
+  async updateSandboxStarted(id: string, providerSandboxId: string): Promise<SandboxRow> {
     await this.client.execute({
       sql: `
-        UPDATE agent_runs
-        SET output_branch = ?, updated_at = CURRENT_TIMESTAMP
+        UPDATE sandboxes
+        SET provider_sandbox_id = ?, state = 'running', started_at = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `,
-      args: [outputBranch, id],
+      args: [providerSandboxId, nowIso(), id],
     });
-    return this.getAgentRun(id);
+    return this.mustGetSandbox(id);
   }
 
-  async appendAgentEvent(input: {
-    id?: string;
-    agentId: string;
+  async updateSandboxState(id: string, state: string): Promise<SandboxRow> {
+    await this.client.execute({
+      sql: `
+        UPDATE sandboxes
+        SET state = ?, stopped_at = CASE WHEN ? IN ('stopped', 'failed') THEN ? ELSE stopped_at END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [state, state, nowIso(), id],
+    });
+    return this.mustGetSandbox(id);
+  }
+
+  async appendMessage(input: {
+    agentId?: string | null;
+    sandboxId?: string | null;
     runId?: string | null;
+    source: string;
     type: string;
-    message?: string | null;
+    text?: string | null;
     data?: unknown;
-  }): Promise<AgentEventRow> {
-    const id = input.id ?? randomId("aevt");
+  }): Promise<MessageRow> {
+    const id = randomId("msg");
     await this.client.execute({
       sql: `
-        INSERT INTO agent_events (id, agent_id, run_id, type, message, data)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (id, agent_id, sandbox_id, run_id, source, type, text, data_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         id,
-        input.agentId,
+        input.agentId ?? null,
+        input.sandboxId ?? null,
         input.runId ?? null,
+        input.source,
         input.type,
-        input.message ?? null,
+        input.text ?? null,
         input.data === undefined ? null : JSON.stringify(input.data),
       ],
     });
-    const row = await this.getAgentEvent(id);
-    if (!row) throw new Error("created agent event could not be loaded");
-    return row;
+    const message = await this.getMessage(id);
+    if (!message) throw new Error("created message could not be loaded");
+    return message;
   }
 
-  async listAgentEvents(filters: {
+  async listMessages(filters: {
     agentId?: string;
-    runId?: string;
+    sandboxId?: string;
     limit?: number;
-  }): Promise<AgentEventRow[]> {
+  }): Promise<MessageRow[]> {
     const conditions: string[] = [];
     const args: SqlValue[] = [];
     if (filters.agentId) {
       conditions.push("agent_id = ?");
       args.push(filters.agentId);
     }
-    if (filters.runId) {
-      conditions.push("run_id = ?");
-      args.push(filters.runId);
+    if (filters.sandboxId) {
+      conditions.push("sandbox_id = ?");
+      args.push(filters.sandboxId);
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     args.push(filters.limit ?? 100);
-    return this.all<AgentEventRow>(
+    return this.all<MessageRow>(
       `
-        SELECT id, agent_id, run_id, type, message, data, created_at
-        FROM agent_events
+        SELECT id, agent_id, sandbox_id, run_id, source, type, text, data_json, created_at
+        FROM messages
         ${where}
         ORDER BY created_at DESC
         LIMIT ?
@@ -591,11 +265,23 @@ export class Database {
     );
   }
 
-  private async getAgentEvent(id: string): Promise<AgentEventRow | null> {
-    return this.first<AgentEventRow>(
+  private async mustGetAgent(id: string): Promise<AgentRow> {
+    const agent = await this.getAgent(id);
+    if (!agent) throw new Error(`agent not found after write: ${id}`);
+    return agent;
+  }
+
+  private async mustGetSandbox(id: string): Promise<SandboxRow> {
+    const sandbox = await this.getSandbox(id);
+    if (!sandbox) throw new Error(`sandbox not found after write: ${id}`);
+    return sandbox;
+  }
+
+  private async getMessage(id: string): Promise<MessageRow | null> {
+    return this.first<MessageRow>(
       `
-        SELECT id, agent_id, run_id, type, message, data, created_at
-        FROM agent_events
+        SELECT id, agent_id, sandbox_id, run_id, source, type, text, data_json, created_at
+        FROM messages
         WHERE id = ?
       `,
       [id],
@@ -611,27 +297,12 @@ export class Database {
     const result = await this.client.execute({ sql, args });
     return result.rows as T[];
   }
-
-  private async ensureHeartbeatColumns(): Promise<void> {
-    const columns = await this.all<{ name: string }>("PRAGMA table_info(heartbeats)");
-    const names = new Set(columns.map((column) => column.name));
-    if (!names.has("provider")) {
-      await this.client.execute(
-        "ALTER TABLE heartbeats ADD COLUMN provider TEXT NOT NULL DEFAULT 'deepseek'",
-      );
-    }
-    if (!names.has("model")) {
-      await this.client.execute(
-        "ALTER TABLE heartbeats ADD COLUMN model TEXT NOT NULL DEFAULT 'deepseek-v4-flash'",
-      );
-    }
-  }
 }
-
-const randomId = (prefix: string): string => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 
 const splitSql = (schema: string): string[] =>
   schema
     .split(";")
     .map((statement) => statement.trim())
     .filter(Boolean);
+
+const randomId = (prefix: string): string => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;

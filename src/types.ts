@@ -1,9 +1,9 @@
-export type HeartbeatStatus = "active" | "inactive";
-export type RunStatus = "succeeded" | "failed" | "skipped";
-
-export type SessionRow = {
+export type AgentRow = {
   id: string;
   name: string;
+  repo_url: string;
+  default_branch: string;
+  current_ref: string;
   status: string;
   created_at: string;
   updated_at: string;
@@ -11,41 +11,40 @@ export type SessionRow = {
 
 export type HeartbeatRow = {
   id: string;
-  session_id: string;
+  agent_id: string;
   title: string;
-  cadence: number;
-  contents: string;
-  provider: string;
-  model: string;
+  cadence_seconds: number;
+  action: string;
+  status: string;
   last_tick: string | null;
   next_tick: string | null;
-  status: HeartbeatStatus;
   created_at: string;
   updated_at: string;
 };
 
-export type HeartbeatRunRow = {
+export type SandboxRow = {
   id: string;
-  heartbeat_id: string;
-  session_id: string;
-  executor: string;
-  model: string | null;
-  status: RunStatus;
-  prompt_snapshot: string;
-  output: string | null;
-  error: string | null;
+  agent_id: string;
+  provider: string;
+  provider_sandbox_id: string | null;
+  state: string;
+  repo_url: string;
+  branch: string;
+  workdir: string;
+  started_at: string | null;
+  stopped_at: string | null;
   created_at: string;
-  completed_at: string | null;
+  updated_at: string;
 };
 
-export type HeartbeatEventRow = {
+export type MessageRow = {
   id: string;
-  heartbeat_id: string | null;
+  agent_id: string | null;
+  sandbox_id: string | null;
   run_id: string | null;
-  session_id: string | null;
   source: string;
   type: string;
-  message: string | null;
-  data: string | null;
+  text: string | null;
+  data_json: string | null;
   created_at: string;
 };

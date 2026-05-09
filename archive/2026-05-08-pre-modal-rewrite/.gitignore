@@ -1,0 +1,7 @@
+node_modules
+dist
+.threadbeat
+
+.projects/
+.env
+.env.local

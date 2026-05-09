@@ -1,0 +1,49 @@
+import "dotenv/config";
+
+import path from "node:path";
+
+import { boolEnv, intEnv } from "./env.js";
+
+const projectRoot = process.cwd();
+
+export type Settings = {
+  projectRoot: string;
+  repoRoot: string;
+  dbUrl: string;
+  dbAuthToken?: string;
+  pollSeconds: number;
+  maxDuePerPoll: number;
+  runTimeoutMs: number;
+  piDryRun: boolean;
+  piDryRunDelayMs: number;
+  piProvider: string;
+  piModel: string;
+  piThinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  deepseekApiKey?: string;
+  logRequests: boolean;
+  port: number;
+};
+
+export const loadSettings = (): Settings => {
+  const repoRoot = path.resolve(process.env.THREADBEAT_REPO_ROOT ?? projectRoot);
+  return {
+    projectRoot,
+    repoRoot,
+    dbUrl:
+      process.env.THREADBEAT_DB_URL ??
+      process.env.TURSO_DATABASE_URL ??
+      `file:${path.join(repoRoot, ".threadbeat", "threadbeat.db")}`,
+    dbAuthToken: process.env.THREADBEAT_DB_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN,
+    pollSeconds: intEnv("THREADBEAT_POLL_SECONDS", 10),
+    maxDuePerPoll: intEnv("THREADBEAT_MAX_DUE_PER_POLL", 5),
+    runTimeoutMs: intEnv("THREADBEAT_RUN_TIMEOUT_SECONDS", 300) * 1000,
+    piDryRun: boolEnv("THREADBEAT_PI_DRY_RUN", false),
+    piDryRunDelayMs: intEnv("THREADBEAT_PI_DRY_RUN_DELAY_MS", 0),
+    piProvider: process.env.THREADBEAT_PI_PROVIDER ?? "deepseek",
+    piModel: process.env.THREADBEAT_PI_MODEL ?? "deepseek-v4-flash",
+    piThinking: (process.env.THREADBEAT_PI_THINKING ?? "off") as Settings["piThinking"],
+    deepseekApiKey: process.env.DEEPSEEK_API_KEY,
+    logRequests: boolEnv("THREADBEAT_LOG_REQUESTS", true),
+    port: intEnv("PORT", 8000),
+  };
+};

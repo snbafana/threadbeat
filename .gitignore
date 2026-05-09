@@ -1,7 +1,6 @@
-node_modules
-dist
-.threadbeat
-
-.projects/
 .env
-.env.local
+.threadbeat/
+.projects/
+dist/
+node_modules/
+npm-debug.log*
