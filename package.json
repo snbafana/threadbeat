@@ -14,6 +14,7 @@
     "test": "tsx scripts/git-planning.test.ts && tsx scripts/code-storage.test.ts && tsx scripts/rate-limit.test.ts && tsx scripts/hosted-git.test.ts && tsx scripts/bootstrap-smoke.ts && tsx scripts/smoke.ts",
     "smoke:code-storage": "tsx scripts/code-storage-live-smoke.ts",
     "smoke:github": "tsx scripts/github-live-smoke.ts",
+    "smoke:modal": "tsx scripts/modal-live-smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts"
   },
   "dependencies": {

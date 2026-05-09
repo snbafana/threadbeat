@@ -34,6 +34,15 @@ MODAL_TOKEN_SECRET=...
 
 Modal's JavaScript SDK is installed as `modal` and expects Node 22+.
 
+To verify live Modal credentials:
+
+```bash
+npm run smoke:modal
+```
+
+The smoke starts a real Modal sandbox, runs `python --version`, and terminates
+the sandbox. Without Modal credentials it exits successfully with a skip message.
+
 Hosted Git is behind a provider boundary:
 
 ```bash
