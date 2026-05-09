@@ -11,7 +11,10 @@ export type PreflightReport = {
   checks: PreflightCheck[];
   sandboxEnvNames: string[];
   sandboxEnvResolvedNames: string[];
+  recommendedSandboxEnvNames: string[];
 };
+
+const DEFAULT_SANDBOX_AUTH_ENV = ["DEEPSEEK_API_KEY"];
 
 export const buildPreflightReport = (settings: Settings): PreflightReport => {
   const sandboxEnv = settings.sandboxEnv ?? {};
@@ -35,7 +38,7 @@ export const buildPreflightReport = (settings: Settings): PreflightReport => {
       ok: sandboxEnvNames.length > 0,
       detail: sandboxEnvNames.length > 0
         ? `${sandboxEnvResolvedNames.length}/${sandboxEnvNames.length} allowlisted env values are present`
-        : "THREADBEAT_SANDBOX_ENV_ALLOWLIST is empty",
+        : `THREADBEAT_SANDBOX_ENV_ALLOWLIST is empty; default sandbox-agent auth expects ${DEFAULT_SANDBOX_AUTH_ENV.join(",")}`,
     },
     {
       name: "agent_pi_image",
@@ -56,6 +59,7 @@ export const buildPreflightReport = (settings: Settings): PreflightReport => {
     checks,
     sandboxEnvNames,
     sandboxEnvResolvedNames,
+    recommendedSandboxEnvNames: DEFAULT_SANDBOX_AUTH_ENV,
   };
 };
 

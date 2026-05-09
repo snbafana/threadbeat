@@ -50,7 +50,8 @@ variables or a Pi auth file.
 To pass model-provider credentials into agent sandboxes, opt in by name:
 
 ```bash
-THREADBEAT_SANDBOX_ENV_ALLOWLIST=OPENAI_API_KEY,ANTHROPIC_API_KEY
+THREADBEAT_SANDBOX_ENV_ALLOWLIST=DEEPSEEK_API_KEY
+DEEPSEEK_API_KEY=...
 ```
 
 Only listed variables that are present in the server environment are injected
@@ -134,7 +135,7 @@ To run the first real authenticated Pi task in a Modal sandbox:
 
 ```bash
 THREADBEAT_RUN_REAL_PI_TASK=1 \
-THREADBEAT_SANDBOX_ENV_ALLOWLIST=OPENAI_API_KEY \
+THREADBEAT_SANDBOX_ENV_ALLOWLIST=DEEPSEEK_API_KEY \
 npm run smoke:modal-agent-real-task
 ```
 

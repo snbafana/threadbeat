@@ -12,8 +12,8 @@ const baseSettings: Settings = {
   modalAppName: "threadbeat-test",
   modalImage: "python:3.13-slim",
   modalInstallSandboxPi: true,
-  sandboxEnv: { OPENAI_API_KEY: "sk-test" },
-  sandboxEnvNames: ["OPENAI_API_KEY"],
+  sandboxEnv: { DEEPSEEK_API_KEY: "sk-test" },
+  sandboxEnvNames: ["DEEPSEEK_API_KEY"],
   sandboxExecTimeoutMs: 120_000,
   agentBootTimeoutMs: 600_000,
   hostedGitProvider: "github",
@@ -35,7 +35,8 @@ try {
   process.env.MODAL_TOKEN_SECRET = "secret";
   const ready = buildPreflightReport(baseSettings);
   assert.equal(ready.ok, true);
-  assert.deepEqual(ready.sandboxEnvResolvedNames, ["OPENAI_API_KEY"]);
+  assert.deepEqual(ready.sandboxEnvResolvedNames, ["DEEPSEEK_API_KEY"]);
+  assert.deepEqual(ready.recommendedSandboxEnvNames, ["DEEPSEEK_API_KEY"]);
 
   const missingSandboxEnv = buildPreflightReport({
     ...baseSettings,
