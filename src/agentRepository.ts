@@ -24,10 +24,10 @@ export const planRunBranch = (input: {
   prefix?: string;
   runId: string;
 }) => {
-  const metadata = getAgentRepositoryMetadata(input.agent);
+  assertValidGitRef(input.agent.current_ref);
   const runIdSegment = toBranchSegment(input.runId, "run", { maxLength: 40 });
-  const objectiveSegment = toBranchSegment(input.objective ?? metadata.name, "task", { maxLength: 48 });
-  const agentSegment = toBranchSegment(metadata.agentId, "agent", { maxLength: 40 });
+  const objectiveSegment = toBranchSegment(input.objective ?? input.agent.name, "task", { maxLength: 48 });
+  const agentSegment = toBranchSegment(input.agent.id, "agent", { maxLength: 40 });
   const prefixSegment = toBranchSegment(input.prefix ?? "threadbeat/runs", "threadbeat_runs", {
     maxLength: 80,
   });

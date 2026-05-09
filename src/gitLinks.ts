@@ -1,12 +1,12 @@
 import { assertValidGitRef } from "./git.js";
 
-export type GitHubRepoParts = {
+type GitHubRepoParts = {
   owner: string;
   repo: string;
   webUrl: string;
 };
 
-export type GitHubLinkSet = {
+type GitHubLinkSet = {
   commitUrl: string | null;
   compareUrl: string | null;
   repoUrl: string | null;
