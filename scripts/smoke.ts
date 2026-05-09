@@ -443,6 +443,39 @@ try {
     cliRestartPlan.run.id,
   ]);
 
+  const cliStep = await cliJson<{
+    executed: { result: { stdout: string } };
+    finalized: { run: { id: string; status: string } } | null;
+    runId: string;
+    status: { sandboxes: Array<{ state: string }> };
+  }>(baseUrl, [
+    "runs",
+    "step",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli step run",
+    "--bootstrap",
+    "--finalize",
+    "--message",
+    "Finalize step smoke",
+    "--",
+    "pwd",
+  ]);
+  assert.match(cliStep.executed.result.stdout, /\/workspace\/agent/);
+  assert.equal(cliStep.finalized?.run.status, "completed");
+  assert.equal(cliStep.finalized.run.id, cliStep.runId);
+  assert.ok(cliStep.status.sandboxes.some((sandbox) => sandbox.state === "running"));
+
+  const cliStepCleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
+    "sandboxes",
+    "stop-running",
+    "--run",
+    cliStep.runId,
+  ]);
+  assert.equal(cliStepCleanup.stopped.length, 1);
+  assert.equal(cliStepCleanup.stopped[0]?.state, "stopped");
+
   await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",
     "stop",

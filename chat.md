@@ -36,7 +36,8 @@ The branch is pushed to origin and was clean at this handoff.
 Latest commits:
 
 ```text
-pending next commit: Add filtered running sandbox cleanup
+pending next commit: Add runs step CLI orchestration
+10b5537 Add running sandbox cleanup
 2850bfe Add run sandbox restart
 688c993 Reuse running sandboxes for runs
 3305bad Add run status inspection endpoint
@@ -117,6 +118,7 @@ npm run cli -- health
 npm run cli -- agents create --name research --repo https://github.com/org/repo.git --branch main
 npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
 npm run cli -- runs status <run_id>
+npm run cli -- runs step --agent <agent_id> --objective "one bounded task" --bootstrap --finalize -- "pwd"
 npm run cli -- runs sandbox <run_id> --bootstrap
 npm run cli -- runs exec <run_id> -- "pwd"
 npm run cli -- runs finalize <run_id> --message "Finalize run"
@@ -209,16 +211,11 @@ git diff --check
 
 Good next small durable slices:
 
-1. Add a combined `runs step` CLI:
-   - Optionally plan/start/bootstrap/exec/finalize in one command.
-   - Keep it CLI-side orchestration over existing server APIs.
-   - Do not introduce Pi yet.
-
-2. Add live Modal verification in broader end-to-end paths:
+1. Add live Modal verification in broader end-to-end paths:
    - `npm run smoke:modal` passed with real `bafanas` Modal credentials.
    - Next useful Modal check is a server/CLI live-mode flow, not only direct `SandboxService`.
 
-3. Add an agent template phase:
+2. Add an agent template phase:
    - Generate a Pi-native repo skeleton with `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, `work/`.
    - Keep server Pi separate from sandbox Pi.
    - This should probably be a new phase after sandbox lifecycle is stable.

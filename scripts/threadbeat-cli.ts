@@ -219,6 +219,30 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options)));
     return;
   }
+  if (subcommandName === "step") {
+    const separatorIndex = args.indexOf("--");
+    const optionArgs = separatorIndex >= 0 ? args.slice(0, separatorIndex) : args;
+    const rawCommandArgs = separatorIndex >= 0 ? args.slice(separatorIndex + 1) : [];
+    const options = parseOptions(optionArgs);
+    const command = rawCommandArgs.join(" ");
+    if (!command.trim()) throw new Error("runs step requires a command after --");
+    const runId = option(options, "run", "run-id") ?? await planRunForStep(options);
+    const sandbox = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/sandbox`, {
+      bootstrap: options.bootstrap === "1",
+    });
+    const executed = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/exec`, {
+      command,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    });
+    const finalized = options.finalize === "1"
+      ? await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/finalize`, {
+        ...(option(options, "message", "commit-message") ? { commitMessage: option(options, "message", "commit-message") } : {}),
+      })
+      : null;
+    const status = await requestJson("GET", `/api/runs/${encodeURIComponent(runId)}/status`);
+    await printJson({ ok: true, runId, sandbox, executed, finalized, status });
+    return;
+  }
   if (subcommandName === "sandbox" || subcommandName === "start-sandbox") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error(`runs ${subcommandName} requires a run id`);
@@ -319,7 +343,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "follow" || key === "live") {
+    if (key === "bootstrap" || key === "finalize" || key === "follow" || key === "live") {
       options[key] = "1";
       continue;
     }
@@ -368,6 +392,14 @@ function option(options: Record<string, string>, ...keys: string[]): string | un
   return undefined;
 }
 
+async function planRunForStep(options: Record<string, string>): Promise<string> {
+  const agentId = required(option(options, "agent", "agent-id"), "--agent");
+  const planned = await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options));
+  const run = (planned as { run?: { id?: unknown } }).run;
+  if (!run || typeof run.id !== "string") throw new Error("planned run response did not include run.id");
+  return run.id;
+}
+
 function runPlanPayload(options: Record<string, string>): Record<string, string> {
   return {
     objective: required(options.objective, "--objective"),
@@ -410,6 +442,8 @@ Commands:
   runs get <run_id>
   runs status <run_id> [--limit 20]
   runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
+  runs step --agent <agent_id> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
+  runs step --run <run_id> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run_id> [--bootstrap]
   runs restart-sandbox <run_id> [--bootstrap]
   runs exec <run_id> [--cwd /workspace/agent] -- <command>

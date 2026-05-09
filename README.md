@@ -106,6 +106,7 @@ npm run cli -- agents repo <agent_id>
 npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
 npm run cli -- runs list --agent <agent_id>
 npm run cli -- runs status <run_id>
+npm run cli -- runs step --agent <agent_id> --objective "one bounded task" --bootstrap --finalize -- "pwd"
 npm run cli -- runs sandbox <run_id> [--bootstrap]
 npm run cli -- runs restart-sandbox <run_id> [--bootstrap]
 npm run cli -- runs exec <run_id> -- "pwd"
@@ -151,6 +152,10 @@ Run planning is intentionally server-side and Pi-free for now:
   run `stopped`.
 - `POST /api/sandboxes/stop-running` stops all running sandboxes matching an
   `agentId` or `runId` filter. At least one filter is required.
+
+The `runs step` CLI command is client-side orchestration over the existing run
+APIs. It can plan a run, start/bootstrap its sandbox, execute one command, and
+optionally finalize the run branch without introducing a new server primitive.
 
 Read-only API inspection routes:
 
