@@ -7,7 +7,7 @@ import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
-import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
+import { cliJson as runCliJson } from "./cli-smoke-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -136,7 +136,12 @@ try {
     assert.ok(bootMessages.messages.some((message) => message.type === "agent_boot_completed"));
   }
 
-  const cleanup = await stopRunSandboxes(baseUrl, runId);
+  const cleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
+    "sandboxes",
+    "stop-running",
+    "--run",
+    runId,
+  ]);
   assert.equal(cleanup.stoppedCount, 1);
 
   console.log(JSON.stringify({
@@ -147,7 +152,7 @@ try {
     try {
       const address = app.server.address() as AddressInfo | null;
       if (address) {
-        await stopRunSandboxes(`http://${settings.host}:${address.port}`, runId);
+        await cliJson(`http://${settings.host}:${address.port}`, ["sandboxes", "stop-running", "--run", runId]);
       }
     } catch {}
   }
@@ -156,4 +161,8 @@ try {
   if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }
+}
+
+async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
+  return runCliJson<T>(baseUrl, args, { maxBuffer: 10 * 1024 * 1024 });
 }

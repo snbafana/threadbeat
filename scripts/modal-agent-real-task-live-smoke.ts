@@ -8,7 +8,7 @@ import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.j
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { DEEPSEEK_API_KEY_ENV } from "../src/piModels.js";
 import { buildServer } from "../src/server.js";
-import { cliJsonHuge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
+import { cliJson as runCliJson } from "./cli-smoke-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -138,7 +138,7 @@ try {
   if (runId) {
     try {
       const address = app.server.address() as AddressInfo | null;
-      if (address) await stopRunSandboxes(`http://${settings.host}:${address.port}`, runId);
+      if (address) await cliJson(`http://${settings.host}:${address.port}`, ["sandboxes", "stop-running", "--run", runId]);
     } catch {}
   }
   await app.close();
@@ -146,4 +146,8 @@ try {
   if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }
+}
+
+async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
+  return runCliJson<T>(baseUrl, args, { maxBuffer: 20 * 1024 * 1024 });
 }
