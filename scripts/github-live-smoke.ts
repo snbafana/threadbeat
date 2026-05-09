@@ -1,13 +1,17 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 
 import type { Settings } from "../src/config.js";
 import { GitHubHostedGitProvider } from "../src/hostedGit.js";
+import {
+  assertCanCleanUpSmokeRepo,
+  deleteGitHubRepo,
+  githubRepoPathFromRemoteUrl,
+  parseGitHubOwnerType,
+  resolveGitHubToken,
+} from "./github-smoke-utils.js";
 
-const execFileAsync = promisify(execFile);
 const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
 const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
 const githubToken = await resolveGitHubToken();
@@ -44,7 +48,7 @@ const provider = new GitHubHostedGitProvider(settings);
 let created: Awaited<ReturnType<typeof provider.createRepository>> | undefined;
 let deleted = false;
 
-await assertCanCleanUpSmokeRepo(githubToken);
+await assertCanCleanUpSmokeRepo(githubToken, "GitHub live smoke");
 
 try {
   created = await provider.createRepository({ agent, dryRun: false, repoId });
@@ -58,11 +62,7 @@ try {
 } finally {
   if (created && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
     const repoPath = githubRepoPathFromRemoteUrl(created.remoteUrl);
-    const response = await fetch(`https://api.github.com/repos/${repoPath}`, {
-      headers: githubHeaders(githubToken),
-      method: "DELETE",
-    });
-    assert.equal(response.status, 204, `GitHub smoke repo delete failed (${response.status}): ${await response.text()}`);
+    await deleteGitHubRepo(githubToken, repoPath);
     deleted = true;
   }
 }
@@ -75,51 +75,3 @@ console.log(JSON.stringify({
   remoteUrlRedacted: created?.remoteUrlRedacted,
   source: created?.source,
 }, null, 2));
-
-function parseGitHubOwnerType(value: string): "auto" | "org" | "user" {
-  if (value === "auto" || value === "org" || value === "user") return value;
-  throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be auto, org, or user");
-}
-
-function githubHeaders(token: string): Record<string, string> {
-  return {
-    accept: "application/vnd.github+json",
-    authorization: `Bearer ${token}`,
-    "user-agent": "threadbeat",
-    "x-github-api-version": "2022-11-28",
-  };
-}
-
-async function resolveGitHubToken(): Promise<string | undefined> {
-  const envToken = process.env.THREADBEAT_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN;
-  if (envToken?.trim()) return envToken.trim();
-  try {
-    const { stdout } = await execFileAsync("gh", ["auth", "token"], { maxBuffer: 1024 * 1024 });
-    const token = stdout.trim();
-    return token.length > 0 ? token : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function assertCanCleanUpSmokeRepo(token: string): Promise<void> {
-  if (process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP === "1") return;
-  const response = await fetch("https://api.github.com/user", {
-    headers: githubHeaders(token),
-    method: "GET",
-  });
-  const scopes = response.headers.get("x-oauth-scopes") ?? "";
-  const scopeSet = new Set(scopes.split(",").map((scope) => scope.trim()).filter(Boolean));
-  if (!scopeSet.has("delete_repo")) {
-    throw new Error(
-      "GitHub live smoke requires a token with delete_repo scope so the temporary repo can be cleaned up. "
-      + "Set THREADBEAT_GITHUB_LIVE_SMOKE_KEEP=1 to intentionally keep the repo.",
-    );
-  }
-}
-
-function githubRepoPathFromRemoteUrl(remoteUrl: string | null): string {
-  if (!remoteUrl) throw new Error("GitHub smoke did not return a remote URL");
-  const parsed = new URL(remoteUrl);
-  return parsed.pathname.replace(/^\/+/, "").replace(/\.git$/, "");
-}
