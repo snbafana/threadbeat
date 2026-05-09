@@ -2,15 +2,13 @@ import "dotenv/config";
 
 import assert from "node:assert/strict";
 
-import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
-import { printJson, skipSmoke } from "./script-output-utils.js";
+import { skipUnlessModalCredentials } from "./script-auth-utils.js";
+import { printJson } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 
-if (!hasModalCredentials(process.env)) {
-  skipSmoke("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
-}
+skipUnlessModalCredentials("Modal CLI live smoke");
 
 const tempRoot = await createScriptTempRoot("threadbeat-modal-cli-live-smoke");
 const settings = scriptSettings({

@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
-import { printJson, skipUnless } from "./script-output-utils.js";
+import { skipUnlessGitHubToken } from "./script-auth-utils.js";
+import { printJson } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -19,7 +20,7 @@ const githubOwner = DEFAULT_GITHUB_OWNER;
 const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
 
-skipUnless(githubToken, "GitHub agent init CLI live smoke skipped: gh auth token is not available");
+skipUnlessGitHubToken(githubToken, "GitHub agent init CLI live smoke");
 
 await assertCanCleanUpSmokeRepo(githubToken, "GitHub agent init CLI live smoke");
 
