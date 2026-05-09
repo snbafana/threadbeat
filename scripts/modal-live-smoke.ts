@@ -5,13 +5,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { hasModalCredentials } from "../src/auth.js";
 import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { Database } from "../src/db.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
 import { SandboxService } from "../src/sandboxService.js";
 
-if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+if (!hasModalCredentials(process.env)) {
   console.log("Modal live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }

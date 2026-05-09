@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { collectPresentEnv, hasModalCredentials } from "../src/auth.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { DEEPSEEK_API_KEY_ENV } from "../src/piModels.js";
@@ -23,9 +24,9 @@ const githubOwner = DEFAULT_GITHUB_OWNER;
 const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
 const sandboxEnvNames = [DEEPSEEK_API_KEY_ENV];
-const sandboxEnv = collectEnv(sandboxEnvNames, process.env);
+const sandboxEnv = collectPresentEnv(sandboxEnvNames, process.env);
 
-if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+if (!hasModalCredentials(process.env)) {
   console.log("Modal agent real task live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }
@@ -163,11 +164,4 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     maxBuffer: 20 * 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
-}
-
-function collectEnv(names: string[], source: NodeJS.ProcessEnv): Record<string, string> {
-  return Object.fromEntries(names.flatMap((name) => {
-    const value = source[name];
-    return value === undefined ? [] : [[name, value]];
-  }));
 }

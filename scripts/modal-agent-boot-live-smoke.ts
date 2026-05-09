@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
@@ -22,7 +23,7 @@ const githubOwner = DEFAULT_GITHUB_OWNER;
 const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
 
-if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+if (!hasModalCredentials(process.env)) {
   console.log("Modal agent boot live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }

@@ -8,12 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 
 const execFileAsync = promisify(execFile);
 
-if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+if (!hasModalCredentials(process.env)) {
   console.log("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }

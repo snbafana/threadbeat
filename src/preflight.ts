@@ -1,3 +1,4 @@
+import { hasModalCredentials } from "./auth.js";
 import type { Settings } from "./config.js";
 import { DEEPSEEK_API_KEY_ENV } from "./piModels.js";
 
@@ -8,7 +9,7 @@ export const buildPreflightReport = (settings: Settings) => {
   const checks = [
     {
       name: "modal_credentials",
-      ok: settings.modalMode !== "live" || Boolean(process.env.MODAL_TOKEN_ID && process.env.MODAL_TOKEN_SECRET),
+      ok: settings.modalMode !== "live" || hasModalCredentials(process.env),
       detail: settings.modalMode === "live"
         ? "Modal credentials must be configured"
         : "Modal credentials are not required in dry-run mode",

@@ -1,3 +1,4 @@
+import { hasModalCredentials } from "./auth.js";
 import type { Settings } from "./config.js";
 
 export type SandboxExecResult = {
@@ -89,7 +90,7 @@ class ModalSandboxProvider implements SandboxProvider {
 }
 
 const assertModalAuth = (): void => {
-  if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+  if (!hasModalCredentials(process.env)) {
     throw new Error("MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required for live Modal mode");
   }
 };

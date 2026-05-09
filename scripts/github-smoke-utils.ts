@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { resolveGitHubToken } from "../src/config.js";
+import { resolveGitHubToken } from "../src/auth.js";
 
 export { resolveGitHubToken };
 
