@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { buildAgentBootPlan } from "../src/agentBoot.js";
+import { buildAgentBootPlan, buildAgentRuntimeCheckPlan } from "../src/agentBoot.js";
 
 const plan = buildAgentBootPlan({
   objective: "continue research on git-backed agents",
@@ -40,5 +40,12 @@ assert.throws(
   () => buildAgentBootPlan({ agentPiCommand: "pi\nrm -rf /", objective: "bad", runId: "run_123" }),
   /single shell command line/,
 );
+
+const runtimeCheck = buildAgentRuntimeCheckPlan({ agentPiCommand: "pi" });
+assert.equal(runtimeCheck.piCommand, "pi");
+assert.match(runtimeCheck.command[2] ?? "", /test -f AGENTS\.md/);
+assert.match(runtimeCheck.command[2] ?? "", /test -f \.pi\/prompts\/heartbeat\.md/);
+assert.match(runtimeCheck.command[2] ?? "", /command -v pi/);
+assert.match(runtimeCheck.command[2] ?? "", /agent runtime ready/);
 
 console.log("agent boot tests passed");

@@ -1,7 +1,7 @@
 import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
-import { buildAgentBootPlan } from "./agentBoot.js";
+import { buildAgentBootPlan, buildAgentRuntimeCheckPlan } from "./agentBoot.js";
 import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
 import { buildAgentTemplate } from "./agentTemplate.js";
 import { createHostedGitProvider } from "./hostedGit.js";
@@ -445,6 +445,34 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         source: "server",
         type: "agent_boot_planned",
         text: `Booting sandbox Pi with ${plan.promptPath}`,
+        data: plan,
+      });
+      const executed = await sandboxService.exec(sandbox, plan.command, { cwd: sandbox.workdir });
+      return { ok: true, run, plan, ...executed };
+    } catch (error) {
+      if (runId) await markRunFailed(runId, error);
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/runs/:id/check-runtime", async (request, reply) => {
+    let runId: string | undefined;
+    try {
+      const { id } = request.params as { id: string };
+      runId = id;
+      const run = await db.getAgentRun(id);
+      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      await db.updateAgentRunStarted(run.id);
+      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      const plan = buildAgentRuntimeCheckPlan({ agentPiCommand: settings.agentPiCommand ?? "pi" });
+      await db.appendMessage({
+        agentId: run.agent_id,
+        sandboxId: sandbox.id,
+        runId: run.id,
+        source: "server",
+        type: "agent_runtime_check_planned",
+        text: `Checking sandbox agent runtime with ${plan.piCommand}`,
         data: plan,
       });
       const executed = await sandboxService.exec(sandbox, plan.command, { cwd: sandbox.workdir });

@@ -68,6 +68,26 @@ try {
     "--bootstrap",
   ]);
 
+  await cliJson<{ result: { exitCode: number } }>(baseUrl, [
+    "runs",
+    "exec",
+    runId,
+    "--",
+    "mkdir -p .pi/prompts .pi/skills && touch AGENTS.md .pi/prompts/heartbeat.md",
+  ]);
+
+  const runtime = await cliJson<{
+    plan: { piCommand: string };
+    result: { exitCode: number; stdout: string };
+  }>(baseUrl, [
+    "runs",
+    "check-runtime",
+    runId,
+  ]);
+  assert.equal(runtime.result.exitCode, 0);
+  assert.equal(runtime.plan.piCommand, "pi");
+  assert.match(runtime.result.stdout, /agent runtime ready/);
+
   const booted = await cliJson<{
     plan: { piCommand: string; promptPath: string; taskPath: string };
     result: { exitCode: number; stderr: string; stdout: string };

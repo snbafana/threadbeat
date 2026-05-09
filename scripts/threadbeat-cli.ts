@@ -327,6 +327,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     return;
   }
+  if (subcommandName === "check-runtime") {
+    const id = args[0];
+    if (!id) throw new Error("runs check-runtime requires a run id");
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/check-runtime`));
+    return;
+  }
   if (subcommandName === "finalize") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs finalize requires a run id");
@@ -534,6 +540,7 @@ Commands:
   runs restart-sandbox <run_id> [--bootstrap]
   runs exec <run_id> [--cwd /workspace/agent] -- <command>
   runs boot <run_id> [--objective "..."] [--prompt .pi/prompts/heartbeat.md] [--task tasks/inbox/run.md]
+  runs check-runtime <run_id>
   runs finalize <run_id> [--message "Finalize run"]
   runs stop <run_id>
   sandboxes start --agent <agent_id>

@@ -15,6 +15,11 @@ export type AgentBootPlan = {
   taskPath: string;
 };
 
+export type AgentRuntimeCheckPlan = {
+  command: string[];
+  piCommand: string;
+};
+
 const DEFAULT_PROMPT_PATH = ".pi/prompts/heartbeat.md";
 
 export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
@@ -41,6 +46,22 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
     promptPath,
     runId,
     taskPath,
+  };
+};
+
+export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string } = {}): AgentRuntimeCheckPlan => {
+  const piCommand = requireSafeShellCommand(input.agentPiCommand ?? "pi", "agentPiCommand");
+  return {
+    command: ["bash", "-lc", [
+      "set -e",
+      "test -f AGENTS.md",
+      "test -f .pi/prompts/heartbeat.md",
+      "test -d .pi/skills",
+      `command -v ${piCommand}`,
+      `${piCommand} --help >/tmp/threadbeat-pi-help.txt 2>&1 || true`,
+      "printf 'agent runtime ready\\n'",
+    ].join("\n")],
+    piCommand,
   };
 };
 

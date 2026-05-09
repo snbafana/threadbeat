@@ -370,6 +370,18 @@ try {
   assert.match(cliRunBoot.result.stdout, /\[dry-run\]/);
   assert.match(cliRunBoot.result.stdout, /pi --prompt-file/);
 
+  const cliRuntimeCheck = await cliJson<{
+    plan: { piCommand: string };
+    result: { exitCode: number; stdout: string };
+  }>(baseUrl, [
+    "runs",
+    "check-runtime",
+    cliRunPlan.run.id,
+  ]);
+  assert.equal(cliRuntimeCheck.plan.piCommand, "pi");
+  assert.equal(cliRuntimeCheck.result.exitCode, 0);
+  assert.match(cliRuntimeCheck.result.stdout, /agent runtime ready/);
+
   const cliRunFinalize = await cliJson<{ run: { result_commit: string; status: string }; result: { commitSha: string } }>(baseUrl, [
     "runs",
     "finalize",
