@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/index.js",
     "typecheck": "tsc --noEmit",
-    "test": "tsx scripts/git-planning.test.ts && tsx scripts/code-storage.test.ts && tsx scripts/rate-limit.test.ts && tsx scripts/hosted-git.test.ts && tsx scripts/agent-template.test.ts && tsx scripts/git-repository-bootstrap.test.ts && tsx scripts/bootstrap-smoke.ts && tsx scripts/smoke.ts",
+    "test": "tsx scripts/git-planning.test.ts && tsx scripts/code-storage.test.ts && tsx scripts/rate-limit.test.ts && tsx scripts/hosted-git.test.ts && tsx scripts/agent-template.test.ts && tsx scripts/agent-boot.test.ts && tsx scripts/git-repository-bootstrap.test.ts && tsx scripts/bootstrap-smoke.ts && tsx scripts/smoke.ts",
     "smoke:code-storage": "tsx scripts/code-storage-live-smoke.ts",
     "smoke:github": "tsx scripts/github-live-smoke.ts",
     "smoke:github-init": "tsx scripts/github-agent-init-live-smoke.ts",

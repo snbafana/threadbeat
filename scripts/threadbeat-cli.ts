@@ -316,6 +316,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     return;
   }
+  if (subcommandName === "boot") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs boot requires a run id");
+    const options = parseOptions(optionArgs);
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/boot`, {
+      ...(options.objective ? { objective: options.objective } : {}),
+      ...(option(options, "prompt", "prompt-path") ? { promptPath: option(options, "prompt", "prompt-path") } : {}),
+      ...(option(options, "task", "task-path") ? { taskPath: option(options, "task", "task-path") } : {}),
+    }));
+    return;
+  }
   if (subcommandName === "finalize") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs finalize requires a run id");
@@ -522,6 +533,7 @@ Commands:
   runs sandbox <run_id> [--bootstrap]
   runs restart-sandbox <run_id> [--bootstrap]
   runs exec <run_id> [--cwd /workspace/agent] -- <command>
+  runs boot <run_id> [--objective "..."] [--prompt .pi/prompts/heartbeat.md] [--task tasks/inbox/run.md]
   runs finalize <run_id> [--message "Finalize run"]
   runs stop <run_id>
   sandboxes start --agent <agent_id>

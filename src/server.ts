@@ -1,6 +1,7 @@
 import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import { buildAgentBootPlan } from "./agentBoot.js";
 import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
 import { buildAgentTemplate } from "./agentTemplate.js";
 import { createHostedGitProvider } from "./hostedGit.js";
@@ -413,6 +414,40 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const cwd = parseOptionalString(body.cwd) ?? sandbox.workdir;
       const result = await sandboxService.exec(sandbox, command, { cwd });
       return { ok: true, run, ...result };
+    } catch (error) {
+      if (runId) await markRunFailed(runId, error);
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/runs/:id/boot", async (request, reply) => {
+    let runId: string | undefined;
+    try {
+      const { id } = request.params as { id: string };
+      runId = id;
+      const run = await db.getAgentRun(id);
+      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      await db.updateAgentRunStarted(run.id);
+      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
+      const body = requestBody(request.body);
+      const plan = buildAgentBootPlan({
+        objective: parseOptionalString(body.objective) ?? run.objective,
+        promptPath: parseOptionalString(body.promptPath ?? body.prompt_path),
+        runId: run.id,
+        taskPath: parseOptionalString(body.taskPath ?? body.task_path),
+      });
+      await db.appendMessage({
+        agentId: run.agent_id,
+        sandboxId: sandbox.id,
+        runId: run.id,
+        source: "server",
+        type: "agent_boot_planned",
+        text: `Booting sandbox Pi with ${plan.promptPath}`,
+        data: plan,
+      });
+      const executed = await sandboxService.exec(sandbox, plan.command, { cwd: sandbox.workdir });
+      return { ok: true, run, plan, ...executed };
     } catch (error) {
       if (runId) await markRunFailed(runId, error);
       return reply.code(400).send({ ok: false, error: messageOf(error) });

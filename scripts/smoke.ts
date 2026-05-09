@@ -356,6 +356,20 @@ try {
   ]);
   assert.match(cliRunExec.result.stdout, /\/workspace\/agent/);
 
+  const cliRunBoot = await cliJson<{
+    plan: { promptPath: string; taskPath: string };
+    result: { exitCode: number; stdout: string };
+  }>(baseUrl, [
+    "runs",
+    "boot",
+    cliRunPlan.run.id,
+  ]);
+  assert.equal(cliRunBoot.plan.promptPath, ".pi/prompts/heartbeat.md");
+  assert.match(cliRunBoot.plan.taskPath, /^tasks\/inbox\/run_/);
+  assert.equal(cliRunBoot.result.exitCode, 0);
+  assert.match(cliRunBoot.result.stdout, /\[dry-run\]/);
+  assert.match(cliRunBoot.result.stdout, /pi --prompt-file/);
+
   const cliRunFinalize = await cliJson<{ run: { result_commit: string; status: string }; result: { commitSha: string } }>(baseUrl, [
     "runs",
     "finalize",
