@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 
 import { buildServer } from "../src/server.js";
-import { cliJson, cliRaw } from "./cli-smoke-utils.js";
+import {
+  cliJson,
+  cliRaw,
+  type CliMessagesResponse,
+  type CliRunResponse,
+  type CliSandboxResponse,
+  type CliSandboxesResponse,
+  type CliStdoutCommandResponse,
+  type CliStopRunningResponse,
+} from "./cli-smoke-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
 const tempRoot = await createScriptTempRoot("threadbeat-smoke");
 
@@ -269,14 +278,14 @@ try {
   });
   assert.equal(cleanupSandboxB.statusCode, 200);
 
-  const cliStopRunning = await cliJson<{ stoppedCount: number }>(baseUrl, [
+  const cliStopRunning = await cliJson<CliStopRunningResponse>(baseUrl, [
     "sandboxes",
     "stop-running",
     "--agent",
     agentBody.agent.id,
   ]);
   assert.equal(cliStopRunning.stoppedCount, 2);
-  const stoppedSandboxes = await cliJson<{ sandboxes: Array<{ state: string }> }>(baseUrl, [
+  const stoppedSandboxes = await cliJson<CliSandboxesResponse>(baseUrl, [
     "sandboxes",
     "list",
     "--agent",
@@ -317,7 +326,7 @@ try {
   ]);
   assert.equal(cliRunsList.runs.length, 2);
 
-  const cliRunGet = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const cliRunGet = await cliJson<CliRunResponse>(baseUrl, [
     "runs",
     "get",
     cliRunPlan.run.id,
@@ -335,7 +344,7 @@ try {
   assert.equal(cliRunStatus.sandboxes.length, 0);
   assert.ok(cliRunStatus.messages.length > 0);
 
-  const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
+  const cliRunSandbox = await cliJson<CliSandboxResponse<{ run_id: string | null }>>(baseUrl, [
     "runs",
     "sandbox",
     cliRunPlan.run.id,
@@ -343,7 +352,7 @@ try {
   ]);
   assert.equal(cliRunSandbox.sandbox.run_id, cliRunPlan.run.id);
 
-  const cliRunBootstrapMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
+  const cliRunBootstrapMessages = await cliJson<CliMessagesResponse>(baseUrl, [
     "messages",
     "list",
     "--run",
@@ -360,9 +369,7 @@ try {
   ]);
   assert.match(cliRunExec.result.stdout, /\/workspace\/agent/);
 
-  const cliRunBoot = await cliJson<{
-    result: { exitCode: number; stdout: string };
-  }>(baseUrl, [
+  const cliRunBoot = await cliJson<CliStdoutCommandResponse>(baseUrl, [
     "runs",
     "boot",
     cliRunPlan.run.id,
@@ -371,9 +378,7 @@ try {
   assert.match(cliRunBoot.result.stdout, /\[dry-run\]/);
   assert.match(cliRunBoot.result.stdout, /pi --provider 'deepseek' --model 'deepseek-v4-flash' --api-key "\$DEEPSEEK_API_KEY" --mode json -p/);
 
-  const cliRuntimeCheck = await cliJson<{
-    result: { exitCode: number; stdout: string };
-  }>(baseUrl, [
+  const cliRuntimeCheck = await cliJson<CliStdoutCommandResponse>(baseUrl, [
     "runs",
     "check-runtime",
     cliRunPlan.run.id,
@@ -382,7 +387,7 @@ try {
   assert.match(cliRuntimeCheck.result.stdout, /agent runtime ready/);
   assert.match(cliRuntimeCheck.result.stdout, /pi --list-models 'deepseek' \| grep -F 'deepseek-v4-flash'/);
 
-  const cliAgentBootMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
+  const cliAgentBootMessages = await cliJson<CliMessagesResponse>(baseUrl, [
     "messages",
     "list",
     "--run",
@@ -424,7 +429,7 @@ try {
   assert.equal(finalizedRunGet.run.status, "completed");
   assert.equal(finalizedRunGet.run.result_commit, cliRunFinalize.result.commitSha);
 
-  const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const cliStopPlan = await cliJson<CliRunResponse>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -444,7 +449,7 @@ try {
   ]);
   assert.equal(cliStoppedRun.run.status, "stopped");
 
-  const cliRestartPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const cliRestartPlan = await cliJson<CliRunResponse>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -452,7 +457,7 @@ try {
     "--objective",
     "cli restarted run",
   ]);
-  const cliRestartInitialSandbox = await cliJson<{ sandbox: { id: string } }>(baseUrl, [
+  const cliRestartInitialSandbox = await cliJson<CliSandboxResponse>(baseUrl, [
     "runs",
     "sandbox",
     cliRestartPlan.run.id,
@@ -462,9 +467,7 @@ try {
     "stop",
     cliRestartPlan.run.id,
   ]);
-  const cliRestartedSandbox = await cliJson<{
-    sandbox: { id: string };
-  }>(baseUrl, [
+  const cliRestartedSandbox = await cliJson<CliSandboxResponse>(baseUrl, [
     "runs",
     "restart-sandbox",
     cliRestartPlan.run.id,
@@ -505,7 +508,7 @@ try {
   assert.match(cliStep.finalized?.commitSha ?? "", /^[a-f0-9]{40}$/);
   assert.ok(cliStep.status.sandboxes.some((sandbox) => sandbox.state === "running"));
 
-  const cliStepCleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
+  const cliStepCleanup = await cliJson<CliStopRunningResponse>(baseUrl, [
     "sandboxes",
     "stop-running",
     "--run",
@@ -513,7 +516,7 @@ try {
   ]);
   assert.equal(cliStepCleanup.stoppedCount, 1);
 
-  await cliJson<{ sandbox: { id: string } }>(baseUrl, [
+  await cliJson<CliSandboxResponse>(baseUrl, [
     "sandboxes",
     "stop",
     cliRunSandbox.sandbox.id,
@@ -525,7 +528,7 @@ try {
   ]);
   assert.equal(hostedGitList.hostedGitRepos.length, 0);
 
-  const cliSandbox = await cliJson<{ sandbox: { id: string } }>(baseUrl, [
+  const cliSandbox = await cliJson<CliSandboxResponse>(baseUrl, [
     "sandboxes",
     "get",
     sandboxBody.sandbox.id,

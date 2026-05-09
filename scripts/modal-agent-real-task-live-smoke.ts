@@ -7,7 +7,12 @@ import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.j
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { DEEPSEEK_API_KEY_ENV } from "../src/piModels.js";
 import { buildServer } from "../src/server.js";
-import { cliJsonHuge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
+import {
+  cliJsonHuge as cliJson,
+  stopRunSandboxes,
+  type CliCommandResponse,
+  type CliRunResponse,
+} from "./cli-smoke-utils.js";
 import { skipUnlessGitHubToken, skipUnlessModalCredentials } from "./script-auth-utils.js";
 import { printJson, skipSmoke } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptServerBaseUrl, scriptSettings } from "./settings-utils.js";
@@ -77,7 +82,7 @@ try {
   assert.equal(initialized.hostedRepo.providerRepoId, repoId);
   assert.ok(initialized.initialized?.filesWritten.includes("AGENTS.md"));
 
-  const planned = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const planned = await cliJson<CliRunResponse>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -90,12 +95,10 @@ try {
   await cliJson(baseUrl, ["runs", "sandbox", runId, "--bootstrap"]);
   await cliJson(baseUrl, ["runs", "check-runtime", runId]);
 
-  const booted = await cliJson<{
-    result: { exitCode: number; stderr: string; stdout: string };
-  }>(baseUrl, ["runs", "boot", runId]);
+  const booted = await cliJson<CliCommandResponse>(baseUrl, ["runs", "boot", runId]);
   assert.equal(booted.result.exitCode, 0, booted.result.stderr || booted.result.stdout);
 
-  const status = await cliJson<{ result: { exitCode: number; stdout: string; stderr: string } }>(baseUrl, [
+  const status = await cliJson<CliCommandResponse>(baseUrl, [
     "runs",
     "exec",
     runId,
