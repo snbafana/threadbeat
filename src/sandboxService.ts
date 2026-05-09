@@ -18,6 +18,7 @@ type SandboxExecOptions = {
 };
 
 type SandboxBootstrapOptions = {
+  baseRef?: string;
   repoUrl?: string;
   repoUrlRedacted?: string;
 };
@@ -119,6 +120,7 @@ export class SandboxService {
     const redactMap = repoUrl === repoUrlRedacted ? undefined : { [repoUrl]: repoUrlRedacted };
     const redact = createRedactor(redactMap);
     const input: SandboxBootstrapInput = {
+      baseRef: options.baseRef,
       repoUrl,
       ref: sandbox.branch,
       workdir: sandbox.workdir,

@@ -7,6 +7,7 @@ import type { Settings } from "../src/config.js";
 import { Database } from "../src/db.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
+import { buildSandboxBootstrapCommands } from "../src/sandboxBootstrap.js";
 import { SandboxService } from "../src/sandboxService.js";
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-bootstrap-smoke-"));
@@ -63,6 +64,22 @@ try {
   assert.ok(secretMessages.some((message) => message.type === "exec_completed" && message.text?.includes("REDACTED")));
   assert.ok(secretMessages.every((message) => !message.text?.includes("SECRET")));
   assert.ok(secretMessages.every((message) => !message.data_json?.includes("SECRET")));
+
+  assert.deepEqual(
+    buildSandboxBootstrapCommands({
+      baseRef: "main",
+      ref: "threadbeat/runs/test",
+      repoUrl: "https://github.com/example/agent.git",
+      workdir: "/workspace/agent",
+    }).map((command) => command.join(" ")),
+    [
+      "mkdir -p /workspace",
+      "sh -lc command -v git >/dev/null || (apt-get update && apt-get install -y git)",
+      "git clone -- https://github.com/example/agent.git /workspace/agent",
+      "sh -lc git -C '/workspace/agent' checkout 'threadbeat/runs/test' || git -C '/workspace/agent' checkout -B 'threadbeat/runs/test' 'main'",
+      "git -C /workspace/agent status --short --branch",
+    ],
+  );
 } finally {
   await db.close();
   await fs.rm(tempRoot, { recursive: true, force: true });

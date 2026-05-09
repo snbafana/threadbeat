@@ -210,7 +210,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         runId: run.id,
       });
       if (!parseBoolean(body.bootstrap, false)) return { ok: true, run, sandbox };
-      const cloneUrl = await resolveCloneUrl(agent.id);
+      const cloneUrl = await resolveCloneUrl(agent.id, run.input_ref);
       const bootstrap = await sandboxService.bootstrap(sandbox, cloneUrl);
       return { ok: true, run, sandbox: bootstrap.sandbox, bootstrap };
     } catch (error) {
@@ -218,14 +218,18 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
-  const resolveCloneUrl = async (agentId: string): Promise<{ repoUrl?: string; repoUrlRedacted?: string }> => {
+  const resolveCloneUrl = async (
+    agentId: string,
+    baseRef: string,
+  ): Promise<{ baseRef: string; repoUrl?: string; repoUrlRedacted?: string }> => {
     const repo = await db.getCodeStorageRepoForAgent(agentId);
-    if (!repo) return {};
+    if (!repo) return { baseRef };
     const cloneUrl = await hostedGit.getCloneUrl({
       namespace: repo.organization_name,
       repoId: repo.code_storage_repo_id,
     });
     return {
+      baseRef,
       repoUrl: cloneUrl.remoteUrl,
       repoUrlRedacted: cloneUrl.remoteUrlRedacted,
     };

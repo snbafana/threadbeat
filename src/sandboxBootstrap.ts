@@ -1,4 +1,5 @@
 export type SandboxBootstrapInput = {
+  baseRef?: string;
   repoUrl: string;
   ref: string;
   workdir: string;
@@ -28,14 +29,22 @@ export class SandboxBootstrapError extends Error {
 export const buildSandboxBootstrapCommands = (input: SandboxBootstrapInput): string[][] => {
   const repoUrl = requireNonEmpty(input.repoUrl, "repoUrl");
   const ref = requireCheckoutRef(input.ref);
+  const baseRef = input.baseRef === undefined ? undefined : requireCheckoutRef(input.baseRef);
   const workdir = requireAbsoluteWorkdir(input.workdir);
   const parentDir = parentDirectory(workdir);
+  const checkoutCommand = baseRef
+    ? [
+      "sh",
+      "-lc",
+      `git -C ${shellQuote(workdir)} checkout ${shellQuote(ref)} || git -C ${shellQuote(workdir)} checkout -B ${shellQuote(ref)} ${shellQuote(baseRef)}`,
+    ]
+    : ["git", "-C", workdir, "checkout", ref];
 
   return [
     ["mkdir", "-p", parentDir],
     ["sh", "-lc", "command -v git >/dev/null || (apt-get update && apt-get install -y git)"],
     ["git", "clone", "--", repoUrl, workdir],
-    ["git", "-C", workdir, "checkout", ref],
+    checkoutCommand,
     ["git", "-C", workdir, "status", "--short", "--branch"],
   ];
 };
@@ -81,3 +90,5 @@ const parentDirectory = (workdir: string): string => {
   if (lastSlash <= 0) return "/";
   return withoutTrailingSlash.slice(0, lastSlash);
 };
+
+const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
