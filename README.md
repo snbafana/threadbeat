@@ -76,10 +76,11 @@ To verify live GitHub credentials without printing secrets:
 ```bash
 npm run smoke:github
 npm run smoke:github-init
+npm run smoke:github-init-cli
 ```
 
 The smokes create real private GitHub repos when credentials are present,
-validate the remote URL or initial template commit, and delete the repos by default. The token must include
+validate the remote URL, API template init, or CLI template init, and delete the repos by default. The token must include
 `delete_repo` unless `THREADBEAT_GITHUB_LIVE_SMOKE_KEEP=1` is set to
 intentionally leave smoke repos behind for manual inspection. Without
 credentials it exits successfully with a skip message.

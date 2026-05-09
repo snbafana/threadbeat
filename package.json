@@ -15,6 +15,7 @@
     "smoke:code-storage": "tsx scripts/code-storage-live-smoke.ts",
     "smoke:github": "tsx scripts/github-live-smoke.ts",
     "smoke:github-init": "tsx scripts/github-agent-init-live-smoke.ts",
+    "smoke:github-init-cli": "tsx scripts/github-agent-init-cli-live-smoke.ts",
     "smoke:modal": "tsx scripts/modal-live-smoke.ts",
     "smoke:modal-cli": "tsx scripts/modal-cli-live-smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts"
