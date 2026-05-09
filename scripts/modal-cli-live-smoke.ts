@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 
 import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
-import { cliJson } from "./cli-smoke-utils.js";
+import { cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 
 if (!hasModalCredentials(process.env)) {
@@ -60,12 +60,7 @@ try {
   assert.match(`${stepped.result.stdout}${stepped.result.stderr}`, /Python/);
   assert.ok(stepped.status.sandboxes.some((sandbox) => sandbox.state === "running"));
 
-  const cleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
-    "sandboxes",
-    "stop-running",
-    "--run",
-    runId,
-  ]);
+  const cleanup = await stopRunSandboxes(baseUrl, runId);
   assert.equal(cleanup.stoppedCount, 1);
 
   console.log(JSON.stringify({
@@ -76,7 +71,7 @@ try {
     try {
       const address = app.server.address() as AddressInfo | null;
       if (address) {
-        await cliJson(`http://${settings.host}:${address.port}`, ["sandboxes", "stop-running", "--run", runId]);
+        await stopRunSandboxes(`http://${settings.host}:${address.port}`, runId);
       }
     } catch {}
   }

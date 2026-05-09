@@ -13,6 +13,26 @@ export const cliJson = async <T>(
   return JSON.parse(stdout) as T;
 };
 
+export const cliJsonLarge = <T>(
+  baseUrl: string,
+  args: string[],
+  input: { maxBuffer?: number } = {},
+): Promise<T> =>
+  cliJson<T>(baseUrl, args, { maxBuffer: 10 * 1024 * 1024, ...input });
+
+export const cliJsonHuge = <T>(
+  baseUrl: string,
+  args: string[],
+): Promise<T> =>
+  cliJsonLarge<T>(baseUrl, args, { maxBuffer: 20 * 1024 * 1024 });
+
+export const stopRunSandboxes = (
+  baseUrl: string,
+  runId: string,
+  input: { maxBuffer?: number } = {},
+): Promise<{ stoppedCount: number }> =>
+  cliJson(baseUrl, ["sandboxes", "stop-running", "--run", runId], input);
+
 export const cliRaw = async (
   baseUrl: string,
   args: string[],

@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
-import { cliJson as runCliJson } from "./cli-smoke-utils.js";
+import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -97,12 +97,7 @@ try {
   assert.ok(bootstrap.some((result) => result.command.join(" ").includes("git -C /workspace/agent push -u origin HEAD:threadbeat/runs/")));
   assert.ok(stepped.status.sandboxes.some((sandbox) => sandbox.state === "running"));
 
-  const cleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
-    "sandboxes",
-    "stop-running",
-    "--run",
-    stepped.status.run.id,
-  ]);
+  const cleanup = await stopRunSandboxes(baseUrl, stepped.status.run.id);
   assert.equal(cleanup.stoppedCount, 1);
 } finally {
   await app.close();
@@ -115,7 +110,3 @@ try {
 console.log(JSON.stringify({
   repoPath,
 }, null, 2));
-
-async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
-  return runCliJson<T>(baseUrl, args, { maxBuffer: 10 * 1024 * 1024 });
-}
