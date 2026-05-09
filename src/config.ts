@@ -23,6 +23,9 @@ export type Settings = {
   sandboxExecTimeoutMs?: number;
   agentBootTimeoutMs?: number;
   agentPiCommand?: string;
+  agentPiProvider?: string;
+  agentPiModel?: string;
+  agentPiApiKeyEnv?: string;
   hostedGitProvider?: HostedGitProviderSetting;
   githubOwner?: string;
   githubOwnerType?: GitHubOwnerType;
@@ -72,6 +75,9 @@ export const loadSettings = (): Settings => {
     sandboxExecTimeoutMs: intEnv("THREADBEAT_SANDBOX_EXEC_TIMEOUT_MS", 120_000),
     agentBootTimeoutMs: intEnv("THREADBEAT_AGENT_BOOT_TIMEOUT_MS", 600_000),
     agentPiCommand: stringEnv("THREADBEAT_AGENT_PI_COMMAND", "pi"),
+    agentPiProvider: stringEnv("THREADBEAT_AGENT_PI_PROVIDER", "deepseek"),
+    agentPiModel: stringEnv("THREADBEAT_AGENT_PI_MODEL", "deepseek-v4-flash"),
+    agentPiApiKeyEnv: stringEnv("THREADBEAT_AGENT_PI_API_KEY_ENV", "DEEPSEEK_API_KEY"),
     hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
     githubOwnerType,

@@ -16,6 +16,9 @@ const baseSettings: Settings = {
   sandboxEnvNames: ["DEEPSEEK_API_KEY"],
   sandboxExecTimeoutMs: 120_000,
   agentBootTimeoutMs: 600_000,
+  agentPiProvider: "deepseek",
+  agentPiModel: "deepseek-v4-flash",
+  agentPiApiKeyEnv: "DEEPSEEK_API_KEY",
   hostedGitProvider: "github",
   githubOwner: "snbafana",
   githubToken: "ghp-test",
@@ -45,6 +48,7 @@ try {
   });
   assert.equal(missingSandboxEnv.ok, false);
   assert.equal(missingSandboxEnv.checks.find((check) => check.name === "sandbox_env_allowlist")?.ok, false);
+  assert.equal(missingSandboxEnv.checks.find((check) => check.name === "sandbox_pi_api_key")?.ok, false);
 } finally {
   process.env = originalEnv;
 }

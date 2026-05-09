@@ -381,7 +381,7 @@ try {
   assert.match(cliRunBoot.plan.taskPath, /^tasks\/inbox\/run_/);
   assert.equal(cliRunBoot.result.exitCode, 0);
   assert.match(cliRunBoot.result.stdout, /\[dry-run\]/);
-  assert.match(cliRunBoot.result.stdout, /pi --mode json -p/);
+  assert.match(cliRunBoot.result.stdout, /pi --provider 'deepseek' --model 'deepseek-v4-flash' --api-key "\$DEEPSEEK_API_KEY" --mode json -p/);
 
   const cliRuntimeCheck = await cliJson<{
     plan: { piCommand: string };

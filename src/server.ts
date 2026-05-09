@@ -440,6 +440,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const body = requestBody(request.body);
       const plan = buildAgentBootPlan({
         agentPiCommand: settings.agentPiCommand ?? "pi",
+        agentPiProvider: settings.agentPiProvider ?? "deepseek",
+        agentPiModel: settings.agentPiModel ?? "deepseek-v4-flash",
+        agentPiApiKeyEnv: settings.agentPiApiKeyEnv ?? "DEEPSEEK_API_KEY",
         objective: parseOptionalString(body.objective) ?? run.objective,
         promptPath: parseOptionalString(body.promptPath ?? body.prompt_path),
         runId: run.id,

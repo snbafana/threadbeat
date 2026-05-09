@@ -35,10 +35,20 @@ export const buildPreflightReport = (settings: Settings): PreflightReport => {
     },
     {
       name: "sandbox_env_allowlist",
-      ok: sandboxEnvNames.length > 0,
+      ok: sandboxEnvNames.includes(settings.agentPiApiKeyEnv ?? "DEEPSEEK_API_KEY"),
       detail: sandboxEnvNames.length > 0
-        ? `${sandboxEnvResolvedNames.length}/${sandboxEnvNames.length} allowlisted env values are present`
+        ? `${sandboxEnvResolvedNames.length}/${sandboxEnvNames.length} allowlisted env values are present; sandbox Pi API key env=${settings.agentPiApiKeyEnv ?? "DEEPSEEK_API_KEY"}`
         : `THREADBEAT_SANDBOX_ENV_ALLOWLIST is empty; default sandbox-agent auth expects ${DEFAULT_SANDBOX_AUTH_ENV.join(",")}`,
+    },
+    {
+      name: "sandbox_pi_api_key",
+      ok: Boolean(sandboxEnv[settings.agentPiApiKeyEnv ?? "DEEPSEEK_API_KEY"]),
+      detail: `${settings.agentPiApiKeyEnv ?? "DEEPSEEK_API_KEY"} must be present in the server env and allowlisted into the sandbox`,
+    },
+    {
+      name: "sandbox_pi_model",
+      ok: Boolean(settings.agentPiProvider && settings.agentPiModel),
+      detail: `sandbox Pi provider=${settings.agentPiProvider ?? "unset"}; model=${settings.agentPiModel ?? "unset"}`,
     },
     {
       name: "agent_pi_image",

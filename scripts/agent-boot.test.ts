@@ -10,18 +10,25 @@ const plan = buildAgentBootPlan({
 assert.equal(plan.promptPath, ".pi/prompts/heartbeat.md");
 assert.equal(plan.piCommand, "pi");
 assert.equal(plan.piExecutable, "pi");
+assert.equal(plan.piProvider, "deepseek");
+assert.equal(plan.piModel, "deepseek-v4-flash");
+assert.equal(plan.piApiKeyEnv, "DEEPSEEK_API_KEY");
 assert.equal(plan.taskPath, "tasks/inbox/run_123.md");
 assert.deepEqual(plan.command.slice(0, 2), ["bash", "-lc"]);
 assert.match(plan.command[2] ?? "", /test -f '\.pi\/prompts\/heartbeat\.md'/);
 assert.match(plan.command[2] ?? "", /cat > 'tasks\/inbox\/run_123\.md'/);
 assert.match(plan.command[2] ?? "", /continue research on git-backed agents/);
 assert.match(plan.command[2] ?? "", /command -v 'pi'/);
+assert.match(plan.command[2] ?? "", /DEEPSEEK_API_KEY is not set/);
 assert.match(plan.command[2] ?? "", /cat '\.pi\/prompts\/heartbeat\.md'/);
 assert.match(plan.command[2] ?? "", /cat 'tasks\/inbox\/run_123\.md'/);
-assert.match(plan.command[2] ?? "", /pi --mode json -p/);
+assert.match(plan.command[2] ?? "", /pi --provider 'deepseek' --model 'deepseek-v4-flash' --api-key "\$DEEPSEEK_API_KEY" --mode json -p/);
 
 const customPlan = buildAgentBootPlan({
+  agentPiApiKeyEnv: "CUSTOM_API_KEY",
   agentPiCommand: "npx --yes @example/pi",
+  agentPiModel: "custom-model",
+  agentPiProvider: "custom-provider",
   objective: "self review",
   promptPath: ".pi/prompts/self-review.md",
   runId: "run_custom",
@@ -31,6 +38,9 @@ const customPlan = buildAgentBootPlan({
 assert.equal(customPlan.promptPath, ".pi/prompts/self-review.md");
 assert.equal(customPlan.piCommand, "npx --yes @example/pi");
 assert.equal(customPlan.piExecutable, "npx");
+assert.equal(customPlan.piProvider, "custom-provider");
+assert.equal(customPlan.piModel, "custom-model");
+assert.equal(customPlan.piApiKeyEnv, "CUSTOM_API_KEY");
 assert.equal(customPlan.taskPath, "tasks/inbox/self-review.md");
 
 assert.throws(
@@ -44,6 +54,10 @@ assert.throws(
 assert.throws(
   () => buildAgentBootPlan({ agentPiCommand: "pi\nrm -rf /", objective: "bad", runId: "run_123" }),
   /single shell command line/,
+);
+assert.throws(
+  () => buildAgentBootPlan({ agentPiApiKeyEnv: "BAD-NAME", objective: "bad", runId: "run_123" }),
+  /shell env variable name/,
 );
 
 const runtimeCheck = buildAgentRuntimeCheckPlan({ agentPiCommand: "pi" });

@@ -39,7 +39,13 @@ sandbox image with `npm install -g @mariozechner/pi-coding-agent`. Add
 newline-separated Dockerfile layers through `THREADBEAT_MODAL_IMAGE_COMMANDS`
 for any extra sandbox-only tools. The server does not embed Pi for agent runs;
 `THREADBEAT_AGENT_PI_COMMAND` is executed inside the sandbox workdir by
-`runs boot`.
+`runs boot`. Sandbox Pi defaults to the archived DeepSeek setup:
+
+```bash
+THREADBEAT_AGENT_PI_PROVIDER=deepseek
+THREADBEAT_AGENT_PI_MODEL=deepseek-v4-flash
+THREADBEAT_AGENT_PI_API_KEY_ENV=DEEPSEEK_API_KEY
+```
 
 `runs boot` writes the Threadbeat objective to `tasks/inbox/<run_id>.md`, reads
 the repo-local `.pi/prompts/heartbeat.md`, and pipes both into Pi with
