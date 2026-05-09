@@ -2,9 +2,8 @@ import "dotenv/config";
 
 import assert from "node:assert/strict";
 
-import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { GitHubHostedGitProvider } from "../src/hostedGit.js";
-import { scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -21,15 +20,18 @@ if (!githubToken) {
 }
 
 const repoId = `threadbeat-live-smoke-${Date.now().toString(36)}`;
-const settings = scriptSettings({
+const settings: Settings = {
+  projectRoot: process.cwd(),
   dbUrl: "file::memory:",
+  host: "127.0.0.1",
+  port: 0,
+  modalMode: "dry-run",
   modalAppName: "threadbeat-github-live-smoke",
-  overrides: {
-    githubOwner,
-    githubOwnerType,
-    githubToken,
-  },
-});
+  modalImage: DEFAULT_MODAL_IMAGE,
+  githubOwner,
+  githubOwnerType,
+  githubToken,
+};
 
 const agent = {
   id: repoId,

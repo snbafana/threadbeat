@@ -7,9 +7,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { buildServer } from "../src/server.js";
-import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { cliJson as runCliJson } from "./cli-smoke-utils.js";
-import { scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -30,15 +29,18 @@ await assertCanCleanUpSmokeRepo(githubToken, "GitHub agent init CLI live smoke")
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-github-agent-init-cli-smoke-"));
 const repoId = `threadbeat-agent-init-cli-${Date.now().toString(36)}`;
-const settings = scriptSettings({
+const settings: Settings = {
+  projectRoot: process.cwd(),
+  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
+  host: "127.0.0.1",
+  port: 0,
+  modalMode: "dry-run",
   modalAppName: "threadbeat-github-agent-init-cli-live-smoke",
-  tempRoot,
-  overrides: {
-    githubOwner,
-    githubOwnerType,
-    githubToken,
-  },
-});
+  modalImage: DEFAULT_MODAL_IMAGE,
+  githubOwner,
+  githubOwnerType,
+  githubToken,
+};
 
 const { app } = await buildServer(settings);
 let repoPath: string | undefined;
