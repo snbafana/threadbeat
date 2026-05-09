@@ -2,21 +2,20 @@ import "dotenv/config";
 
 import assert from "node:assert/strict";
 
-import type { Settings } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { GitHubHostedGitProvider } from "../src/hostedGit.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
-  parseGitHubOwnerType,
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
-const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
-const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
-const githubToken = await resolveGitHubToken();
+const githubOwner = DEFAULT_GITHUB_OWNER;
+const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
+const githubToken = resolveGitHubToken();
 
-if (!githubOwner || !githubToken) {
-  console.log("GitHub live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN/gh auth token are not set");
+if (!githubToken) {
+  console.log("GitHub live smoke skipped: gh auth token is not available");
   process.exit(0);
 }
 
@@ -28,7 +27,7 @@ const settings: Settings = {
   port: 0,
   modalMode: "dry-run",
   modalAppName: "threadbeat-github-live-smoke",
-  modalImage: "python:3.13-slim",
+  modalImage: DEFAULT_MODAL_IMAGE,
   githubOwner,
   githubOwnerType,
   githubToken,
@@ -55,7 +54,7 @@ try {
   assert.ok(created.remoteUrlRedacted?.includes("REDACTED"));
   repoPath = `${created.namespace}/${created.providerRepoId}`;
 } finally {
-  if (repoPath && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
+  if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }
 }

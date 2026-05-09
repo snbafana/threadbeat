@@ -42,7 +42,7 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
     "  exit 127",
     "fi",
     `if [ -z "\${${piApiKeyEnv}:-}" ]; then`,
-    `  echo '${piApiKeyEnv} is not set in this sandbox. Add it to THREADBEAT_SANDBOX_ENV_ALLOWLIST and the server environment.' >&2`,
+    `  echo '${piApiKeyEnv} is not set in this sandbox. Add it to .env before live agent boots.' >&2`,
     "  exit 78",
     "fi",
     installPiModelsJsonScript(),

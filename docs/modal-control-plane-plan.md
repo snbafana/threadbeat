@@ -56,8 +56,8 @@ This is a separate phase before AI execution.
 
 Goals:
 
-- Use GitHub as the durable Git infrastructure for agent bodies when configured
-  with `THREADBEAT_GITHUB_OWNER` and `THREADBEAT_GITHUB_TOKEN`.
+- Use GitHub as the durable Git infrastructure for agent bodies through the
+  central settings defaults and local GitHub CLI auth.
 - Clone or fork a template agent repo into a durable hosted Git repo.
 - Store `repo_url` and `current_ref` on the agent row; derive visible Git links
   from Git refs when needed.

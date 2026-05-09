@@ -9,27 +9,26 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildServer } from "../src/server.js";
-import type { Settings } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
-  parseGitHubOwnerType,
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
 const execFileAsync = promisify(execFile);
-const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
-const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
-const githubToken = await resolveGitHubToken();
+const githubOwner = DEFAULT_GITHUB_OWNER;
+const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
+const githubToken = resolveGitHubToken();
 
 if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
   console.log("Modal agent boot live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }
 
-if (!githubOwner || !githubToken) {
-  console.log("Modal agent boot live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN/gh auth token are not set");
+if (!githubToken) {
+  console.log("Modal agent boot live smoke skipped: gh auth token is not available");
   process.exit(0);
 }
 
@@ -37,15 +36,15 @@ await assertCanCleanUpSmokeRepo(githubToken, "Modal agent boot live smoke");
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-agent-boot-live-smoke-"));
 const repoId = `threadbeat-modal-agent-boot-${Date.now().toString(36)}`;
-const useRealPiImage = process.env.THREADBEAT_MODAL_AGENT_BOOT_REAL_PI === "1";
+const useRealPiImage = process.argv.includes("--real-pi");
 const settings: Settings = {
   projectRoot: path.resolve("."),
   dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
   host: "127.0.0.1",
   port: 0,
   modalMode: "live",
-  modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-agent-boot-live-smoke",
-  modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  modalAppName: "threadbeat-modal-agent-boot-live-smoke",
+  modalImage: DEFAULT_MODAL_IMAGE,
   modalInstallSandboxPi: useRealPiImage,
   modalImageCommands: useRealPiImage
     ? buildModalImageCommands({ installSandboxPi: true })
@@ -164,7 +163,7 @@ try {
   }
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
-  if (repoPath && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
+  if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }
 }
@@ -175,7 +174,6 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     env: {
       ...process.env,
       THREADBEAT_BASE_URL: baseUrl,
-      THREADBEAT_GITHUB_OWNER_TYPE: githubOwnerType,
     },
     maxBuffer: 10 * 1024 * 1024,
   });

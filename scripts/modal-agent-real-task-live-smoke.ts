@@ -8,40 +8,35 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import type { Settings } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
+import { DEEPSEEK_API_KEY_ENV } from "../src/piModels.js";
 import { buildServer } from "../src/server.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
-  parseGitHubOwnerType,
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
 const execFileAsync = promisify(execFile);
-const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
-const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
-const githubToken = await resolveGitHubToken();
-const sandboxEnvNames = listEnv(process.env.THREADBEAT_SANDBOX_ENV_ALLOWLIST);
+const githubOwner = DEFAULT_GITHUB_OWNER;
+const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
+const githubToken = resolveGitHubToken();
+const sandboxEnvNames = [DEEPSEEK_API_KEY_ENV];
 const sandboxEnv = collectEnv(sandboxEnvNames, process.env);
-
-if (process.env.THREADBEAT_RUN_REAL_PI_TASK !== "1") {
-  console.log("Modal agent real task live smoke skipped: set THREADBEAT_RUN_REAL_PI_TASK=1 to run it");
-  process.exit(0);
-}
 
 if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
   console.log("Modal agent real task live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }
 
-if (!githubOwner || !githubToken) {
-  console.log("Modal agent real task live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN/gh auth token are not set");
+if (!githubToken) {
+  console.log("Modal agent real task live smoke skipped: gh auth token is not available");
   process.exit(0);
 }
 
 if (Object.keys(sandboxEnv).length === 0) {
-  console.log("Modal agent real task live smoke skipped: THREADBEAT_SANDBOX_ENV_ALLOWLIST did not resolve any sandbox env values");
+  console.log(`Modal agent real task live smoke skipped: ${DEEPSEEK_API_KEY_ENV} is not set`);
   process.exit(0);
 }
 
@@ -55,8 +50,8 @@ const settings: Settings = {
   host: "127.0.0.1",
   port: 0,
   modalMode: "live",
-  modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-agent-real-task-live-smoke",
-  modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  modalAppName: "threadbeat-modal-agent-real-task-live-smoke",
+  modalImage: DEFAULT_MODAL_IMAGE,
   modalInstallSandboxPi: true,
   modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
   sandboxEnv,
@@ -153,7 +148,7 @@ try {
   }
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
-  if (repoPath && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
+  if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }
 }
@@ -164,15 +159,10 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     env: {
       ...process.env,
       THREADBEAT_BASE_URL: baseUrl,
-      THREADBEAT_GITHUB_OWNER_TYPE: githubOwnerType,
     },
     maxBuffer: 20 * 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
-}
-
-function listEnv(value: string | undefined): string[] {
-  return (value ?? "").split(/[\s,]+/).map((entry) => entry.trim()).filter(Boolean);
 }
 
 function collectEnv(names: string[], source: NodeJS.ProcessEnv): Record<string, string> {

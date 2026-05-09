@@ -21,9 +21,7 @@ export const buildPreflightReport = (settings: Settings) => {
     {
       name: "sandbox_pi_auth",
       ok: sandboxEnvNames.includes(agentPiApiKeyEnv) && Boolean(sandboxEnv[agentPiApiKeyEnv]),
-      detail: sandboxEnvNames.length > 0
-        ? "sandbox Pi API key env must be allowlisted and present"
-        : "sandbox Pi auth allowlist is empty",
+      detail: "sandbox Pi API key must be present",
     },
     {
       name: "sandbox_pi_model",

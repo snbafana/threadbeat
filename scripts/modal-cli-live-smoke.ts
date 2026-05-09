@@ -9,7 +9,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildServer } from "../src/server.js";
-import type { Settings } from "../src/config.js";
+import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -25,8 +25,8 @@ const settings: Settings = {
   host: "127.0.0.1",
   port: 0,
   modalMode: "live",
-  modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-cli-live-smoke",
-  modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  modalAppName: "threadbeat-modal-cli-live-smoke",
+  modalImage: DEFAULT_MODAL_IMAGE,
 };
 
 const { app } = await buildServer(settings);

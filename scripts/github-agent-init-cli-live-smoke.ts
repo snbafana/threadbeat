@@ -9,22 +9,21 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildServer } from "../src/server.js";
-import type { Settings } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
   getGitHubFile,
-  parseGitHubOwnerType,
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
 const execFileAsync = promisify(execFile);
-const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
-const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
-const githubToken = await resolveGitHubToken();
+const githubOwner = DEFAULT_GITHUB_OWNER;
+const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
+const githubToken = resolveGitHubToken();
 
-if (!githubOwner || !githubToken) {
-  console.log("GitHub agent init CLI live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN/gh auth token are not set");
+if (!githubToken) {
+  console.log("GitHub agent init CLI live smoke skipped: gh auth token is not available");
   process.exit(0);
 }
 
@@ -39,7 +38,7 @@ const settings: Settings = {
   port: 0,
   modalMode: "dry-run",
   modalAppName: "threadbeat-github-agent-init-cli-live-smoke",
-  modalImage: "python:3.13-slim",
+  modalImage: DEFAULT_MODAL_IMAGE,
   githubOwner,
   githubOwnerType,
   githubToken,
@@ -115,7 +114,7 @@ try {
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
-  if (repoPath && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
+  if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }
 }
@@ -130,7 +129,6 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     env: {
       ...process.env,
       THREADBEAT_BASE_URL: baseUrl,
-      THREADBEAT_GITHUB_OWNER_TYPE: githubOwnerType,
     },
     maxBuffer: 10 * 1024 * 1024,
   });

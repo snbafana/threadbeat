@@ -157,16 +157,16 @@ export const redactHostedGitRemoteUrl = (remoteUrl: string | null): string | nul
 
 const requireGitHubOwner = (owner: string | undefined): string => {
   const trimmed = owner?.trim();
-  if (!trimmed) throw new Error("THREADBEAT_GITHUB_OWNER is required for GitHub hosted Git");
+  if (!trimmed) throw new Error("GitHub owner is required for hosted Git");
   if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(trimmed)) {
-    throw new Error("THREADBEAT_GITHUB_OWNER must be a valid GitHub owner name");
+    throw new Error("GitHub owner must be a valid GitHub owner name");
   }
   return trimmed;
 };
 
 const requireGitHubToken = (token: string | undefined): string => {
   const trimmed = token?.trim();
-  if (!trimmed) throw new Error("THREADBEAT_GITHUB_TOKEN or GITHUB_TOKEN is required for live GitHub hosted Git");
+  if (!trimmed) throw new Error("GitHub token is required for live hosted Git");
   return trimmed;
 };
 

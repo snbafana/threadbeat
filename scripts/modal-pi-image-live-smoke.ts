@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { Settings } from "../src/config.js";
+import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { Database } from "../src/db.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
@@ -24,8 +24,8 @@ const settings: Settings = {
   host: "127.0.0.1",
   port: 0,
   modalMode: "live",
-  modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-pi-image-live-smoke",
-  modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  modalAppName: "threadbeat-modal-pi-image-live-smoke",
+  modalImage: DEFAULT_MODAL_IMAGE,
   modalInstallSandboxPi: true,
   modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
 };

@@ -24,52 +24,25 @@ cp .env.example .env
 npm run dev
 ```
 
-By default Modal is in dry-run mode. To use live Modal Sandboxes:
+By default the server dry-runs Modal until Modal credentials are present. To use
+live Modal Sandboxes, put only the required secrets in `.env`:
 
 ```bash
-THREADBEAT_MODAL_MODE=live
 MODAL_TOKEN_ID=...
 MODAL_TOKEN_SECRET=...
+DEEPSEEK_API_KEY=...
 ```
 
 Modal's JavaScript SDK is installed as `modal` and expects Node 22+.
-`THREADBEAT_MODAL_IMAGE` is the base sandbox image. Set
-`THREADBEAT_MODAL_INSTALL_SANDBOX_PI=1` to layer the Pi CLI into the Modal
-sandbox image with `npm install -g @mariozechner/pi-coding-agent`. Add
-newline-separated Dockerfile layers through `THREADBEAT_MODAL_IMAGE_COMMANDS`
-for any extra sandbox-only tools. The server does not embed Pi for agent runs;
-`THREADBEAT_AGENT_PI_COMMAND` is executed inside the sandbox workdir by
-`runs boot`. Sandbox Pi defaults to the archived DeepSeek setup:
-
-```bash
-THREADBEAT_AGENT_PI_PROVIDER=deepseek
-THREADBEAT_AGENT_PI_MODEL=deepseek-v4-flash
-THREADBEAT_AGENT_PI_API_KEY_ENV=DEEPSEEK_API_KEY
-```
+The base sandbox image, Modal app name, Pi image layers, timeout values, GitHub
+owner default, and sandbox Pi provider/model live in `src/config.ts`.
+Agent sandboxes receive only `DEEPSEEK_API_KEY`; the rest of the server
+environment is not copied into agent compute.
 
 `runs boot` writes the Threadbeat objective to `tasks/inbox/<run>.md`, reads
 the repo-local `.pi/prompts/heartbeat.md`, and pipes both into Pi with
 `pi --mode json -p`. That is the documented noninteractive Pi path; autonomous
-agent runs still require sandbox-side provider auth such as API-key environment
-variables or a Pi auth file.
-
-To pass model-provider credentials into agent sandboxes, opt in by name:
-
-```bash
-THREADBEAT_SANDBOX_ENV_ALLOWLIST=DEEPSEEK_API_KEY
-DEEPSEEK_API_KEY=...
-```
-
-Only listed variables that are present in the server environment are injected
-into Modal sandboxes. This is intentionally separate from server-side Pi and
-avoids copying the whole server environment into agent compute.
-
-Sandbox commands have bounded execution by default:
-
-```bash
-THREADBEAT_SANDBOX_EXEC_TIMEOUT_MS=120000
-THREADBEAT_AGENT_BOOT_TIMEOUT_MS=600000
-```
+agent runs still require `DEEPSEEK_API_KEY` in `.env`.
 
 `runs boot` uses the longer agent boot timeout; ordinary `runs exec`,
 `sandboxes exec`, runtime checks, and finalize commands use the sandbox exec
@@ -110,9 +83,8 @@ npm run smoke:modal-pi-image
 ```
 
 This smoke starts a real Modal sandbox with
-`THREADBEAT_MODAL_INSTALL_SANDBOX_PI` equivalent image layers, runs
-`command -v pi && pi --help`, and terminates the sandbox. It only verifies the
-sandbox Pi binary; it does not load server-side Pi.
+the same Pi image layers used by the server defaults, runs `command -v pi &&
+pi --help`, and terminates the sandbox.
 
 To verify the sandbox-agent boot path against a real Modal sandbox:
 
@@ -140,27 +112,18 @@ runtime validation.
 To run the first real authenticated Pi task in a Modal sandbox:
 
 ```bash
-THREADBEAT_RUN_REAL_PI_TASK=1 \
-THREADBEAT_SANDBOX_ENV_ALLOWLIST=DEEPSEEK_API_KEY \
 npm run smoke:modal-agent-real-task
 ```
 
-This smoke is opt-in because it can consume model-provider credits. It creates a
+This smoke can consume model-provider credits. It requires Modal credentials,
+`DEEPSEEK_API_KEY`, and a `gh auth token` with `delete_repo`. It creates a
 hosted Git-backed agent repo, bootstraps it into Modal with the real Pi image,
 runs `runs boot`, checks that the worktree changed, finalizes the run branch,
-and deletes the temporary GitHub repo by default.
+and deletes the temporary GitHub repo.
 
-Hosted Git uses GitHub:
-
-```bash
-THREADBEAT_GITHUB_OWNER=your-org
-THREADBEAT_GITHUB_OWNER_TYPE=org
-THREADBEAT_GITHUB_TOKEN=...
-```
-
-It supports dry-run repository planning and live private repo creation
-when `THREADBEAT_GITHUB_TOKEN` is present. `THREADBEAT_GITHUB_OWNER_TYPE=user`
-switches creation from `/orgs/:owner/repos` to `/user/repos`.
+Hosted Git uses GitHub. The default owner and owner-type detection live in
+`src/config.ts`; live private repo creation uses `gh auth token` from the local
+GitHub CLI session.
 
 GitHub live creation is guarded before the network call. The initial policy is
 conservative: one create per owner per 10 seconds and six creates per owner per
@@ -174,14 +137,9 @@ npm run smoke:github-init-cli
 ```
 
 The smokes create real private GitHub repos when credentials are present,
-validate the remote URL or CLI template init, and delete the repos by default. The token must include
-`delete_repo` unless `THREADBEAT_GITHUB_LIVE_SMOKE_KEEP=1` is set to
-intentionally leave smoke repos behind for manual inspection. Without
-credentials it exits successfully with a skip message.
-
-`THREADBEAT_GITHUB_OWNER_TYPE=auto` detects personal-account repos by comparing
-`THREADBEAT_GITHUB_OWNER` with the authenticated GitHub login. Use `user` or
-`org` only when you want to force a specific creation endpoint.
+validate the remote URL or CLI template init, and delete the repos. The token
+must include `delete_repo`; without a `gh auth token`, the smokes exit
+successfully with a skip message.
 
 ## CLI
 

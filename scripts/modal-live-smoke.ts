@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { Settings } from "../src/config.js";
+import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { Database } from "../src/db.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
@@ -23,8 +23,8 @@ const settings: Settings = {
   host: "127.0.0.1",
   port: 0,
   modalMode: "live",
-  modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-live-smoke",
-  modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  modalAppName: "threadbeat-modal-live-smoke",
+  modalImage: DEFAULT_MODAL_IMAGE,
   sandboxEnv: {
     THREADBEAT_SANDBOX_ENV_SMOKE: "present",
   },
