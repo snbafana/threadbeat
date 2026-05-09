@@ -75,13 +75,17 @@ To verify live GitHub credentials without printing secrets:
 
 ```bash
 npm run smoke:github
+npm run smoke:github-init
 ```
 
-The smoke creates a real private GitHub repo when credentials are present,
-validates the remote URL, and deletes the repo by default. The token must include
+The smokes create real private GitHub repos when credentials are present,
+validate the remote URL or initial template commit, and delete the repos by default. The token must include
 `delete_repo` unless `THREADBEAT_GITHUB_LIVE_SMOKE_KEEP=1` is set to
-intentionally leave the smoke repo behind for manual inspection. Without
+intentionally leave smoke repos behind for manual inspection. Without
 credentials it exits successfully with a skip message.
+
+For personal-account repos, set `THREADBEAT_GITHUB_OWNER_TYPE=user`; org repos
+use `THREADBEAT_GITHUB_OWNER_TYPE=org`.
 
 To use live Code.Storage repo creation, set:
 

@@ -214,7 +214,9 @@ Good next small durable slices:
    - The generated skeleton is Pi-native: `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, ignored `work/`.
    - Added `POST /api/agents/from-template` and `agents init --name <name> --repo-id <repo_id>`.
    - Added a generic Git initial commit helper that writes the template to a temp repo, commits, and pushes to the hosted remote in live mode.
-   - Next: add a live GitHub smoke for `agents init --live` that creates a temporary private repo, verifies `AGENTS.md`, and deletes the repo.
+   - Added and ran `npm run smoke:github-init` for live `agents/from-template`: it created `snbafana/threadbeat-agent-init-moxvqe60`, verified `AGENTS.md`, and deleted it.
+   - Note: the local `.env` had `THREADBEAT_GITHUB_OWNER=snbafana` with `THREADBEAT_GITHUB_OWNER_TYPE=org`; live GitHub creation for this account needs `THREADBEAT_GITHUB_OWNER_TYPE=user`.
+   - Next: decide whether `agents init --live` should become the default path for GitHub-backed agents.
 
 ## Conceptual Decisions To Preserve
 
