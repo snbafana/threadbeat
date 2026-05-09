@@ -1,10 +1,7 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
-import fs from "node:fs/promises";
 import type { AddressInfo } from "node:net";
-import os from "node:os";
-import path from "node:path";
 
 import { collectPresentEnv, hasModalCredentials } from "../src/auth.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
@@ -12,7 +9,7 @@ import { buildModalImageCommands } from "../src/modalImage.js";
 import { DEEPSEEK_API_KEY_ENV } from "../src/piModels.js";
 import { buildServer } from "../src/server.js";
 import { cliJson as runCliJson } from "./cli-smoke-utils.js";
-import { scriptSettings } from "./settings-utils.js";
+import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -42,7 +39,7 @@ if (Object.keys(sandboxEnv).length === 0) {
 
 await assertCanCleanUpSmokeRepo(githubToken, "Modal agent real task live smoke");
 
-const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-agent-real-task-live-smoke-"));
+const tempRoot = await createScriptTempRoot("threadbeat-modal-agent-real-task-live-smoke");
 const repoId = `threadbeat-modal-agent-real-task-${Date.now().toString(36)}`;
 const settings = scriptSettings({
   modalMode: "live",
@@ -145,7 +142,7 @@ try {
     } catch {}
   }
   await app.close();
-  await fs.rm(tempRoot, { recursive: true, force: true });
+  await removeScriptTempRoot(tempRoot);
   if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
   }
