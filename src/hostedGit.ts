@@ -1,6 +1,7 @@
 import { CodeStorageService, type CodeStorageCreateResult } from "./codeStorage.js";
 import type { AgentRepositoryRecord } from "./agentRepository.js";
 import { assertValidBranchName, toBranchSegment } from "./git.js";
+import { RateLimitGuard, githubCreateRepoRateLimitRules } from "./rateLimit.js";
 import type { Settings } from "./config.js";
 
 export type HostedGitProviderName = "code-storage" | "github";
@@ -43,7 +44,10 @@ export class CodeStorageHostedGitProvider implements HostedGitProvider {
 export class GitHubHostedGitProvider implements HostedGitProvider {
   readonly name = "github";
 
-  constructor(private readonly settings: Settings) {}
+  constructor(
+    private readonly settings: Settings,
+    private readonly rateLimitGuard = new RateLimitGuard(),
+  ) {}
 
   async createRepository(input: HostedGitCreateInput): Promise<HostedGitRepository> {
     const owner = requireGitHubOwner(this.settings.githubOwner);
@@ -53,6 +57,10 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
 
     if (live) {
       requireGitHubToken(this.settings.githubToken);
+      enforceRateLimit(this.rateLimitGuard.check(
+        `github:create-repo:${owner}`,
+        githubCreateRepoRateLimitRules,
+      ));
       throw new Error("live GitHub hosted Git creation is not implemented yet");
     }
 
@@ -123,4 +131,10 @@ const requireGitHubToken = (token: string | undefined): string => {
   const trimmed = token?.trim();
   if (!trimmed) throw new Error("THREADBEAT_GITHUB_TOKEN or GITHUB_TOKEN is required for live GitHub hosted Git");
   return trimmed;
+};
+
+const enforceRateLimit = (decision: { allowed: boolean; reason?: string; retryAfterMs?: number }): void => {
+  if (decision.allowed) return;
+  const retrySeconds = Math.ceil((decision.retryAfterMs ?? 0) / 1000);
+  throw new Error(`hosted Git rate limit blocked request: ${decision.reason}; retry after ${retrySeconds}s`);
 };

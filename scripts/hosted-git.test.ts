@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import { createHostedGitProvider, normalizeGitHubRepoName, redactHostedGitRemoteUrl } from "../src/hostedGit.js";
+import { GitHubHostedGitProvider, createHostedGitProvider, normalizeGitHubRepoName, redactHostedGitRemoteUrl } from "../src/hostedGit.js";
+import { RateLimitGuard } from "../src/rateLimit.js";
 import type { Settings } from "../src/config.js";
 
 const settings: Settings = {
@@ -87,5 +88,57 @@ assert.deepEqual(githubRepo, {
     webUrl: "https://github.com/threadbeat-test/github-agent-store",
   },
 });
+
+let now = 0;
+const liveProvider = new GitHubHostedGitProvider({
+  ...githubSettings,
+  githubToken: "token",
+}, new RateLimitGuard(() => now));
+
+await assert.rejects(
+  () => liveProvider.createRepository({
+    agent: {
+      id: "agt_github_live",
+      name: "GitHub Live Agent",
+      repo_url: "https://github.com/example/github-agent.git",
+      default_branch: "main",
+      current_ref: "main",
+    },
+    dryRun: false,
+    repoId: "github-agent-live-store",
+  }),
+  /live GitHub hosted Git creation is not implemented yet/,
+);
+
+await assert.rejects(
+  () => liveProvider.createRepository({
+    agent: {
+      id: "agt_github_live_2",
+      name: "GitHub Live Agent 2",
+      repo_url: "https://github.com/example/github-agent.git",
+      default_branch: "main",
+      current_ref: "main",
+    },
+    dryRun: false,
+    repoId: "github-agent-live-store-2",
+  }),
+  /hosted Git rate limit blocked request/,
+);
+
+now = 10_000;
+await assert.rejects(
+  () => liveProvider.createRepository({
+    agent: {
+      id: "agt_github_live_3",
+      name: "GitHub Live Agent 3",
+      repo_url: "https://github.com/example/github-agent.git",
+      default_branch: "main",
+      current_ref: "main",
+    },
+    dryRun: false,
+    repoId: "github-agent-live-store-3",
+  }),
+  /live GitHub hosted Git creation is not implemented yet/,
+);
 
 console.log("hosted git tests passed");
