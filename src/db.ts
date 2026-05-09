@@ -94,6 +94,7 @@ export class Database {
   }
 
   async createAgentRun(input: {
+    id?: string;
     agentId: string;
     kind?: string;
     objective: string;
@@ -102,7 +103,7 @@ export class Database {
     baseCommit?: string | null;
     status?: string;
   }): Promise<AgentRunRow> {
-    const id = randomId("run");
+    const id = input.id ?? randomId("run");
     await this.client.execute({
       sql: `
         INSERT INTO agent_runs (

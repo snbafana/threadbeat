@@ -49,6 +49,30 @@ try {
   assert.equal(repositoryResponse.statusCode, 200);
   assert.match(repositoryResponse.body, /https:\/\/github.com\/example\/agent/);
 
+  const runPlanResponse = await app.inject({
+    method: "POST",
+    url: `/api/agents/${agentBody.agent.id}/runs`,
+    payload: {
+      objective: "smoke branch plan",
+      inputRef: "main",
+    },
+  });
+  assert.equal(runPlanResponse.statusCode, 200);
+  const runPlanBody = JSON.parse(runPlanResponse.body) as {
+    plan: { branchName: string; links: { compareUrl: string | null } };
+    run: { id: string; status: string };
+  };
+  assert.equal(runPlanBody.run.status, "planned");
+  assert.match(runPlanBody.plan.branchName, /^threadbeat\/runs\//);
+  assert.match(runPlanBody.plan.links.compareUrl ?? "", /github\.com\/example\/agent\/compare\/main\.\.\.threadbeat\/runs\//);
+
+  const runGetResponse = await app.inject({
+    method: "GET",
+    url: `/api/runs/${runPlanBody.run.id}`,
+  });
+  assert.equal(runGetResponse.statusCode, 200);
+  assert.match(runGetResponse.body, /smoke branch plan/);
+
   const heartbeatResponse = await app.inject({
     method: "POST",
     url: "/api/heartbeats",
@@ -141,6 +165,32 @@ try {
     agentBody.agent.id,
   ]);
   assert.equal(cliRepository.repository.repoWebUrl, "https://github.com/example/agent");
+
+  const cliRunPlan = await cliJson<{ run: { id: string; objective: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli branch plan",
+  ]);
+  assert.equal(cliRunPlan.run.objective, "cli branch plan");
+  assert.match(cliRunPlan.plan.branchName, /^threadbeat\/runs\//);
+
+  const cliRunsList = await cliJson<{ runs: unknown[] }>(baseUrl, [
+    "runs",
+    "list",
+    "--agent",
+    agentBody.agent.id,
+  ]);
+  assert.equal(cliRunsList.runs.length, 2);
+
+  const cliRunGet = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "get",
+    cliRunPlan.run.id,
+  ]);
+  assert.equal(cliRunGet.run.id, cliRunPlan.run.id);
 
   const codeStorageCreate = await cliJson<{ codeStorageRepo: { code_storage_repo_id: string; remote_url_redacted: string } }>(baseUrl, [
     "code-storage",

@@ -63,7 +63,9 @@ Goals:
   the agent row.
 - Store each agent's Code.Storage repo id and redacted remote URL separately
   from the authenticated remote URL.
-- Add run branch planning and git status/diff/commit metadata.
+- Add persisted run branch planning with compare/tree links before any sandbox
+  execution starts.
+- Add git status/diff/commit metadata.
 - Add a bootstrap action that starts a sandbox, installs git if needed, clones
   the agent repo into `/workspace/agent`, checks out the current ref, and emits
   all stdout/stderr as messages.

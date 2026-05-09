@@ -51,6 +51,8 @@ npm run cli -- health
 npm run cli -- agents create --name research --repo https://github.com/org/repo.git --branch main
 npm run cli -- agents list
 npm run cli -- agents repo <agent_id>
+npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
+npm run cli -- runs list --agent <agent_id>
 npm run cli -- code-storage create --agent <agent_id> --id <repo_id>
 npm run cli -- code-storage list
 npm run cli -- heartbeats list --agent <agent_id>
@@ -69,8 +71,16 @@ npm run cli -- messages listen --sandbox <sandbox_id>
 the sandbox service bootstrap implementation when present, and otherwise returns
 a clear `501` without requiring database changes.
 
+Run planning is intentionally server-side and Pi-free for now:
+
+- `POST /api/agents/:id/runs` creates a persisted run plan and Git branch name.
+- `GET /api/agents/:id/runs` lists planned/completed runs for an agent.
+- `GET /api/runs/:id` reads one run with compare/tree links.
+
 Read-only API inspection routes:
 
+- `GET /api/agents/:id/runs`
+- `GET /api/runs/:id`
 - `GET /api/heartbeats?agentId=<agent_id>`
 - `GET /api/heartbeats/:id`
 - `POST /api/agents/:id/code-storage`

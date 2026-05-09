@@ -27,6 +27,11 @@ async function main(commandName?: string, subcommandName?: string, args: string[
     return;
   }
 
+  if (commandName === "runs") {
+    await runs(subcommandName, args);
+    return;
+  }
+
   if (commandName === "heartbeats") {
     await heartbeats(subcommandName, args);
     return;
@@ -94,6 +99,20 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     }
     throw new Error(`unknown agents code-storage action: ${action}`);
   }
+  if (subcommandName === "runs") {
+    const [id, action, ...optionArgs] = args;
+    if (!id) throw new Error("agents runs requires an agent id");
+    if (!action || action === "list") {
+      await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/runs`));
+      return;
+    }
+    if (action === "plan") {
+      const options = parseOptions(optionArgs);
+      await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(id)}/runs`, runPlanPayload(options)));
+      return;
+    }
+    throw new Error(`unknown agents runs action: ${action}`);
+  }
   throw new Error(`unknown agents command: ${subcommandName}`);
 }
 
@@ -156,6 +175,28 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
     return;
   }
   throw new Error(`unknown sandboxes command: ${subcommandName}`);
+}
+
+async function runs(subcommandName?: string, args: string[] = []): Promise<void> {
+  if (!subcommandName || subcommandName === "list") {
+    const options = parseOptions(args);
+    const agentId = required(option(options, "agent", "agent-id"), "--agent");
+    await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`));
+    return;
+  }
+  if (subcommandName === "get") {
+    const id = args[0];
+    if (!id) throw new Error("runs get requires a run id");
+    await printJson(await requestJson("GET", `/api/runs/${encodeURIComponent(id)}`));
+    return;
+  }
+  if (subcommandName === "plan") {
+    const options = parseOptions(args);
+    const agentId = required(option(options, "agent", "agent-id"), "--agent");
+    await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options)));
+    return;
+  }
+  throw new Error(`unknown runs command: ${subcommandName}`);
 }
 
 async function heartbeats(subcommandName?: string, args: string[] = []): Promise<void> {
@@ -254,6 +295,16 @@ function option(options: Record<string, string>, ...keys: string[]): string | un
   return undefined;
 }
 
+function runPlanPayload(options: Record<string, string>): Record<string, string> {
+  return {
+    objective: required(options.objective, "--objective"),
+    ...(options.kind ? { kind: options.kind } : {}),
+    ...(option(options, "input-ref", "input") ? { inputRef: option(options, "input-ref", "input") as string } : {}),
+    ...(options.prefix ? { prefix: options.prefix } : {}),
+    ...(option(options, "base-commit", "base") ? { baseCommit: option(options, "base-commit", "base") as string } : {}),
+  };
+}
+
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
@@ -278,8 +329,13 @@ Commands:
   agents repo <agent_id>
   agents code-storage <agent_id> [get]
   agents code-storage <agent_id> create [--id <code_storage_repo_id>] [--live]
+  agents runs <agent_id> [list]
+  agents runs <agent_id> plan --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
   code-storage list
   code-storage create --agent <agent_id> [--id <code_storage_repo_id>] [--live]
+  runs list --agent <agent_id>
+  runs get <run_id>
+  runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>]
   sandboxes get <sandbox_id>

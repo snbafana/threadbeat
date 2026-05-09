@@ -2,10 +2,11 @@ import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
 import { CodeStorageService } from "./codeStorage.js";
-import { getAgentRepositoryMetadata } from "./agentRepository.js";
+import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
 import { MessageBus } from "./messageBus.js";
+import { runPlanFromRow } from "./runPlanning.js";
 import { SandboxService } from "./sandboxService.js";
 import type { Settings } from "./config.js";
 
@@ -134,6 +135,67 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     ok: true,
     codeStorageRepos: await db.listCodeStorageRepos(),
   }));
+
+  app.get("/api/agents/:id/runs", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const agent = await db.getAgent(id);
+    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    const runs = await db.listAgentRuns(id);
+    return {
+      ok: true,
+      runs,
+      plans: runs.map((run) => runPlanFromRow(agent, run)),
+    };
+  });
+
+  app.post("/api/agents/:id/runs", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const agent = await db.getAgent(id);
+      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      const body = requestBody(request.body);
+      const objective = parseString(body.objective, "objective");
+      const inputRef = parseOptionalString(body.inputRef ?? body.input_ref) ?? agent.current_ref;
+      const runId = nextId("run");
+      const plan = planRunBranch({
+        agent: { ...agent, current_ref: inputRef },
+        objective,
+        prefix: parseOptionalString(body.prefix),
+        runId,
+      });
+      const run = await db.createAgentRun({
+        id: runId,
+        agentId: agent.id,
+        kind: parseOptionalString(body.kind) ?? "run",
+        objective,
+        inputRef: plan.sourceRef,
+        runBranch: plan.branchName,
+        baseCommit: parseOptionalString(body.baseCommit ?? body.base_commit),
+        status: parseOptionalString(body.status) ?? "planned",
+      });
+      const persistedPlan = runPlanFromRow(agent, run);
+      await db.appendMessage({
+        agentId: agent.id,
+        runId: run.id,
+        source: "server",
+        type: "agent_run_planned",
+        text: `Planned ${run.kind} run ${run.id} on ${run.run_branch}`,
+        data: { run, plan: persistedPlan },
+      });
+      return { ok: true, run, plan: persistedPlan };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/runs/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = await db.getAgentRun(id);
+    if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+    const agent = await db.getAgent(run.agent_id);
+    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    return { ok: true, run, plan: runPlanFromRow(agent, run) };
+  });
 
   app.get("/api/heartbeats", async (request) => {
     const query = request.query as Record<string, string | undefined>;
@@ -298,6 +360,8 @@ const parseCommand = (value: unknown): string[] => {
 
 const queryValue = (query: Record<string, string | undefined>, camelKey: string, snakeKey: string): string | undefined =>
   parseOptionalString(query[camelKey] ?? query[snakeKey]);
+
+const nextId = (prefix: string): string => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 
 const parseBoolean = (value: unknown, fallback: boolean): boolean => {
   if (value === undefined || value === null || value === "") return fallback;
