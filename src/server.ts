@@ -54,7 +54,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       });
       return { ok: true, template };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -115,7 +115,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         initialized,
       };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -134,7 +134,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       });
       return { ok: true, agent };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -152,7 +152,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       if (!agent) return notFound(reply, "agent");
       return { ok: true, repository: getAgentRepositoryMetadata(agent) };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -205,7 +205,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       });
       return { ok: true, run, plan: runPlanFromRow(agent, run) };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -248,10 +248,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const existingSandbox = await getRunSandbox(run.id);
       if (existingSandbox) {
         if (existingSandbox.state !== "running") {
-          return reply.code(409).send({
-            ok: false,
-            error: `run sandbox is already ${existingSandbox.state}`,
-          });
+          return conflict(reply, `run sandbox is already ${existingSandbox.state}`);
         }
         if (!bootstrapRequested) return { ok: true, sandbox: existingSandbox };
         const cloneUrl = await resolveCloneUrl(agent.id, run.input_ref);
@@ -265,7 +262,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return { ok: true, sandbox, bootstrap: await sandboxService.bootstrap(sandbox, cloneUrl) };
     } catch (error) {
       if (runId) await db.updateAgentRunFailed(runId);
-      return reply.code(500).send({ ok: false, error: messageOf(error) });
+      return serverError(reply, error);
     }
   });
 
@@ -278,7 +275,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const run = await db.getAgentRun(id);
       if (!run) return notFound(reply, "run");
       if (run.status === "completed" || run.status === "failed") {
-        return reply.code(409).send({ ok: false, error: `run is already ${run.status}` });
+        return conflict(reply, `run is already ${run.status}`);
       }
       const agent = await db.getAgent(run.agent_id);
       if (!agent) return notFound(reply, "agent");
@@ -287,13 +284,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         return notFound(reply, "run sandbox");
       }
       if (existingSandbox.state === "running") {
-        return reply.code(409).send({ ok: false, error: "run sandbox is already running" });
+        return conflict(reply, "run sandbox is already running");
       }
       if (existingSandbox.state !== "stopped" && existingSandbox.state !== "failed") {
-        return reply.code(409).send({
-          ok: false,
-          error: `run sandbox cannot restart from ${existingSandbox.state}`,
-        });
+        return conflict(reply, `run sandbox cannot restart from ${existingSandbox.state}`);
       }
       const bootstrapRequested = parseBoolean(body.bootstrap, false);
       const cloneUrl = bootstrapRequested ? await resolveCloneUrl(agent.id, run.input_ref) : null;
@@ -305,7 +299,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return { ok: true, sandbox, bootstrap: await sandboxService.bootstrap(sandbox, cloneUrl) };
     } catch (error) {
       if (runId) await db.updateAgentRunFailed(runId);
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -327,7 +321,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return { ok: true, result };
     } catch (error) {
       if (runId) await db.updateAgentRunFailed(runId);
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -370,7 +364,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return { ok: true, result };
     } catch (error) {
       if (runId) await db.updateAgentRunFailed(runId);
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -407,7 +401,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return { ok: true, result };
     } catch (error) {
       if (runId) await db.updateAgentRunFailed(runId);
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -436,7 +430,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return { ok: true, result: finalized };
     } catch (error) {
       if (runId) await db.updateAgentRunFailed(runId);
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -446,7 +440,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const run = await db.getAgentRun(id);
       if (!run) return notFound(reply, "run");
       if (run.status === "completed" || run.status === "failed") {
-        return reply.code(409).send({ ok: false, error: `run is already ${run.status}` });
+        return conflict(reply, `run is already ${run.status}`);
       }
       const sandbox = await getRunSandbox(run.id);
       if (sandbox) await sandboxService.stop(sandbox);
@@ -463,7 +457,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       });
       return { ok: true };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -514,7 +508,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       });
       return { ok: true, heartbeat };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -535,7 +529,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const agentId = parseOptionalString(body.agentId);
       const runId = parseOptionalString(body.runId);
       if (!agentId && !runId) {
-        return reply.code(400).send({ ok: false, error: "agentId or runId is required" });
+        return badRequest(reply, "agentId or runId is required");
       }
       if (agentId && !(await db.getAgent(agentId))) {
         return notFound(reply, "agent");
@@ -552,7 +546,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       }
       return { ok: true, stoppedCount };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -571,7 +565,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const sandbox = await sandboxService.startForAgent(agent);
       return { ok: true, sandbox };
     } catch (error) {
-      return reply.code(500).send({ ok: false, error: messageOf(error) });
+      return serverError(reply, error);
     }
   });
 
@@ -586,7 +580,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const result = await sandboxService.exec(sandbox, command, { timeoutMs });
       return { ok: true, result };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -597,7 +591,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       if (!sandbox) return notFound(reply, "sandbox");
       return { ok: true, bootstrap: await sandboxService.bootstrap(sandbox) };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -609,7 +603,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       await sandboxService.stop(sandbox);
       return { ok: true };
     } catch (error) {
-      return reply.code(400).send({ ok: false, error: messageOf(error) });
+      return badRequest(reply, error);
     }
   });
 
@@ -658,7 +652,19 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 };
 
 const notFound = (reply: FastifyReply, resource: string) =>
-  reply.code(404).send({ ok: false, error: `${resource} not found` });
+  errorResponse(reply, 404, `${resource} not found`);
+
+const badRequest = (reply: FastifyReply, error: unknown) =>
+  errorResponse(reply, 400, messageOf(error));
+
+const conflict = (reply: FastifyReply, error: string) =>
+  errorResponse(reply, 409, error);
+
+const serverError = (reply: FastifyReply, error: unknown) =>
+  errorResponse(reply, 500, messageOf(error));
+
+const errorResponse = (reply: FastifyReply, statusCode: number, error: string) =>
+  reply.code(statusCode).send({ ok: false, error });
 
 const parseString = (value: unknown, field: string): string => {
   if (typeof value !== "string" || value.trim() === "") {
