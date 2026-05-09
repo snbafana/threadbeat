@@ -277,6 +277,14 @@ try {
   ]);
   assert.ok(cliRunMessages.messages.length > 0);
 
+  const finalizedRunGet = await cliJson<{ run: { id: string; result_commit: string; status: string } }>(baseUrl, [
+    "runs",
+    "get",
+    cliRunPlan.run.id,
+  ]);
+  assert.equal(finalizedRunGet.run.status, "completed");
+  assert.equal(finalizedRunGet.run.result_commit, cliRunFinalize.result.commitSha);
+
   await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",
     "stop",

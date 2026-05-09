@@ -154,7 +154,7 @@ export class Database {
     await this.client.execute({
       sql: `
         UPDATE agent_runs
-        SET status = 'running', started_at = ?, updated_at = CURRENT_TIMESTAMP
+        SET status = 'running', started_at = COALESCE(started_at, ?), updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `,
       args: [nowIso(), id],
@@ -182,6 +182,22 @@ export class Database {
         nowIso(),
         input.id,
       ],
+    });
+    return this.mustGetAgentRun(input.id);
+  }
+
+  async updateAgentRunFailed(input: {
+    id: string;
+    resultSummary: string;
+  }): Promise<AgentRunRow> {
+    await this.client.execute({
+      sql: `
+        UPDATE agent_runs
+        SET status = 'failed', result_summary = ?, completed_at = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `,
+      args: [input.resultSummary, nowIso(), input.id],
     });
     return this.mustGetAgentRun(input.id);
   }
