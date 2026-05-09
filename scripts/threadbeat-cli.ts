@@ -137,8 +137,11 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
   if (!subcommandName || subcommandName === "list") {
     const options = parseOptions(args);
     const agentId = option(options, "agent", "agent-id");
-    const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
-    await printJson(await requestJson("GET", `/api/sandboxes${query}`));
+    const runId = option(options, "run", "run-id");
+    const params = new URLSearchParams();
+    if (agentId) params.set("agentId", agentId);
+    if (runId) params.set("runId", runId);
+    await printJson(await requestJson("GET", withQuery("/api/sandboxes", params)));
     return;
   }
   if (subcommandName === "get") {
@@ -196,6 +199,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options)));
     return;
   }
+  if (subcommandName === "sandbox" || subcommandName === "start-sandbox") {
+    const id = args[0];
+    if (!id) throw new Error(`runs ${subcommandName} requires a run id`);
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/sandbox`));
+    return;
+  }
   throw new Error(`unknown runs command: ${subcommandName}`);
 }
 
@@ -223,8 +232,10 @@ async function messages(subcommandName?: string, args: string[] = []): Promise<v
   const options = parseOptions(mode ? rawArgs.slice(1) : rawArgs);
   const params = new URLSearchParams();
   const agentId = option(options, "agent", "agent-id");
+  const runId = option(options, "run", "run-id");
   const sandboxId = option(options, "sandbox", "sandbox-id");
   if (agentId) params.set("agentId", agentId);
+  if (runId) params.set("runId", runId);
   if (sandboxId) params.set("sandboxId", sandboxId);
   if (option(options, "limit")) params.set("limit", option(options, "limit") as string);
 
@@ -336,16 +347,17 @@ Commands:
   runs list --agent <agent_id>
   runs get <run_id>
   runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
+  runs sandbox <run_id>
   sandboxes start --agent <agent_id>
-  sandboxes list [--agent <agent_id>]
+  sandboxes list [--agent <agent_id>] [--run <run_id>]
   sandboxes get <sandbox_id>
   sandboxes exec <sandbox_id> -- <command>
   sandboxes stop <sandbox_id>
   sandboxes bootstrap <sandbox_id>
   heartbeats list [--agent <agent_id>]
   heartbeats get <heartbeat_id>
-  messages list [--agent <agent_id>] [--sandbox <sandbox_id>] [--limit 50]
-  messages listen [--agent <agent_id>] [--sandbox <sandbox_id>]
-  messages --follow [--agent <agent_id>] [--sandbox <sandbox_id>]
+  messages list [--agent <agent_id>] [--run <run_id>] [--sandbox <sandbox_id>] [--limit 50]
+  messages listen [--agent <agent_id>] [--run <run_id>] [--sandbox <sandbox_id>]
+  messages --follow [--agent <agent_id>] [--run <run_id>] [--sandbox <sandbox_id>]
 `);
 }

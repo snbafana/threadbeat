@@ -84,6 +84,7 @@ CREATE INDEX IF NOT EXISTS idx_heartbeats_due
 CREATE TABLE IF NOT EXISTS sandboxes (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL,
+  run_id TEXT,
   provider TEXT NOT NULL DEFAULT 'modal',
   provider_sandbox_id TEXT,
   state TEXT NOT NULL DEFAULT 'starting',
@@ -94,7 +95,8 @@ CREATE TABLE IF NOT EXISTS sandboxes (
   stopped_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+  FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+  FOREIGN KEY (run_id) REFERENCES agent_runs(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_sandboxes_agent_id

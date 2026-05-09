@@ -73,6 +73,38 @@ try {
   assert.equal(runGetResponse.statusCode, 200);
   assert.match(runGetResponse.body, /smoke branch plan/);
 
+  const runSandboxResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${runPlanBody.run.id}/sandbox`,
+  });
+  assert.equal(runSandboxResponse.statusCode, 200);
+  const runSandboxBody = JSON.parse(runSandboxResponse.body) as {
+    sandbox: { branch: string; id: string; run_id: string | null; state: string };
+  };
+  assert.equal(runSandboxBody.sandbox.branch, runPlanBody.plan.branchName);
+  assert.equal(runSandboxBody.sandbox.run_id, runPlanBody.run.id);
+  assert.equal(runSandboxBody.sandbox.state, "running");
+
+  const runSandboxListResponse = await app.inject({
+    method: "GET",
+    url: `/api/sandboxes?run_id=${runPlanBody.run.id}`,
+  });
+  assert.equal(runSandboxListResponse.statusCode, 200);
+  assert.ok(runSandboxListResponse.body.includes(runSandboxBody.sandbox.id));
+
+  const runMessagesResponse = await app.inject({
+    method: "GET",
+    url: `/api/messages?run_id=${runPlanBody.run.id}`,
+  });
+  assert.equal(runMessagesResponse.statusCode, 200);
+  assert.match(runMessagesResponse.body, /sandbox_running/);
+
+  const runSandboxStopResponse = await app.inject({
+    method: "POST",
+    url: `/api/sandboxes/${runSandboxBody.sandbox.id}/stop`,
+  });
+  assert.equal(runSandboxStopResponse.statusCode, 200);
+
   const heartbeatResponse = await app.inject({
     method: "POST",
     url: "/api/heartbeats",
@@ -191,6 +223,36 @@ try {
     cliRunPlan.run.id,
   ]);
   assert.equal(cliRunGet.run.id, cliRunPlan.run.id);
+
+  const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null; branch: string } }>(baseUrl, [
+    "runs",
+    "sandbox",
+    cliRunPlan.run.id,
+  ]);
+  assert.equal(cliRunSandbox.sandbox.run_id, cliRunPlan.run.id);
+  assert.equal(cliRunSandbox.sandbox.branch, cliRunPlan.plan.branchName);
+
+  const cliRunSandboxes = await cliJson<{ sandboxes: unknown[] }>(baseUrl, [
+    "sandboxes",
+    "list",
+    "--run",
+    cliRunPlan.run.id,
+  ]);
+  assert.equal(cliRunSandboxes.sandboxes.length, 1);
+
+  const cliRunMessages = await cliJson<{ messages: unknown[] }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    cliRunPlan.run.id,
+  ]);
+  assert.ok(cliRunMessages.messages.length > 0);
+
+  await cliJson<{ sandbox: { id: string } }>(baseUrl, [
+    "sandboxes",
+    "stop",
+    cliRunSandbox.sandbox.id,
+  ]);
 
   const codeStorageCreate = await cliJson<{ codeStorageRepo: { code_storage_repo_id: string; remote_url_redacted: string } }>(baseUrl, [
     "code-storage",

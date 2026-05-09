@@ -197,6 +197,23 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return { ok: true, run, plan: runPlanFromRow(agent, run) };
   });
 
+  app.post("/api/runs/:id/sandbox", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const run = await db.getAgentRun(id);
+      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      const agent = await db.getAgent(run.agent_id);
+      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      const sandbox = await sandboxService.startForAgent(agent, {
+        branch: run.run_branch,
+        runId: run.id,
+      });
+      return { ok: true, run, sandbox };
+    } catch (error) {
+      return reply.code(500).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.get("/api/heartbeats", async (request) => {
     const query = request.query as Record<string, string | undefined>;
     return { ok: true, heartbeats: await db.listHeartbeats(queryValue(query, "agentId", "agent_id")) };
@@ -230,7 +247,13 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.get("/api/sandboxes", async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    return { ok: true, sandboxes: await db.listSandboxes({ agentId: queryValue(query, "agentId", "agent_id") }) };
+    return {
+      ok: true,
+      sandboxes: await db.listSandboxes({
+        agentId: queryValue(query, "agentId", "agent_id"),
+        runId: queryValue(query, "runId", "run_id"),
+      }),
+    };
   });
 
   app.get("/api/sandboxes/:id", async (request, reply) => {
@@ -294,6 +317,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       ok: true,
       messages: await db.listMessages({
         agentId: queryValue(query, "agentId", "agent_id"),
+        runId: queryValue(query, "runId", "run_id"),
         sandboxId: queryValue(query, "sandboxId", "sandbox_id"),
         limit: parsePositiveInt(query.limit, 100),
       }),
@@ -303,6 +327,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/messages/listen", async (request, reply) => {
     const query = request.query as Record<string, string | undefined>;
     const agentId = queryValue(query, "agentId", "agent_id");
+    const runId = queryValue(query, "runId", "run_id");
     const sandboxId = queryValue(query, "sandboxId", "sandbox_id");
     reply.hijack();
     reply.raw.writeHead(200, {
@@ -313,6 +338,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
     const unsubscribe = bus.subscribe((message) => {
       if (agentId && message.agent_id !== agentId) return;
+      if (runId && message.run_id !== runId) return;
       if (sandboxId && message.sandbox_id !== sandboxId) return;
       reply.raw.write(`${JSON.stringify(message)}\n`);
     });

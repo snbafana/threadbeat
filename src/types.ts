@@ -60,6 +60,7 @@ export type HeartbeatRow = {
 export type SandboxRow = {
   id: string;
   agent_id: string;
+  run_id: string | null;
   provider: string;
   provider_sandbox_id: string | null;
   state: string;

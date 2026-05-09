@@ -65,6 +65,7 @@ npm run cli -- agents list
 npm run cli -- agents repo <agent_id>
 npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
 npm run cli -- runs list --agent <agent_id>
+npm run cli -- runs sandbox <run_id>
 npm run cli -- code-storage create --agent <agent_id> --id <repo_id>
 npm run cli -- code-storage list
 npm run cli -- heartbeats list --agent <agent_id>
@@ -88,22 +89,25 @@ Run planning is intentionally server-side and Pi-free for now:
 - `POST /api/agents/:id/runs` creates a persisted run plan and Git branch name.
 - `GET /api/agents/:id/runs` lists planned/completed runs for an agent.
 - `GET /api/runs/:id` reads one run with compare/tree links.
+- `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
+  sandbox/messages with the run id.
 
 Read-only API inspection routes:
 
 - `GET /api/agents/:id/runs`
 - `GET /api/runs/:id`
+- `POST /api/runs/:id/sandbox`
 - `GET /api/heartbeats?agentId=<agent_id>`
 - `GET /api/heartbeats/:id`
 - `POST /api/agents/:id/code-storage`
 - `GET /api/agents/:id/code-storage`
 - `GET /api/code-storage/repos`
-- `GET /api/sandboxes?agentId=<agent_id>`
+- `GET /api/sandboxes?agentId=<agent_id>&runId=<run_id>`
 - `GET /api/sandboxes/:id`
-- `GET /api/messages?agentId=<agent_id>&sandboxId=<sandbox_id>&limit=50`
-- `GET /api/messages/listen?agentId=<agent_id>&sandboxId=<sandbox_id>`
+- `GET /api/messages?agentId=<agent_id>&runId=<run_id>&sandboxId=<sandbox_id>&limit=50`
+- `GET /api/messages/listen?agentId=<agent_id>&runId=<run_id>&sandboxId=<sandbox_id>`
 
-Snake-case query aliases such as `agent_id` and `sandbox_id` are accepted for
+Snake-case query aliases such as `agent_id`, `run_id`, and `sandbox_id` are accepted for
 inspection routes.
 
 ## Phases

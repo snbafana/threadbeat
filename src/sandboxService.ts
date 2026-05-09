@@ -8,6 +8,11 @@ import type { SandboxExecResult, SandboxProvider } from "./modalProvider.js";
 import type { MessageBus } from "./messageBus.js";
 import type { AgentRow, MessageRow, SandboxRow } from "./types.js";
 
+type SandboxStartOptions = {
+  branch?: string;
+  runId?: string | null;
+};
+
 export class SandboxService {
   constructor(
     private readonly db: Database,
@@ -15,19 +20,22 @@ export class SandboxService {
     private readonly bus: MessageBus,
   ) {}
 
-  async startForAgent(agent: AgentRow): Promise<SandboxRow> {
+  async startForAgent(agent: AgentRow, options: SandboxStartOptions = {}): Promise<SandboxRow> {
+    const branch = options.branch ?? agent.current_ref;
     let sandbox = await this.db.createSandbox({
       agentId: agent.id,
+      runId: options.runId,
       repoUrl: agent.repo_url,
-      branch: agent.current_ref,
+      branch,
     });
     await this.message({
       agentId: agent.id,
       sandboxId: sandbox.id,
+      runId: options.runId,
       source: "server",
       type: "sandbox_starting",
       text: `Starting sandbox for ${agent.name}`,
-      data: { repoUrl: agent.repo_url, branch: agent.current_ref },
+      data: { repoUrl: agent.repo_url, branch, runId: options.runId ?? null },
     });
 
     try {
@@ -36,6 +44,7 @@ export class SandboxService {
       await this.message({
         agentId: agent.id,
         sandboxId: sandbox.id,
+        runId: options.runId,
         source: "modal",
         type: "sandbox_running",
         text: `Sandbox running: ${started.providerSandboxId}`,
@@ -47,6 +56,7 @@ export class SandboxService {
       await this.message({
         agentId: agent.id,
         sandboxId: sandbox.id,
+        runId: options.runId,
         source: "modal",
         type: "sandbox_failed",
         text: messageOf(error),
@@ -62,6 +72,7 @@ export class SandboxService {
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
+      runId: sandbox.run_id,
       source: "server",
       type: "exec_started",
       text: command.join(" "),
@@ -71,6 +82,7 @@ export class SandboxService {
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
+      runId: sandbox.run_id,
       source: "sandbox",
       type: "exec_completed",
       text: result.stdout || result.stderr || `exit ${result.exitCode}`,
@@ -88,6 +100,7 @@ export class SandboxService {
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
+      runId: sandbox.run_id,
       source: "server",
       type: "bootstrap_started",
       text: `Bootstrapping sandbox workdir ${sandbox.workdir}`,
@@ -102,6 +115,7 @@ export class SandboxService {
       await this.message({
         agentId: sandbox.agent_id,
         sandboxId: sandbox.id,
+        runId: sandbox.run_id,
         source: "sandbox",
         type: "bootstrap_completed",
         text: `Sandbox bootstrap completed in ${sandbox.workdir}`,
@@ -112,6 +126,7 @@ export class SandboxService {
       await this.message({
         agentId: sandbox.agent_id,
         sandboxId: sandbox.id,
+        runId: sandbox.run_id,
         source: "sandbox",
         type: "bootstrap_failed",
         text: messageOf(error),
@@ -129,6 +144,7 @@ export class SandboxService {
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
+      runId: sandbox.run_id,
       source: "server",
       type: "sandbox_stopped",
       text: `Sandbox stopped: ${sandbox.id}`,
@@ -139,6 +155,7 @@ export class SandboxService {
   private async message(input: {
     agentId: string;
     sandboxId: string;
+    runId?: string | null;
     source: string;
     type: string;
     text?: string | null;

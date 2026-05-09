@@ -39,6 +39,7 @@ export class Database {
     await this.ensureAgentColumns();
     await this.ensureCodeStorageRepoColumns();
     await this.ensureAgentRunColumns();
+    await this.ensureSandboxColumns();
   }
 
   async createAgent(input: {
@@ -330,6 +331,7 @@ export class Database {
 
   async createSandbox(input: {
     agentId: string;
+    runId?: string | null;
     repoUrl: string;
     branch: string;
     workdir?: string;
@@ -337,21 +339,29 @@ export class Database {
     const id = randomId("sbx");
     await this.client.execute({
       sql: `
-        INSERT INTO sandboxes (id, agent_id, repo_url, branch, workdir)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO sandboxes (id, agent_id, run_id, repo_url, branch, workdir)
+        VALUES (?, ?, ?, ?, ?, ?)
       `,
-      args: [id, input.agentId, input.repoUrl, input.branch, input.workdir ?? "/workspace/agent"],
+      args: [id, input.agentId, input.runId ?? null, input.repoUrl, input.branch, input.workdir ?? "/workspace/agent"],
     });
     return this.mustGetSandbox(id);
   }
 
-  async listSandboxes(filters: { agentId?: string } = {}): Promise<SandboxRow[]> {
+  async listSandboxes(filters: { agentId?: string; runId?: string } = {}): Promise<SandboxRow[]> {
     const args: SqlValue[] = [];
-    const where = filters.agentId ? "WHERE agent_id = ?" : "";
-    if (filters.agentId) args.push(filters.agentId);
+    const conditions: string[] = [];
+    if (filters.agentId) {
+      conditions.push("agent_id = ?");
+      args.push(filters.agentId);
+    }
+    if (filters.runId) {
+      conditions.push("run_id = ?");
+      args.push(filters.runId);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     return this.all<SandboxRow>(
       `
-        SELECT id, agent_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
+        SELECT id, agent_id, run_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
                started_at, stopped_at, created_at, updated_at
         FROM sandboxes
         ${where}
@@ -364,7 +374,7 @@ export class Database {
   async getSandbox(id: string): Promise<SandboxRow | null> {
     return this.first<SandboxRow>(
       `
-        SELECT id, agent_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
+        SELECT id, agent_id, run_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
                started_at, stopped_at, created_at, updated_at
         FROM sandboxes
         WHERE id = ?
@@ -431,6 +441,7 @@ export class Database {
 
   async listMessages(filters: {
     agentId?: string;
+    runId?: string;
     sandboxId?: string;
     limit?: number;
   }): Promise<MessageRow[]> {
@@ -443,6 +454,10 @@ export class Database {
     if (filters.sandboxId) {
       conditions.push("sandbox_id = ?");
       args.push(filters.sandboxId);
+    }
+    if (filters.runId) {
+      conditions.push("run_id = ?");
+      args.push(filters.runId);
     }
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     args.push(filters.limit ?? 100);
@@ -542,6 +557,14 @@ export class Database {
     if (!names.has("completed_at")) {
       await this.client.execute("ALTER TABLE agent_runs ADD COLUMN completed_at TEXT");
     }
+  }
+
+  private async ensureSandboxColumns(): Promise<void> {
+    const names = await this.tableColumnNames("sandboxes");
+    if (!names.has("run_id")) {
+      await this.client.execute("ALTER TABLE sandboxes ADD COLUMN run_id TEXT");
+    }
+    await this.client.execute("CREATE INDEX IF NOT EXISTS idx_sandboxes_run_id ON sandboxes(run_id, created_at DESC)");
   }
 
   private async ensureCodeStorageRepoColumns(): Promise<void> {
