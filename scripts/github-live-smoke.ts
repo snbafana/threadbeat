@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { GitHubHostedGitProvider } from "../src/hostedGit.js";
-import { printJson, skipUnless } from "./script-output-utils.js";
 import { scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -17,7 +16,10 @@ const githubOwner = DEFAULT_GITHUB_OWNER;
 const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
 
-skipUnless(githubToken, "GitHub live smoke skipped: gh auth token is not available");
+if (!githubToken) {
+  console.log("GitHub live smoke skipped: gh auth token is not available");
+  process.exit(0);
+}
 
 const repoId = `threadbeat-live-smoke-${Date.now().toString(36)}`;
 const settings = scriptSettings({
@@ -54,6 +56,6 @@ try {
   await deleteGitHubRepoIfCreated(githubToken, repoPath);
 }
 
-printJson({
+console.log(JSON.stringify({
   repoPath,
-});
+}, null, 2));
