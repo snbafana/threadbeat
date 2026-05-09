@@ -99,6 +99,15 @@ try {
   assert.equal(runMessagesResponse.statusCode, 200);
   assert.match(runMessagesResponse.body, /sandbox_running/);
 
+  const runStatusResponse = await app.inject({
+    method: "GET",
+    url: `/api/runs/${runPlanBody.run.id}/status?limit=5`,
+  });
+  assert.equal(runStatusResponse.statusCode, 200);
+  assert.match(runStatusResponse.body, /"sandboxes":/);
+  assert.match(runStatusResponse.body, /"messages":/);
+  assert.match(runStatusResponse.body, /sandbox_running/);
+
   const runSandboxStopResponse = await app.inject({
     method: "POST",
     url: `/api/runs/${runPlanBody.run.id}/stop`,
@@ -232,6 +241,17 @@ try {
     cliRunPlan.run.id,
   ]);
   assert.equal(cliRunGet.run.id, cliRunPlan.run.id);
+
+  const cliRunStatus = await cliJson<{ run: { id: string }; sandboxes: unknown[]; messages: unknown[] }>(baseUrl, [
+    "runs",
+    "status",
+    cliRunPlan.run.id,
+    "--limit",
+    "2",
+  ]);
+  assert.equal(cliRunStatus.run.id, cliRunPlan.run.id);
+  assert.equal(cliRunStatus.sandboxes.length, 0);
+  assert.ok(cliRunStatus.messages.length > 0);
 
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null; branch: string } }>(baseUrl, [
     "runs",

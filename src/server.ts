@@ -197,6 +197,26 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return { ok: true, run, plan: runPlanFromRow(agent, run) };
   });
 
+  app.get("/api/runs/:id/status", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const query = request.query as Record<string, string | undefined>;
+    const run = await db.getAgentRun(id);
+    if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+    const agent = await db.getAgent(run.agent_id);
+    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    const [sandboxes, messages] = await Promise.all([
+      db.listSandboxes({ runId: run.id }),
+      db.listMessages({ runId: run.id, limit: parsePositiveInt(query.limit, 20) }),
+    ]);
+    return {
+      ok: true,
+      run,
+      plan: runPlanFromRow(agent, run),
+      sandboxes,
+      messages,
+    };
+  });
+
   app.post("/api/runs/:id/sandbox", async (request, reply) => {
     let runId: string | undefined;
     try {

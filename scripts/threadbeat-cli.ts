@@ -193,6 +193,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("GET", `/api/runs/${encodeURIComponent(id)}`));
     return;
   }
+  if (subcommandName === "status") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs status requires a run id");
+    const options = parseOptions(optionArgs);
+    const params = new URLSearchParams();
+    if (option(options, "limit")) params.set("limit", option(options, "limit") as string);
+    await printJson(await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)));
+    return;
+  }
   if (subcommandName === "plan") {
     const options = parseOptions(args);
     const agentId = required(option(options, "agent", "agent-id"), "--agent");
@@ -379,6 +388,7 @@ Commands:
   code-storage create --agent <agent_id> [--id <code_storage_repo_id>] [--live]
   runs list --agent <agent_id>
   runs get <run_id>
+  runs status <run_id> [--limit 20]
   runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
   runs sandbox <run_id> [--bootstrap]
   runs exec <run_id> [--cwd /workspace/agent] -- <command>
