@@ -2,8 +2,10 @@ CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   repo_url TEXT NOT NULL,
+  repo_web_url TEXT,
   default_branch TEXT NOT NULL DEFAULT 'main',
   current_ref TEXT NOT NULL DEFAULT 'main',
+  current_commit TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -11,6 +13,30 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE INDEX IF NOT EXISTS idx_agents_status
   ON agents(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'run',
+  objective TEXT NOT NULL,
+  input_ref TEXT NOT NULL,
+  run_branch TEXT NOT NULL,
+  base_commit TEXT,
+  result_commit TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  result_summary TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_agent_id
+  ON agent_runs(agent_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status
+  ON agent_runs(status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS heartbeats (
   id TEXT PRIMARY KEY,

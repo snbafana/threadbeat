@@ -27,6 +27,11 @@ async function main(commandName?: string, subcommandName?: string, args: string[
     return;
   }
 
+  if (commandName === "heartbeats") {
+    await heartbeats(subcommandName, args);
+    return;
+  }
+
   if (commandName === "messages") {
     await messages(subcommandName, args);
     return;
@@ -61,19 +66,32 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}`));
     return;
   }
+  if (subcommandName === "repo" || subcommandName === "repository") {
+    const id = args[0];
+    if (!id) throw new Error(`agents ${subcommandName} requires an id`);
+    await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/repository`));
+    return;
+  }
   throw new Error(`unknown agents command: ${subcommandName}`);
 }
 
 async function sandboxes(subcommandName?: string, args: string[] = []): Promise<void> {
   if (!subcommandName || subcommandName === "list") {
     const options = parseOptions(args);
-    const query = options.agent ? `?agentId=${encodeURIComponent(options.agent)}` : "";
+    const agentId = option(options, "agent", "agent-id");
+    const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
     await printJson(await requestJson("GET", `/api/sandboxes${query}`));
+    return;
+  }
+  if (subcommandName === "get") {
+    const id = args[0];
+    if (!id) throw new Error("sandboxes get requires a sandbox id");
+    await printJson(await requestJson("GET", `/api/sandboxes/${encodeURIComponent(id)}`));
     return;
   }
   if (subcommandName === "start") {
     const options = parseOptions(args);
-    const agentId = required(options.agent, "--agent");
+    const agentId = required(option(options, "agent", "agent-id"), "--agent");
     await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/sandboxes`));
     return;
   }
@@ -92,18 +110,46 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
     await printJson(await requestJson("POST", `/api/sandboxes/${encodeURIComponent(id)}/stop`));
     return;
   }
+  if (subcommandName === "bootstrap") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("sandboxes bootstrap requires a sandbox id");
+    await printJson(await requestJson("POST", `/api/sandboxes/${encodeURIComponent(id)}/bootstrap`, parseOptions(optionArgs)));
+    return;
+  }
   throw new Error(`unknown sandboxes command: ${subcommandName}`);
 }
 
-async function messages(subcommandName?: string, args: string[] = []): Promise<void> {
-  const options = parseOptions(subcommandName ? [subcommandName, ...args] : args);
-  const params = new URLSearchParams();
-  if (options.agent) params.set("agentId", options.agent);
-  if (options.sandbox) params.set("sandboxId", options.sandbox);
-  if (options.limit) params.set("limit", options.limit);
+async function heartbeats(subcommandName?: string, args: string[] = []): Promise<void> {
+  if (!subcommandName || subcommandName === "list") {
+    const options = parseOptions(args);
+    const params = new URLSearchParams();
+    const agentId = option(options, "agent", "agent-id");
+    if (agentId) params.set("agentId", agentId);
+    await printJson(await requestJson("GET", withQuery("/api/heartbeats", params)));
+    return;
+  }
+  if (subcommandName === "get") {
+    const id = args[0];
+    if (!id) throw new Error("heartbeats get requires a heartbeat id");
+    await printJson(await requestJson("GET", `/api/heartbeats/${encodeURIComponent(id)}`));
+    return;
+  }
+  throw new Error(`unknown heartbeats command: ${subcommandName}`);
+}
 
-  if (options.follow === "1") {
-    const response = await fetch(`${baseUrl}/api/messages/listen?${params.toString()}`);
+async function messages(subcommandName?: string, args: string[] = []): Promise<void> {
+  const rawArgs = subcommandName ? [subcommandName, ...args] : args;
+  const mode = rawArgs[0] === "list" || rawArgs[0] === "listen" ? rawArgs[0] : undefined;
+  const options = parseOptions(mode ? rawArgs.slice(1) : rawArgs);
+  const params = new URLSearchParams();
+  const agentId = option(options, "agent", "agent-id");
+  const sandboxId = option(options, "sandbox", "sandbox-id");
+  if (agentId) params.set("agentId", agentId);
+  if (sandboxId) params.set("sandboxId", sandboxId);
+  if (option(options, "limit")) params.set("limit", option(options, "limit") as string);
+
+  if (mode === "listen" || options.follow === "1") {
+    const response = await fetch(`${baseUrl}${withQuery("/api/messages/listen", params)}`);
     if (!response.ok || !response.body) throw new Error(`listen failed: ${response.status}`);
     for await (const event of ndjson(response.body)) {
       console.log(JSON.stringify(event));
@@ -111,7 +157,7 @@ async function messages(subcommandName?: string, args: string[] = []): Promise<v
     return;
   }
 
-  await printJson(await requestJson("GET", `/api/messages?${params.toString()}`));
+  await printJson(await requestJson("GET", withQuery("/api/messages", params)));
 }
 
 function parseOptions(args: string[]): Record<string, string> {
@@ -162,8 +208,20 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
+function option(options: Record<string, string>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    if (options[key]) return options[key];
+  }
+  return undefined;
+}
+
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+function withQuery(path: string, params: URLSearchParams): string {
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
 }
 
 function printJson(value: unknown): void {
@@ -178,11 +236,17 @@ Commands:
   agents create --name <name> --repo <url> [--branch main] [--ref main]
   agents list
   agents get <agent_id>
+  agents repo <agent_id>
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>]
+  sandboxes get <sandbox_id>
   sandboxes exec <sandbox_id> -- <command>
   sandboxes stop <sandbox_id>
-  messages [--agent <agent_id>] [--sandbox <sandbox_id>] [--limit 50]
+  sandboxes bootstrap <sandbox_id>
+  heartbeats list [--agent <agent_id>]
+  heartbeats get <heartbeat_id>
+  messages list [--agent <agent_id>] [--sandbox <sandbox_id>] [--limit 50]
+  messages listen [--agent <agent_id>] [--sandbox <sandbox_id>]
   messages --follow [--agent <agent_id>] [--sandbox <sandbox_id>]
 `);
 }

@@ -2,9 +2,28 @@ export type AgentRow = {
   id: string;
   name: string;
   repo_url: string;
+  repo_web_url: string | null;
   default_branch: string;
   current_ref: string;
+  current_commit: string | null;
   status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentRunRow = {
+  id: string;
+  agent_id: string;
+  kind: string;
+  objective: string;
+  input_ref: string;
+  run_branch: string;
+  base_commit: string | null;
+  result_commit: string | null;
+  status: string;
+  result_summary: string | null;
+  started_at: string | null;
+  completed_at: string | null;
   created_at: string;
   updated_at: string;
 };

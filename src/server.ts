@@ -1,6 +1,7 @@
 import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
+import { getAgentRepositoryMetadata } from "./agentRepository.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
 import { MessageBus } from "./messageBus.js";
@@ -40,11 +41,24 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/agents", async (request, reply) => {
     try {
       const body = requestBody(request.body);
-      const agent = await db.createAgent({
+      const repoUrl = parseString(body.repoUrl ?? body.repo_url, "repoUrl");
+      const provisionalAgent = {
+        id: "new-agent",
         name: parseString(body.name, "name"),
-        repoUrl: parseString(body.repoUrl ?? body.repo_url, "repoUrl"),
-        defaultBranch: parseOptionalString(body.defaultBranch ?? body.default_branch),
-        currentRef: parseOptionalString(body.currentRef ?? body.current_ref),
+        repo_url: repoUrl,
+        default_branch: parseOptionalString(body.defaultBranch ?? body.default_branch) ?? "main",
+        current_ref:
+          parseOptionalString(body.currentRef ?? body.current_ref)
+          ?? parseOptionalString(body.defaultBranch ?? body.default_branch)
+          ?? "main",
+      };
+      const metadata = getAgentRepositoryMetadata(provisionalAgent);
+      const agent = await db.createAgent({
+        name: provisionalAgent.name,
+        repoUrl,
+        repoWebUrl: metadata.repoWebUrl,
+        defaultBranch: metadata.defaultBranch,
+        currentRef: metadata.currentRef,
       });
       return { ok: true, agent };
     } catch (error) {
@@ -59,9 +73,27 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return { ok: true, agent };
   });
 
+  app.get("/api/agents/:id/repository", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const agent = await db.getAgent(id);
+      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      return { ok: true, repository: getAgentRepositoryMetadata(agent) };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.get("/api/heartbeats", async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    return { ok: true, heartbeats: await db.listHeartbeats(query.agentId) };
+    return { ok: true, heartbeats: await db.listHeartbeats(queryValue(query, "agentId", "agent_id")) };
+  });
+
+  app.get("/api/heartbeats/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const heartbeat = await db.getHeartbeat(id);
+    if (!heartbeat) return reply.code(404).send({ ok: false, error: "heartbeat not found" });
+    return { ok: true, heartbeat };
   });
 
   app.post("/api/heartbeats", async (request, reply) => {
@@ -85,7 +117,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.get("/api/sandboxes", async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    return { ok: true, sandboxes: await db.listSandboxes({ agentId: query.agentId }) };
+    return { ok: true, sandboxes: await db.listSandboxes({ agentId: queryValue(query, "agentId", "agent_id") }) };
   });
 
   app.get("/api/sandboxes/:id", async (request, reply) => {
@@ -121,6 +153,17 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/sandboxes/:id/bootstrap", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const sandbox = await db.getSandbox(id);
+      if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
+      return { ok: true, result: await sandboxService.bootstrap(sandbox) };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/sandboxes/:id/stop", async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
@@ -137,8 +180,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return {
       ok: true,
       messages: await db.listMessages({
-        agentId: query.agentId,
-        sandboxId: query.sandboxId,
+        agentId: queryValue(query, "agentId", "agent_id"),
+        sandboxId: queryValue(query, "sandboxId", "sandbox_id"),
         limit: parsePositiveInt(query.limit, 100),
       }),
     };
@@ -146,8 +189,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.get("/api/messages/listen", async (request, reply) => {
     const query = request.query as Record<string, string | undefined>;
-    const agentId = query.agentId;
-    const sandboxId = query.sandboxId;
+    const agentId = queryValue(query, "agentId", "agent_id");
+    const sandboxId = queryValue(query, "sandboxId", "sandbox_id");
     reply.hijack();
     reply.raw.writeHead(200, {
       "content-type": "application/x-ndjson; charset=utf-8",
@@ -201,5 +244,8 @@ const parseCommand = (value: unknown): string[] => {
   if (typeof value === "string" && value.trim()) return ["bash", "-lc", value.trim()];
   throw new Error("command must be a string or string[]");
 };
+
+const queryValue = (query: Record<string, string | undefined>, camelKey: string, snakeKey: string): string | undefined =>
+  parseOptionalString(query[camelKey] ?? query[snakeKey]);
 
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);

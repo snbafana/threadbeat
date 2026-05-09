@@ -1,5 +1,10 @@
 import type { Database } from "./db.js";
-import type { SandboxProvider } from "./modalProvider.js";
+import {
+  bootstrapSandbox,
+  type SandboxBootstrapCommandResult,
+  type SandboxBootstrapInput,
+} from "./sandboxBootstrap.js";
+import type { SandboxExecResult, SandboxProvider } from "./modalProvider.js";
 import type { MessageBus } from "./messageBus.js";
 import type { AgentRow, MessageRow, SandboxRow } from "./types.js";
 
@@ -50,7 +55,7 @@ export class SandboxService {
     }
   }
 
-  async exec(sandbox: SandboxRow, command: string[]): Promise<{ sandbox: SandboxRow; result: unknown }> {
+  async exec(sandbox: SandboxRow, command: string[]): Promise<{ sandbox: SandboxRow; result: SandboxExecResult }> {
     if (!sandbox.provider_sandbox_id) throw new Error("sandbox has no provider id");
     if (sandbox.state !== "running") throw new Error(`sandbox is not running: ${sandbox.state}`);
 
@@ -72,6 +77,48 @@ export class SandboxService {
       data: result,
     });
     return { sandbox, result };
+  }
+
+  async bootstrap(sandbox: SandboxRow): Promise<{ sandbox: SandboxRow; results: SandboxBootstrapCommandResult[] }> {
+    const input: SandboxBootstrapInput = {
+      repoUrl: sandbox.repo_url,
+      ref: sandbox.branch,
+      workdir: sandbox.workdir,
+    };
+    await this.message({
+      agentId: sandbox.agent_id,
+      sandboxId: sandbox.id,
+      source: "server",
+      type: "bootstrap_started",
+      text: `Bootstrapping sandbox workdir ${sandbox.workdir}`,
+      data: input,
+    });
+
+    try {
+      const results = await bootstrapSandbox(input, async (command) => {
+        const { result } = await this.exec(sandbox, command);
+        return result;
+      });
+      await this.message({
+        agentId: sandbox.agent_id,
+        sandboxId: sandbox.id,
+        source: "sandbox",
+        type: "bootstrap_completed",
+        text: `Sandbox bootstrap completed in ${sandbox.workdir}`,
+        data: { ...input, results },
+      });
+      return { sandbox, results };
+    } catch (error) {
+      await this.message({
+        agentId: sandbox.agent_id,
+        sandboxId: sandbox.id,
+        source: "sandbox",
+        type: "bootstrap_failed",
+        text: messageOf(error),
+        data: input,
+      });
+      throw error;
+    }
   }
 
   async stop(sandbox: SandboxRow): Promise<SandboxRow> {

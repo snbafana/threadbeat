@@ -1,0 +1,83 @@
+export type SandboxBootstrapInput = {
+  repoUrl: string;
+  ref: string;
+  workdir: string;
+};
+
+export type SandboxBootstrapExecResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+};
+
+export type SandboxBootstrapCommandResult = SandboxBootstrapExecResult & {
+  command: string[];
+};
+
+export type SandboxBootstrapExec = (command: string[]) => Promise<SandboxBootstrapExecResult>;
+
+export class SandboxBootstrapError extends Error {
+  constructor(
+    readonly commandResult: SandboxBootstrapCommandResult,
+    readonly completedResults: SandboxBootstrapCommandResult[],
+  ) {
+    super(`bootstrap command failed (${commandResult.exitCode}): ${commandResult.command.join(" ")}`);
+  }
+}
+
+export const buildSandboxBootstrapCommands = (input: SandboxBootstrapInput): string[][] => {
+  const repoUrl = requireNonEmpty(input.repoUrl, "repoUrl");
+  const ref = requireCheckoutRef(input.ref);
+  const workdir = requireAbsoluteWorkdir(input.workdir);
+  const parentDir = parentDirectory(workdir);
+
+  return [
+    ["mkdir", "-p", parentDir],
+    ["sh", "-lc", "command -v git >/dev/null || (apt-get update && apt-get install -y git)"],
+    ["git", "clone", "--", repoUrl, workdir],
+    ["git", "-C", workdir, "checkout", ref],
+    ["git", "-C", workdir, "status", "--short", "--branch"],
+  ];
+};
+
+export const bootstrapSandbox = async (
+  input: SandboxBootstrapInput,
+  exec: SandboxBootstrapExec,
+): Promise<SandboxBootstrapCommandResult[]> => {
+  const results: SandboxBootstrapCommandResult[] = [];
+  for (const command of buildSandboxBootstrapCommands(input)) {
+    const result = await exec(command);
+    const commandResult = { command, ...result };
+    results.push(commandResult);
+    if (commandResult.exitCode !== 0) {
+      throw new SandboxBootstrapError(commandResult, [...results]);
+    }
+  }
+  return results;
+};
+
+const requireNonEmpty = (value: string, field: string): string => {
+  if (value.trim() === "") throw new Error(`${field} must be a non-empty string`);
+  if (value.includes("\0")) throw new Error(`${field} must not contain null bytes`);
+  return value.trim();
+};
+
+const requireCheckoutRef = (value: string): string => {
+  const ref = requireNonEmpty(value, "ref");
+  if (ref.startsWith("-")) throw new Error("ref must not start with '-'");
+  return ref;
+};
+
+const requireAbsoluteWorkdir = (value: string): string => {
+  const workdir = requireNonEmpty(value, "workdir");
+  if (!workdir.startsWith("/")) throw new Error("workdir must be an absolute sandbox path");
+  if (workdir === "/") throw new Error("workdir must not be the filesystem root");
+  return workdir.replace(/\/+$/, "");
+};
+
+const parentDirectory = (workdir: string): string => {
+  const withoutTrailingSlash = workdir.replace(/\/+$/, "");
+  const lastSlash = withoutTrailingSlash.lastIndexOf("/");
+  if (lastSlash <= 0) return "/";
+  return withoutTrailingSlash.slice(0, lastSlash);
+};
