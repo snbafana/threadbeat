@@ -81,6 +81,18 @@ workdir, calls `runs boot`, and verifies that the Pi command is invoked from the
 sandbox. It proves the boot plumbing without mixing server Pi with sandbox-agent
 Pi.
 
+To verify the same Git-backed agent bootstrap path with the real Pi image layer:
+
+```bash
+npm run smoke:modal-agent-real-pi-runtime
+```
+
+This smoke creates a hosted Git-backed agent, starts and bootstraps a Modal run
+sandbox, verifies `AGENTS.md` and `.pi/*` from the cloned repo, and runs
+`command -v pi && pi --help` from the sandbox workdir. It intentionally stops
+before an autonomous Pi task so model/provider auth remains separate from
+runtime validation.
+
 Hosted Git is behind a provider boundary:
 
 ```bash

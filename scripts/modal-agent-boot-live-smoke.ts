@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
+import { buildModalImageCommands } from "../src/modalImage.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -36,6 +37,7 @@ await assertCanCleanUpSmokeRepo(githubToken, "Modal agent boot live smoke");
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-agent-boot-live-smoke-"));
 const repoId = `threadbeat-modal-agent-boot-${Date.now().toString(36)}`;
+const useRealPiImage = process.env.THREADBEAT_MODAL_AGENT_BOOT_REAL_PI === "1";
 const settings: Settings = {
   projectRoot: path.resolve("."),
   dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
@@ -44,9 +46,10 @@ const settings: Settings = {
   modalMode: "live",
   modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-agent-boot-live-smoke",
   modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
-  modalImageCommands: [
-    "RUN printf '#!/bin/sh\\necho sandbox-pi \"$@\"\\n' > /usr/local/bin/pi && chmod +x /usr/local/bin/pi",
-  ],
+  modalInstallSandboxPi: useRealPiImage,
+  modalImageCommands: useRealPiImage
+    ? buildModalImageCommands({ installSandboxPi: true })
+    : ["RUN printf '#!/bin/sh\\necho sandbox-pi \"$@\"\\n' > /usr/local/bin/pi && chmod +x /usr/local/bin/pi"],
   hostedGitProvider: "github",
   githubOwner,
   githubOwnerType,
@@ -113,23 +116,6 @@ try {
   assert.equal(runtime.plan.piCommand, "pi");
   assert.match(runtime.result.stdout, /agent runtime ready/);
 
-  const booted = await cliJson<{
-    plan: { piCommand: string; promptPath: string; taskPath: string };
-    result: { exitCode: number; stderr: string; stdout: string };
-  }>(baseUrl, [
-    "runs",
-    "boot",
-    runId,
-  ]);
-
-  assert.equal(booted.result.exitCode, 0);
-  assert.equal(booted.plan.piCommand, "pi");
-  assert.equal(booted.plan.promptPath, ".pi/prompts/heartbeat.md");
-  assert.match(booted.plan.taskPath, /^tasks\/inbox\/run_/);
-  assert.match(booted.result.stdout, /sandbox-pi/);
-  assert.match(booted.result.stdout, /--prompt-file \.pi\/prompts\/heartbeat\.md/);
-  assert.match(booted.result.stdout, /--message-file tasks\/inbox\/run_/);
-
   const messages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
     "messages",
     "list",
@@ -137,7 +123,33 @@ try {
     runId,
   ]);
   assert.ok(messages.messages.some((message) => message.type === "agent_runtime_check_completed"));
-  assert.ok(messages.messages.some((message) => message.type === "agent_boot_completed"));
+
+  if (!useRealPiImage) {
+    const booted = await cliJson<{
+      plan: { piCommand: string; promptPath: string; taskPath: string };
+      result: { exitCode: number; stderr: string; stdout: string };
+    }>(baseUrl, [
+      "runs",
+      "boot",
+      runId,
+    ]);
+
+    assert.equal(booted.result.exitCode, 0);
+    assert.equal(booted.plan.piCommand, "pi");
+    assert.equal(booted.plan.promptPath, ".pi/prompts/heartbeat.md");
+    assert.match(booted.plan.taskPath, /^tasks\/inbox\/run_/);
+    assert.match(booted.result.stdout, /sandbox-pi/);
+    assert.match(booted.result.stdout, /--prompt-file \.pi\/prompts\/heartbeat\.md/);
+    assert.match(booted.result.stdout, /--message-file tasks\/inbox\/run_/);
+
+    const bootMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
+      "messages",
+      "list",
+      "--run",
+      runId,
+    ]);
+    assert.ok(bootMessages.messages.some((message) => message.type === "agent_boot_completed"));
+  }
 
   const cleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
     "sandboxes",
@@ -152,6 +164,7 @@ try {
     ok: true,
     modalAppName: settings.modalAppName,
     modalImage: settings.modalImage,
+    realPiImage: useRealPiImage,
     repoPath,
     runId,
   }, null, 2));

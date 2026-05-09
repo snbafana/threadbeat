@@ -19,6 +19,7 @@
     "smoke:modal": "tsx scripts/modal-live-smoke.ts",
     "smoke:modal-cli": "tsx scripts/modal-cli-live-smoke.ts",
     "smoke:modal-pi-image": "tsx scripts/modal-pi-image-live-smoke.ts",
+    "smoke:modal-agent-real-pi-runtime": "THREADBEAT_MODAL_AGENT_BOOT_REAL_PI=1 tsx scripts/modal-agent-boot-live-smoke.ts",
     "smoke:modal-agent-boot": "tsx scripts/modal-agent-boot-live-smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts"
   },
