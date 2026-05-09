@@ -57,7 +57,7 @@ try {
   const baseUrl = `http://${settings.host}:${address.port}`;
 
   const initialized = await cliJson<{
-    agent: { current_commit: string | null; repo_url: string };
+    agent: { current_commit: string | null; id: string; repo_url: string };
     hostedRepo: { namespace: string; providerRepoId: string };
     initialized: { commitSha: string; filesWritten: string[] } | null;
   }>(baseUrl, [
@@ -82,6 +82,41 @@ try {
   const agentsMd = await getGitHubFile(githubToken, repoPath, "AGENTS.md");
   assert.match(agentsMd, /GitHub Agent Init CLI Smoke/);
   assert.match(agentsMd, /Self-Improvement Rules/);
+
+  const stepped = await cliJson<{
+    executed: { result: { exitCode: number; stdout: string } };
+    finalized: null;
+    runId: string;
+    sandbox: { bootstrap?: { results: Array<{ command: string[]; exitCode: number; stdout: string }> } };
+    status: { sandboxes: Array<{ branch: string; state: string }> };
+  }>(baseUrl, [
+    "runs",
+    "step",
+    "--agent",
+    initialized.agent.id,
+    "--objective",
+    "bootstrap initialized agent",
+    "--bootstrap",
+    "--cwd",
+    "/workspace/agent",
+    "--",
+    "test -f AGENTS.md && test -d .pi/prompts && git status --short --branch",
+  ]);
+  assert.equal(stepped.executed.result.exitCode, 0);
+  assert.match(stepped.executed.result.stdout, /\[dry-run\]/);
+  assert.match(stepped.executed.result.stdout, /test -f AGENTS\.md/);
+  assert.ok(stepped.sandbox.bootstrap?.results.every((result) => result.exitCode === 0));
+  assert.ok(stepped.sandbox.bootstrap?.results.some((result) => result.command.join(" ").includes("git clone")));
+  assert.ok(stepped.sandbox.bootstrap?.results.some((result) => result.command.join(" ").includes("git -C /workspace/agent push -u origin HEAD:threadbeat/runs/")));
+  assert.ok(stepped.status.sandboxes.some((sandbox) => sandbox.state === "running" && sandbox.branch.startsWith("threadbeat/runs/")));
+
+  const cleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
+    "sandboxes",
+    "stop-running",
+    "--run",
+    stepped.runId,
+  ]);
+  assert.ok(cleanup.stopped.some((sandbox) => sandbox.state === "stopped"));
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
