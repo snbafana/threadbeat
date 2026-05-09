@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 
+import { Database } from "../src/db.js";
+import { createSandboxProvider } from "../src/modalProvider.js";
+import { MessageBus } from "../src/messageBus.js";
 import { buildSandboxBootstrapCommands } from "../src/sandboxBootstrap.js";
-import {
-  createScriptTempRoot,
-  removeScriptTempRoot,
-  scriptDatabase,
-  scriptSandboxService,
-  scriptSettings,
-} from "./settings-utils.js";
+import { SandboxService } from "../src/sandboxService.js";
+import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 
 const tempRoot = await createScriptTempRoot("threadbeat-bootstrap-smoke");
 
@@ -16,11 +15,11 @@ const settings = scriptSettings({
   tempRoot,
 });
 
-const db = scriptDatabase(settings);
+const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
 
 try {
   await db.initSchema();
-  const service = scriptSandboxService(db, settings);
+  const service = new SandboxService(db, createSandboxProvider(settings), new MessageBus());
   const agent = await db.createAgent({
     name: "bootstrap-smoke-agent",
     repoUrl: "https://github.com/example/agent.git",
