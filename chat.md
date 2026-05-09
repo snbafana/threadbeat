@@ -36,7 +36,8 @@ The branch is pushed to origin and was clean at this handoff.
 Latest commits:
 
 ```text
-pending next commit: Add explicit run sandbox restart
+pending next commit: Add filtered running sandbox cleanup
+2850bfe Add run sandbox restart
 688c993 Reuse running sandboxes for runs
 3305bad Add run status inspection endpoint
 d2b7d2b Add run stop lifecycle endpoint
@@ -102,6 +103,7 @@ Implemented API:
 - `GET /api/sandboxes`
 - `GET /api/sandboxes/:id`
 - `POST /api/agents/:id/sandboxes`
+- `POST /api/sandboxes/stop-running`
 - `POST /api/sandboxes/:id/exec`
 - `POST /api/sandboxes/:id/bootstrap`
 - `POST /api/sandboxes/:id/stop`
@@ -121,6 +123,7 @@ npm run cli -- runs finalize <run_id> --message "Finalize run"
 npm run cli -- runs stop <run_id>
 npm run cli -- sandboxes start --agent <agent_id>
 npm run cli -- sandboxes exec <sandbox_id> -- "pwd && ls -la"
+npm run cli -- sandboxes stop-running --agent <agent_id>
 npm run cli -- sandboxes stop <sandbox_id>
 npm run cli -- messages listen --run <run_id>
 ```
@@ -211,16 +214,11 @@ Good next small durable slices:
    - Keep it CLI-side orchestration over existing server APIs.
    - Do not introduce Pi yet.
 
-2. Add run-level cleanup:
-   - Stop all running sandboxes for a run or agent.
-   - Useful before live Modal usage to avoid leaked long-running sandboxes.
+2. Add live Modal verification in broader end-to-end paths:
+   - `npm run smoke:modal` passed with real `bafanas` Modal credentials.
+   - Next useful Modal check is a server/CLI live-mode flow, not only direct `SandboxService`.
 
-3. Add live Modal verification when credentials are available:
-   - Run `npm run smoke:modal`.
-   - Fix any real Modal SDK issues.
-   - Only then tell the user Modal sandbox implementation is done.
-
-4. Add an agent template phase:
+3. Add an agent template phase:
    - Generate a Pi-native repo skeleton with `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, `work/`.
    - Keep server Pi separate from sandbox Pi.
    - This should probably be a new phase after sandbox lifecycle is stable.

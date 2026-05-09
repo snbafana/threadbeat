@@ -250,6 +250,35 @@ try {
   assert.equal(messagesResponse.statusCode, 200);
   assert.match(messagesResponse.body, /exec_completed/);
 
+  const unfilteredStopRunningResponse = await app.inject({
+    method: "POST",
+    url: "/api/sandboxes/stop-running",
+    payload: {},
+  });
+  assert.equal(unfilteredStopRunningResponse.statusCode, 400);
+  assert.match(unfilteredStopRunningResponse.body, /agentId or runId is required/);
+
+  const cleanupSandboxA = await app.inject({
+    method: "POST",
+    url: `/api/agents/${agentBody.agent.id}/sandboxes`,
+  });
+  assert.equal(cleanupSandboxA.statusCode, 200);
+  const cleanupSandboxB = await app.inject({
+    method: "POST",
+    url: `/api/agents/${agentBody.agent.id}/sandboxes`,
+  });
+  assert.equal(cleanupSandboxB.statusCode, 200);
+
+  const cliStopRunning = await cliJson<{ scanned: number; stopped: Array<{ state: string }> }>(baseUrl, [
+    "sandboxes",
+    "stop-running",
+    "--agent",
+    agentBody.agent.id,
+  ]);
+  assert.ok(cliStopRunning.scanned >= 2);
+  assert.equal(cliStopRunning.stopped.length, 2);
+  assert.ok(cliStopRunning.stopped.every((sandbox) => sandbox.state === "stopped"));
+
   const cliHeartbeat = await cliJson<{ heartbeat: { id: string } }>(baseUrl, [
     "heartbeats",
     "get",

@@ -156,6 +156,17 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
     await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/sandboxes`));
     return;
   }
+  if (subcommandName === "stop-running") {
+    const options = parseOptions(args);
+    const agentId = option(options, "agent", "agent-id");
+    const runId = option(options, "run", "run-id");
+    if (!agentId && !runId) throw new Error("sandboxes stop-running requires --agent or --run");
+    await printJson(await requestJson("POST", "/api/sandboxes/stop-running", {
+      ...(agentId ? { agentId } : {}),
+      ...(runId ? { runId } : {}),
+    }));
+    return;
+  }
   if (subcommandName === "exec") {
     const [sandboxId, ...commandArgs] = args;
     if (!sandboxId) throw new Error("sandboxes exec requires a sandbox id");
@@ -408,6 +419,7 @@ Commands:
   sandboxes list [--agent <agent_id>] [--run <run_id>]
   sandboxes get <sandbox_id>
   sandboxes exec <sandbox_id> -- <command>
+  sandboxes stop-running [--agent <agent_id>] [--run <run_id>]
   sandboxes stop <sandbox_id>
   sandboxes bootstrap <sandbox_id>
   heartbeats list [--agent <agent_id>]

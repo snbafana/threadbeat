@@ -461,6 +461,44 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     };
   });
 
+  app.post("/api/sandboxes/stop-running", async (request, reply) => {
+    try {
+      const body = requestBody(request.body);
+      const agentId = parseOptionalString(body.agentId ?? body.agent_id);
+      const runId = parseOptionalString(body.runId ?? body.run_id);
+      if (!agentId && !runId) {
+        return reply.code(400).send({ ok: false, error: "agentId or runId is required" });
+      }
+      if (agentId && !(await db.getAgent(agentId))) {
+        return reply.code(404).send({ ok: false, error: "agent not found" });
+      }
+      if (runId && !(await db.getAgentRun(runId))) {
+        return reply.code(404).send({ ok: false, error: "run not found" });
+      }
+      const sandboxes = await db.listSandboxes({ agentId, runId });
+      const running = sandboxes.filter((sandbox) => sandbox.state === "running");
+      const stopped: typeof sandboxes = [];
+      for (const sandbox of running) {
+        stopped.push(await sandboxService.stop(sandbox));
+      }
+      await db.appendMessage({
+        agentId,
+        runId,
+        source: "server",
+        type: "sandboxes_stop_running_completed",
+        text: `Stopped ${stopped.length} running sandbox${stopped.length === 1 ? "" : "es"}`,
+        data: {
+          filters: { agentId, runId },
+          stoppedIds: stopped.map((sandbox) => sandbox.id),
+          skippedIds: sandboxes.filter((sandbox) => sandbox.state !== "running").map((sandbox) => sandbox.id),
+        },
+      });
+      return { ok: true, stopped, scanned: sandboxes.length };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.get("/api/sandboxes/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const sandbox = await db.getSandbox(id);

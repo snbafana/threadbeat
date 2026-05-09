@@ -119,6 +119,7 @@ npm run cli -- sandboxes start --agent <agent_id>
 npm run cli -- sandboxes list --agent <agent_id>
 npm run cli -- sandboxes get <sandbox_id>
 npm run cli -- sandboxes exec <sandbox_id> -- "pwd && ls -la"
+npm run cli -- sandboxes stop-running --agent <agent_id>
 npm run cli -- sandboxes bootstrap <sandbox_id>
 npm run cli -- sandboxes stop <sandbox_id>
 npm run cli -- messages list --sandbox <sandbox_id>
@@ -148,6 +149,8 @@ Run planning is intentionally server-side and Pi-free for now:
   branch, and records the result commit on the run.
 - `POST /api/runs/:id/stop` stops the run sandbox when one exists and marks the
   run `stopped`.
+- `POST /api/sandboxes/stop-running` stops all running sandboxes matching an
+  `agentId` or `runId` filter. At least one filter is required.
 
 Read-only API inspection routes:
 
@@ -159,6 +162,7 @@ Read-only API inspection routes:
 - `POST /api/runs/:id/exec`
 - `POST /api/runs/:id/finalize`
 - `POST /api/runs/:id/stop`
+- `POST /api/sandboxes/stop-running`
 - `GET /api/heartbeats?agentId=<agent_id>`
 - `GET /api/heartbeats/:id`
 - `POST /api/agents/:id/code-storage`
