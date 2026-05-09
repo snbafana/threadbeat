@@ -8,8 +8,8 @@ import path from "node:path";
 
 import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
-import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { cliJson } from "./cli-smoke-utils.js";
+import { scriptSettings } from "./settings-utils.js";
 
 if (!hasModalCredentials(process.env)) {
   console.log("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
@@ -17,15 +17,11 @@ if (!hasModalCredentials(process.env)) {
 }
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-cli-live-smoke-"));
-const settings: Settings = {
-  projectRoot: path.resolve("."),
-  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
-  host: "127.0.0.1",
-  port: 0,
+const settings = scriptSettings({
   modalMode: "live",
   modalAppName: "threadbeat-modal-cli-live-smoke",
-  modalImage: DEFAULT_MODAL_IMAGE,
-};
+  tempRoot,
+});
 
 const { app } = await buildServer(settings);
 let runId: string | undefined;

@@ -7,11 +7,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { collectPresentEnv, hasModalCredentials } from "../src/auth.js";
-import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { DEEPSEEK_API_KEY_ENV } from "../src/piModels.js";
 import { buildServer } from "../src/server.js";
 import { cliJson as runCliJson } from "./cli-smoke-utils.js";
+import { scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -43,22 +44,20 @@ await assertCanCleanUpSmokeRepo(githubToken, "Modal agent real task live smoke")
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-agent-real-task-live-smoke-"));
 const repoId = `threadbeat-modal-agent-real-task-${Date.now().toString(36)}`;
-const settings: Settings = {
-  projectRoot: path.resolve("."),
-  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
-  host: "127.0.0.1",
-  port: 0,
+const settings = scriptSettings({
   modalMode: "live",
   modalAppName: "threadbeat-modal-agent-real-task-live-smoke",
-  modalImage: DEFAULT_MODAL_IMAGE,
-  modalInstallSandboxPi: true,
-  modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
-  sandboxEnv,
-  sandboxEnvNames,
-  githubOwner,
-  githubOwnerType,
-  githubToken,
-};
+  tempRoot,
+  overrides: {
+    modalInstallSandboxPi: true,
+    modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
+    sandboxEnv,
+    sandboxEnvNames,
+    githubOwner,
+    githubOwnerType,
+    githubToken,
+  },
+});
 
 const { app } = await buildServer(settings);
 let repoPath: string | undefined;

@@ -6,12 +6,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { hasModalCredentials } from "../src/auth.js";
-import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { Database } from "../src/db.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
 import { SandboxService } from "../src/sandboxService.js";
+import { scriptSettings } from "./settings-utils.js";
 
 if (!hasModalCredentials(process.env)) {
   console.log("Modal Pi image live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
@@ -19,17 +19,15 @@ if (!hasModalCredentials(process.env)) {
 }
 
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-pi-image-live-smoke-"));
-const settings: Settings = {
-  projectRoot: process.cwd(),
-  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
-  host: "127.0.0.1",
-  port: 0,
+const settings = scriptSettings({
   modalMode: "live",
   modalAppName: "threadbeat-modal-pi-image-live-smoke",
-  modalImage: DEFAULT_MODAL_IMAGE,
-  modalInstallSandboxPi: true,
-  modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
-};
+  tempRoot,
+  overrides: {
+    modalInstallSandboxPi: true,
+    modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
+  },
+});
 
 const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
 let sandboxId: string | undefined;

@@ -8,9 +8,10 @@ import path from "node:path";
 
 import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
-import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { cliJson as runCliJson } from "./cli-smoke-utils.js";
+import { scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -36,22 +37,20 @@ await assertCanCleanUpSmokeRepo(githubToken, "Modal agent boot live smoke");
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-modal-agent-boot-live-smoke-"));
 const repoId = `threadbeat-modal-agent-boot-${Date.now().toString(36)}`;
 const useRealPiImage = process.argv.includes("--real-pi");
-const settings: Settings = {
-  projectRoot: path.resolve("."),
-  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
-  host: "127.0.0.1",
-  port: 0,
+const settings = scriptSettings({
   modalMode: "live",
   modalAppName: "threadbeat-modal-agent-boot-live-smoke",
-  modalImage: DEFAULT_MODAL_IMAGE,
-  modalInstallSandboxPi: useRealPiImage,
-  modalImageCommands: useRealPiImage
-    ? buildModalImageCommands({ installSandboxPi: true })
-    : ["RUN printf '#!/bin/sh\\necho sandbox-pi \"$@\"\\n' > /usr/local/bin/pi && chmod +x /usr/local/bin/pi"],
-  githubOwner,
-  githubOwnerType,
-  githubToken,
-};
+  tempRoot,
+  overrides: {
+    modalInstallSandboxPi: useRealPiImage,
+    modalImageCommands: useRealPiImage
+      ? buildModalImageCommands({ installSandboxPi: true })
+      : ["RUN printf '#!/bin/sh\\necho sandbox-pi \"$@\"\\n' > /usr/local/bin/pi && chmod +x /usr/local/bin/pi"],
+    githubOwner,
+    githubOwnerType,
+    githubToken,
+  },
+});
 
 const { app } = await buildServer(settings);
 let repoPath: string | undefined;
