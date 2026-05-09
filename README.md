@@ -109,6 +109,19 @@ sandbox, verifies `AGENTS.md` and `.pi/*` from the cloned repo, and runs
 before an autonomous Pi task so model/provider auth remains separate from
 runtime validation.
 
+To run the first real authenticated Pi task in a Modal sandbox:
+
+```bash
+THREADBEAT_RUN_REAL_PI_TASK=1 \
+THREADBEAT_SANDBOX_ENV_ALLOWLIST=OPENAI_API_KEY \
+npm run smoke:modal-agent-real-task
+```
+
+This smoke is opt-in because it can consume model-provider credits. It creates a
+hosted Git-backed agent repo, bootstraps it into Modal with the real Pi image,
+runs `runs boot`, checks that the worktree changed, finalizes the run branch,
+and deletes the temporary GitHub repo by default.
+
 Hosted Git is behind a provider boundary:
 
 ```bash
