@@ -38,11 +38,16 @@ Hosted Git is behind a provider boundary:
 
 ```bash
 THREADBEAT_GIT_PROVIDER=code-storage
+# or
+THREADBEAT_GIT_PROVIDER=github
+THREADBEAT_GITHUB_OWNER=your-org
+THREADBEAT_GITHUB_TOKEN=...
 ```
 
-Only `code-storage` is implemented right now. The point of the boundary is to
-add GitHub App, Gitea, or GitLab without changing run planning or sandbox
-startup.
+`github` currently supports dry-run repository planning only; live creation is
+kept disabled until the GitHub App/PAT flow and rate-limit handling are explicit.
+The point of the boundary is to add live GitHub, Gitea, or GitLab without
+changing run planning or sandbox startup.
 
 To use live Code.Storage repo creation, set:
 

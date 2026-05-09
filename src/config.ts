@@ -4,7 +4,7 @@ import path from "node:path";
 import { intEnv, stringEnv } from "./env.js";
 
 export type ModalMode = "dry-run" | "live";
-export type HostedGitProviderSetting = "code-storage";
+export type HostedGitProviderSetting = "code-storage" | "github";
 
 export type Settings = {
   projectRoot: string;
@@ -15,6 +15,8 @@ export type Settings = {
   modalAppName: string;
   modalImage: string;
   hostedGitProvider?: HostedGitProviderSetting;
+  githubOwner?: string;
+  githubToken?: string;
   codeStorageName?: string;
   codeStoragePrivateKey?: string;
 };
@@ -26,8 +28,8 @@ export const loadSettings = (): Settings => {
     throw new Error("THREADBEAT_MODAL_MODE must be dry-run or live");
   }
   const hostedGitProvider = stringEnv("THREADBEAT_GIT_PROVIDER", "code-storage");
-  if (hostedGitProvider !== "code-storage") {
-    throw new Error("THREADBEAT_GIT_PROVIDER must be code-storage");
+  if (hostedGitProvider !== "code-storage" && hostedGitProvider !== "github") {
+    throw new Error("THREADBEAT_GIT_PROVIDER must be code-storage or github");
   }
 
   return {
@@ -42,6 +44,8 @@ export const loadSettings = (): Settings => {
     modalAppName: stringEnv("THREADBEAT_MODAL_APP_NAME", "threadbeat-sandboxes"),
     modalImage: stringEnv("THREADBEAT_MODAL_IMAGE", "python:3.13-slim"),
     hostedGitProvider,
+    githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
+    githubToken: process.env.THREADBEAT_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN,
     codeStorageName: process.env.CODE_STORAGE_NAME ?? process.env.PIERRE_CODE_STORAGE_NAME,
     codeStoragePrivateKey:
       process.env.CODE_STORAGE_PRIVATE_KEY
