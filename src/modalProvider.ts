@@ -10,9 +10,13 @@ export type SandboxExecResult = {
   exitCode: number;
 };
 
+export type SandboxExecInput = {
+  timeoutMs?: number;
+};
+
 export interface SandboxProvider {
   start(input: SandboxStartInput): Promise<{ providerSandboxId: string }>;
-  exec(providerSandboxId: string, command: string[]): Promise<SandboxExecResult>;
+  exec(providerSandboxId: string, command: string[], input?: SandboxExecInput): Promise<SandboxExecResult>;
   stop(providerSandboxId: string): Promise<void>;
 }
 
@@ -26,7 +30,7 @@ class DryRunSandboxProvider implements SandboxProvider {
     return { providerSandboxId: `dry_${input.sandboxName}_${Date.now()}` };
   }
 
-  async exec(_providerSandboxId: string, command: string[]): Promise<SandboxExecResult> {
+  async exec(_providerSandboxId: string, command: string[], _input: SandboxExecInput = {}): Promise<SandboxExecResult> {
     if (command.join(" ").includes("git rev-parse HEAD")) {
       return {
         stdout: "0123456789abcdef0123456789abcdef01234567\n",
@@ -60,10 +64,14 @@ class ModalSandboxProvider implements SandboxProvider {
     return { providerSandboxId: sandbox.sandboxId as string };
   }
 
-  async exec(providerSandboxId: string, command: string[]): Promise<SandboxExecResult> {
+  async exec(providerSandboxId: string, command: string[], input: SandboxExecInput = {}): Promise<SandboxExecResult> {
     const { modal } = await this.modalResources();
     const sandbox = await modal.sandboxes.fromId(providerSandboxId);
-    const process = await sandbox.exec(command, { stdout: "pipe", stderr: "pipe" });
+    const process = await sandbox.exec(command, {
+      stdout: "pipe",
+      stderr: "pipe",
+      timeoutMs: input.timeoutMs,
+    });
     const [stdout, stderr, exitCode] = await Promise.all([
       process.stdout.readText(),
       process.stderr.readText(),

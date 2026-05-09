@@ -20,6 +20,8 @@ export type Settings = {
   modalImageCommands?: string[];
   sandboxEnv?: Record<string, string>;
   sandboxEnvNames?: string[];
+  sandboxExecTimeoutMs?: number;
+  agentBootTimeoutMs?: number;
   agentPiCommand?: string;
   hostedGitProvider?: HostedGitProviderSetting;
   githubOwner?: string;
@@ -67,6 +69,8 @@ export const loadSettings = (): Settings => {
     modalImageCommands,
     sandboxEnv,
     sandboxEnvNames,
+    sandboxExecTimeoutMs: intEnv("THREADBEAT_SANDBOX_EXEC_TIMEOUT_MS", 120_000),
+    agentBootTimeoutMs: intEnv("THREADBEAT_AGENT_BOOT_TIMEOUT_MS", 600_000),
     agentPiCommand: stringEnv("THREADBEAT_AGENT_PI_COMMAND", "pi"),
     hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,

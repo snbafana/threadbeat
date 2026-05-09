@@ -412,7 +412,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const body = requestBody(request.body);
       const command = parseCommand(body.command);
       const cwd = parseOptionalString(body.cwd) ?? sandbox.workdir;
-      const result = await sandboxService.exec(sandbox, command, { cwd });
+      const timeoutMs = parseOptionalInteger(body.timeoutMs ?? body.timeout_ms) ?? settings.sandboxExecTimeoutMs;
+      const result = await sandboxService.exec(sandbox, command, { cwd, timeoutMs });
       return { ok: true, run, ...result };
     } catch (error) {
       if (runId) await markRunFailed(runId, error);
@@ -447,7 +448,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         text: `Booting sandbox Pi with ${plan.promptPath}`,
         data: plan,
       });
-      const executed = await sandboxService.exec(sandbox, plan.command, { cwd: sandbox.workdir });
+      const executed = await sandboxService.exec(sandbox, plan.command, {
+        cwd: sandbox.workdir,
+        timeoutMs: settings.agentBootTimeoutMs,
+      });
       const failed = executed.result.exitCode !== 0;
       const updatedRun = failed
         ? await db.updateAgentRunFailed({
@@ -493,7 +497,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         text: `Checking sandbox agent runtime with ${plan.piCommand}`,
         data: plan,
       });
-      const executed = await sandboxService.exec(sandbox, plan.command, { cwd: sandbox.workdir });
+      const executed = await sandboxService.exec(sandbox, plan.command, {
+        cwd: sandbox.workdir,
+        timeoutMs: settings.sandboxExecTimeoutMs,
+      });
       const failed = executed.result.exitCode !== 0;
       const updatedRun = failed
         ? await db.updateAgentRunFailed({
@@ -532,7 +539,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const commitMessage =
         parseOptionalString(body.commitMessage ?? body.commit_message)
         ?? `Finalize ${run.kind} ${run.id}`;
-      const finalized = await sandboxService.finalizeRunBranch(sandbox, { commitMessage });
+      const finalized = await sandboxService.finalizeRunBranch(sandbox, {
+        commitMessage,
+        timeoutMs: settings.sandboxExecTimeoutMs,
+      });
       const completed = await db.updateAgentRunCompleted({
         id: run.id,
         resultCommit: finalized.result.commitSha,
@@ -711,7 +721,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
       const body = requestBody(request.body);
       const command = parseCommand(body.command);
-      const result = await sandboxService.exec(sandbox, command);
+      const timeoutMs = parseOptionalInteger(body.timeoutMs ?? body.timeout_ms) ?? settings.sandboxExecTimeoutMs;
+      const result = await sandboxService.exec(sandbox, command, { timeoutMs });
       return { ok: true, ...result };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -799,6 +810,13 @@ const parseOptionalString = (value: unknown): string | undefined => {
 
 const parsePositiveInt = (value: unknown, fallback: number): number => {
   if (value === undefined || value === null || value === "") return fallback;
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error("expected positive integer");
+  return Math.floor(parsed);
+};
+
+const parseOptionalInteger = (value: unknown): number | undefined => {
+  if (value === undefined || value === null || value === "") return undefined;
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error("expected positive integer");
   return Math.floor(parsed);

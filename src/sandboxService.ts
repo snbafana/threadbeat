@@ -16,6 +16,7 @@ type SandboxStartOptions = {
 type SandboxExecOptions = {
   cwd?: string;
   redact?: Record<string, string>;
+  timeoutMs?: number;
 };
 
 type SandboxBootstrapOptions = {
@@ -100,9 +101,9 @@ export class SandboxService {
       source: "server",
       type: "exec_started",
       text: redact(execCommand.join(" ")),
-      data: { command: execCommand.map(redact), cwd: options.cwd ?? null },
+      data: { command: execCommand.map(redact), cwd: options.cwd ?? null, timeoutMs: options.timeoutMs ?? null },
     });
-    const result = await this.provider.exec(sandbox.provider_sandbox_id, execCommand);
+    const result = await this.provider.exec(sandbox.provider_sandbox_id, execCommand, { timeoutMs: options.timeoutMs });
     const redactedResult = {
       exitCode: result.exitCode,
       stderr: redact(result.stderr),
@@ -183,7 +184,7 @@ export class SandboxService {
 
   async finalizeRunBranch(
     sandbox: SandboxRow,
-    input: { commitMessage: string },
+    input: { commitMessage: string; timeoutMs?: number },
   ): Promise<{ sandbox: SandboxRow; result: SandboxFinalizeResult }> {
     const commitMessage = requireNonEmpty(input.commitMessage, "commitMessage");
     const commands = [
@@ -210,7 +211,7 @@ export class SandboxService {
 
     const results = [];
     for (const command of commands) {
-      const { result } = await this.exec(sandbox, command, { cwd: sandbox.workdir });
+      const { result } = await this.exec(sandbox, command, { cwd: sandbox.workdir, timeoutMs: input.timeoutMs });
       results.push({ command, ...result });
       if (result.exitCode !== 0) {
         await this.message({

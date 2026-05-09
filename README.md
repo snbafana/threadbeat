@@ -57,6 +57,17 @@ Only listed variables that are present in the server environment are injected
 into Modal sandboxes. This is intentionally separate from server-side Pi and
 avoids copying the whole server environment into agent compute.
 
+Sandbox commands have bounded execution by default:
+
+```bash
+THREADBEAT_SANDBOX_EXEC_TIMEOUT_MS=120000
+THREADBEAT_AGENT_BOOT_TIMEOUT_MS=600000
+```
+
+`runs boot` uses the longer agent boot timeout; ordinary `runs exec`,
+`sandboxes exec`, runtime checks, and finalize commands use the sandbox exec
+timeout. CLI exec calls can override with `--timeout-ms`.
+
 To verify live Modal credentials:
 
 ```bash

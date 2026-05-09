@@ -211,9 +211,14 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
     const [sandboxId, ...commandArgs] = args;
     if (!sandboxId) throw new Error("sandboxes exec requires a sandbox id");
     const separatorIndex = commandArgs.indexOf("--");
+    const optionArgs = separatorIndex >= 0 ? commandArgs.slice(0, separatorIndex) : [];
+    const options = parseOptions(optionArgs);
     const command = separatorIndex >= 0 ? commandArgs.slice(separatorIndex + 1).join(" ") : commandArgs.join(" ");
     if (!command.trim()) throw new Error("sandboxes exec requires a command");
-    await printJson(await requestJson("POST", `/api/sandboxes/${encodeURIComponent(sandboxId)}/exec`, { command }));
+    await printJson(await requestJson("POST", `/api/sandboxes/${encodeURIComponent(sandboxId)}/exec`, {
+      command,
+      ...(option(options, "timeout", "timeout-ms") ? { timeoutMs: option(options, "timeout", "timeout-ms") } : {}),
+    }));
     return;
   }
   if (subcommandName === "stop") {
@@ -313,6 +318,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/exec`, {
       command,
       ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...(option(options, "timeout", "timeout-ms") ? { timeoutMs: option(options, "timeout", "timeout-ms") } : {}),
     }));
     return;
   }
@@ -538,7 +544,7 @@ Commands:
   runs step --run <run_id> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run_id> [--bootstrap]
   runs restart-sandbox <run_id> [--bootstrap]
-  runs exec <run_id> [--cwd /workspace/agent] -- <command>
+  runs exec <run_id> [--cwd /workspace/agent] [--timeout-ms 120000] -- <command>
   runs boot <run_id> [--objective "..."] [--prompt .pi/prompts/heartbeat.md] [--task tasks/inbox/run.md]
   runs check-runtime <run_id>
   runs finalize <run_id> [--message "Finalize run"]
@@ -546,7 +552,7 @@ Commands:
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>] [--run <run_id>]
   sandboxes get <sandbox_id>
-  sandboxes exec <sandbox_id> -- <command>
+  sandboxes exec <sandbox_id> [--timeout-ms 120000] -- <command>
   sandboxes stop-running [--agent <agent_id>] [--run <run_id>]
   sandboxes stop <sandbox_id>
   sandboxes bootstrap <sandbox_id>
