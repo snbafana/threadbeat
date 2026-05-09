@@ -81,7 +81,11 @@ class ModalSandboxProvider implements SandboxProvider {
     const { ModalClient } = await import("modal");
     const modal = new ModalClient();
     const app = await modal.apps.fromName(this.settings.modalAppName, { createIfMissing: true });
-    const image = modal.images.fromRegistry(this.settings.modalImage);
+    const baseImage = modal.images.fromRegistry(this.settings.modalImage);
+    const imageCommands = this.settings.modalImageCommands ?? [];
+    const image = imageCommands.length > 0
+      ? baseImage.dockerfileCommands(imageCommands)
+      : baseImage;
     return { modal, app, image };
   }
 }

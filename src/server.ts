@@ -432,6 +432,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
       const body = requestBody(request.body);
       const plan = buildAgentBootPlan({
+        agentPiCommand: settings.agentPiCommand ?? "pi",
         objective: parseOptionalString(body.objective) ?? run.objective,
         promptPath: parseOptionalString(body.promptPath ?? body.prompt_path),
         runId: run.id,

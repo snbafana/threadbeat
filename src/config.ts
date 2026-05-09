@@ -15,6 +15,8 @@ export type Settings = {
   modalMode: ModalMode;
   modalAppName: string;
   modalImage: string;
+  modalImageCommands?: string[];
+  agentPiCommand?: string;
   hostedGitProvider?: HostedGitProviderSetting;
   githubOwner?: string;
   githubOwnerType?: GitHubOwnerType;
@@ -49,6 +51,8 @@ export const loadSettings = (): Settings => {
     modalMode,
     modalAppName: stringEnv("THREADBEAT_MODAL_APP_NAME", "threadbeat-sandboxes"),
     modalImage: stringEnv("THREADBEAT_MODAL_IMAGE", "python:3.13-slim"),
+    modalImageCommands: linesEnv("THREADBEAT_MODAL_IMAGE_COMMANDS"),
+    agentPiCommand: stringEnv("THREADBEAT_AGENT_PI_COMMAND", "pi"),
     hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
     githubOwnerType,
@@ -60,3 +64,9 @@ export const loadSettings = (): Settings => {
       ?? process.env.PIERRE_CODE_STORAGE_PRIVATE_KEY,
   };
 };
+
+const linesEnv = (name: string): string[] =>
+  (process.env[name] ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);

@@ -33,6 +33,11 @@ MODAL_TOKEN_SECRET=...
 ```
 
 Modal's JavaScript SDK is installed as `modal` and expects Node 22+.
+`THREADBEAT_MODAL_IMAGE` is the base sandbox image. Add newline-separated
+Dockerfile layers through `THREADBEAT_MODAL_IMAGE_COMMANDS` when the agent
+sandbox needs runtime tools such as Pi. The server does not embed Pi for agent
+runs; `THREADBEAT_AGENT_PI_COMMAND` is executed inside the sandbox workdir by
+`runs boot`.
 
 To verify live Modal credentials:
 
@@ -51,6 +56,17 @@ npm run smoke:modal-cli
 
 This starts the server in live Modal mode, drives it through `threadbeat-cli`,
 executes `python --version`, and cleans up with `sandboxes stop-running`.
+
+To verify the sandbox-agent boot path against a real Modal sandbox:
+
+```bash
+npm run smoke:modal-agent-boot
+```
+
+This smoke layers a tiny test `pi` binary into the Modal image, bootstraps a run
+workdir, calls `runs boot`, and verifies that the Pi command is invoked from the
+sandbox. It proves the boot plumbing without mixing server Pi with sandbox-agent
+Pi.
 
 Hosted Git is behind a provider boundary:
 

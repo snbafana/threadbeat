@@ -1,4 +1,5 @@
 export type AgentBootInput = {
+  agentPiCommand?: string;
   objective: string;
   promptPath?: string;
   runId: string;
@@ -7,6 +8,7 @@ export type AgentBootInput = {
 
 export type AgentBootPlan = {
   command: string[];
+  piCommand: string;
   objective: string;
   promptPath: string;
   runId: string;
@@ -18,6 +20,7 @@ const DEFAULT_PROMPT_PATH = ".pi/prompts/heartbeat.md";
 export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
   const runId = requireSafeRunId(input.runId);
   const objective = requireNonEmpty(input.objective, "objective");
+  const piCommand = requireSafeShellCommand(input.agentPiCommand ?? "pi", "agentPiCommand");
   const promptPath = requireSafeRelativePath(input.promptPath ?? DEFAULT_PROMPT_PATH, "promptPath");
   const taskPath = requireSafeRelativePath(input.taskPath ?? `tasks/inbox/${runId}.md`, "taskPath");
   const script = [
@@ -29,10 +32,11 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
     "  echo 'Pi CLI is not installed in this sandbox image. Install Pi in the Modal image before live agent boots.' >&2",
     "  exit 127",
     "fi",
-    `pi --prompt-file ${shellQuote(promptPath)} --message-file ${shellQuote(taskPath)}`,
+    `${piCommand} --prompt-file ${shellQuote(promptPath)} --message-file ${shellQuote(taskPath)}`,
   ].join("\n");
   return {
     command: ["bash", "-lc", script],
+    piCommand,
     objective,
     promptPath,
     runId,
@@ -67,6 +71,12 @@ const requireSafeRelativePath = (value: string, field: string): string => {
   if (path.startsWith("/") || path.includes("://")) throw new Error(`${field} must be a relative repo path`);
   if (path.split("/").some((part) => part === ".." || part === "")) throw new Error(`${field} must be a safe relative path`);
   return path;
+};
+
+const requireSafeShellCommand = (value: string, field: string): string => {
+  const command = requireNonEmpty(value, field);
+  if (/[\n\r\0]/.test(command)) throw new Error(`${field} must be a single shell command line`);
+  return command;
 };
 
 const parentDirectory = (value: string): string => {
