@@ -3,6 +3,7 @@ import "dotenv/config";
 import path from "node:path";
 import { boolEnv, intEnv, stringEnv } from "./env.js";
 import { buildModalImageCommands } from "./modalImage.js";
+import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_FLASH_MODEL, DEEPSEEK_PROVIDER } from "./piModels.js";
 
 export type ModalMode = "dry-run" | "live";
 export type HostedGitProviderSetting = "code-storage" | "github";
@@ -75,9 +76,9 @@ export const loadSettings = (): Settings => {
     sandboxExecTimeoutMs: intEnv("THREADBEAT_SANDBOX_EXEC_TIMEOUT_MS", 120_000),
     agentBootTimeoutMs: intEnv("THREADBEAT_AGENT_BOOT_TIMEOUT_MS", 600_000),
     agentPiCommand: stringEnv("THREADBEAT_AGENT_PI_COMMAND", "pi"),
-    agentPiProvider: stringEnv("THREADBEAT_AGENT_PI_PROVIDER", "deepseek"),
-    agentPiModel: stringEnv("THREADBEAT_AGENT_PI_MODEL", "deepseek-v4-flash"),
-    agentPiApiKeyEnv: stringEnv("THREADBEAT_AGENT_PI_API_KEY_ENV", "DEEPSEEK_API_KEY"),
+    agentPiProvider: stringEnv("THREADBEAT_AGENT_PI_PROVIDER", DEEPSEEK_PROVIDER),
+    agentPiModel: stringEnv("THREADBEAT_AGENT_PI_MODEL", DEEPSEEK_FLASH_MODEL),
+    agentPiApiKeyEnv: stringEnv("THREADBEAT_AGENT_PI_API_KEY_ENV", DEEPSEEK_API_KEY_ENV),
     hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
     githubOwnerType,

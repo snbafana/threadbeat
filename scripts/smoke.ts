@@ -394,6 +394,7 @@ try {
   assert.equal(cliRuntimeCheck.plan.piCommand, "pi");
   assert.equal(cliRuntimeCheck.result.exitCode, 0);
   assert.match(cliRuntimeCheck.result.stdout, /agent runtime ready/);
+  assert.match(cliRuntimeCheck.result.stdout, /pi --list-models 'deepseek' \| grep -F 'deepseek-v4-flash'/);
 
   const cliAgentBootMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
     "messages",

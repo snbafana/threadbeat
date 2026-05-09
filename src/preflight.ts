@@ -1,4 +1,5 @@
 import type { Settings } from "./config.js";
+import { DEEPSEEK_API_KEY_ENV } from "./piModels.js";
 
 export type PreflightCheck = {
   name: string;
@@ -14,7 +15,7 @@ export type PreflightReport = {
   recommendedSandboxEnvNames: string[];
 };
 
-const DEFAULT_SANDBOX_AUTH_ENV = ["DEEPSEEK_API_KEY"];
+const DEFAULT_SANDBOX_AUTH_ENV = [DEEPSEEK_API_KEY_ENV];
 
 export const buildPreflightReport = (settings: Settings): PreflightReport => {
   const sandboxEnv = settings.sandboxEnv ?? {};

@@ -190,6 +190,8 @@ export class SandboxService {
     const commands = [
       ["git", "status", "--short"],
       ["git", "add", "-A"],
+      ["git", "config", "user.name", "Threadbeat Agent"],
+      ["git", "config", "user.email", "threadbeat-agent@users.noreply.github.com"],
       [
         "sh",
         "-lc",

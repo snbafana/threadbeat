@@ -1,3 +1,5 @@
+import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_FLASH_MODEL, DEEPSEEK_PROVIDER, deepSeekPiModelsJson } from "./piModels.js";
+
 export type AgentBootInput = {
   agentPiApiKeyEnv?: string;
   agentPiCommand?: string;
@@ -34,9 +36,9 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
   const objective = requireNonEmpty(input.objective, "objective");
   const piCommand = requireSafeShellCommand(input.agentPiCommand ?? "pi", "agentPiCommand");
   const piExecutable = firstCommandWord(piCommand);
-  const piProvider = requireSafeArgument(input.agentPiProvider ?? "deepseek", "agentPiProvider");
-  const piModel = requireSafeArgument(input.agentPiModel ?? "deepseek-v4-flash", "agentPiModel");
-  const piApiKeyEnv = requireSafeEnvName(input.agentPiApiKeyEnv ?? "DEEPSEEK_API_KEY", "agentPiApiKeyEnv");
+  const piProvider = requireSafeArgument(input.agentPiProvider ?? DEEPSEEK_PROVIDER, "agentPiProvider");
+  const piModel = requireSafeArgument(input.agentPiModel ?? DEEPSEEK_FLASH_MODEL, "agentPiModel");
+  const piApiKeyEnv = requireSafeEnvName(input.agentPiApiKeyEnv ?? DEEPSEEK_API_KEY_ENV, "agentPiApiKeyEnv");
   const promptPath = requireSafeRelativePath(input.promptPath ?? DEFAULT_PROMPT_PATH, "promptPath");
   const taskPath = requireSafeRelativePath(input.taskPath ?? `tasks/inbox/${runId}.md`, "taskPath");
   const script = [
@@ -53,6 +55,7 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
     `  echo '${piApiKeyEnv} is not set in this sandbox. Add it to THREADBEAT_SANDBOX_ENV_ALLOWLIST and the server environment.' >&2`,
     "  exit 78",
     "fi",
+    installPiModelsJsonScript(),
     "{",
     "  printf 'Use the project instructions in AGENTS.md and the prompt template below.\\n\\n'",
     `  cat ${shellQuote(promptPath)}`,
@@ -74,9 +77,11 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
   };
 };
 
-export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string } = {}): AgentRuntimeCheckPlan => {
+export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string; agentPiModel?: string; agentPiProvider?: string } = {}): AgentRuntimeCheckPlan => {
   const piCommand = requireSafeShellCommand(input.agentPiCommand ?? "pi", "agentPiCommand");
   const piExecutable = firstCommandWord(piCommand);
+  const piProvider = requireSafeArgument(input.agentPiProvider ?? DEEPSEEK_PROVIDER, "agentPiProvider");
+  const piModel = requireSafeArgument(input.agentPiModel ?? DEEPSEEK_FLASH_MODEL, "agentPiModel");
   return {
     command: ["bash", "-lc", [
       "set -e",
@@ -84,6 +89,8 @@ export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string } = 
       "test -f .pi/prompts/heartbeat.md",
       "test -d .pi/skills",
       `command -v ${shellQuote(piExecutable)}`,
+      installPiModelsJsonScript(),
+      `${piCommand} --list-models ${shellQuote(piProvider)} | grep -F ${shellQuote(piModel)} >/tmp/threadbeat-pi-model-check.txt`,
       `${piCommand} --help >/tmp/threadbeat-pi-help.txt 2>&1 || true`,
       "printf 'agent runtime ready\\n'",
     ].join("\n")],
@@ -99,6 +106,13 @@ Run ID: ${runId}
 
 ${objective}
 `;
+
+const installPiModelsJsonScript = (): string => [
+  "mkdir -p \"$HOME/.pi/agent\"",
+  "cat > \"$HOME/.pi/agent/models.json\" <<'THREADBEAT_PI_MODELS'",
+  deepSeekPiModelsJson().trimEnd(),
+  "THREADBEAT_PI_MODELS",
+].join("\n");
 
 const requireNonEmpty = (value: string, field: string): string => {
   const trimmed = value.trim();

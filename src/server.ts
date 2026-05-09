@@ -440,9 +440,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const body = requestBody(request.body);
       const plan = buildAgentBootPlan({
         agentPiCommand: settings.agentPiCommand ?? "pi",
-        agentPiProvider: settings.agentPiProvider ?? "deepseek",
-        agentPiModel: settings.agentPiModel ?? "deepseek-v4-flash",
-        agentPiApiKeyEnv: settings.agentPiApiKeyEnv ?? "DEEPSEEK_API_KEY",
+        agentPiProvider: settings.agentPiProvider,
+        agentPiModel: settings.agentPiModel,
+        agentPiApiKeyEnv: settings.agentPiApiKeyEnv,
         objective: parseOptionalString(body.objective) ?? run.objective,
         promptPath: parseOptionalString(body.promptPath ?? body.prompt_path),
         runId: run.id,
@@ -496,7 +496,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       await db.updateAgentRunStarted(run.id);
       const [sandbox] = await db.listSandboxes({ runId: run.id });
       if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
-      const plan = buildAgentRuntimeCheckPlan({ agentPiCommand: settings.agentPiCommand ?? "pi" });
+      const plan = buildAgentRuntimeCheckPlan({
+        agentPiCommand: settings.agentPiCommand,
+        agentPiProvider: settings.agentPiProvider,
+        agentPiModel: settings.agentPiModel,
+      });
       await db.appendMessage({
         agentId: run.agent_id,
         sandboxId: sandbox.id,
