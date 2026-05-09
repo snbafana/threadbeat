@@ -36,7 +36,8 @@ The branch is pushed to origin and was clean at this handoff.
 Latest commits:
 
 ```text
-pending next commit: Add runs step CLI orchestration
+pending next commit: Add Modal CLI live smoke
+d8959b2 Add runs step CLI
 10b5537 Add running sandbox cleanup
 2850bfe Add run sandbox restart
 688c993 Reuse running sandboxes for runs
@@ -140,11 +141,8 @@ Implemented:
 - Live mode requires `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`.
 - Live Modal sandbox starts a long-lived command, supports exec, and terminates on stop.
 - `npm run smoke:modal` exists and starts a real Modal sandbox, runs `python --version`, and stops it when credentials are present.
-
-Important current limitation:
-
-- `npm run smoke:modal` has only been observed in skip mode because `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` were not set in the shell.
-- Do not tell the user Modal sandbox implementation is fully done until the live smoke passes with real Modal credentials.
+- `npm run smoke:modal-cli` starts the server in live Modal mode and drives a real sandbox through `threadbeat-cli`.
+- Modal live smoke passed with the repo-local `bafanas` credentials.
 
 ## Hosted Git / Code Storage Status
 
@@ -205,17 +203,13 @@ npm run build
 git diff --check
 ```
 
-`npm run smoke:modal` exits successfully in skip mode when Modal credentials are missing.
+`npm run smoke:modal` passes with real `bafanas` Modal credentials.
 
 ## Next Best Slices
 
 Good next small durable slices:
 
-1. Add live Modal verification in broader end-to-end paths:
-   - `npm run smoke:modal` passed with real `bafanas` Modal credentials.
-   - Next useful Modal check is a server/CLI live-mode flow, not only direct `SandboxService`.
-
-2. Add an agent template phase:
+1. Add an agent template phase:
    - Generate a Pi-native repo skeleton with `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, `work/`.
    - Keep server Pi separate from sandbox Pi.
    - This should probably be a new phase after sandbox lifecycle is stable.

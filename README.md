@@ -43,6 +43,15 @@ npm run smoke:modal
 The smoke starts a real Modal sandbox, runs `python --version`, and terminates
 the sandbox. Without Modal credentials it exits successfully with a skip message.
 
+To verify the server and CLI control plane against a real Modal sandbox:
+
+```bash
+npm run smoke:modal-cli
+```
+
+This starts the server in live Modal mode, drives it through `threadbeat-cli`,
+executes `python --version`, and cleans up with `sandboxes stop-running`.
+
 Hosted Git is behind a provider boundary:
 
 ```bash
