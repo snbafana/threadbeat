@@ -8,7 +8,6 @@ const agent = {
   id: "agt_testagent",
   name: "Research Agent",
   repo_url: "https://github.com/example/threadbeat-agent.git",
-  default_branch: "main",
   current_ref: "feature/input-cleanup",
 };
 
@@ -61,8 +60,6 @@ assert.deepEqual(getAgentRepositoryMetadata(agent), {
   agentId: "agt_testagent",
   currentRef: "feature/input-cleanup",
   currentTreeUrl: "https://github.com/example/threadbeat-agent/tree/feature/input-cleanup",
-  defaultBranch: "main",
-  defaultBranchTreeUrl: "https://github.com/example/threadbeat-agent/tree/main",
   name: "Research Agent",
   repoUrl: "https://github.com/example/threadbeat-agent.git",
   repoWebUrl: "https://github.com/example/threadbeat-agent",
@@ -78,14 +75,6 @@ const plan = planRunBranch({
 assert.equal(
   plan.branchName,
   "threadbeat/runs/20260508T123456789z/agt_testagent/run_123-add_git_planning",
-);
-assert.equal(plan.sourceRef, "feature/input-cleanup");
-assert.equal(plan.compareBaseRef, "feature/input-cleanup");
-assert.equal(plan.compareHeadRef, plan.branchName);
-assert.equal(plan.links.treeUrl, `https://github.com/example/threadbeat-agent/tree/${plan.branchName}`);
-assert.equal(
-  plan.links.compareUrl,
-  `https://github.com/example/threadbeat-agent/compare/feature/input-cleanup...${plan.branchName}`,
 );
 
 console.log("git planning tests passed");

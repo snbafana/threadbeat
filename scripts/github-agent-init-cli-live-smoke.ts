@@ -40,7 +40,6 @@ const settings: Settings = {
   modalMode: "dry-run",
   modalAppName: "threadbeat-github-agent-init-cli-live-smoke",
   modalImage: "python:3.13-slim",
-  hostedGitProvider: "github",
   githubOwner,
   githubOwnerType,
   githubToken,
@@ -48,7 +47,6 @@ const settings: Settings = {
 
 const { app } = await buildServer(settings);
 let repoPath: string | undefined;
-let deleted = false;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
@@ -56,7 +54,7 @@ try {
   const baseUrl = `http://${settings.host}:${address.port}`;
 
   const initialized = await cliJson<{
-    agent: { current_commit: string | null; id: string; repo_url: string };
+    agent: { id: string; repo_url: string };
     hostedRepo: { namespace: string; providerRepoId: string };
     initialized: { commitSha: string; filesWritten: string[] } | null;
   }>(baseUrl, [
@@ -73,8 +71,7 @@ try {
   assert.equal(initialized.hostedRepo.namespace, githubOwner);
   assert.equal(initialized.hostedRepo.providerRepoId, repoId);
   assert.match(initialized.agent.repo_url, new RegExp(`github.com/${githubOwner}/${repoId}\\.git`));
-  assert.match(initialized.agent.current_commit ?? "", /^[a-f0-9]{40}$/);
-  assert.equal(initialized.agent.current_commit, initialized.initialized?.commitSha);
+  assert.match(initialized.initialized?.commitSha ?? "", /^[a-f0-9]{40}$/);
   assert.ok(initialized.initialized?.filesWritten.includes("AGENTS.md"));
   repoPath = `${githubOwner}/${repoId}`;
 
@@ -83,11 +80,9 @@ try {
   assert.match(agentsMd, /Self-Improvement Rules/);
 
   const stepped = await cliJson<{
-    executed: { result: { exitCode: number; stdout: string } };
-    finalized: null;
-    runId: string;
-    sandbox: { bootstrap?: { results: Array<{ command: string[]; exitCode: number; stdout: string }> } };
-    status: { sandboxes: Array<{ branch: string; state: string }> };
+    bootstrap?: Array<{ command: string[]; exitCode: number }>;
+    result: { exitCode: number; stdout: string };
+    status: { run: { id: string }; sandboxes: Array<{ state: string }> };
   }>(baseUrl, [
     "runs",
     "step",
@@ -101,33 +96,31 @@ try {
     "--",
     "test -f AGENTS.md && test -d .pi/prompts && git status --short --branch",
   ]);
-  assert.equal(stepped.executed.result.exitCode, 0);
-  assert.match(stepped.executed.result.stdout, /\[dry-run\]/);
-  assert.match(stepped.executed.result.stdout, /test -f AGENTS\.md/);
-  assert.ok(stepped.sandbox.bootstrap?.results.every((result) => result.exitCode === 0));
-  assert.ok(stepped.sandbox.bootstrap?.results.some((result) => result.command.join(" ").includes("git clone")));
-  assert.ok(stepped.sandbox.bootstrap?.results.some((result) => result.command.join(" ").includes("git -C /workspace/agent push -u origin HEAD:threadbeat/runs/")));
-  assert.ok(stepped.status.sandboxes.some((sandbox) => sandbox.state === "running" && sandbox.branch.startsWith("threadbeat/runs/")));
+  assert.equal(stepped.result.exitCode, 0);
+  assert.match(stepped.result.stdout, /\[dry-run\]/);
+  assert.match(stepped.result.stdout, /test -f AGENTS\.md/);
+  const bootstrap = stepped.bootstrap ?? [];
+  assert.ok(bootstrap.every((result) => result.exitCode === 0));
+  assert.ok(bootstrap.some((result) => result.command.join(" ").includes("git clone")));
+  assert.ok(bootstrap.some((result) => result.command.join(" ").includes("git -C /workspace/agent push -u origin HEAD:threadbeat/runs/")));
+  assert.ok(stepped.status.sandboxes.some((sandbox) => sandbox.state === "running"));
 
-  const cleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
+  const cleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
     "sandboxes",
     "stop-running",
     "--run",
-    stepped.runId,
+    stepped.status.run.id,
   ]);
-  assert.ok(cleanup.stopped.some((sandbox) => sandbox.state === "stopped"));
+  assert.equal(cleanup.stoppedCount, 1);
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
   if (repoPath && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
     await deleteGitHubRepo(githubToken, repoPath);
-    deleted = true;
   }
 }
 
 console.log(JSON.stringify({
-  ok: true,
-  deleted,
   repoPath,
 }, null, 2));
 

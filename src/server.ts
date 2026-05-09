@@ -4,14 +4,15 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { buildAgentBootPlan, buildAgentRuntimeCheckPlan } from "./agentBoot.js";
 import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
 import { buildAgentTemplate } from "./agentTemplate.js";
-import { createHostedGitProvider } from "./hostedGit.js";
+import { GitHubHostedGitProvider } from "./hostedGit.js";
 import { createInitialCommit } from "./gitRepositoryBootstrap.js";
+import { assertValidGitRef } from "./git.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
 import { MessageBus } from "./messageBus.js";
 import { buildPreflightReport } from "./preflight.js";
 import { runPlanFromRow } from "./runPlanning.js";
-import { SandboxService } from "./sandboxService.js";
+import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
 import type { Settings } from "./config.js";
 
 type AppParts = {
@@ -24,7 +25,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   await db.initSchema();
 
   const bus = new MessageBus();
-  const hostedGit = createHostedGitProvider(settings);
+  const hostedGit = new GitHubHostedGitProvider(settings);
   const sandboxService = new SandboxService(db, createSandboxProvider(settings), bus);
   const app = Fastify({ logger: true });
 
@@ -32,16 +33,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     await db.close();
   });
 
-  app.get("/health", async () => ({
-    ok: true,
-    name: "threadbeat",
-    modalMode: settings.modalMode,
-    modalAppName: settings.modalAppName,
-    modalImage: settings.modalImage,
-  }));
+  app.get("/health", async () => ({ ok: true }));
 
   app.get("/api/preflight", async () => ({
-    ok: true,
     preflight: buildPreflightReport(settings),
   }));
 
@@ -67,7 +61,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/agents/from-template", async (request, reply) => {
     try {
       const body = requestBody(request.body);
-      const defaultBranch = parseOptionalString(body.defaultBranch ?? body.default_branch) ?? "main";
+      const defaultBranch = parseOptionalString(body.defaultBranch) ?? "main";
       const template = buildAgentTemplate({
         name: parseString(body.name, "name"),
         id: parseOptionalString(body.id),
@@ -77,55 +71,49 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         id: template.id,
         name: template.name,
         repo_url: `threadbeat-template://${template.id}`,
-        default_branch: defaultBranch,
         current_ref: defaultBranch,
       };
-      const dryRun = parseBoolean(body.dryRun ?? body.dry_run, defaultAgentTemplateDryRun(settings));
+      const dryRun = parseBoolean(body.dryRun, !settings.githubOwner?.trim() || !settings.githubToken?.trim());
       const hostedRepo = await hostedGit.createRepository({
         agent: provisionalAgent,
         dryRun,
-        repoId: parseOptionalString(body.repoId ?? body.repo_id) ?? template.id,
+        repoId: parseOptionalString(body.repoId) ?? template.id,
       });
       const initialized = hostedRepo.remoteUrl && !dryRun
         ? await createInitialCommit({
           branch: hostedRepo.defaultBranch,
-          commitMessage: parseOptionalString(body.commitMessage ?? body.commit_message) ?? "Initialize Threadbeat agent",
           files: template.files,
           remoteUrl: hostedRepo.remoteUrl,
         })
         : null;
       const repoUrl = hostedAgentRepoUrl(hostedRepo);
-      const metadata = getAgentRepositoryMetadata({
-        ...provisionalAgent,
-        repo_url: repoUrl,
-        current_ref: hostedRepo.defaultBranch,
-      });
       const agent = await db.createAgent({
         name: template.name,
         repoUrl,
-        repoWebUrl: metadata.repoWebUrl,
-        defaultBranch: hostedRepo.defaultBranch,
         currentRef: hostedRepo.defaultBranch,
-        currentCommit: initialized?.commitSha,
       });
-      const repo = await db.createHostedGitRepo({
+      await db.createHostedGitRepo({
         agentId: agent.id,
-        provider: hostedRepo.provider,
         owner: hostedRepo.namespace,
         repo: hostedRepo.providerRepoId,
-        defaultBranch: hostedRepo.defaultBranch,
-        remoteUrlRedacted: hostedRepo.remoteUrlRedacted,
       });
       await db.appendMessage({
         agentId: agent.id,
-        source: "server",
         type: initialized ? "agent_template_repo_initialized" : "agent_template_repo_planned",
         text: initialized
-          ? `Initialized hosted agent repo ${hostedRepo.providerRepoId} at ${initialized.commitSha}`
-          : `Planned hosted agent repo ${hostedRepo.providerRepoId} from template`,
-        data: { agent, hostedRepo: { ...hostedRepo, remoteUrl: hostedRepo.remoteUrlRedacted }, template, initialized },
+          ? "Initialized hosted agent repo"
+          : "Planned hosted agent repo from template",
       });
-      return { ok: true, agent, hostedGitRepo: repo, hostedRepo: { ...hostedRepo, remoteUrl: hostedRepo.remoteUrlRedacted }, initialized, template };
+      return {
+        ok: true,
+        agent,
+        hostedRepo: {
+          namespace: hostedRepo.namespace,
+          providerRepoId: hostedRepo.providerRepoId,
+          remoteUrlRedacted: hostedRepo.remoteUrlRedacted,
+        },
+        initialized,
+      };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -134,24 +122,15 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/agents", async (request, reply) => {
     try {
       const body = requestBody(request.body);
-      const repoUrl = parseString(body.repoUrl ?? body.repo_url, "repoUrl");
-      const provisionalAgent = {
-        id: "new-agent",
-        name: parseString(body.name, "name"),
-        repo_url: repoUrl,
-        default_branch: parseOptionalString(body.defaultBranch ?? body.default_branch) ?? "main",
-        current_ref:
-          parseOptionalString(body.currentRef ?? body.current_ref)
-          ?? parseOptionalString(body.defaultBranch ?? body.default_branch)
-          ?? "main",
-      };
-      const metadata = getAgentRepositoryMetadata(provisionalAgent);
+      const repoUrl = parseString(body.repoUrl, "repoUrl");
+      const currentRef = assertValidGitRef(
+        parseOptionalString(body.currentRef)
+        ?? "main",
+      );
       const agent = await db.createAgent({
-        name: provisionalAgent.name,
+        name: parseString(body.name, "name"),
         repoUrl,
-        repoWebUrl: metadata.repoWebUrl,
-        defaultBranch: metadata.defaultBranch,
-        currentRef: metadata.currentRef,
+        currentRef,
       });
       return { ok: true, agent };
     } catch (error) {
@@ -193,12 +172,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     const { id } = request.params as { id: string };
     const agent = await db.getAgent(id);
     if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-    const runs = await db.listAgentRuns(id);
-    return {
-      ok: true,
-      runs,
-      plans: runs.map((run) => runPlanFromRow(agent, run)),
-    };
+    return { ok: true, runs: await db.listAgentRuns(id) };
   });
 
   app.post("/api/agents/:id/runs", async (request, reply) => {
@@ -208,7 +182,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
       const body = requestBody(request.body);
       const objective = parseString(body.objective, "objective");
-      const inputRef = parseOptionalString(body.inputRef ?? body.input_ref) ?? agent.current_ref;
+      const inputRef = parseOptionalString(body.inputRef) ?? agent.current_ref;
       const runId = nextId("run");
       const plan = planRunBranch({
         agent: { ...agent, current_ref: inputRef },
@@ -219,23 +193,17 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const run = await db.createAgentRun({
         id: runId,
         agentId: agent.id,
-        kind: parseOptionalString(body.kind) ?? "run",
         objective,
-        inputRef: plan.sourceRef,
+        inputRef,
         runBranch: plan.branchName,
-        baseCommit: parseOptionalString(body.baseCommit ?? body.base_commit),
-        status: parseOptionalString(body.status) ?? "planned",
       });
-      const persistedPlan = runPlanFromRow(agent, run);
       await db.appendMessage({
         agentId: agent.id,
         runId: run.id,
-        source: "server",
         type: "agent_run_planned",
-        text: `Planned ${run.kind} run ${run.id} on ${run.run_branch}`,
-        data: { run, plan: persistedPlan },
+        text: "Planned run",
       });
-      return { ok: true, run, plan: persistedPlan };
+      return { ok: true, run, plan: runPlanFromRow(agent, run) };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -245,9 +213,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     const { id } = request.params as { id: string };
     const run = await db.getAgentRun(id);
     if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-    const agent = await db.getAgent(run.agent_id);
-    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-    return { ok: true, run, plan: runPlanFromRow(agent, run) };
+    return { ok: true, run };
   });
 
   app.get("/api/runs/:id/status", async (request, reply) => {
@@ -255,16 +221,13 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     const query = request.query as Record<string, string | undefined>;
     const run = await db.getAgentRun(id);
     if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-    const agent = await db.getAgent(run.agent_id);
-    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
     const [sandboxes, messages] = await Promise.all([
       db.listSandboxes({ runId: run.id }),
-      db.listMessages({ runId: run.id, limit: parsePositiveInt(query.limit, 20) }),
+      db.listMessages({ runId: run.id, limit: parseOptionalInteger(query.limit) ?? 20 }),
     ]);
     return {
       ok: true,
       run,
-      plan: runPlanFromRow(agent, run),
       sandboxes,
       messages,
     };
@@ -278,10 +241,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const body = requestBody(request.body);
       const run = await db.getAgentRun(id);
       if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-      await db.updateAgentRunStarted(run.id);
+      await db.markAgentRunRunning(run.id);
       const agent = await db.getAgent(run.agent_id);
       if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-      const [existingSandbox] = await db.listSandboxes({ runId: run.id });
+      const bootstrapRequested = parseBoolean(body.bootstrap, false);
+      const existingSandbox = await getRunSandbox(run.id);
       if (existingSandbox) {
         if (existingSandbox.state !== "running") {
           return reply.code(409).send({
@@ -289,30 +253,27 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
             error: `run sandbox is already ${existingSandbox.state}`,
           });
         }
-        if (!parseBoolean(body.bootstrap, false)) {
-          return { ok: true, run, sandbox: existingSandbox, existing: true };
-        }
+        if (!bootstrapRequested) return { ok: true, sandbox: existingSandbox };
         const cloneUrl = await resolveCloneUrl(agent.id, run.input_ref);
-        const bootstrap = await sandboxService.bootstrap(existingSandbox, cloneUrl);
-        return { ok: true, run, sandbox: bootstrap.sandbox, bootstrap, existing: true };
+        return { ok: true, sandbox: existingSandbox, bootstrap: await sandboxService.bootstrap(existingSandbox, cloneUrl) };
       }
+      const cloneUrl = bootstrapRequested ? await resolveCloneUrl(agent.id, run.input_ref) : null;
       const sandbox = await sandboxService.startForAgent(agent, {
-        branch: run.run_branch,
         runId: run.id,
       });
-      if (!parseBoolean(body.bootstrap, false)) return { ok: true, run, sandbox };
-      const cloneUrl = await resolveCloneUrl(agent.id, run.input_ref);
-      const bootstrap = await sandboxService.bootstrap(sandbox, cloneUrl);
-      return { ok: true, run, sandbox: bootstrap.sandbox, bootstrap };
+      if (!cloneUrl) return { ok: true, sandbox };
+      return { ok: true, sandbox, bootstrap: await sandboxService.bootstrap(sandbox, cloneUrl) };
     } catch (error) {
-      if (runId) await markRunFailed(runId, error);
+      if (runId) await db.updateAgentRunFailed(runId);
       return reply.code(500).send({ ok: false, error: messageOf(error) });
     }
   });
 
   app.post("/api/runs/:id/restart-sandbox", async (request, reply) => {
+    let runId: string | undefined;
     try {
       const { id } = request.params as { id: string };
+      runId = id;
       const body = requestBody(request.body);
       const run = await db.getAgentRun(id);
       if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
@@ -321,7 +282,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       }
       const agent = await db.getAgent(run.agent_id);
       if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-      const [existingSandbox] = await db.listSandboxes({ runId: run.id });
+      const existingSandbox = await getRunSandbox(run.id);
       if (!existingSandbox) {
         return reply.code(404).send({ ok: false, error: "run sandbox not found" });
       }
@@ -334,33 +295,16 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           error: `run sandbox cannot restart from ${existingSandbox.state}`,
         });
       }
-      const restartedRun = await db.updateAgentRunRestarted(run.id);
+      const bootstrapRequested = parseBoolean(body.bootstrap, false);
+      const cloneUrl = bootstrapRequested ? await resolveCloneUrl(agent.id, run.input_ref) : null;
+      await db.markAgentRunRunning(run.id);
       const sandbox = await sandboxService.startForAgent(agent, {
-        branch: run.run_branch,
         runId: run.id,
       });
-      await db.appendMessage({
-        agentId: run.agent_id,
-        sandboxId: sandbox.id,
-        runId: run.id,
-        source: "server",
-        type: "agent_run_sandbox_restarted",
-        text: `Restarted run sandbox ${sandbox.id}`,
-        data: { previousSandbox: existingSandbox, sandbox },
-      });
-      if (!parseBoolean(body.bootstrap, false)) {
-        return { ok: true, run: restartedRun, sandbox, previousSandbox: existingSandbox };
-      }
-      const cloneUrl = await resolveCloneUrl(agent.id, run.input_ref);
-      const bootstrap = await sandboxService.bootstrap(sandbox, cloneUrl);
-      return {
-        ok: true,
-        run: restartedRun,
-        sandbox: bootstrap.sandbox,
-        previousSandbox: existingSandbox,
-        bootstrap,
-      };
+      if (!cloneUrl) return { ok: true, sandbox };
+      return { ok: true, sandbox, bootstrap: await sandboxService.bootstrap(sandbox, cloneUrl) };
     } catch (error) {
+      if (runId) await db.updateAgentRunFailed(runId);
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
   });
@@ -372,17 +316,17 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       runId = id;
       const run = await db.getAgentRun(id);
       if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-      await db.updateAgentRunStarted(run.id);
-      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      await db.markAgentRunRunning(run.id);
+      const sandbox = await getRunSandbox(run.id);
       if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
       const body = requestBody(request.body);
       const command = parseCommand(body.command);
-      const cwd = parseOptionalString(body.cwd) ?? sandbox.workdir;
-      const timeoutMs = parseOptionalInteger(body.timeoutMs ?? body.timeout_ms) ?? settings.sandboxExecTimeoutMs;
+      const cwd = parseOptionalString(body.cwd) ?? SANDBOX_WORKDIR;
+      const timeoutMs = parseOptionalInteger(body.timeoutMs) ?? settings.sandboxExecTimeoutMs;
       const result = await sandboxService.exec(sandbox, command, { cwd, timeoutMs });
-      return { ok: true, run, ...result };
+      return { ok: true, result };
     } catch (error) {
-      if (runId) await markRunFailed(runId, error);
+      if (runId) await db.updateAgentRunFailed(runId);
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
   });
@@ -394,8 +338,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       runId = id;
       const run = await db.getAgentRun(id);
       if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-      await db.updateAgentRunStarted(run.id);
-      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      await db.markAgentRunRunning(run.id);
+      const sandbox = await getRunSandbox(run.id);
       if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
       const body = requestBody(request.body);
       const plan = buildAgentBootPlan({
@@ -404,44 +348,28 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         agentPiModel: settings.agentPiModel,
         agentPiApiKeyEnv: settings.agentPiApiKeyEnv,
         objective: parseOptionalString(body.objective) ?? run.objective,
-        promptPath: parseOptionalString(body.promptPath ?? body.prompt_path),
+        promptPath: parseOptionalString(body.promptPath),
         runId: run.id,
-        taskPath: parseOptionalString(body.taskPath ?? body.task_path),
+        taskPath: parseOptionalString(body.taskPath),
       });
-      await db.appendMessage({
-        agentId: run.agent_id,
-        sandboxId: sandbox.id,
-        runId: run.id,
-        source: "server",
-        type: "agent_boot_planned",
-        text: `Booting sandbox Pi with ${plan.promptPath}`,
-        data: plan,
-      });
-      const executed = await sandboxService.exec(sandbox, plan.command, {
-        cwd: sandbox.workdir,
+      const result = await sandboxService.exec(sandbox, plan.command, {
+        cwd: SANDBOX_WORKDIR,
         timeoutMs: settings.agentBootTimeoutMs,
       });
-      const failed = executed.result.exitCode !== 0;
-      const updatedRun = failed
-        ? await db.updateAgentRunFailed({
-          id: run.id,
-          resultSummary: executed.result.stderr || executed.result.stdout || `agent boot exited ${executed.result.exitCode}`,
-        })
-        : run;
+      const failed = result.exitCode !== 0;
+      if (failed) await db.updateAgentRunFailed(run.id);
       await db.appendMessage({
         agentId: run.agent_id,
         sandboxId: sandbox.id,
         runId: run.id,
-        source: "sandbox",
         type: failed ? "agent_boot_failed" : "agent_boot_completed",
         text: failed
-          ? `Sandbox Pi boot failed with exit ${executed.result.exitCode}`
-          : `Sandbox Pi boot completed with ${plan.promptPath}`,
-        data: { plan, result: executed.result },
+          ? "Sandbox Pi boot failed"
+          : "Sandbox Pi boot completed",
       });
-      return { ok: true, run: updatedRun, plan, ...executed };
+      return { ok: true, result };
     } catch (error) {
-      if (runId) await markRunFailed(runId, error);
+      if (runId) await db.updateAgentRunFailed(runId);
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
   });
@@ -453,48 +381,32 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       runId = id;
       const run = await db.getAgentRun(id);
       if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-      await db.updateAgentRunStarted(run.id);
-      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      await db.markAgentRunRunning(run.id);
+      const sandbox = await getRunSandbox(run.id);
       if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
       const plan = buildAgentRuntimeCheckPlan({
         agentPiCommand: settings.agentPiCommand,
         agentPiProvider: settings.agentPiProvider,
         agentPiModel: settings.agentPiModel,
       });
-      await db.appendMessage({
-        agentId: run.agent_id,
-        sandboxId: sandbox.id,
-        runId: run.id,
-        source: "server",
-        type: "agent_runtime_check_planned",
-        text: `Checking sandbox agent runtime with ${plan.piCommand}`,
-        data: plan,
-      });
-      const executed = await sandboxService.exec(sandbox, plan.command, {
-        cwd: sandbox.workdir,
+      const result = await sandboxService.exec(sandbox, plan.command, {
+        cwd: SANDBOX_WORKDIR,
         timeoutMs: settings.sandboxExecTimeoutMs,
       });
-      const failed = executed.result.exitCode !== 0;
-      const updatedRun = failed
-        ? await db.updateAgentRunFailed({
-          id: run.id,
-          resultSummary: executed.result.stderr || executed.result.stdout || `agent runtime check exited ${executed.result.exitCode}`,
-        })
-        : run;
+      const failed = result.exitCode !== 0;
+      if (failed) await db.updateAgentRunFailed(run.id);
       await db.appendMessage({
         agentId: run.agent_id,
         sandboxId: sandbox.id,
         runId: run.id,
-        source: "sandbox",
         type: failed ? "agent_runtime_check_failed" : "agent_runtime_check_completed",
         text: failed
-          ? `Sandbox agent runtime check failed with exit ${executed.result.exitCode}`
-          : `Sandbox agent runtime check completed with ${plan.piCommand}`,
-        data: { plan, result: executed.result },
+          ? "Sandbox agent runtime check failed"
+          : "Sandbox agent runtime check completed",
       });
-      return { ok: true, run: updatedRun, plan, ...executed };
+      return { ok: true, result };
     } catch (error) {
-      if (runId) await markRunFailed(runId, error);
+      if (runId) await db.updateAgentRunFailed(runId);
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
   });
@@ -506,25 +418,24 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       runId = id;
       const run = await db.getAgentRun(id);
       if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      const sandbox = await getRunSandbox(run.id);
       if (!sandbox) return reply.code(404).send({ ok: false, error: "run sandbox not found" });
       const body = requestBody(request.body);
       const commitMessage =
-        parseOptionalString(body.commitMessage ?? body.commit_message)
-        ?? `Finalize ${run.kind} ${run.id}`;
+        parseOptionalString(body.commitMessage)
+        ?? `Finalize run ${run.id}`;
       const finalized = await sandboxService.finalizeRunBranch(sandbox, {
         commitMessage,
         timeoutMs: settings.sandboxExecTimeoutMs,
       });
-      const completed = await db.updateAgentRunCompleted({
+      await db.updateAgentRunCompleted({
         id: run.id,
-        resultCommit: finalized.result.commitSha,
-        resultSummary: finalized.result.statusText.trim() || "No worktree changes reported before finalize",
+        resultCommit: finalized.commitSha,
         status: "completed",
       });
-      return { ok: true, run: completed, ...finalized };
+      return { ok: true, result: finalized };
     } catch (error) {
-      if (runId) await markRunFailed(runId, error);
+      if (runId) await db.updateAgentRunFailed(runId);
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
   });
@@ -537,25 +448,20 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       if (run.status === "completed" || run.status === "failed") {
         return reply.code(409).send({ ok: false, error: `run is already ${run.status}` });
       }
-      const [sandbox] = await db.listSandboxes({ runId: run.id });
-      const stoppedSandbox = sandbox ? await sandboxService.stop(sandbox) : null;
-      const stoppedRun = await db.updateAgentRunCompleted({
+      const sandbox = await getRunSandbox(run.id);
+      if (sandbox) await sandboxService.stop(sandbox);
+      await db.updateAgentRunCompleted({
         id: run.id,
-        resultSummary: stoppedSandbox
-          ? `Stopped run sandbox ${stoppedSandbox.id}`
-          : "Stopped run before sandbox start",
         status: "stopped",
       });
       await db.appendMessage({
         agentId: run.agent_id,
-        sandboxId: stoppedSandbox?.id,
+        sandboxId: sandbox?.id,
         runId: run.id,
-        source: "server",
         type: "agent_run_stopped",
-        text: `Stopped run ${run.id}`,
-        data: { run: stoppedRun, sandbox: stoppedSandbox },
+        text: "Stopped run",
       });
-      return { ok: true, run: stoppedRun, sandbox: stoppedSandbox };
+      return { ok: true };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -579,18 +485,14 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     };
   };
 
-  const markRunFailed = async (runId: string, error: unknown): Promise<void> => {
-    const existing = await db.getAgentRun(runId);
-    if (!existing || existing.status === "completed") return;
-    await db.updateAgentRunFailed({
-      id: runId,
-      resultSummary: messageOf(error),
-    });
+  const getRunSandbox = async (runId: string) => {
+    const sandboxes = await db.listSandboxes({ runId });
+    return sandboxes.find((sandbox) => sandbox.state === "running") ?? sandboxes[0] ?? null;
   };
 
   app.get("/api/heartbeats", async (request) => {
     const query = request.query as Record<string, string | undefined>;
-    return { ok: true, heartbeats: await db.listHeartbeats(queryValue(query, "agentId", "agent_id")) };
+    return { ok: true, heartbeats: await db.listHeartbeats(query.agentId) };
   });
 
   app.get("/api/heartbeats/:id", async (request, reply) => {
@@ -603,15 +505,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/heartbeats", async (request, reply) => {
     try {
       const body = requestBody(request.body);
-      const agentId = parseString(body.agentId ?? body.agent_id, "agentId");
+      const agentId = parseString(body.agentId, "agentId");
       const agent = await db.getAgent(agentId);
       if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
       const heartbeat = await db.createHeartbeat({
         agentId,
         title: parseOptionalString(body.title) ?? "heartbeat",
-        cadenceSeconds: parsePositiveInt(body.cadenceSeconds ?? body.cadence_seconds, 60),
-        action: parseString(body.action, "action"),
-        status: parseOptionalString(body.status) ?? "active",
       });
       return { ok: true, heartbeat };
     } catch (error) {
@@ -624,8 +523,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return {
       ok: true,
       sandboxes: await db.listSandboxes({
-        agentId: queryValue(query, "agentId", "agent_id"),
-        runId: queryValue(query, "runId", "run_id"),
+        agentId: query.agentId,
+        runId: query.runId,
       }),
     };
   });
@@ -633,8 +532,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/sandboxes/stop-running", async (request, reply) => {
     try {
       const body = requestBody(request.body);
-      const agentId = parseOptionalString(body.agentId ?? body.agent_id);
-      const runId = parseOptionalString(body.runId ?? body.run_id);
+      const agentId = parseOptionalString(body.agentId);
+      const runId = parseOptionalString(body.runId);
       if (!agentId && !runId) {
         return reply.code(400).send({ ok: false, error: "agentId or runId is required" });
       }
@@ -646,23 +545,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       }
       const sandboxes = await db.listSandboxes({ agentId, runId });
       const running = sandboxes.filter((sandbox) => sandbox.state === "running");
-      const stopped: typeof sandboxes = [];
+      let stoppedCount = 0;
       for (const sandbox of running) {
-        stopped.push(await sandboxService.stop(sandbox));
+        await sandboxService.stop(sandbox);
+        stoppedCount += 1;
       }
-      await db.appendMessage({
-        agentId,
-        runId,
-        source: "server",
-        type: "sandboxes_stop_running_completed",
-        text: `Stopped ${stopped.length} running sandbox${stopped.length === 1 ? "" : "es"}`,
-        data: {
-          filters: { agentId, runId },
-          stoppedIds: stopped.map((sandbox) => sandbox.id),
-          skippedIds: sandboxes.filter((sandbox) => sandbox.state !== "running").map((sandbox) => sandbox.id),
-        },
-      });
-      return { ok: true, stopped, scanned: sandboxes.length };
+      return { ok: true, stoppedCount };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -694,9 +582,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
       const body = requestBody(request.body);
       const command = parseCommand(body.command);
-      const timeoutMs = parseOptionalInteger(body.timeoutMs ?? body.timeout_ms) ?? settings.sandboxExecTimeoutMs;
+      const timeoutMs = parseOptionalInteger(body.timeoutMs) ?? settings.sandboxExecTimeoutMs;
       const result = await sandboxService.exec(sandbox, command, { timeoutMs });
-      return { ok: true, ...result };
+      return { ok: true, result };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -707,7 +595,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { id } = request.params as { id: string };
       const sandbox = await db.getSandbox(id);
       if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
-      return { ok: true, result: await sandboxService.bootstrap(sandbox) };
+      return { ok: true, bootstrap: await sandboxService.bootstrap(sandbox) };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -718,7 +606,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { id } = request.params as { id: string };
       const sandbox = await db.getSandbox(id);
       if (!sandbox) return reply.code(404).send({ ok: false, error: "sandbox not found" });
-      return { ok: true, sandbox: await sandboxService.stop(sandbox) };
+      await sandboxService.stop(sandbox);
+      return { ok: true };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -729,19 +618,19 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return {
       ok: true,
       messages: await db.listMessages({
-        agentId: queryValue(query, "agentId", "agent_id"),
-        runId: queryValue(query, "runId", "run_id"),
-        sandboxId: queryValue(query, "sandboxId", "sandbox_id"),
-        limit: parsePositiveInt(query.limit, 100),
+        agentId: query.agentId,
+        runId: query.runId,
+        sandboxId: query.sandboxId,
+        limit: parseOptionalInteger(query.limit) ?? 100,
       }),
     };
   });
 
   app.get("/api/messages/listen", async (request, reply) => {
     const query = request.query as Record<string, string | undefined>;
-    const agentId = queryValue(query, "agentId", "agent_id");
-    const runId = queryValue(query, "runId", "run_id");
-    const sandboxId = queryValue(query, "sandboxId", "sandbox_id");
+    const agentId = query.agentId;
+    const runId = query.runId;
+    const sandboxId = query.sandboxId;
     reply.hijack();
     reply.raw.writeHead(200, {
       "content-type": "application/x-ndjson; charset=utf-8",
@@ -781,13 +670,6 @@ const parseOptionalString = (value: unknown): string | undefined => {
   return value.trim();
 };
 
-const parsePositiveInt = (value: unknown, fallback: number): number => {
-  if (value === undefined || value === null || value === "") return fallback;
-  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error("expected positive integer");
-  return Math.floor(parsed);
-};
-
 const parseOptionalInteger = (value: unknown): number | undefined => {
   if (value === undefined || value === null || value === "") return undefined;
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
@@ -804,9 +686,6 @@ const parseCommand = (value: unknown): string[] => {
   throw new Error("command must be a string or string[]");
 };
 
-const queryValue = (query: Record<string, string | undefined>, camelKey: string, snakeKey: string): string | undefined =>
-  parseOptionalString(query[camelKey] ?? query[snakeKey]);
-
 const nextId = (prefix: string): string => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
 
 const parseBoolean = (value: unknown, fallback: boolean): boolean => {
@@ -817,30 +696,11 @@ const parseBoolean = (value: unknown, fallback: boolean): boolean => {
   return fallback;
 };
 
-const defaultAgentTemplateDryRun = (settings: Settings): boolean => {
-  return !settings.githubOwner?.trim() || !settings.githubToken?.trim();
-};
-
 const messageOf = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-const hostedGitSourceValue = (source: unknown, key: string): string | undefined => {
-  if (!source || typeof source !== "object") return undefined;
-  const value = (source as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : undefined;
-};
-
 const hostedAgentRepoUrl = (hostedRepo: {
-  provider: string;
   namespace: string;
   providerRepoId: string;
-  remoteUrl: string | null;
-  remoteUrlRedacted: string | null;
-  source: unknown;
 }): string => {
-  const webUrl = hostedGitSourceValue(hostedRepo.source, "webUrl");
-  if (webUrl) return `${webUrl.replace(/\/+$/, "")}.git`;
-  if (hostedRepo.provider === "github") {
-    return `https://github.com/${hostedRepo.namespace}/${hostedRepo.providerRepoId}.git`;
-  }
-  return hostedRepo.remoteUrlRedacted ?? hostedRepo.remoteUrl ?? `${hostedRepo.provider}:${hostedRepo.namespace}/${hostedRepo.providerRepoId}`;
+  return `https://github.com/${hostedRepo.namespace}/${hostedRepo.providerRepoId}.git`;
 };

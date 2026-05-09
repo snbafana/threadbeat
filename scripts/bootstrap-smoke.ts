@@ -30,11 +30,11 @@ try {
   const agent = await db.createAgent({
     name: "bootstrap-smoke-agent",
     repoUrl: "https://github.com/example/agent.git",
-    defaultBranch: "main",
+    currentRef: "main",
   });
 
   const sandbox = await service.startForAgent(agent);
-  const { results } = await service.bootstrap(sandbox);
+  const results = await service.bootstrap(sandbox);
 
   assert.deepEqual(
     results.map((result) => result.command.join(" ")),
@@ -51,7 +51,8 @@ try {
   const messages = await db.listMessages({ sandboxId: sandbox.id, limit: 100 });
   assert.ok(messages.some((message) => message.type === "bootstrap_started"));
   assert.ok(messages.some((message) => message.type === "bootstrap_completed"));
-  assert.ok(messages.some((message) => message.type === "exec_completed" && message.text?.includes("git clone")));
+  assert.ok(messages.some((message) => message.type === "exec_started" && message.text?.includes("git clone")));
+  assert.ok(messages.some((message) => message.type === "exec_completed"));
 
   const secretSandbox = await service.startForAgent(agent);
   await service.bootstrap(secretSandbox, {
@@ -60,9 +61,8 @@ try {
   });
   const secretMessages = await db.listMessages({ sandboxId: secretSandbox.id, limit: 100 });
   assert.ok(secretMessages.some((message) => message.type === "exec_started" && message.text?.includes("REDACTED")));
-  assert.ok(secretMessages.some((message) => message.type === "exec_completed" && message.text?.includes("REDACTED")));
+  assert.ok(secretMessages.some((message) => message.type === "exec_completed"));
   assert.ok(secretMessages.every((message) => !message.text?.includes("SECRET")));
-  assert.ok(secretMessages.every((message) => !message.data_json?.includes("SECRET")));
 
   assert.deepEqual(
     buildSandboxBootstrapCommands({

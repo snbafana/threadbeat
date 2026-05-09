@@ -13,7 +13,6 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx scripts/config.test.ts && tsx scripts/preflight.test.ts && tsx scripts/git-planning.test.ts && tsx scripts/rate-limit.test.ts && tsx scripts/hosted-git.test.ts && tsx scripts/agent-template.test.ts && tsx scripts/agent-boot.test.ts && tsx scripts/modal-image.test.ts && tsx scripts/git-repository-bootstrap.test.ts && tsx scripts/bootstrap-smoke.ts && tsx scripts/smoke.ts",
     "smoke:github": "tsx scripts/github-live-smoke.ts",
-    "smoke:github-init": "tsx scripts/github-agent-init-live-smoke.ts",
     "smoke:github-init-cli": "tsx scripts/github-agent-init-cli-live-smoke.ts",
     "smoke:modal": "tsx scripts/modal-live-smoke.ts",
     "smoke:modal-cli": "tsx scripts/modal-cli-live-smoke.ts",

@@ -4,14 +4,12 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-export type GitHubOwnerType = "auto" | "org" | "user";
-
-export const parseGitHubOwnerType = (value: string): GitHubOwnerType => {
+export const parseGitHubOwnerType = (value: string) => {
   if (value === "auto" || value === "org" || value === "user") return value;
   throw new Error("THREADBEAT_GITHUB_OWNER_TYPE must be auto, org, or user");
 };
 
-export const githubHeaders = (token: string): Record<string, string> => ({
+const githubHeaders = (token: string): Record<string, string> => ({
   accept: "application/vnd.github+json",
   authorization: `Bearer ${token}`,
   "user-agent": "threadbeat",
@@ -65,10 +63,4 @@ export const getGitHubFile = async (token: string, repoPath: string, filePath: s
   assert.equal(body.encoding, "base64");
   assert.ok(body.content);
   return Buffer.from(body.content, "base64").toString("utf8");
-};
-
-export const githubRepoPathFromRemoteUrl = (remoteUrl: string | null): string => {
-  if (!remoteUrl) throw new Error("GitHub smoke did not return a remote URL");
-  const parsed = new URL(remoteUrl);
-  return parsed.pathname.replace(/^\/+/, "").replace(/\.git$/, "");
 };

@@ -49,9 +49,8 @@ try {
   ]);
 
   const stepped = await cliJson<{
-    executed: { result: { exitCode: number; stderr: string; stdout: string } };
-    runId: string;
-    status: { sandboxes: Array<{ state: string }> };
+    result: { exitCode: number; stderr: string; stdout: string };
+    status: { run: { id: string }; sandboxes: Array<{ state: string }> };
   }>(baseUrl, [
     "runs",
     "step",
@@ -64,27 +63,22 @@ try {
     "--",
     "python --version",
   ]);
-  runId = stepped.runId;
+  runId = stepped.status.run.id;
 
-  assert.equal(stepped.executed.result.exitCode, 0);
-  assert.match(`${stepped.executed.result.stdout}${stepped.executed.result.stderr}`, /Python/);
+  assert.equal(stepped.result.exitCode, 0);
+  assert.match(`${stepped.result.stdout}${stepped.result.stderr}`, /Python/);
   assert.ok(stepped.status.sandboxes.some((sandbox) => sandbox.state === "running"));
 
-  const cleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
+  const cleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
     "sandboxes",
     "stop-running",
     "--run",
     runId,
   ]);
-  assert.equal(cleanup.stopped.length, 1);
-  assert.equal(cleanup.stopped[0]?.state, "stopped");
+  assert.equal(cleanup.stoppedCount, 1);
 
   console.log(JSON.stringify({
     ok: true,
-    modalAppName: settings.modalAppName,
-    modalImage: settings.modalImage,
-    runId,
-    stoppedSandboxes: cleanup.stopped.length,
   }, null, 2));
 } finally {
   if (runId) {
@@ -93,9 +87,7 @@ try {
       if (address) {
         await cliJson(`http://${settings.host}:${address.port}`, ["sandboxes", "stop-running", "--run", runId]);
       }
-    } catch {
-      // Best-effort cleanup. The main assertions already validated cleanup.
-    }
+    } catch {}
   }
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });

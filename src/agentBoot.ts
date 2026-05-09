@@ -1,6 +1,6 @@
 import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_FLASH_MODEL, DEEPSEEK_PROVIDER, deepSeekPiModelsJson } from "./piModels.js";
 
-export type AgentBootInput = {
+type AgentBootInput = {
   agentPiApiKeyEnv?: string;
   agentPiCommand?: string;
   agentPiModel?: string;
@@ -11,22 +11,12 @@ export type AgentBootInput = {
   taskPath?: string;
 };
 
-export type AgentBootPlan = {
+type AgentBootPlan = {
   command: string[];
-  piApiKeyEnv: string;
-  piCommand: string;
-  piExecutable: string;
-  piModel: string;
-  piProvider: string;
-  objective: string;
-  promptPath: string;
-  runId: string;
-  taskPath: string;
 };
 
-export type AgentRuntimeCheckPlan = {
+type AgentRuntimeCheckPlan = {
   command: string[];
-  piCommand: string;
 };
 
 const DEFAULT_PROMPT_PATH = ".pi/prompts/heartbeat.md";
@@ -63,18 +53,7 @@ export const buildAgentBootPlan = (input: AgentBootInput): AgentBootPlan => {
     `  cat ${shellQuote(taskPath)}`,
     `} | ${piCommand} --provider ${shellQuote(piProvider)} --model ${shellQuote(piModel)} --api-key "$${piApiKeyEnv}" --mode json -p`,
   ].join("\n");
-  return {
-    command: ["bash", "-lc", script],
-    piApiKeyEnv,
-    piCommand,
-    piExecutable,
-    piModel,
-    piProvider,
-    objective,
-    promptPath,
-    runId,
-    taskPath,
-  };
+  return { command: ["bash", "-lc", script] };
 };
 
 export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string; agentPiModel?: string; agentPiProvider?: string } = {}): AgentRuntimeCheckPlan => {
@@ -94,7 +73,6 @@ export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string; age
       `${piCommand} --help >/tmp/threadbeat-pi-help.txt 2>&1 || true`,
       "printf 'agent runtime ready\\n'",
     ].join("\n")],
-    piCommand,
   };
 };
 

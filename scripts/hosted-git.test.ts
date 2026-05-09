@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { GitHubHostedGitProvider, createHostedGitProvider, normalizeGitHubRepoName, redactHostedGitRemoteUrl } from "../src/hostedGit.js";
+import { GitHubHostedGitProvider, normalizeGitHubRepoName, redactHostedGitRemoteUrl } from "../src/hostedGit.js";
 import { RateLimitGuard } from "../src/rateLimit.js";
 import type { Settings } from "../src/config.js";
 
@@ -12,17 +12,10 @@ const settings: Settings = {
   modalMode: "dry-run",
   modalAppName: "threadbeat-hosted-git-test",
   modalImage: "python:3.13-slim",
-  hostedGitProvider: "github",
   githubOwner: "threadbeat-test",
 };
 
-const provider = createHostedGitProvider(settings);
-assert.equal(provider.name, "github");
-
-const githubSettings: Settings = settings;
-
-const githubProvider = createHostedGitProvider(githubSettings);
-assert.equal(githubProvider.name, "github");
+const githubProvider = new GitHubHostedGitProvider(settings);
 assert.equal(normalizeGitHubRepoName("Agent Store!!"), "agent-store");
 assert.equal(
   redactHostedGitRemoteUrl("https://x-access-token:SECRET@github.com/threadbeat-test/agent.git"),
@@ -34,7 +27,6 @@ const githubRepo = await githubProvider.createRepository({
     id: "agt_github",
     name: "GitHub Agent",
     repo_url: "https://github.com/example/github-agent.git",
-    default_branch: "main",
     current_ref: "main",
   },
   dryRun: true,
@@ -43,18 +35,10 @@ const githubRepo = await githubProvider.createRepository({
 
 assert.deepEqual(githubRepo, {
   defaultBranch: "main",
-  live: false,
   namespace: "threadbeat-test",
-  provider: "github",
   providerRepoId: "github-agent-store",
   remoteUrl: "https://x-access-token:DRY_RUN_TOKEN@github.com/threadbeat-test/github-agent-store.git",
   remoteUrlRedacted: "https://x-access-token:REDACTED@github.com/threadbeat-test/github-agent-store.git",
-  source: {
-    defaultBranch: "main",
-    provider: "github",
-    repo: "github-agent-store",
-    webUrl: "https://github.com/threadbeat-test/github-agent-store",
-  },
 });
 const githubClone = await githubProvider.getCloneUrl({
   namespace: "threadbeat-test",
@@ -68,7 +52,7 @@ assert.deepEqual(githubClone, {
 let now = 0;
 const liveFetchCalls: Array<{ body: unknown; headers: Record<string, string>; method: string; url: string }> = [];
 const liveProvider = new GitHubHostedGitProvider({
-  ...githubSettings,
+  ...settings,
   githubOwnerType: "org",
   githubToken: "token",
 }, new RateLimitGuard(() => now), async (url, init) => {
@@ -80,7 +64,6 @@ const liveProvider = new GitHubHostedGitProvider({
   });
   return new Response(JSON.stringify({
     full_name: "threadbeat-test/github-agent-live-store",
-    html_url: "https://github.com/threadbeat-test/github-agent-live-store",
     name: "github-agent-live-store",
   }), { status: 201 });
 });
@@ -90,13 +73,11 @@ const liveRepo = await liveProvider.createRepository({
     id: "agt_github_live",
     name: "GitHub Live Agent",
     repo_url: "https://github.com/example/github-agent.git",
-    default_branch: "main",
     current_ref: "main",
   },
   dryRun: false,
   repoId: "github-agent-live-store",
 });
-assert.equal(liveRepo.live, true);
 assert.equal(liveRepo.remoteUrlRedacted, "https://x-access-token:REDACTED@github.com/threadbeat-test/github-agent-live-store.git");
 assert.equal(liveFetchCalls.length, 1);
 assert.deepEqual(liveFetchCalls[0]?.body, {
@@ -110,7 +91,7 @@ assert.equal(liveFetchCalls[0]?.url, "https://api.github.com/orgs/threadbeat-tes
 
 const autoUserFetchCalls: Array<{ url: string }> = [];
 const autoUserProvider = new GitHubHostedGitProvider({
-  ...githubSettings,
+  ...settings,
   githubOwner: "threadbeat-test",
   githubOwnerType: "auto",
   githubToken: "token",
@@ -121,7 +102,6 @@ const autoUserProvider = new GitHubHostedGitProvider({
   }
   return new Response(JSON.stringify({
     full_name: "threadbeat-test/auto-user-repo",
-    html_url: "https://github.com/threadbeat-test/auto-user-repo",
     name: "auto-user-repo",
   }), { status: 201 });
 });
@@ -130,7 +110,6 @@ await autoUserProvider.createRepository({
     id: "agt_auto_user",
     name: "GitHub Auto User Agent",
     repo_url: "https://github.com/example/github-agent.git",
-    default_branch: "main",
     current_ref: "main",
   },
   dryRun: false,
@@ -143,7 +122,7 @@ assert.deepEqual(autoUserFetchCalls.map((call) => call.url), [
 
 const autoOrgFetchCalls: Array<{ url: string }> = [];
 const autoOrgProvider = new GitHubHostedGitProvider({
-  ...githubSettings,
+  ...settings,
   githubOwner: "threadbeat-org",
   githubOwnerType: "auto",
   githubToken: "token",
@@ -154,7 +133,6 @@ const autoOrgProvider = new GitHubHostedGitProvider({
   }
   return new Response(JSON.stringify({
     full_name: "threadbeat-org/auto-org-repo",
-    html_url: "https://github.com/threadbeat-org/auto-org-repo",
     name: "auto-org-repo",
   }), { status: 201 });
 });
@@ -163,7 +141,6 @@ await autoOrgProvider.createRepository({
     id: "agt_auto_org",
     name: "GitHub Auto Org Agent",
     repo_url: "https://github.com/example/github-agent.git",
-    default_branch: "main",
     current_ref: "main",
   },
   dryRun: false,
@@ -180,7 +157,6 @@ await assert.rejects(
       id: "agt_github_live_2",
       name: "GitHub Live Agent 2",
       repo_url: "https://github.com/example/github-agent.git",
-      default_branch: "main",
       current_ref: "main",
     },
     dryRun: false,
@@ -195,12 +171,11 @@ const thirdRepo = await liveProvider.createRepository({
     id: "agt_github_live_3",
     name: "GitHub Live Agent 3",
     repo_url: "https://github.com/example/github-agent.git",
-    default_branch: "main",
     current_ref: "main",
   },
   dryRun: false,
   repoId: "github-agent-live-store-3",
 });
-assert.equal(thirdRepo.live, true);
+assert.equal(thirdRepo.providerRepoId, "github-agent-live-store");
 
 console.log("hosted git tests passed");

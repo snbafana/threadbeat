@@ -6,8 +6,6 @@ import { buildModalImageCommands } from "./modalImage.js";
 import { DEEPSEEK_API_KEY_ENV, DEEPSEEK_FLASH_MODEL, DEEPSEEK_PROVIDER } from "./piModels.js";
 
 export type ModalMode = "dry-run" | "live";
-export type HostedGitProviderSetting = "github";
-export type GitHubOwnerType = "auto" | "org" | "user";
 
 export type Settings = {
   projectRoot: string;
@@ -27,9 +25,8 @@ export type Settings = {
   agentPiProvider?: string;
   agentPiModel?: string;
   agentPiApiKeyEnv?: string;
-  hostedGitProvider?: HostedGitProviderSetting;
   githubOwner?: string;
-  githubOwnerType?: GitHubOwnerType;
+  githubOwnerType?: "auto" | "org" | "user";
   githubToken?: string;
 };
 
@@ -38,10 +35,6 @@ export const loadSettings = (): Settings => {
   const modalMode = stringEnv("THREADBEAT_MODAL_MODE", "dry-run");
   if (modalMode !== "dry-run" && modalMode !== "live") {
     throw new Error("THREADBEAT_MODAL_MODE must be dry-run or live");
-  }
-  const hostedGitProvider = stringEnv("THREADBEAT_GIT_PROVIDER", "github");
-  if (hostedGitProvider !== "github") {
-    throw new Error("THREADBEAT_GIT_PROVIDER must be github");
   }
   const githubOwnerType = stringEnv("THREADBEAT_GITHUB_OWNER_TYPE", "auto");
   if (githubOwnerType !== "auto" && githubOwnerType !== "org" && githubOwnerType !== "user") {
@@ -77,7 +70,6 @@ export const loadSettings = (): Settings => {
     agentPiProvider: stringEnv("THREADBEAT_AGENT_PI_PROVIDER", DEEPSEEK_PROVIDER),
     agentPiModel: stringEnv("THREADBEAT_AGENT_PI_MODEL", DEEPSEEK_FLASH_MODEL),
     agentPiApiKeyEnv: stringEnv("THREADBEAT_AGENT_PI_API_KEY_ENV", DEEPSEEK_API_KEY_ENV),
-    hostedGitProvider,
     githubOwner: process.env.THREADBEAT_GITHUB_OWNER,
     githubOwnerType,
     githubToken: process.env.THREADBEAT_GITHUB_TOKEN ?? process.env.GITHUB_TOKEN,

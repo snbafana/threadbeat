@@ -72,8 +72,7 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     await printJson(await requestJson("POST", "/api/agents", {
       name: required(options.name, "--name"),
       repoUrl: required(options.repo, "--repo"),
-      defaultBranch: options.branch,
-      currentRef: options.ref,
+      ...(options.branch ? { currentRef: options.branch } : {}),
     }));
     return;
   }
@@ -84,34 +83,33 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
       ...(options.id ? { id: options.id } : {}),
       ...(options.description ? { description: options.description } : {}),
     });
-    const outDir = option(options, "out", "dir");
+    const outDir = options.out;
     if (!outDir) {
       await printJson(response);
       return;
     }
     const template = readTemplateResponse(response);
-    const written = await materializeTemplate(template, outDir);
-    await printJson({ ok: true, template: { id: template.id, name: template.name }, outDir: path.resolve(outDir), written });
+    const written = await materializeTemplate(template.files, outDir);
+    await printJson({ outDir: path.resolve(outDir), written });
     return;
   }
   if (subcommandName === "init") {
     const options = parseOptions(args);
-    if (options.live === "1" && option(options, "dry-run", "dryRun") === "1") {
+    if (options.live === "1" && options["dry-run"] === "1") {
       throw new Error("agents init cannot use both --live and --dry-run");
     }
     const dryRun = options.live === "1"
       ? false
-      : option(options, "dry-run", "dryRun") === "1"
+      : options["dry-run"] === "1"
         ? true
         : undefined;
     await printJson(await requestJson("POST", "/api/agents/from-template", {
       name: required(options.name, "--name"),
       ...(options.id ? { id: options.id } : {}),
-      ...(option(options, "repo-id", "repo") ? { repoId: option(options, "repo-id", "repo") } : {}),
+      ...(options["repo-id"] ? { repoId: options["repo-id"] } : {}),
       ...(options.description ? { description: options.description } : {}),
       ...(options.branch ? { defaultBranch: options.branch } : {}),
       ...(dryRun === undefined ? {} : { dryRun }),
-      ...(option(options, "message", "commit-message") ? { commitMessage: option(options, "message", "commit-message") } : {}),
     }));
     return;
   }
@@ -121,7 +119,7 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}`));
     return;
   }
-  if (subcommandName === "repo" || subcommandName === "repository") {
+  if (subcommandName === "repo") {
     const id = args[0];
     if (!id) throw new Error(`agents ${subcommandName} requires an id`);
     await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/repository`));
@@ -133,25 +131,11 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/hosted-git`));
     return;
   }
-  if (subcommandName === "runs") {
-    const [id, action, ...optionArgs] = args;
-    if (!id) throw new Error("agents runs requires an agent id");
-    if (!action || action === "list") {
-      await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(id)}/runs`));
-      return;
-    }
-    if (action === "plan") {
-      const options = parseOptions(optionArgs);
-      await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(id)}/runs`, runPlanPayload(options)));
-      return;
-    }
-    throw new Error(`unknown agents runs action: ${action}`);
-  }
   throw new Error(`unknown agents command: ${subcommandName}`);
 }
 
 async function hostedGit(subcommandName?: string): Promise<void> {
-  if (!subcommandName || subcommandName === "repos" || subcommandName === "list") {
+  if (!subcommandName || subcommandName === "list") {
     await printJson(await requestJson("GET", "/api/hosted-git/repos"));
     return;
   }
@@ -161,8 +145,8 @@ async function hostedGit(subcommandName?: string): Promise<void> {
 async function sandboxes(subcommandName?: string, args: string[] = []): Promise<void> {
   if (!subcommandName || subcommandName === "list") {
     const options = parseOptions(args);
-    const agentId = option(options, "agent", "agent-id");
-    const runId = option(options, "run", "run-id");
+    const agentId = options.agent;
+    const runId = options.run;
     const params = new URLSearchParams();
     if (agentId) params.set("agentId", agentId);
     if (runId) params.set("runId", runId);
@@ -177,14 +161,14 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
   }
   if (subcommandName === "start") {
     const options = parseOptions(args);
-    const agentId = required(option(options, "agent", "agent-id"), "--agent");
+    const agentId = required(options.agent, "--agent");
     await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/sandboxes`));
     return;
   }
   if (subcommandName === "stop-running") {
     const options = parseOptions(args);
-    const agentId = option(options, "agent", "agent-id");
-    const runId = option(options, "run", "run-id");
+    const agentId = options.agent;
+    const runId = options.run;
     if (!agentId && !runId) throw new Error("sandboxes stop-running requires --agent or --run");
     await printJson(await requestJson("POST", "/api/sandboxes/stop-running", {
       ...(agentId ? { agentId } : {}),
@@ -202,7 +186,7 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
     if (!command.trim()) throw new Error("sandboxes exec requires a command");
     await printJson(await requestJson("POST", `/api/sandboxes/${encodeURIComponent(sandboxId)}/exec`, {
       command,
-      ...(option(options, "timeout", "timeout-ms") ? { timeoutMs: option(options, "timeout", "timeout-ms") } : {}),
+      ...(options["timeout-ms"] ? { timeoutMs: options["timeout-ms"] } : {}),
     }));
     return;
   }
@@ -213,9 +197,9 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
     return;
   }
   if (subcommandName === "bootstrap") {
-    const [id, ...optionArgs] = args;
+    const id = args[0];
     if (!id) throw new Error("sandboxes bootstrap requires a sandbox id");
-    await printJson(await requestJson("POST", `/api/sandboxes/${encodeURIComponent(id)}/bootstrap`, parseOptions(optionArgs)));
+    await printJson(await requestJson("POST", `/api/sandboxes/${encodeURIComponent(id)}/bootstrap`));
     return;
   }
   throw new Error(`unknown sandboxes command: ${subcommandName}`);
@@ -224,7 +208,7 @@ async function sandboxes(subcommandName?: string, args: string[] = []): Promise<
 async function runs(subcommandName?: string, args: string[] = []): Promise<void> {
   if (!subcommandName || subcommandName === "list") {
     const options = parseOptions(args);
-    const agentId = required(option(options, "agent", "agent-id"), "--agent");
+    const agentId = required(options.agent, "--agent");
     await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`));
     return;
   }
@@ -239,13 +223,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (!id) throw new Error("runs status requires a run id");
     const options = parseOptions(optionArgs);
     const params = new URLSearchParams();
-    if (option(options, "limit")) params.set("limit", option(options, "limit") as string);
+    if (options.limit) params.set("limit", options.limit);
     await printJson(await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)));
     return;
   }
   if (subcommandName === "plan") {
     const options = parseOptions(args);
-    const agentId = required(option(options, "agent", "agent-id"), "--agent");
+    const agentId = required(options.agent, "--agent");
     await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options)));
     return;
   }
@@ -256,24 +240,30 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     const command = rawCommandArgs.join(" ");
     if (!command.trim()) throw new Error("runs step requires a command after --");
-    const runId = option(options, "run", "run-id") ?? await planRunForStep(options);
-    const sandbox = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/sandbox`, {
+    const runId = options.run ?? await planRunForStep(options);
+    const sandboxResponse = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/sandbox`, {
       bootstrap: options.bootstrap === "1",
-    });
-    const executed = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/exec`, {
+    }) as { sandbox: unknown; bootstrap?: unknown };
+    const execResponse = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/exec`, {
       command,
       ...(options.cwd ? { cwd: options.cwd } : {}),
-    });
-    const finalized = options.finalize === "1"
+    }) as { result: unknown };
+    const finalizeResponse = options.finalize === "1"
       ? await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/finalize`, {
-        ...(option(options, "message", "commit-message") ? { commitMessage: option(options, "message", "commit-message") } : {}),
-      })
+        ...(options.message ? { commitMessage: options.message } : {}),
+      }) as { result: unknown }
       : null;
     const status = await requestJson("GET", `/api/runs/${encodeURIComponent(runId)}/status`);
-    await printJson({ ok: true, runId, sandbox, executed, finalized, status });
+    await printJson({
+      sandbox: sandboxResponse.sandbox,
+      ...(sandboxResponse.bootstrap ? { bootstrap: sandboxResponse.bootstrap } : {}),
+      result: execResponse.result,
+      ...(finalizeResponse ? { finalized: finalizeResponse.result } : {}),
+      status,
+    });
     return;
   }
-  if (subcommandName === "sandbox" || subcommandName === "start-sandbox") {
+  if (subcommandName === "sandbox") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error(`runs ${subcommandName} requires a run id`);
     const options = parseOptions(optionArgs);
@@ -303,7 +293,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/exec`, {
       command,
       ...(options.cwd ? { cwd: options.cwd } : {}),
-      ...(option(options, "timeout", "timeout-ms") ? { timeoutMs: option(options, "timeout", "timeout-ms") } : {}),
+      ...(options["timeout-ms"] ? { timeoutMs: options["timeout-ms"] } : {}),
     }));
     return;
   }
@@ -313,8 +303,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/boot`, {
       ...(options.objective ? { objective: options.objective } : {}),
-      ...(option(options, "prompt", "prompt-path") ? { promptPath: option(options, "prompt", "prompt-path") } : {}),
-      ...(option(options, "task", "task-path") ? { taskPath: option(options, "task", "task-path") } : {}),
+      ...(options.prompt ? { promptPath: options.prompt } : {}),
+      ...(options.task ? { taskPath: options.task } : {}),
     }));
     return;
   }
@@ -329,7 +319,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (!id) throw new Error("runs finalize requires a run id");
     const options = parseOptions(optionArgs);
     await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/finalize`, {
-      ...(option(options, "message", "commit-message") ? { commitMessage: option(options, "message", "commit-message") } : {}),
+      ...(options.message ? { commitMessage: options.message } : {}),
     }));
     return;
   }
@@ -346,7 +336,7 @@ async function heartbeats(subcommandName?: string, args: string[] = []): Promise
   if (!subcommandName || subcommandName === "list") {
     const options = parseOptions(args);
     const params = new URLSearchParams();
-    const agentId = option(options, "agent", "agent-id");
+    const agentId = options.agent;
     if (agentId) params.set("agentId", agentId);
     await printJson(await requestJson("GET", withQuery("/api/heartbeats", params)));
     return;
@@ -365,15 +355,15 @@ async function messages(subcommandName?: string, args: string[] = []): Promise<v
   const mode = rawArgs[0] === "list" || rawArgs[0] === "listen" ? rawArgs[0] : undefined;
   const options = parseOptions(mode ? rawArgs.slice(1) : rawArgs);
   const params = new URLSearchParams();
-  const agentId = option(options, "agent", "agent-id");
-  const runId = option(options, "run", "run-id");
-  const sandboxId = option(options, "sandbox", "sandbox-id");
+  const agentId = options.agent;
+  const runId = options.run;
+  const sandboxId = options.sandbox;
   if (agentId) params.set("agentId", agentId);
   if (runId) params.set("runId", runId);
   if (sandboxId) params.set("sandboxId", sandboxId);
-  if (option(options, "limit")) params.set("limit", option(options, "limit") as string);
+  if (options.limit) params.set("limit", options.limit);
 
-  if (mode === "listen" || options.follow === "1") {
+  if (mode === "listen") {
     const response = await fetch(`${baseUrl}${withQuery("/api/messages/listen", params)}`);
     if (!response.ok || !response.body) throw new Error(`listen failed: ${response.status}`);
     for await (const event of ndjson(response.body)) {
@@ -391,7 +381,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "finalize" || key === "follow" || key === "live" || key === "dry-run") {
+    if (key === "bootstrap" || key === "finalize" || key === "live" || key === "dry-run") {
       options[key] = "1";
       continue;
     }
@@ -433,15 +423,8 @@ function required(value: string | undefined, flag: string): string {
   return value;
 }
 
-function option(options: Record<string, string>, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    if (options[key]) return options[key];
-  }
-  return undefined;
-}
-
 async function planRunForStep(options: Record<string, string>): Promise<string> {
-  const agentId = required(option(options, "agent", "agent-id"), "--agent");
+  const agentId = required(options.agent, "--agent");
   const planned = await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options));
   const run = (planned as { run?: { id?: unknown } }).run;
   if (!run || typeof run.id !== "string") throw new Error("planned run response did not include run.id");
@@ -450,24 +433,22 @@ async function planRunForStep(options: Record<string, string>): Promise<string> 
 
 type AgentTemplateResponse = {
   template: {
-    id: string;
-    name: string;
     files: Array<{ path: string; content: string }>;
   };
 };
 
 function readTemplateResponse(value: unknown): AgentTemplateResponse["template"] {
   const template = (value as AgentTemplateResponse).template;
-  if (!template || typeof template.id !== "string" || typeof template.name !== "string" || !Array.isArray(template.files)) {
+  if (!template || !Array.isArray(template.files)) {
     throw new Error("template response did not include template files");
   }
   return template;
 }
 
-async function materializeTemplate(template: AgentTemplateResponse["template"], outDir: string): Promise<string[]> {
+async function materializeTemplate(files: AgentTemplateResponse["template"]["files"], outDir: string): Promise<string[]> {
   const root = path.resolve(outDir);
   const written: string[] = [];
-  for (const file of template.files) {
+  for (const file of files) {
     if (!isSafeRelativePath(file.path)) throw new Error(`unsafe template path: ${file.path}`);
     const target = path.join(root, file.path);
     await fs.mkdir(path.dirname(target), { recursive: true });
@@ -484,10 +465,8 @@ function isSafeRelativePath(value: string): boolean {
 function runPlanPayload(options: Record<string, string>): Record<string, string> {
   return {
     objective: required(options.objective, "--objective"),
-    ...(options.kind ? { kind: options.kind } : {}),
-    ...(option(options, "input-ref", "input") ? { inputRef: option(options, "input-ref", "input") as string } : {}),
+    ...(options["input-ref"] ? { inputRef: options["input-ref"] } : {}),
     ...(options.prefix ? { prefix: options.prefix } : {}),
-    ...(option(options, "base-commit", "base") ? { baseCommit: option(options, "base-commit", "base") as string } : {}),
   };
 }
 
@@ -510,40 +489,37 @@ function printHelp(): void {
 Commands:
   health
   preflight
-  agents template --name <name> [--id <agent_id>] [--description "..."] [--out ./agent-repo]
-  agents init --name <name> [--id <agent_id>] [--repo-id <repo_id>] [--branch main] [--description "..."] [--live|--dry-run]
-  agents create --name <name> --repo <url> [--branch main] [--ref main]
+  agents template --name <name> [--id <agent>] [--description "..."] [--out ./agent-repo]
+  agents init --name <name> [--id <agent>] [--repo-id <repo>] [--branch main] [--description "..."] [--live|--dry-run]
+  agents create --name <name> --repo <url> [--branch main]
   agents list
-  agents get <agent_id>
-  agents repo <agent_id>
-  agents hosted-git <agent_id>
-  agents runs <agent_id> [list]
-  agents runs <agent_id> plan --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
+  agents get <agent>
+  agents repo <agent>
+  agents hosted-git <agent>
   hosted-git list
-  runs list --agent <agent_id>
-  runs get <run_id>
-  runs status <run_id> [--limit 20]
-  runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
-  runs step --agent <agent_id> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
-  runs step --run <run_id> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
-  runs sandbox <run_id> [--bootstrap]
-  runs restart-sandbox <run_id> [--bootstrap]
-  runs exec <run_id> [--cwd /workspace/agent] [--timeout-ms 120000] -- <command>
-  runs boot <run_id> [--objective "..."] [--prompt .pi/prompts/heartbeat.md] [--task tasks/inbox/run.md]
-  runs check-runtime <run_id>
-  runs finalize <run_id> [--message "Finalize run"]
-  runs stop <run_id>
-  sandboxes start --agent <agent_id>
-  sandboxes list [--agent <agent_id>] [--run <run_id>]
-  sandboxes get <sandbox_id>
-  sandboxes exec <sandbox_id> [--timeout-ms 120000] -- <command>
-  sandboxes stop-running [--agent <agent_id>] [--run <run_id>]
-  sandboxes stop <sandbox_id>
-  sandboxes bootstrap <sandbox_id>
-  heartbeats list [--agent <agent_id>]
-  heartbeats get <heartbeat_id>
-  messages list [--agent <agent_id>] [--run <run_id>] [--sandbox <sandbox_id>] [--limit 50]
-  messages listen [--agent <agent_id>] [--run <run_id>] [--sandbox <sandbox_id>]
-  messages --follow [--agent <agent_id>] [--run <run_id>] [--sandbox <sandbox_id>]
+  runs list --agent <agent>
+  runs get <run>
+  runs status <run> [--limit 20]
+  runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
+  runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
+  runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
+  runs sandbox <run> [--bootstrap]
+  runs restart-sandbox <run> [--bootstrap]
+  runs exec <run> [--cwd /workspace/agent] [--timeout-ms 120000] -- <command>
+  runs boot <run> [--objective "..."] [--prompt .pi/prompts/heartbeat.md] [--task tasks/inbox/run.md]
+  runs check-runtime <run>
+  runs finalize <run> [--message "Finalize run"]
+  runs stop <run>
+  sandboxes start --agent <agent>
+  sandboxes list [--agent <agent>] [--run <run>]
+  sandboxes get <sandbox>
+  sandboxes exec <sandbox> [--timeout-ms 120000] -- <command>
+  sandboxes stop-running [--agent <agent>] [--run <run>]
+  sandboxes stop <sandbox>
+  sandboxes bootstrap <sandbox>
+  heartbeats list [--agent <agent>]
+  heartbeats get <heartbeat>
+  messages list [--agent <agent>] [--run <run>] [--sandbox <sandbox>] [--limit 50]
+  messages listen [--agent <agent>] [--run <run>] [--sandbox <sandbox>]
 `);
 }

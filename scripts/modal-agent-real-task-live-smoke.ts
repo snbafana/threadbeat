@@ -61,7 +61,6 @@ const settings: Settings = {
   modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
   sandboxEnv,
   sandboxEnvNames,
-  hostedGitProvider: "github",
   githubOwner,
   githubOwnerType,
   githubToken,
@@ -70,7 +69,6 @@ const settings: Settings = {
 const { app } = await buildServer(settings);
 let repoPath: string | undefined;
 let runId: string | undefined;
-let deleted = false;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
@@ -126,40 +124,38 @@ try {
   assert.equal(status.result.exitCode, 0);
   assert.notEqual(status.result.stdout.trim(), "", "expected Pi to mutate the bootstrapped agent repo");
 
-  const finalized = await cliJson<{ run: { result_commit: string; status: string } }>(baseUrl, [
+  const finalized = await cliJson<{ result: { commitSha: string } }>(baseUrl, [
     "runs",
     "finalize",
     runId,
     "--message",
     "Finalize real Pi task smoke",
   ]);
-  assert.equal(finalized.run.status, "completed");
-  assert.match(finalized.run.result_commit, /^[a-f0-9]{40}$/);
+  assert.match(finalized.result.commitSha, /^[a-f0-9]{40}$/);
+  const finalizedRun = await cliJson<{ run: { result_commit: string; status: string } }>(baseUrl, [
+    "runs",
+    "get",
+    runId,
+  ]);
+  assert.equal(finalizedRun.run.status, "completed");
+  assert.equal(finalizedRun.run.result_commit, finalized.result.commitSha);
 
   console.log(JSON.stringify({
-    ok: true,
-    modalAppName: settings.modalAppName,
     repoPath,
-    runId,
-    sandboxEnvNames,
-    resultCommit: finalized.run.result_commit,
+    resultCommit: finalized.result.commitSha,
   }, null, 2));
 } finally {
   if (runId) {
     try {
       const address = app.server.address() as AddressInfo | null;
       if (address) await cliJson(`http://${settings.host}:${address.port}`, ["sandboxes", "stop-running", "--run", runId]);
-    } catch {
-      // Best-effort cleanup. Main assertions validate cleanup on the success path.
-    }
+    } catch {}
   }
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
   if (repoPath && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
     await deleteGitHubRepo(githubToken, repoPath);
-    deleted = true;
   }
-  if (repoPath) console.log(JSON.stringify({ cleanup: { deleted, repoPath } }, null, 2));
 }
 
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {

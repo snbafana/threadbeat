@@ -35,7 +35,7 @@ try {
     url: "/api/preflight",
   });
   assert.equal(preflightResponse.statusCode, 200);
-  assert.match(preflightResponse.body, /sandbox_env_allowlist/);
+  assert.match(preflightResponse.body, /sandbox_pi_auth/);
 
   const cliPreflight = await cliJson<{ preflight: { ok: boolean; checks: Array<{ name: string }> } }>(baseUrl, [
     "preflight",
@@ -49,7 +49,7 @@ try {
     payload: {
       name: "smoke-agent",
       repoUrl: "https://github.com/example/agent.git",
-      defaultBranch: "main",
+      currentRef: "main",
     },
   });
   assert.equal(agentResponse.statusCode, 200);
@@ -92,9 +92,8 @@ try {
   });
   assert.equal(runSandboxResponse.statusCode, 200);
   const runSandboxBody = JSON.parse(runSandboxResponse.body) as {
-    sandbox: { branch: string; id: string; run_id: string | null; state: string };
+    sandbox: { id: string; run_id: string | null; state: string };
   };
-  assert.equal(runSandboxBody.sandbox.branch, runPlanBody.plan.branchName);
   assert.equal(runSandboxBody.sandbox.run_id, runPlanBody.run.id);
   assert.equal(runSandboxBody.sandbox.state, "running");
 
@@ -104,22 +103,20 @@ try {
   });
   assert.equal(duplicateRunSandboxResponse.statusCode, 200);
   const duplicateRunSandboxBody = JSON.parse(duplicateRunSandboxResponse.body) as {
-    existing: boolean;
     sandbox: { id: string };
   };
-  assert.equal(duplicateRunSandboxBody.existing, true);
   assert.equal(duplicateRunSandboxBody.sandbox.id, runSandboxBody.sandbox.id);
 
   const runSandboxListResponse = await app.inject({
     method: "GET",
-    url: `/api/sandboxes?run_id=${runPlanBody.run.id}`,
+    url: `/api/sandboxes?runId=${runPlanBody.run.id}`,
   });
   assert.equal(runSandboxListResponse.statusCode, 200);
   assert.ok(runSandboxListResponse.body.includes(runSandboxBody.sandbox.id));
 
   const runMessagesResponse = await app.inject({
     method: "GET",
-    url: `/api/messages?run_id=${runPlanBody.run.id}`,
+    url: `/api/messages?runId=${runPlanBody.run.id}`,
   });
   assert.equal(runMessagesResponse.statusCode, 200);
   assert.match(runMessagesResponse.body, /sandbox_running/);
@@ -138,8 +135,6 @@ try {
     url: `/api/runs/${runPlanBody.run.id}/stop`,
   });
   assert.equal(runSandboxStopResponse.statusCode, 200);
-  assert.match(runSandboxStopResponse.body, /"status":"stopped"/);
-  assert.match(runSandboxStopResponse.body, /agent_run_stopped|Stopped run/);
 
   const stoppedRunResponse = await app.inject({
     method: "GET",
@@ -161,15 +156,17 @@ try {
   });
   assert.equal(runSandboxRestartResponse.statusCode, 200);
   const runSandboxRestartBody = JSON.parse(runSandboxRestartResponse.body) as {
-    previousSandbox: { id: string };
-    run: { status: string };
     sandbox: { id: string; run_id: string | null; state: string };
   };
-  assert.equal(runSandboxRestartBody.run.status, "running");
-  assert.equal(runSandboxRestartBody.previousSandbox.id, runSandboxBody.sandbox.id);
   assert.notEqual(runSandboxRestartBody.sandbox.id, runSandboxBody.sandbox.id);
   assert.equal(runSandboxRestartBody.sandbox.run_id, runPlanBody.run.id);
   assert.equal(runSandboxRestartBody.sandbox.state, "running");
+  const restartedRunResponse = await app.inject({
+    method: "GET",
+    url: `/api/runs/${runPlanBody.run.id}`,
+  });
+  assert.equal(restartedRunResponse.statusCode, 200);
+  assert.match(restartedRunResponse.body, /"status":"running"/);
 
   const runningRunSandboxRestartResponse = await app.inject({
     method: "POST",
@@ -190,8 +187,6 @@ try {
     payload: {
       agentId: agentBody.agent.id,
       title: "smoke heartbeat",
-      cadenceSeconds: 60,
-      action: "echo smoke",
     },
   });
   assert.equal(heartbeatResponse.statusCode, 200);
@@ -206,7 +201,7 @@ try {
 
   const heartbeatListResponse = await app.inject({
     method: "GET",
-    url: `/api/heartbeats?agent_id=${agentBody.agent.id}`,
+    url: `/api/heartbeats?agentId=${agentBody.agent.id}`,
   });
   assert.equal(heartbeatListResponse.statusCode, 200);
   assert.match(heartbeatListResponse.body, /smoke heartbeat/);
@@ -234,12 +229,12 @@ try {
   assert.equal(bootstrapResponse.statusCode, 200);
   assert.match(bootstrapResponse.body, /git clone/);
 
-  const cliBootstrap = await cliJson<{ result: { results: unknown[] } }>(baseUrl, [
+  const cliBootstrap = await cliJson<{ bootstrap: unknown[] }>(baseUrl, [
     "sandboxes",
     "bootstrap",
     sandboxBody.sandbox.id,
   ]);
-  assert.equal(cliBootstrap.result.results.length, 5);
+  assert.equal(cliBootstrap.bootstrap.length, 5);
 
   const execResponse = await app.inject({
     method: "POST",
@@ -254,11 +249,16 @@ try {
     url: `/api/sandboxes/${sandboxBody.sandbox.id}/stop`,
   });
   assert.equal(stopResponse.statusCode, 200);
-  assert.match(stopResponse.body, /stopped/);
+  const stoppedSandboxResponse = await app.inject({
+    method: "GET",
+    url: `/api/sandboxes/${sandboxBody.sandbox.id}`,
+  });
+  assert.equal(stoppedSandboxResponse.statusCode, 200);
+  assert.match(stoppedSandboxResponse.body, /"state":"stopped"/);
 
   const messagesResponse = await app.inject({
     method: "GET",
-    url: `/api/messages?sandbox_id=${sandboxBody.sandbox.id}`,
+    url: `/api/messages?sandboxId=${sandboxBody.sandbox.id}`,
   });
   assert.equal(messagesResponse.statusCode, 200);
   assert.match(messagesResponse.body, /exec_completed/);
@@ -282,15 +282,20 @@ try {
   });
   assert.equal(cleanupSandboxB.statusCode, 200);
 
-  const cliStopRunning = await cliJson<{ scanned: number; stopped: Array<{ state: string }> }>(baseUrl, [
+  const cliStopRunning = await cliJson<{ stoppedCount: number }>(baseUrl, [
     "sandboxes",
     "stop-running",
     "--agent",
     agentBody.agent.id,
   ]);
-  assert.ok(cliStopRunning.scanned >= 2);
-  assert.equal(cliStopRunning.stopped.length, 2);
-  assert.ok(cliStopRunning.stopped.every((sandbox) => sandbox.state === "stopped"));
+  assert.equal(cliStopRunning.stoppedCount, 2);
+  const stoppedSandboxes = await cliJson<{ sandboxes: Array<{ state: string }> }>(baseUrl, [
+    "sandboxes",
+    "list",
+    "--agent",
+    agentBody.agent.id,
+  ]);
+  assert.ok(stoppedSandboxes.sandboxes.filter((sandbox) => sandbox.state === "stopped").length >= 3);
 
   const cliHeartbeat = await cliJson<{ heartbeat: { id: string } }>(baseUrl, [
     "heartbeats",
@@ -343,14 +348,13 @@ try {
   assert.equal(cliRunStatus.sandboxes.length, 0);
   assert.ok(cliRunStatus.messages.length > 0);
 
-  const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null; branch: string } }>(baseUrl, [
+  const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",
     cliRunPlan.run.id,
     "--bootstrap",
   ]);
   assert.equal(cliRunSandbox.sandbox.run_id, cliRunPlan.run.id);
-  assert.equal(cliRunSandbox.sandbox.branch, cliRunPlan.plan.branchName);
 
   const cliRunBootstrapMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
     "messages",
@@ -370,28 +374,23 @@ try {
   assert.match(cliRunExec.result.stdout, /\/workspace\/agent/);
 
   const cliRunBoot = await cliJson<{
-    plan: { promptPath: string; taskPath: string };
     result: { exitCode: number; stdout: string };
   }>(baseUrl, [
     "runs",
     "boot",
     cliRunPlan.run.id,
   ]);
-  assert.equal(cliRunBoot.plan.promptPath, ".pi/prompts/heartbeat.md");
-  assert.match(cliRunBoot.plan.taskPath, /^tasks\/inbox\/run_/);
   assert.equal(cliRunBoot.result.exitCode, 0);
   assert.match(cliRunBoot.result.stdout, /\[dry-run\]/);
   assert.match(cliRunBoot.result.stdout, /pi --provider 'deepseek' --model 'deepseek-v4-flash' --api-key "\$DEEPSEEK_API_KEY" --mode json -p/);
 
   const cliRuntimeCheck = await cliJson<{
-    plan: { piCommand: string };
     result: { exitCode: number; stdout: string };
   }>(baseUrl, [
     "runs",
     "check-runtime",
     cliRunPlan.run.id,
   ]);
-  assert.equal(cliRuntimeCheck.plan.piCommand, "pi");
   assert.equal(cliRuntimeCheck.result.exitCode, 0);
   assert.match(cliRuntimeCheck.result.stdout, /agent runtime ready/);
   assert.match(cliRuntimeCheck.result.stdout, /pi --list-models 'deepseek' \| grep -F 'deepseek-v4-flash'/);
@@ -405,15 +404,13 @@ try {
   assert.ok(cliAgentBootMessages.messages.some((message) => message.type === "agent_boot_completed"));
   assert.ok(cliAgentBootMessages.messages.some((message) => message.type === "agent_runtime_check_completed"));
 
-  const cliRunFinalize = await cliJson<{ run: { result_commit: string; status: string }; result: { commitSha: string } }>(baseUrl, [
+  const cliRunFinalize = await cliJson<{ result: { commitSha: string } }>(baseUrl, [
     "runs",
     "finalize",
     cliRunPlan.run.id,
     "--message",
     "Finalize smoke run",
   ]);
-  assert.equal(cliRunFinalize.run.status, "completed");
-  assert.equal(cliRunFinalize.run.result_commit, cliRunFinalize.result.commitSha);
   assert.match(cliRunFinalize.result.commitSha, /^[a-f0-9]{40}$/);
 
   const cliRunSandboxes = await cliJson<{ sandboxes: unknown[] }>(baseUrl, [
@@ -448,13 +445,17 @@ try {
     "--objective",
     "cli stopped run",
   ]);
-  const cliStoppedRun = await cliJson<{ run: { status: string; result_summary: string } }>(baseUrl, [
+  await cliJson(baseUrl, [
     "runs",
     "stop",
     cliStopPlan.run.id,
   ]);
+  const cliStoppedRun = await cliJson<{ run: { status: string } }>(baseUrl, [
+    "runs",
+    "get",
+    cliStopPlan.run.id,
+  ]);
   assert.equal(cliStoppedRun.run.status, "stopped");
-  assert.match(cliStoppedRun.run.result_summary, /before sandbox start/);
 
   const cliRestartPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
@@ -469,34 +470,35 @@ try {
     "sandbox",
     cliRestartPlan.run.id,
   ]);
-  await cliJson<{ run: { status: string } }>(baseUrl, [
+  await cliJson(baseUrl, [
     "runs",
     "stop",
     cliRestartPlan.run.id,
   ]);
   const cliRestartedSandbox = await cliJson<{
-    previousSandbox: { id: string };
-    run: { status: string };
     sandbox: { id: string };
   }>(baseUrl, [
     "runs",
     "restart-sandbox",
     cliRestartPlan.run.id,
   ]);
-  assert.equal(cliRestartedSandbox.run.status, "running");
-  assert.equal(cliRestartedSandbox.previousSandbox.id, cliRestartInitialSandbox.sandbox.id);
   assert.notEqual(cliRestartedSandbox.sandbox.id, cliRestartInitialSandbox.sandbox.id);
-  await cliJson<{ run: { status: string } }>(baseUrl, [
+  const cliRestartedRun = await cliJson<{ run: { status: string } }>(baseUrl, [
+    "runs",
+    "get",
+    cliRestartPlan.run.id,
+  ]);
+  assert.equal(cliRestartedRun.run.status, "running");
+  await cliJson(baseUrl, [
     "runs",
     "stop",
     cliRestartPlan.run.id,
   ]);
 
   const cliStep = await cliJson<{
-    executed: { result: { stdout: string } };
-    finalized: { run: { id: string; status: string } } | null;
-    runId: string;
-    status: { sandboxes: Array<{ state: string }> };
+    result: { stdout: string };
+    finalized: { commitSha: string };
+    status: { run: { id: string; status: string }; sandboxes: Array<{ state: string }> };
   }>(baseUrl, [
     "runs",
     "step",
@@ -511,19 +513,18 @@ try {
     "--",
     "pwd",
   ]);
-  assert.match(cliStep.executed.result.stdout, /\/workspace\/agent/);
-  assert.equal(cliStep.finalized?.run.status, "completed");
-  assert.equal(cliStep.finalized.run.id, cliStep.runId);
+  assert.match(cliStep.result.stdout, /\/workspace\/agent/);
+  assert.equal(cliStep.status.run.status, "completed");
+  assert.match(cliStep.finalized?.commitSha ?? "", /^[a-f0-9]{40}$/);
   assert.ok(cliStep.status.sandboxes.some((sandbox) => sandbox.state === "running"));
 
-  const cliStepCleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
+  const cliStepCleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
     "sandboxes",
     "stop-running",
     "--run",
-    cliStep.runId,
+    cliStep.status.run.id,
   ]);
-  assert.equal(cliStepCleanup.stopped.length, 1);
-  assert.equal(cliStepCleanup.stopped[0]?.state, "stopped");
+  assert.equal(cliStepCleanup.stoppedCount, 1);
 
   await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",
@@ -547,7 +548,7 @@ try {
   const cliMessages = await cliJson<{ messages: unknown[] }>(baseUrl, [
     "messages",
     "list",
-    "--sandbox-id",
+    "--sandbox",
     sandboxBody.sandbox.id,
     "--limit",
     "5",

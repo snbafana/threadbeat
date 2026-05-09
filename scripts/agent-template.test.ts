@@ -83,8 +83,7 @@ try {
   });
   assert.equal(initResponse.statusCode, 200);
   assert.match(initResponse.body, /"repo_url":"https:\/\/github\.com\/threadbeat-agent-template-test\/fresh-agent-repo\.git"/);
-  assert.match(initResponse.body, /"hostedGitRepo":/);
-  assert.match(initResponse.body, /"path":"AGENTS.md"/);
+  assert.match(initResponse.body, /"hostedRepo":/);
   assert.match(initResponse.body, /"initialized":null/);
 } finally {
   await app.close();

@@ -1,48 +1,35 @@
 import type { AgentRepositoryRecord } from "./agentRepository.js";
-import { assertValidBranchName, toBranchSegment } from "./git.js";
+import { assertValidGitRef, toBranchSegment } from "./git.js";
 import { RateLimitGuard, githubCreateRepoRateLimitRules } from "./rateLimit.js";
 import type { Settings } from "./config.js";
 
 type FetchLike = typeof fetch;
 
-export type HostedGitProviderName = "github";
-
-export type HostedGitCreateInput = {
+type HostedGitCreateInput = {
   agent: AgentRepositoryRecord;
   dryRun?: boolean;
   repoId?: string;
 };
 
-export type HostedGitCloneInput = {
+type HostedGitCloneInput = {
   namespace: string;
   repoId: string;
 };
 
-export type HostedGitCloneUrl = {
+type HostedGitCloneUrl = {
   remoteUrl: string;
   remoteUrlRedacted: string;
 };
 
-export type HostedGitRepository = {
+type HostedGitRepository = {
   defaultBranch: string;
-  live: boolean;
   namespace: string;
-  provider: HostedGitProviderName;
   providerRepoId: string;
   remoteUrl: string | null;
   remoteUrlRedacted: string | null;
-  source: unknown;
 };
 
-export interface HostedGitProvider {
-  readonly name: HostedGitProviderName;
-  createRepository(input: HostedGitCreateInput): Promise<HostedGitRepository>;
-  getCloneUrl(input: HostedGitCloneInput): Promise<HostedGitCloneUrl>;
-}
-
-export class GitHubHostedGitProvider implements HostedGitProvider {
-  readonly name = "github";
-
+export class GitHubHostedGitProvider {
   constructor(
     private readonly settings: Settings,
     private readonly rateLimitGuard = new RateLimitGuard(),
@@ -52,7 +39,7 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
   async createRepository(input: HostedGitCreateInput): Promise<HostedGitRepository> {
     const owner = requireGitHubOwner(this.settings.githubOwner);
     const repoId = normalizeGitHubRepoName(input.repoId ?? input.agent.id);
-    const defaultBranch = assertValidBranchName(input.agent.default_branch);
+    const defaultBranch = assertValidGitRef(input.agent.current_ref);
     const live = input.dryRun !== true;
 
     if (live) {
@@ -67,18 +54,10 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
     const remoteUrl = `https://x-access-token:DRY_RUN_TOKEN@github.com/${owner}/${repoId}.git`;
     return {
       defaultBranch,
-      live: false,
       namespace: owner,
-      provider: "github",
       providerRepoId: repoId,
       remoteUrl,
       remoteUrlRedacted: redactHostedGitRemoteUrl(remoteUrl),
-      source: {
-        defaultBranch,
-        provider: "github",
-        repo: repoId,
-        webUrl: `https://github.com/${owner}/${repoId}`,
-      },
     };
   }
 
@@ -126,18 +105,10 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
     const remoteUrl = githubRemoteUrl({ fullName: repo.fullName, token: input.token });
     return {
       defaultBranch: input.defaultBranch,
-      live: true,
       namespace: input.owner,
-      provider: "github",
       providerRepoId: repo.name,
       remoteUrl,
       remoteUrlRedacted: redactHostedGitRemoteUrl(remoteUrl),
-      source: {
-        defaultBranch: input.defaultBranch,
-        provider: "github",
-        repo: repo.name,
-        webUrl: repo.htmlUrl,
-      },
     };
   }
 
@@ -161,12 +132,6 @@ export class GitHubHostedGitProvider implements HostedGitProvider {
     return login.toLowerCase() === owner.toLowerCase() ? "user" : "org";
   }
 }
-
-export const createHostedGitProvider = (settings: Settings): HostedGitProvider => {
-  const provider = settings.hostedGitProvider ?? "github";
-  if (provider === "github") return new GitHubHostedGitProvider(settings);
-  throw new Error(`unsupported hosted git provider: ${provider}`);
-};
 
 const githubRemoteUrl = (input: { fullName?: string; owner?: string; repoId?: string; token: string }): string => {
   const fullName = input.fullName ?? `${input.owner}/${input.repoId}`;
@@ -228,16 +193,15 @@ const githubLogin = (body: unknown): string => {
   return login.trim();
 };
 
-const parseGitHubCreateRepoResponse = (body: unknown): { fullName: string; htmlUrl: string; name: string } => {
+const parseGitHubCreateRepoResponse = (body: unknown): { fullName: string; name: string } => {
   if (!body || typeof body !== "object") throw new Error("GitHub repo create returned an invalid response");
   const record = body as Record<string, unknown>;
   const fullName = record.full_name;
-  const htmlUrl = record.html_url;
   const name = record.name;
-  if (typeof fullName !== "string" || typeof htmlUrl !== "string" || typeof name !== "string") {
+  if (typeof fullName !== "string" || typeof name !== "string") {
     throw new Error("GitHub repo create returned an invalid response");
   }
-  return { fullName, htmlUrl, name };
+  return { fullName, name };
 };
 
 const enforceRateLimit = (decision: { allowed: boolean; reason?: string; retryAfterMs?: number }): void => {

@@ -47,7 +47,7 @@ THREADBEAT_AGENT_PI_MODEL=deepseek-v4-flash
 THREADBEAT_AGENT_PI_API_KEY_ENV=DEEPSEEK_API_KEY
 ```
 
-`runs boot` writes the Threadbeat objective to `tasks/inbox/<run_id>.md`, reads
+`runs boot` writes the Threadbeat objective to `tasks/inbox/<run>.md`, reads
 the repo-local `.pi/prompts/heartbeat.md`, and pipes both into Pi with
 `pi --mode json -p`. That is the documented noninteractive Pi path; autonomous
 agent runs still require sandbox-side provider auth such as API-key environment
@@ -82,8 +82,8 @@ npm run cli -- preflight
 ```
 
 The preflight endpoint reports whether Modal credentials, hosted Git settings,
-sandbox auth allowlisting, Pi image setup, and timeout settings are present. It
-only returns booleans and environment variable names.
+sandbox Pi auth, Pi image setup, and timeout settings are present. It
+returns readiness check rows without printing secret values.
 
 To verify live Modal credentials:
 
@@ -150,16 +150,15 @@ hosted Git-backed agent repo, bootstraps it into Modal with the real Pi image,
 runs `runs boot`, checks that the worktree changed, finalizes the run branch,
 and deletes the temporary GitHub repo by default.
 
-Hosted Git is behind a provider boundary:
+Hosted Git uses GitHub:
 
 ```bash
-THREADBEAT_GIT_PROVIDER=github
 THREADBEAT_GITHUB_OWNER=your-org
 THREADBEAT_GITHUB_OWNER_TYPE=org
 THREADBEAT_GITHUB_TOKEN=...
 ```
 
-GitHub is the only enabled hosted Git backend for now. It supports dry-run repository planning and live private repo creation
+It supports dry-run repository planning and live private repo creation
 when `THREADBEAT_GITHUB_TOKEN` is present. `THREADBEAT_GITHUB_OWNER_TYPE=user`
 switches creation from `/orgs/:owner/repos` to `/user/repos`.
 
@@ -171,12 +170,11 @@ To verify live GitHub credentials without printing secrets:
 
 ```bash
 npm run smoke:github
-npm run smoke:github-init
 npm run smoke:github-init-cli
 ```
 
 The smokes create real private GitHub repos when credentials are present,
-validate the remote URL, API template init, or CLI template init, and delete the repos by default. The token must include
+validate the remote URL or CLI template init, and delete the repos by default. The token must include
 `delete_repo` unless `THREADBEAT_GITHUB_LIVE_SMOKE_KEEP=1` is set to
 intentionally leave smoke repos behind for manual inspection. Without
 credentials it exits successfully with a skip message.
@@ -194,34 +192,30 @@ npm run cli -- agents init --name research --repo-id research-agent
 npm run cli -- agents init --name research --repo-id research-agent --dry-run
 npm run cli -- agents create --name research --repo https://github.com/org/repo.git --branch main
 npm run cli -- agents list
-npm run cli -- agents repo <agent_id>
-npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
-npm run cli -- runs list --agent <agent_id>
-npm run cli -- runs status <run_id>
-npm run cli -- runs step --agent <agent_id> --objective "one bounded task" --bootstrap --finalize -- "pwd"
-npm run cli -- runs sandbox <run_id> [--bootstrap]
-npm run cli -- runs restart-sandbox <run_id> [--bootstrap]
-npm run cli -- runs exec <run_id> -- "pwd"
-npm run cli -- runs finalize <run_id> --message "Finalize run"
-npm run cli -- runs stop <run_id>
-npm run cli -- agents hosted-git <agent_id>
+npm run cli -- agents repo <agent>
+npm run cli -- runs plan --agent <agent> --objective "one bounded task"
+npm run cli -- runs list --agent <agent>
+npm run cli -- runs status <run>
+npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
+npm run cli -- runs sandbox <run> [--bootstrap]
+npm run cli -- runs restart-sandbox <run> [--bootstrap]
+npm run cli -- runs exec <run> -- "pwd"
+npm run cli -- runs finalize <run> --message "Finalize run"
+npm run cli -- runs stop <run>
+npm run cli -- agents hosted-git <agent>
 npm run cli -- hosted-git list
-npm run cli -- heartbeats list --agent <agent_id>
-npm run cli -- heartbeats get <heartbeat_id>
-npm run cli -- sandboxes start --agent <agent_id>
-npm run cli -- sandboxes list --agent <agent_id>
-npm run cli -- sandboxes get <sandbox_id>
-npm run cli -- sandboxes exec <sandbox_id> -- "pwd && ls -la"
-npm run cli -- sandboxes stop-running --agent <agent_id>
-npm run cli -- sandboxes bootstrap <sandbox_id>
-npm run cli -- sandboxes stop <sandbox_id>
-npm run cli -- messages list --sandbox <sandbox_id>
-npm run cli -- messages listen --sandbox <sandbox_id>
+npm run cli -- heartbeats list --agent <agent>
+npm run cli -- heartbeats get <heartbeat>
+npm run cli -- sandboxes start --agent <agent>
+npm run cli -- sandboxes list --agent <agent>
+npm run cli -- sandboxes get <sandbox>
+npm run cli -- sandboxes exec <sandbox> -- "pwd && ls -la"
+npm run cli -- sandboxes stop-running --agent <agent>
+npm run cli -- sandboxes bootstrap <sandbox>
+npm run cli -- sandboxes stop <sandbox>
+npm run cli -- messages list --sandbox <sandbox>
+npm run cli -- messages listen --sandbox <sandbox>
 ```
-
-`sandboxes bootstrap` calls `POST /api/sandboxes/:id/bootstrap`. The route uses
-the sandbox service bootstrap implementation when present, and otherwise returns
-a clear `501` without requiring database changes.
 
 Agent template generation is Pi-native but does not run Pi:
 
@@ -234,9 +228,8 @@ Run planning is intentionally server-side and Pi-free for now:
 
 - `POST /api/agents/:id/runs` creates a persisted run plan and Git branch name.
 - `GET /api/agents/:id/runs` lists planned/completed runs for an agent.
-- `GET /api/runs/:id` reads one run with compare/tree links.
-- `GET /api/runs/:id/status` reads one run with its branch plan, sandboxes, and
-  latest messages.
+- `GET /api/runs/:id` reads one run record.
+- `GET /api/runs/:id/status` reads one run with sandboxes and messages.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts. Repeated calls return
@@ -255,29 +248,6 @@ Run planning is intentionally server-side and Pi-free for now:
 The `runs step` CLI command is client-side orchestration over the existing run
 APIs. It can plan a run, start/bootstrap its sandbox, execute one command, and
 optionally finalize the run branch without introducing a new server primitive.
-
-Read-only API inspection routes:
-
-- `GET /api/agents/:id/runs`
-- `GET /api/runs/:id`
-- `GET /api/runs/:id/status`
-- `POST /api/runs/:id/sandbox`
-- `POST /api/runs/:id/restart-sandbox`
-- `POST /api/runs/:id/exec`
-- `POST /api/runs/:id/finalize`
-- `POST /api/runs/:id/stop`
-- `POST /api/sandboxes/stop-running`
-- `GET /api/heartbeats?agentId=<agent_id>`
-- `GET /api/heartbeats/:id`
-- `GET /api/agents/:id/hosted-git`
-- `GET /api/hosted-git/repos`
-- `GET /api/sandboxes?agentId=<agent_id>&runId=<run_id>`
-- `GET /api/sandboxes/:id`
-- `GET /api/messages?agentId=<agent_id>&runId=<run_id>&sandboxId=<sandbox_id>&limit=50`
-- `GET /api/messages/listen?agentId=<agent_id>&runId=<run_id>&sandboxId=<sandbox_id>`
-
-Snake-case query aliases such as `agent_id`, `run_id`, and `sandbox_id` are accepted for
-inspection routes.
 
 ## Phases
 

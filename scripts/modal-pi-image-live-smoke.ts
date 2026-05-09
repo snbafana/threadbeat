@@ -39,23 +39,19 @@ try {
   const agent = await db.createAgent({
     name: "modal-pi-image-live-smoke-agent",
     repoUrl: "https://github.com/octocat/Hello-World.git",
-    defaultBranch: "master",
+    currentRef: "master",
   });
 
   const sandbox = await service.startForAgent(agent);
   sandboxId = sandbox.id;
-  const { result } = await service.exec(sandbox, ["bash", "-lc", "command -v pi && pi --help >/tmp/threadbeat-pi-help.txt 2>&1 && head -20 /tmp/threadbeat-pi-help.txt"]);
+  const result = await service.exec(sandbox, ["bash", "-lc", "command -v pi && pi --help >/tmp/threadbeat-pi-help.txt 2>&1 && head -20 /tmp/threadbeat-pi-help.txt"]);
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /pi/);
-  const stopped = await service.stop(sandbox);
-  assert.equal(stopped.state, "stopped");
+  await service.stop(sandbox);
+  assert.equal((await db.getSandbox(sandbox.id))?.state, "stopped");
 
   console.log(JSON.stringify({
     ok: true,
-    modalAppName: settings.modalAppName,
-    modalImage: settings.modalImage,
-    providerSandboxId: sandbox.provider_sandbox_id,
-    sandboxId: sandbox.id,
   }, null, 2));
 } finally {
   if (sandboxId) {
