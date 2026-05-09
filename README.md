@@ -96,7 +96,7 @@ npm run cli -- agents list
 npm run cli -- agents repo <agent_id>
 npm run cli -- runs plan --agent <agent_id> --objective "one bounded task"
 npm run cli -- runs list --agent <agent_id>
-npm run cli -- runs sandbox <run_id>
+npm run cli -- runs sandbox <run_id> [--bootstrap]
 npm run cli -- code-storage create --agent <agent_id> --id <repo_id>
 npm run cli -- code-storage list
 npm run cli -- heartbeats list --agent <agent_id>
@@ -121,7 +121,8 @@ Run planning is intentionally server-side and Pi-free for now:
 - `GET /api/agents/:id/runs` lists planned/completed runs for an agent.
 - `GET /api/runs/:id` reads one run with compare/tree links.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
-  sandbox/messages with the run id.
+  sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
+  checkout the repo immediately after the sandbox starts.
 
 Read-only API inspection routes:
 

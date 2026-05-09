@@ -200,6 +200,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/runs/:id/sandbox", async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
+      const body = requestBody(request.body);
       const run = await db.getAgentRun(id);
       if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
       const agent = await db.getAgent(run.agent_id);
@@ -208,7 +209,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         branch: run.run_branch,
         runId: run.id,
       });
-      return { ok: true, run, sandbox };
+      if (!parseBoolean(body.bootstrap, false)) return { ok: true, run, sandbox };
+      const bootstrap = await sandboxService.bootstrap(sandbox);
+      return { ok: true, run, sandbox: bootstrap.sandbox, bootstrap };
     } catch (error) {
       return reply.code(500).send({ ok: false, error: messageOf(error) });
     }

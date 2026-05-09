@@ -200,9 +200,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     return;
   }
   if (subcommandName === "sandbox" || subcommandName === "start-sandbox") {
-    const id = args[0];
+    const [id, ...optionArgs] = args;
     if (!id) throw new Error(`runs ${subcommandName} requires a run id`);
-    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/sandbox`));
+    const options = parseOptions(optionArgs);
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/sandbox`, {
+      bootstrap: options.bootstrap === "1",
+    }));
     return;
   }
   throw new Error(`unknown runs command: ${subcommandName}`);
@@ -257,7 +260,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "follow" || key === "live") {
+    if (key === "bootstrap" || key === "follow" || key === "live") {
       options[key] = "1";
       continue;
     }
@@ -347,7 +350,7 @@ Commands:
   runs list --agent <agent_id>
   runs get <run_id>
   runs plan --agent <agent_id> --objective <objective> [--kind run] [--input-ref main] [--prefix threadbeat/runs]
-  runs sandbox <run_id>
+  runs sandbox <run_id> [--bootstrap]
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>] [--run <run_id>]
   sandboxes get <sandbox_id>

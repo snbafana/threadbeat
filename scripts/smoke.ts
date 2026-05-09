@@ -228,9 +228,18 @@ try {
     "runs",
     "sandbox",
     cliRunPlan.run.id,
+    "--bootstrap",
   ]);
   assert.equal(cliRunSandbox.sandbox.run_id, cliRunPlan.run.id);
   assert.equal(cliRunSandbox.sandbox.branch, cliRunPlan.plan.branchName);
+
+  const cliRunBootstrapMessages = await cliJson<{ messages: Array<{ type: string }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    cliRunPlan.run.id,
+  ]);
+  assert.ok(cliRunBootstrapMessages.messages.some((message) => message.type === "bootstrap_completed"));
 
   const cliRunSandboxes = await cliJson<{ sandboxes: unknown[] }>(baseUrl, [
     "sandboxes",
