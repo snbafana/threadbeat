@@ -101,9 +101,18 @@ try {
 
   const runSandboxStopResponse = await app.inject({
     method: "POST",
-    url: `/api/sandboxes/${runSandboxBody.sandbox.id}/stop`,
+    url: `/api/runs/${runPlanBody.run.id}/stop`,
   });
   assert.equal(runSandboxStopResponse.statusCode, 200);
+  assert.match(runSandboxStopResponse.body, /"status":"stopped"/);
+  assert.match(runSandboxStopResponse.body, /agent_run_stopped|Stopped run/);
+
+  const stoppedRunResponse = await app.inject({
+    method: "GET",
+    url: `/api/runs/${runPlanBody.run.id}`,
+  });
+  assert.equal(stoppedRunResponse.statusCode, 200);
+  assert.match(stoppedRunResponse.body, /"status":"stopped"/);
 
   const heartbeatResponse = await app.inject({
     method: "POST",
@@ -284,6 +293,22 @@ try {
   ]);
   assert.equal(finalizedRunGet.run.status, "completed");
   assert.equal(finalizedRunGet.run.result_commit, cliRunFinalize.result.commitSha);
+
+  const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli stopped run",
+  ]);
+  const cliStoppedRun = await cliJson<{ run: { status: string; result_summary: string } }>(baseUrl, [
+    "runs",
+    "stop",
+    cliStopPlan.run.id,
+  ]);
+  assert.equal(cliStoppedRun.run.status, "stopped");
+  assert.match(cliStoppedRun.run.result_summary, /before sandbox start/);
 
   await cliJson<{ sandbox: { id: string } }>(baseUrl, [
     "sandboxes",

@@ -270,6 +270,38 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/runs/:id/stop", async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      const run = await db.getAgentRun(id);
+      if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+      if (run.status === "completed" || run.status === "failed") {
+        return reply.code(409).send({ ok: false, error: `run is already ${run.status}` });
+      }
+      const [sandbox] = await db.listSandboxes({ runId: run.id });
+      const stoppedSandbox = sandbox ? await sandboxService.stop(sandbox) : null;
+      const stoppedRun = await db.updateAgentRunCompleted({
+        id: run.id,
+        resultSummary: stoppedSandbox
+          ? `Stopped run sandbox ${stoppedSandbox.id}`
+          : "Stopped run before sandbox start",
+        status: "stopped",
+      });
+      await db.appendMessage({
+        agentId: run.agent_id,
+        sandboxId: stoppedSandbox?.id,
+        runId: run.id,
+        source: "server",
+        type: "agent_run_stopped",
+        text: `Stopped run ${run.id}`,
+        data: { run: stoppedRun, sandbox: stoppedSandbox },
+      });
+      return { ok: true, run: stoppedRun, sandbox: stoppedSandbox };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   const resolveCloneUrl = async (
     agentId: string,
     baseRef: string,

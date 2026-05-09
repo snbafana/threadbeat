@@ -232,6 +232,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     return;
   }
+  if (subcommandName === "stop") {
+    const id = args[0];
+    if (!id) throw new Error("runs stop requires a run id");
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/stop`));
+    return;
+  }
   throw new Error(`unknown runs command: ${subcommandName}`);
 }
 
@@ -377,6 +383,7 @@ Commands:
   runs sandbox <run_id> [--bootstrap]
   runs exec <run_id> [--cwd /workspace/agent] -- <command>
   runs finalize <run_id> [--message "Finalize run"]
+  runs stop <run_id>
   sandboxes start --agent <agent_id>
   sandboxes list [--agent <agent_id>] [--run <run_id>]
   sandboxes get <sandbox_id>
