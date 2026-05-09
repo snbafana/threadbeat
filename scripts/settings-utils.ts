@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 
@@ -28,10 +27,3 @@ export const createScriptTempRoot = (name: string): Promise<string> =>
 
 export const removeScriptTempRoot = (tempRoot: string): Promise<void> =>
   fs.rm(tempRoot, { recursive: true, force: true });
-
-export const scriptServerBaseUrl = (host: string, address: AddressInfo | string | null): string => {
-  if (!address || typeof address === "string") {
-    throw new Error("Server is not listening on a TCP port");
-  }
-  return `http://${host}:${address.port}`;
-};
