@@ -9,6 +9,7 @@ import { buildModalImageCommands } from "../src/modalImage.js";
 import { DEEPSEEK_API_KEY_ENV } from "../src/piModels.js";
 import { buildServer } from "../src/server.js";
 import { cliJsonHuge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
+import { printJson, skipSmoke, skipUnless } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -24,18 +25,13 @@ const sandboxEnvNames = [DEEPSEEK_API_KEY_ENV];
 const sandboxEnv = collectPresentEnv(sandboxEnvNames, process.env);
 
 if (!hasModalCredentials(process.env)) {
-  console.log("Modal agent real task live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
-  process.exit(0);
+  skipSmoke("Modal agent real task live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
 }
 
-if (!githubToken) {
-  console.log("Modal agent real task live smoke skipped: gh auth token is not available");
-  process.exit(0);
-}
+skipUnless(githubToken, "Modal agent real task live smoke skipped: gh auth token is not available");
 
 if (Object.keys(sandboxEnv).length === 0) {
-  console.log(`Modal agent real task live smoke skipped: ${DEEPSEEK_API_KEY_ENV} is not set`);
-  process.exit(0);
+  skipSmoke(`Modal agent real task live smoke skipped: ${DEEPSEEK_API_KEY_ENV} is not set`);
 }
 
 await assertCanCleanUpSmokeRepo(githubToken, "Modal agent real task live smoke");
@@ -131,10 +127,10 @@ try {
   assert.equal(finalizedRun.run.status, "completed");
   assert.equal(finalizedRun.run.result_commit, finalized.result.commitSha);
 
-  console.log(JSON.stringify({
+  printJson({
     repoPath,
     resultCommit: finalized.result.commitSha,
-  }, null, 2));
+  });
 } finally {
   if (runId) {
     try {

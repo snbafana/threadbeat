@@ -6,11 +6,11 @@ import type { AddressInfo } from "node:net";
 import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
+import { printJson, skipSmoke } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 
 if (!hasModalCredentials(process.env)) {
-  console.log("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
-  process.exit(0);
+  skipSmoke("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
 }
 
 const tempRoot = await createScriptTempRoot("threadbeat-modal-cli-live-smoke");
@@ -63,9 +63,9 @@ try {
   const cleanup = await stopRunSandboxes(baseUrl, runId);
   assert.equal(cleanup.stoppedCount, 1);
 
-  console.log(JSON.stringify({
+  printJson({
     ok: true,
-  }, null, 2));
+  });
 } finally {
   if (runId) {
     try {

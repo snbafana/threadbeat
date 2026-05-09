@@ -6,6 +6,7 @@ import type { AddressInfo } from "node:net";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
+import { printJson, skipUnless } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -19,10 +20,7 @@ const githubOwner = DEFAULT_GITHUB_OWNER;
 const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
 
-if (!githubToken) {
-  console.log("GitHub agent init CLI live smoke skipped: gh auth token is not available");
-  process.exit(0);
-}
+skipUnless(githubToken, "GitHub agent init CLI live smoke skipped: gh auth token is not available");
 
 await assertCanCleanUpSmokeRepo(githubToken, "GitHub agent init CLI live smoke");
 
@@ -106,6 +104,6 @@ try {
   await deleteGitHubRepoIfCreated(githubToken, repoPath);
 }
 
-console.log(JSON.stringify({
+printJson({
   repoPath,
-}, null, 2));
+});

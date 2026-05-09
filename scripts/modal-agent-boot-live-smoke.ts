@@ -8,6 +8,7 @@ import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE } from "../src/config.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js";
+import { printJson, skipSmoke, skipUnless } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
@@ -21,14 +22,10 @@ const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
 
 if (!hasModalCredentials(process.env)) {
-  console.log("Modal agent boot live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
-  process.exit(0);
+  skipSmoke("Modal agent boot live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
 }
 
-if (!githubToken) {
-  console.log("Modal agent boot live smoke skipped: gh auth token is not available");
-  process.exit(0);
-}
+skipUnless(githubToken, "Modal agent boot live smoke skipped: gh auth token is not available");
 
 await assertCanCleanUpSmokeRepo(githubToken, "Modal agent boot live smoke");
 
@@ -140,9 +137,9 @@ try {
   const cleanup = await stopRunSandboxes(baseUrl, runId);
   assert.equal(cleanup.stoppedCount, 1);
 
-  console.log(JSON.stringify({
+  printJson({
     repoPath,
-  }, null, 2));
+  });
 } finally {
   if (runId) {
     try {

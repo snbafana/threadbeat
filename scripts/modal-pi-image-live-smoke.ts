@@ -9,11 +9,11 @@ import { buildModalImageCommands } from "../src/modalImage.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
 import { SandboxService } from "../src/sandboxService.js";
+import { printJson, skipSmoke } from "./script-output-utils.js";
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 
 if (!hasModalCredentials(process.env)) {
-  console.log("Modal Pi image live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
-  process.exit(0);
+  skipSmoke("Modal Pi image live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
 }
 
 const tempRoot = await createScriptTempRoot("threadbeat-modal-pi-image-live-smoke");
@@ -47,9 +47,9 @@ try {
   await service.stop(sandbox);
   assert.equal((await db.getSandbox(sandbox.id))?.state, "stopped");
 
-  console.log(JSON.stringify({
+  printJson({
     ok: true,
-  }, null, 2));
+  });
 } finally {
   if (sandboxId) {
     const sandbox = await db.getSandbox(sandboxId);
