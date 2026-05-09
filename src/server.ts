@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { getAgentRepositoryMetadata, planRunBranch } from "./agentRepository.js";
 import { buildAgentTemplate } from "./agentTemplate.js";
 import { createHostedGitProvider } from "./hostedGit.js";
+import { createInitialCommit } from "./gitRepositoryBootstrap.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
 import { MessageBus } from "./messageBus.js";
@@ -51,6 +52,76 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         description: parseOptionalString(body.description),
       });
       return { ok: true, template };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/agents/from-template", async (request, reply) => {
+    try {
+      const body = requestBody(request.body);
+      const defaultBranch = parseOptionalString(body.defaultBranch ?? body.default_branch) ?? "main";
+      const template = buildAgentTemplate({
+        name: parseString(body.name, "name"),
+        id: parseOptionalString(body.id),
+        description: parseOptionalString(body.description),
+      });
+      const provisionalAgent = {
+        id: template.id,
+        name: template.name,
+        repo_url: `threadbeat-template://${template.id}`,
+        default_branch: defaultBranch,
+        current_ref: defaultBranch,
+      };
+      const dryRun = parseBoolean(body.dryRun ?? body.dry_run, true);
+      const hostedRepo = await hostedGit.createRepository({
+        agent: provisionalAgent,
+        dryRun,
+        repoId: parseOptionalString(body.repoId ?? body.repo_id) ?? template.id,
+      });
+      const initialized = hostedRepo.remoteUrl && !dryRun
+        ? await createInitialCommit({
+          branch: hostedRepo.defaultBranch,
+          commitMessage: parseOptionalString(body.commitMessage ?? body.commit_message) ?? "Initialize Threadbeat agent",
+          files: template.files,
+          remoteUrl: hostedRepo.remoteUrl,
+        })
+        : null;
+      const repoUrl = hostedAgentRepoUrl(hostedRepo);
+      const metadata = getAgentRepositoryMetadata({
+        ...provisionalAgent,
+        repo_url: repoUrl,
+        current_ref: hostedRepo.defaultBranch,
+      });
+      const agent = await db.createAgent({
+        name: template.name,
+        repoUrl,
+        repoWebUrl: metadata.repoWebUrl,
+        defaultBranch: hostedRepo.defaultBranch,
+        currentRef: hostedRepo.defaultBranch,
+        currentCommit: initialized?.commitSha,
+      });
+      const repo = await db.createCodeStorageRepo({
+        agentId: agent.id,
+        codeStorageRepoId: hostedRepo.providerRepoId,
+        organizationName: hostedRepo.namespace,
+        defaultBranch: hostedRepo.defaultBranch,
+        remoteUrlRedacted: hostedRepo.remoteUrlRedacted,
+        sourceProvider: hostedRepo.provider,
+        sourceOwner: hostedGitSourceValue(hostedRepo.source, "owner") ?? hostedRepo.namespace,
+        sourceName: hostedGitSourceValue(hostedRepo.source, "repo") ?? hostedGitSourceValue(hostedRepo.source, "name"),
+        sourceDefaultBranch: hostedGitSourceValue(hostedRepo.source, "defaultBranch") ?? hostedRepo.defaultBranch,
+      });
+      await db.appendMessage({
+        agentId: agent.id,
+        source: "server",
+        type: initialized ? "agent_template_repo_initialized" : "agent_template_repo_planned",
+        text: initialized
+          ? `Initialized hosted agent repo ${hostedRepo.providerRepoId} at ${initialized.commitSha}`
+          : `Planned hosted agent repo ${hostedRepo.providerRepoId} from template`,
+        data: { agent, hostedRepo: { ...hostedRepo, remoteUrl: hostedRepo.remoteUrlRedacted }, template, initialized },
+      });
+      return { ok: true, agent, codeStorageRepo: repo, hostedRepo: { ...hostedRepo, remoteUrl: hostedRepo.remoteUrlRedacted }, initialized, template };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -661,4 +732,22 @@ const codeStorageSourceValue = (source: unknown, key: string): string | undefine
   if (!source || typeof source !== "object") return undefined;
   const value = (source as Record<string, unknown>)[key];
   return typeof value === "string" ? value : undefined;
+};
+
+const hostedGitSourceValue = codeStorageSourceValue;
+
+const hostedAgentRepoUrl = (hostedRepo: {
+  provider: string;
+  namespace: string;
+  providerRepoId: string;
+  remoteUrl: string | null;
+  remoteUrlRedacted: string | null;
+  source: unknown;
+}): string => {
+  const webUrl = hostedGitSourceValue(hostedRepo.source, "webUrl");
+  if (webUrl) return `${webUrl.replace(/\/+$/, "")}.git`;
+  if (hostedRepo.provider === "github") {
+    return `https://github.com/${hostedRepo.namespace}/${hostedRepo.providerRepoId}.git`;
+  }
+  return hostedRepo.remoteUrlRedacted ?? hostedRepo.remoteUrl ?? `${hostedRepo.provider}:${hostedRepo.namespace}/${hostedRepo.providerRepoId}`;
 };

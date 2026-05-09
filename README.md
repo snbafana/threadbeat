@@ -110,6 +110,7 @@ message.
 ```bash
 npm run cli -- health
 npm run cli -- agents template --name research --out ./agents/research
+npm run cli -- agents init --name research --repo-id research-agent
 npm run cli -- agents create --name research --repo https://github.com/org/repo.git --branch main
 npm run cli -- agents list
 npm run cli -- agents repo <agent_id>
@@ -145,6 +146,7 @@ Agent template generation is Pi-native but does not run Pi:
 
 - `POST /api/agent-template` returns a file manifest for a git-backed agent repo.
 - `agents template --name <name> --out <dir>` materializes `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, and `.gitignore`.
+- `POST /api/agents/from-template` and `agents init` create a hosted Git repo record from the template; with `--live`, Threadbeat writes an initial Git commit and pushes it to the hosted remote.
 - Server-side Pi and sandbox-agent Pi remain separate; this only creates the sandbox-agent repo shape.
 
 Run planning is intentionally server-side and Pi-free for now:

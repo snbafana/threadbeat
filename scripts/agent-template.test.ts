@@ -70,6 +70,21 @@ try {
     payload: { name: "" },
   });
   assert.equal(badResponse.statusCode, 400);
+
+  const initResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents/from-template",
+    payload: {
+      name: "Fresh Agent",
+      id: "fresh-agent",
+      repoId: "fresh-agent-repo",
+      dryRun: true,
+    },
+  });
+  assert.equal(initResponse.statusCode, 200);
+  assert.match(initResponse.body, /"repo_url":"https:\/\/t:REDACTED@threadbeat-agent-template-test\.code\.storage\/fresh-agent-repo\.git"/);
+  assert.match(initResponse.body, /"path":"AGENTS.md"/);
+  assert.match(initResponse.body, /"initialized":null/);
 } finally {
   await app.close();
 }

@@ -212,7 +212,9 @@ Good next small durable slices:
 1. Continue agent template phase:
    - Added `POST /api/agent-template` and `agents template --name <name> --out <dir>`.
    - The generated skeleton is Pi-native: `AGENTS.md`, `.pi/prompts`, `.pi/skills`, `.pi/extensions`, `state/`, `tasks/`, `findings/`, `artifacts/`, ignored `work/`.
-   - Next: wire hosted Git repo creation plus an initial template commit so `agents create` can optionally create a fresh git-backed agent body instead of only registering an existing repo.
+   - Added `POST /api/agents/from-template` and `agents init --name <name> --repo-id <repo_id>`.
+   - Added a generic Git initial commit helper that writes the template to a temp repo, commits, and pushes to the hosted remote in live mode.
+   - Next: add a live GitHub smoke for `agents init --live` that creates a temporary private repo, verifies `AGENTS.md`, and deletes the repo.
 
 ## Conceptual Decisions To Preserve
 

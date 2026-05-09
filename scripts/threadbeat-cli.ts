@@ -89,6 +89,19 @@ async function agents(subcommandName?: string, args: string[] = []): Promise<voi
     await printJson({ ok: true, template: { id: template.id, name: template.name }, outDir: path.resolve(outDir), written });
     return;
   }
+  if (subcommandName === "init") {
+    const options = parseOptions(args);
+    await printJson(await requestJson("POST", "/api/agents/from-template", {
+      name: required(options.name, "--name"),
+      ...(options.id ? { id: options.id } : {}),
+      ...(option(options, "repo-id", "repo") ? { repoId: option(options, "repo-id", "repo") } : {}),
+      ...(options.description ? { description: options.description } : {}),
+      ...(options.branch ? { defaultBranch: options.branch } : {}),
+      dryRun: options.live === "1" ? false : true,
+      ...(option(options, "message", "commit-message") ? { commitMessage: option(options, "message", "commit-message") } : {}),
+    }));
+    return;
+  }
   if (subcommandName === "get") {
     const id = args[0];
     if (!id) throw new Error("agents get requires an id");
@@ -481,6 +494,7 @@ function printHelp(): void {
 Commands:
   health
   agents template --name <name> [--id <agent_id>] [--description "..."] [--out ./agent-repo]
+  agents init --name <name> [--id <agent_id>] [--repo-id <repo_id>] [--branch main] [--description "..."] [--live]
   agents create --name <name> --repo <url> [--branch main] [--ref main]
   agents list
   agents get <agent_id>
