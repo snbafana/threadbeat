@@ -1,14 +1,15 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { buildServer } from "../src/server.js";
 import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
-import { cliJson as runCliJson } from "./cli-smoke-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
@@ -16,6 +17,7 @@ import {
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
+const execFileAsync = promisify(execFile);
 const githubOwner = DEFAULT_GITHUB_OWNER;
 const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
 const githubToken = resolveGitHubToken();
@@ -122,5 +124,13 @@ console.log(JSON.stringify({
 }, null, 2));
 
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
-  return runCliJson<T>(baseUrl, args, { maxBuffer: 10 * 1024 * 1024 });
+  const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: {
+      ...process.env,
+      THREADBEAT_BASE_URL: baseUrl,
+    },
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return JSON.parse(stdout) as T;
 }

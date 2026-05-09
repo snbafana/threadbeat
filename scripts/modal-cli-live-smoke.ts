@@ -1,15 +1,18 @@
 import "dotenv/config";
 
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
 import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
-import { cliJson } from "./cli-smoke-utils.js";
+
+const execFileAsync = promisify(execFile);
 
 if (!hasModalCredentials(process.env)) {
   console.log("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
@@ -89,4 +92,12 @@ try {
   }
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
+}
+
+async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
+  const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+  });
+  return JSON.parse(stdout) as T;
 }

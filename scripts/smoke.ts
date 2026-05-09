@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
-import { cliJson, cliRaw } from "./cli-smoke-utils.js";
+
+const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-smoke-"));
 
 const settings: Settings = {
@@ -554,4 +557,16 @@ try {
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
+}
+
+async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
+  const { stdout } = await cliRaw(baseUrl, args);
+  return JSON.parse(stdout) as T;
+}
+
+async function cliRaw(baseUrl: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+  });
 }
