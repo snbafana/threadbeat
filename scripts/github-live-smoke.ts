@@ -7,8 +7,7 @@ import { GitHubHostedGitProvider } from "../src/hostedGit.js";
 import { scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
-  deleteGitHubRepoIfCreated,
-  githubRepoPath,
+  deleteGitHubRepo,
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
@@ -51,9 +50,11 @@ try {
   assert.equal(created.namespace, githubOwner);
   assert.ok(created.remoteUrl?.includes(`github.com/`));
   assert.ok(created.remoteUrlRedacted?.includes("REDACTED"));
-  repoPath = githubRepoPath(created.namespace, created.providerRepoId);
+  repoPath = `${created.namespace}/${created.providerRepoId}`;
 } finally {
-  await deleteGitHubRepoIfCreated(githubToken, repoPath);
+  if (repoPath) {
+    await deleteGitHubRepo(githubToken, repoPath);
+  }
 }
 
 console.log(JSON.stringify({

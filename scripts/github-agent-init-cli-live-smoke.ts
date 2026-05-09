@@ -9,9 +9,8 @@ import { cliJsonLarge as cliJson, stopRunSandboxes } from "./cli-smoke-utils.js"
 import { createScriptTempRoot, removeScriptTempRoot, scriptSettings } from "./settings-utils.js";
 import {
   assertCanCleanUpSmokeRepo,
-  deleteGitHubRepoIfCreated,
+  deleteGitHubRepo,
   getGitHubFile,
-  githubRepoPath,
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
@@ -66,7 +65,7 @@ try {
   assert.match(initialized.agent.repo_url, new RegExp(`github.com/${githubOwner}/${repoId}\\.git`));
   assert.match(initialized.initialized?.commitSha ?? "", /^[a-f0-9]{40}$/);
   assert.ok(initialized.initialized?.filesWritten.includes("AGENTS.md"));
-  repoPath = githubRepoPath(githubOwner, repoId);
+  repoPath = `${githubOwner}/${repoId}`;
 
   const agentsMd = await getGitHubFile(githubToken, repoPath, "AGENTS.md");
   assert.match(agentsMd, /GitHub Agent Init CLI Smoke/);
@@ -103,7 +102,9 @@ try {
 } finally {
   await app.close();
   await removeScriptTempRoot(tempRoot);
-  await deleteGitHubRepoIfCreated(githubToken, repoPath);
+  if (repoPath) {
+    await deleteGitHubRepo(githubToken, repoPath);
+  }
 }
 
 console.log(JSON.stringify({
