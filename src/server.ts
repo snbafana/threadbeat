@@ -221,7 +221,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   const resolveCloneUrl = async (
     agentId: string,
     baseRef: string,
-  ): Promise<{ baseRef: string; repoUrl?: string; repoUrlRedacted?: string }> => {
+  ): Promise<{ baseRef: string; pushRef?: boolean; repoUrl?: string; repoUrlRedacted?: string }> => {
     const repo = await db.getCodeStorageRepoForAgent(agentId);
     if (!repo) return { baseRef };
     const cloneUrl = await hostedGit.getCloneUrl({
@@ -230,6 +230,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     });
     return {
       baseRef,
+      pushRef: true,
       repoUrl: cloneUrl.remoteUrl,
       repoUrlRedacted: cloneUrl.remoteUrlRedacted,
     };

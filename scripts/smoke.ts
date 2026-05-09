@@ -306,6 +306,7 @@ try {
   assert.ok(hostedRunMessages.messages.some((message) => message.type === "bootstrap_completed"));
   assert.ok(hostedRunMessages.messages.some((message) => message.text?.includes("threadbeat-smoke.code.storage")));
   assert.ok(hostedRunMessages.messages.some((message) => message.text?.includes("checkout -B")));
+  assert.ok(hostedRunMessages.messages.some((message) => message.text?.includes("push -u origin HEAD:threadbeat/runs/")));
   assert.ok(hostedRunMessages.messages.every((message) => !message.text?.includes("DRY_RUN_TOKEN")));
   assert.ok(hostedRunMessages.messages.every((message) => !message.data_json?.includes("DRY_RUN_TOKEN")));
 

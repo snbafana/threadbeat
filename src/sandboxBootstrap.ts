@@ -1,5 +1,6 @@
 export type SandboxBootstrapInput = {
   baseRef?: string;
+  pushRef?: boolean;
   repoUrl: string;
   ref: string;
   workdir: string;
@@ -30,6 +31,7 @@ export const buildSandboxBootstrapCommands = (input: SandboxBootstrapInput): str
   const repoUrl = requireNonEmpty(input.repoUrl, "repoUrl");
   const ref = requireCheckoutRef(input.ref);
   const baseRef = input.baseRef === undefined ? undefined : requireCheckoutRef(input.baseRef);
+  const pushRef = input.pushRef === true;
   const workdir = requireAbsoluteWorkdir(input.workdir);
   const parentDir = parentDirectory(workdir);
   const checkoutCommand = baseRef
@@ -40,13 +42,15 @@ export const buildSandboxBootstrapCommands = (input: SandboxBootstrapInput): str
     ]
     : ["git", "-C", workdir, "checkout", ref];
 
-  return [
+  const commands = [
     ["mkdir", "-p", parentDir],
     ["sh", "-lc", "command -v git >/dev/null || (apt-get update && apt-get install -y git)"],
     ["git", "clone", "--", repoUrl, workdir],
     checkoutCommand,
     ["git", "-C", workdir, "status", "--short", "--branch"],
   ];
+  if (pushRef) commands.push(["git", "-C", workdir, "push", "-u", "origin", `HEAD:${ref}`]);
+  return commands;
 };
 
 export const bootstrapSandbox = async (

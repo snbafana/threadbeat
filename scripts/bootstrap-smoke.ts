@@ -68,6 +68,7 @@ try {
   assert.deepEqual(
     buildSandboxBootstrapCommands({
       baseRef: "main",
+      pushRef: true,
       ref: "threadbeat/runs/test",
       repoUrl: "https://github.com/example/agent.git",
       workdir: "/workspace/agent",
@@ -78,6 +79,7 @@ try {
       "git clone -- https://github.com/example/agent.git /workspace/agent",
       "sh -lc git -C '/workspace/agent' checkout 'threadbeat/runs/test' || git -C '/workspace/agent' checkout -B 'threadbeat/runs/test' 'main'",
       "git -C /workspace/agent status --short --branch",
+      "git -C /workspace/agent push -u origin HEAD:threadbeat/runs/test",
     ],
   );
 } finally {
