@@ -914,6 +914,22 @@ try {
   assert.ok(watchedWorkerStatus.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id && agent.total >= workerGroupQueue.queued.length
   )));
+  const detachedWorkerLogs = await cliJson<{
+    session: string;
+    workers: Array<{
+      workerId: string;
+      alive: boolean;
+      stdout: { path: string; lines: string[] };
+      stderr: { path: string; lines: string[] };
+    }>;
+  }>(baseUrl, ["runs", "session-logs", detachedWorkerSessionName, "--lines", "5"]);
+  assert.equal(detachedWorkerLogs.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerLogs.workers[0].workerId, "smoke-detached-worker-1");
+  assert.equal(detachedWorkerLogs.workers[0].alive, true);
+  assert.match(detachedWorkerLogs.workers[0].stdout.path, /worker-sessions/);
+  assert.match(detachedWorkerLogs.workers[0].stderr.path, /worker-sessions/);
+  assert.ok(Array.isArray(detachedWorkerLogs.workers[0].stdout.lines));
+  assert.ok(Array.isArray(detachedWorkerLogs.workers[0].stderr.lines));
   const stoppedWorkerSession = await cliJson<{
     session: string;
     stopped: Array<{ workerId: string; pid: number | null; stopped: boolean }>;

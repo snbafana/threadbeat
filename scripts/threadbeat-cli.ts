@@ -372,6 +372,29 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await sleep(intervalMs);
     }
   }
+  if (subcommandName === "session-logs") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const session = await readWorkerSession(required(sessionName, "runs session-logs <session>"));
+    const lines = parsePositiveInteger(options.lines ?? "80", "--lines");
+    await printJson({
+      session: session.session,
+      workers: await Promise.all(session.workers.map(async (worker) => ({
+        workerId: worker.workerId,
+        pid: worker.pid,
+        alive: processIsAlive(worker.pid),
+        stdout: {
+          path: worker.stdoutPath,
+          lines: await tailFileLines(worker.stdoutPath, lines),
+        },
+        stderr: {
+          path: worker.stderrPath,
+          lines: await tailFileLines(worker.stderrPath, lines),
+        },
+      }))),
+    });
+    return;
+  }
   if (subcommandName === "stop-session") {
     const sessionName = required(args[0], "runs stop-session <session>");
     const session = await readWorkerSession(sessionName);
@@ -1041,6 +1064,18 @@ async function writeWorkerSession(session: WorkerSession): Promise<void> {
   await fs.writeFile(workerSessionPath(session.session), `${JSON.stringify(session, null, 2)}\n`);
 }
 
+async function tailFileLines(filePath: string, lineCount: number): Promise<string[]> {
+  try {
+    const text = await fs.readFile(filePath, "utf8");
+    const lines = text.split(/\r?\n/);
+    if (lines.at(-1) === "") lines.pop();
+    return lines.slice(-lineCount);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 function workerSessionPath(sessionName: string): string {
   assertSafeSessionName(sessionName);
   return path.join(workerSessionDir, `${sessionName}.json`);
@@ -1200,6 +1235,7 @@ Commands:
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running]
   runs session-watch <name> [--status planned,running] [--interval-ms 2000] [--max-polls 10]
+  runs session-logs <name> [--lines 80]
   runs stop-session <name>
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
