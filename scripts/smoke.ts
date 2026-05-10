@@ -1353,6 +1353,12 @@ try {
       resultCommit: string | null;
       workerId: string | null;
       location: string;
+      commands: {
+        checkoutBranch: string[];
+        resumeBranch: string[];
+        resumeSession: string[] | null;
+        checkoutSession: string[] | null;
+      };
     }>;
     recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; skipped?: string }>;
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
@@ -1375,6 +1381,9 @@ try {
     && run.resultCommit === null
     && run.workerId === null
     && run.location === "unassigned"
+    && run.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && run.commands.resumeSession?.join(" ") === `npm run cli -- runs resume-session ${detachedWorkerSessionName}`
+    && run.commands.checkoutSession?.join(" ") === `npm run cli -- runs checkout-session ${detachedWorkerSessionName} --dir ./checkouts/${detachedWorkerSessionName}-resumable --resumable`
   )));
   assert.equal(detachedWorkerReview.logs[0].workerId, "smoke-detached-worker-1");
   assert.equal(detachedWorkerReview.logs[0].alive, true);

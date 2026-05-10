@@ -866,7 +866,43 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             location: "other_worker",
           })),
       ]),
-    ];
+    ].map((run) => {
+      const checkoutDir = `./checkouts/${status.session.session}-resumable`;
+      return {
+        ...run,
+        commands: {
+          checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.runId, "--dir", `${checkoutDir}/${run.runId}`],
+          resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.runId],
+          resumeSession: run.location === "other_worker"
+            ? null
+            : [
+              "npm",
+              "run",
+              "cli",
+              "--",
+              "runs",
+              "resume-session",
+              status.session.session,
+              ...(run.workerId ? ["--worker-id", run.workerId] : []),
+            ],
+          checkoutSession: run.location === "other_worker"
+            ? null
+            : [
+              "npm",
+              "run",
+              "cli",
+              "--",
+              "runs",
+              "checkout-session",
+              status.session.session,
+              "--dir",
+              checkoutDir,
+              "--resumable",
+              ...(run.workerId ? ["--worker-id", run.workerId] : []),
+            ],
+        },
+      };
+    });
     const agentIds = workerSessionAgentIds(status.session);
     const recoveryPreview = await recoverStaleRuns(
       agentIds,
