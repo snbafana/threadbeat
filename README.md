@@ -180,6 +180,7 @@ npm run cli -- agents create --name research --repo https://github.com/org/repo.
 npm run cli -- agents list
 npm run cli -- agents repo <agent>
 npm run cli -- runs plan --agent <agent> --objective "one bounded task"
+npm run cli -- runs queue --agents <agent>,<agent> --objective "one bounded task"
 npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt
 npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt --assignment round-robin
 npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt --assignment round-robin --dry-run
@@ -223,6 +224,7 @@ npm run cli -- runs resume-session overnight --worker-id worker-a --dry-run
 npm run cli -- runs stop-session overnight --recover
 npm run cli -- runs restart-session overnight --recover
 npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover --include-stopped
+npm run cli -- runs dispatch --agents <agent>,<agent> --objective "one bounded task" --session overnight --workers 3 --boot --recover
 npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.txt --session overnight --workers 3 --boot --recover --include-stopped
 npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 3 --boot --recover
 npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 3 --dry-run
@@ -294,18 +296,20 @@ Run planning is intentionally server-side and Pi-free for now:
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.
-- `runs queue --objectives-file <file>` creates planned runs from a newline
-  separated task file for one or more agents. Blank lines and `#` comments are
-  ignored; workers can then drain the backlog with `runs work --loop --recover`.
-  The default assignment is `fanout`, which gives every listed agent every
-  objective. Use `--assignment round-robin` to split the file across agents.
-  Add `--dry-run` to preview the assignment without creating run branches.
-- `runs dispatch --objectives-file <file> --session <name>` queues the file
+- `runs queue --objective "task"` creates planned runs from an inline task for
+  one or more agents. Use `--objectives-file <file>` for a newline separated
+  task file. Blank lines and `#` comments are ignored; workers can then drain
+  the backlog with `runs work --loop --recover`. The default assignment is
+  `fanout`, which gives every listed agent every objective. Use
+  `--assignment round-robin` to split the tasks across agents. Add `--dry-run`
+  to preview the assignment without creating run branches.
+- `runs dispatch --objective "task" --session <name>` queues an inline task
   across agents and starts a detached worker session in one command, leaving
   branch state visible through `runs monitor`, `runs branches`, and
-  `runs checkout`. It uses the same `--assignment fanout|round-robin` behavior
-  as `runs queue`; add `--dry-run` to preview assigned objectives and the worker
-  command without creating runs or starting workers.
+  `runs checkout`. Use `--objectives-file` for a file-backed batch. It uses the
+  same `--assignment fanout|round-robin` behavior as `runs queue`; add
+  `--dry-run` to preview assigned objectives and the worker command without
+  creating runs or starting workers.
 - `POST /api/runs/:id/requeue` moves an unfinished run with no running sandbox
   back to `planned`, which lets an operator recover a worker that claimed a run
   and exited before starting the sandbox.

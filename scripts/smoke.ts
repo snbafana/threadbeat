@@ -1029,6 +1029,23 @@ try {
     queueAgentBody.agent.id,
   ]);
   assert.ok(roundRobinQueued.queued.every((item) => item.run.status === "planned"));
+  const inlineQueued = await cliJson<{
+    assignment: string;
+    queued: Array<{ agentId: string; objective: string; run: { status: string } }>;
+  }>(baseUrl, [
+    "runs",
+    "queue",
+    "--agents",
+    `${queueAgentBody.agent.id},${queuePeerBody.agent.id}`,
+    "--objective",
+    "inline queue objective",
+    "--assignment",
+    "round-robin",
+  ]);
+  assert.equal(inlineQueued.assignment, "round-robin");
+  assert.deepEqual(inlineQueued.queued.map((item) => item.objective), ["inline queue objective"]);
+  assert.deepEqual(inlineQueued.queued.map((item) => item.agentId), [queueAgentBody.agent.id]);
+  assert.ok(inlineQueued.queued.every((item) => item.run.status === "planned"));
 
   const drainAgentResponse = await app.inject({
     method: "POST",
@@ -1774,6 +1791,34 @@ try {
   assert.equal(dispatchPreview.session.session, dispatchSessionName);
   assert.equal(dispatchPreview.session.workerCount, 1);
   assert.ok(dispatchPreview.session.command.includes("--loop"));
+  const inlineDispatchPreview = await cliJson<{
+    assignment: string;
+    dryRun: boolean;
+    planned: Array<{ agentId: string; objective: string }>;
+    session: { session: string; workerCount: number; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "dispatch",
+    "--agents",
+    `${dispatchAgentBody.agent.id},${dispatchPeerBody.agent.id}`,
+    "--objective",
+    "inline dispatch objective",
+    "--assignment",
+    "round-robin",
+    "--session",
+    `${dispatchSessionName}-inline-preview`,
+    "--workers",
+    "2",
+    "--dry-run",
+  ]);
+  assert.equal(inlineDispatchPreview.assignment, "round-robin");
+  assert.equal(inlineDispatchPreview.dryRun, true);
+  assert.deepEqual(inlineDispatchPreview.planned, [{
+    agentId: dispatchAgentBody.agent.id,
+    objective: "inline dispatch objective",
+  }]);
+  assert.equal(inlineDispatchPreview.session.session, `${dispatchSessionName}-inline-preview`);
+  assert.equal(inlineDispatchPreview.session.workerCount, 2);
   const dispatched = await cliJson<{
     assignment: string;
     queued: Array<{ agentId: string; objective: string; run: { id: string; status: string } }>;

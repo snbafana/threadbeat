@@ -741,7 +741,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "dispatch") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
-    const objectives = await readObjectivesFile(required(options["objectives-file"], "--objectives-file"));
+    const objectives = await readObjectivesInput(options);
     const queueConcurrency = parsePositiveInteger(options["queue-concurrency"] ?? options.concurrency ?? "4", "--queue-concurrency");
     const workerCount = parsePositiveInteger(options.workers ?? "1", "--workers");
     const workerPrefix = options["worker-prefix"] ?? "worker";
@@ -1383,7 +1383,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "queue") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
-    const objectives = await readObjectivesFile(required(options["objectives-file"], "--objectives-file"));
+    const objectives = await readObjectivesInput(options);
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
     const assignment = options.assignment ?? "fanout";
     const queueItems = assignObjectives(agentIds, objectives, assignment);
@@ -2376,13 +2376,24 @@ async function planRunForStep(options: Record<string, string>): Promise<string> 
   return run.id;
 }
 
+async function readObjectivesInput(options: Record<string, string>): Promise<string[]> {
+  if (options["objectives-file"] && options.objective) {
+    throw new Error("use either --objectives-file or --objective, not both");
+  }
+  if (options.objective) return parseObjectivesText(options.objective, "--objective");
+  return await readObjectivesFile(required(options["objectives-file"], "--objectives-file or --objective"));
+}
+
 async function readObjectivesFile(filePath: string): Promise<string[]> {
-  const text = await fs.readFile(filePath, "utf8");
+  return parseObjectivesText(await fs.readFile(filePath, "utf8"), "--objectives-file");
+}
+
+function parseObjectivesText(text: string, source: string): string[] {
   const objectives = text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line !== "" && !line.startsWith("#"));
-  if (objectives.length === 0) throw new Error("--objectives-file did not contain any objectives");
+  if (objectives.length === 0) throw new Error(`${source} did not contain any objectives`);
   return objectives;
 }
 
@@ -2515,9 +2526,9 @@ Commands:
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty]
-  runs dispatch --agents <agent,agent> --objectives-file ./tasks.txt --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped]
+  runs dispatch --agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
-  runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--assignment fanout|round-robin] [--dry-run] [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
+  runs queue --agent <agent>|--agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") [--assignment fanout|round-robin] [--dry-run] [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--resume-stopped] [--worker-id worker-a] [--loop|--until-empty] [--limit 10] [--concurrency 2]
   runs work --agent <agent>|--agents <agent,agent> --workers 3 [--worker-prefix worker] [--until-empty] [--limit 10]
