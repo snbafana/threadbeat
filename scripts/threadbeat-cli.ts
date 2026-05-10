@@ -2,6 +2,7 @@ import "dotenv/config";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { deriveGitHubLinks } from "../src/gitLinks.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
@@ -227,6 +228,69 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const params = new URLSearchParams();
     if (options.limit) params.set("limit", options.limit);
     await printJson(await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)));
+    return;
+  }
+  if (subcommandName === "inspect") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs inspect requires a run id");
+    const options = parseOptions(optionArgs);
+    const params = new URLSearchParams();
+    params.set("limit", options.limit ?? "10");
+    const status = await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)) as {
+      run: {
+        id: string;
+        agent_id: string;
+        objective: string;
+        input_ref: string;
+        run_branch: string;
+        result_commit: string | null;
+        status: string;
+        worker_id: string | null;
+      };
+      sandboxes: Array<{ id: string; state: string; provider_sandbox_id: string | null }>;
+      messages: Array<{ id: string; type: string; text: string }>;
+    };
+    const repository = await requestJson("GET", `/api/agents/${encodeURIComponent(status.run.agent_id)}/repository`) as {
+      repository: { repoUrl: string; repoWebUrl: string | null };
+    };
+    const branchLinks = deriveGitHubLinks(repository.repository.repoUrl, {
+      compareBaseRef: status.run.input_ref,
+      compareHeadRef: status.run.run_branch,
+      treeRef: status.run.run_branch,
+    });
+    const resultLinks = deriveGitHubLinks(repository.repository.repoUrl, {
+      commitRef: status.run.result_commit,
+      compareBaseRef: status.run.input_ref,
+      compareHeadRef: status.run.result_commit,
+      treeRef: status.run.result_commit,
+    });
+    await printJson({
+      run: {
+        id: status.run.id,
+        agentId: status.run.agent_id,
+        status: status.run.status,
+        objective: status.run.objective,
+        baseRef: status.run.input_ref,
+        branchName: status.run.run_branch,
+        resultCommit: status.run.result_commit,
+        workerId: status.run.worker_id,
+      },
+      repository: repository.repository,
+      links: {
+        repoUrl: branchLinks.repoUrl,
+        branchTreeUrl: branchLinks.treeUrl,
+        branchCompareUrl: branchLinks.compareUrl,
+        resultTreeUrl: resultLinks.treeUrl,
+        resultCommitUrl: resultLinks.commitUrl,
+        resultCompareUrl: resultLinks.compareUrl,
+      },
+      sandboxes: status.sandboxes.map((sandbox) => ({
+        id: sandbox.id,
+        state: sandbox.state,
+        providerSandboxId: sandbox.provider_sandbox_id,
+      })),
+      messages: status.messages,
+    });
     return;
   }
   if (subcommandName === "claim") {
@@ -1243,6 +1307,7 @@ Commands:
   runs list --agent <agent>
   runs get <run>
   runs status <run> [--limit 20]
+  runs inspect <run> [--limit 10]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
   runs recover --agent <agent>|--agents <agent,agent> [--worker-id worker-a] [--concurrency 4]

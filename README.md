@@ -158,6 +158,7 @@ npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix wo
 npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix worker --detach --session overnight --loop --recover
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
+npm run cli -- runs inspect <run>
 npm run cli -- runs claim <run> --worker-id worker-a
 npm run cli -- runs requeue <run> --worker-id worker-a
 npm run cli -- runs recover --agents <agent>,<agent> --worker-id worker-a
@@ -206,6 +207,8 @@ Run planning is intentionally server-side and Pi-free for now:
 - `GET /api/agents/:id/runs` lists planned/completed runs for an agent.
 - `GET /api/runs/:id` reads one run record.
 - `GET /api/runs/:id/status` reads one run with sandboxes and messages.
+- `runs inspect <run>` combines run state, branch/base refs, result commit,
+  GitHub links, sandbox states, and recent messages for branch-native review.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.

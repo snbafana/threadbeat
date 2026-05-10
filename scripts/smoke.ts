@@ -1110,6 +1110,34 @@ try {
   assert.equal(finalizedRunGet.run.status, "completed");
   assert.equal(finalizedRunGet.run.result_commit, cliRunFinalize.result.commitSha);
 
+  const inspectedRun = await cliJson<{
+    run: {
+      id: string;
+      status: string;
+      branchName: string;
+      resultCommit: string;
+    };
+    links: {
+      branchTreeUrl: string | null;
+      resultCommitUrl: string | null;
+      resultTreeUrl: string | null;
+    };
+    sandboxes: Array<{ state: string }>;
+    messages: Array<{ type: string }>;
+  }>(baseUrl, [
+    "runs",
+    "inspect",
+    cliRunPlan.run.id,
+  ]);
+  assert.equal(inspectedRun.run.status, "completed");
+  assert.equal(inspectedRun.run.resultCommit, cliRunFinalize.result.commitSha);
+  assert.match(inspectedRun.run.branchName, /^threadbeat\/runs\//);
+  assert.match(inspectedRun.links.branchTreeUrl ?? "", /github\.com\/example\/agent\/tree\/threadbeat\/runs\//);
+  assert.match(inspectedRun.links.resultCommitUrl ?? "", new RegExp(`github\\.com/example/agent/commit/${cliRunFinalize.result.commitSha}`));
+  assert.match(inspectedRun.links.resultTreeUrl ?? "", new RegExp(`github\\.com/example/agent/tree/${cliRunFinalize.result.commitSha}`));
+  assert.ok(inspectedRun.sandboxes.some((sandbox) => sandbox.state === "running"));
+  assert.ok(inspectedRun.messages.length > 0);
+
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",
