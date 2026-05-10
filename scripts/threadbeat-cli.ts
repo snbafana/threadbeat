@@ -267,6 +267,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       treeRef: status.run.result_commit,
     });
     const checkoutDir = options["checkout-dir"] ?? `./checkouts/${status.run.id}`;
+    const checkout = options.checkout === "1"
+      ? await checkoutRunBranch(status.run.id, path.resolve(checkoutDir))
+      : null;
     await printJson({
       run: {
         id: status.run.id,
@@ -300,6 +303,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         providerSandboxId: sandbox.provider_sandbox_id,
       })),
       messages: status.messages,
+      ...(checkout ? {
+        checkout: checkout.checkout,
+        review: checkout.review,
+      } : {}),
     });
     return;
   }
@@ -1725,7 +1732,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -2442,7 +2449,7 @@ Commands:
   runs list --agent <agent> [--status planned,running,completed,stopped,failed]
   runs get <run>
   runs status <run> [--limit 20]
-  runs inspect <run> [--limit 10]
+  runs inspect <run> [--limit 10] [--checkout] [--checkout-dir ./checkouts/run]
   runs checkout <run> --dir ./checkouts/run
   runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--resumable] [--worker-id worker-a] [--concurrency 2]
   runs claim <run> [--worker-id worker-a]

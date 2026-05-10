@@ -2242,6 +2242,29 @@ try {
     commit.sha === expectedCheckoutHead && commit.subject === "Write branch report"
   )));
   assert.equal(await fs.readFile(path.join(checkoutDir, "report.md"), "utf8"), "branch report\n");
+  const inspectCheckoutDir = path.join(tempRoot, "inspect-checkout");
+  const inspectedCheckoutRun = await cliJson<{
+    run: { id: string; branchName: string; resultCommit: string | null };
+    checkout: { dir: string; headCommit: string; matchesResultCommit: boolean | null };
+    review: { changedFiles: Array<{ status: string; path: string }>; commits: Array<{ sha: string; subject: string }> };
+  }>(baseUrl, [
+    "runs",
+    "inspect",
+    checkoutPlan.run.id,
+    "--checkout",
+    "--checkout-dir",
+    inspectCheckoutDir,
+  ]);
+  assert.equal(inspectedCheckoutRun.run.branchName, checkoutPlan.plan.branchName);
+  assert.equal(inspectedCheckoutRun.run.resultCommit, null);
+  assert.equal(inspectedCheckoutRun.checkout.dir, inspectCheckoutDir);
+  assert.equal(inspectedCheckoutRun.checkout.headCommit, expectedCheckoutHead);
+  assert.equal(inspectedCheckoutRun.checkout.matchesResultCommit, null);
+  assert.deepEqual(inspectedCheckoutRun.review.changedFiles, [{ status: "A", path: "report.md" }]);
+  assert.ok(inspectedCheckoutRun.review.commits.some((commit) => (
+    commit.sha === expectedCheckoutHead && commit.subject === "Write branch report"
+  )));
+  assert.equal(await fs.readFile(path.join(inspectCheckoutDir, "report.md"), "utf8"), "branch report\n");
   await cliJson(baseUrl, ["runs", "stop", checkoutPlan.run.id]);
   const checkoutSessionName = `checkout-session-${process.pid}`;
   await fs.mkdir(path.join(".threadbeat", "worker-sessions"), { recursive: true });

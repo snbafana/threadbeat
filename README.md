@@ -190,6 +190,7 @@ npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix wo
 npm run cli -- runs list --agent <agent> [--status planned,running,completed,stopped,failed]
 npm run cli -- runs status <run>
 npm run cli -- runs inspect <run>
+npm run cli -- runs inspect <run> --checkout --checkout-dir ./checkouts/<run>
 npm run cli -- runs checkout <run> --dir ./checkouts/<run>
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight-resume --resumable --worker-id worker-a
@@ -264,8 +265,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `GET /api/runs/:id/status` reads one run with sandboxes and messages.
 - `runs inspect <run>` combines run state, branch/base refs, result commit,
   GitHub links, sandbox states, recent messages, and concrete checkout/watch
-  commands for branch-native review. Add `--checkout-dir <path>` to change the
-  suggested checkout command.
+  commands for branch-native review. Add `--checkout --checkout-dir <path>` to
+  clone or refresh the run branch and include changed files/commits in the same
+  payload.
 - `runs checkout <run> --dir <path>` clones or refreshes the run branch into a
   local Git checkout and reports base/head commits, commits ahead, and changed
   files so the branch state can be reviewed directly.
