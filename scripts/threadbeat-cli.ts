@@ -247,6 +247,42 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await sleep(intervalMs);
     }
   }
+  if (subcommandName === "monitor") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+    for (let poll = 0; poll < maxPolls; poll += 1) {
+      const agents = [];
+      for (const agentId of agentIds) {
+        const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+          runs: Array<{ id: string; status: string }>;
+        };
+        const runs = await mapConcurrent(listed.runs, 4, async (run) => {
+          const params = new URLSearchParams();
+          params.set("limit", options.limit ?? "3");
+          const status = await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(run.id)}/status`, params)) as {
+            run: { id: string; status: string };
+            sandboxes: Array<{ state: string }>;
+            messages: Array<{ type: string; text: string }>;
+          };
+          return {
+            id: status.run.id,
+            status: status.run.status,
+            sandboxes: status.sandboxes.map((sandbox) => sandbox.state),
+            messages: status.messages.map((message) => ({
+              type: message.type,
+              text: message.text,
+            })),
+          };
+        });
+        agents.push({ agentId, runs });
+      }
+      console.log(JSON.stringify({ agents }));
+      if (poll + 1 < maxPolls) await sleep(intervalMs);
+    }
+    return;
+  }
   if (subcommandName === "plan") {
     const options = parseOptions(args);
     const agentId = required(options.agent, "--agent");
@@ -653,6 +689,7 @@ Commands:
   runs get <run>
   runs status <run> [--limit 20]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
+  runs monitor --agent <agent>|--agents <agent,agent> [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--loop] [--limit 10] [--concurrency 2]

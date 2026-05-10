@@ -441,6 +441,27 @@ try {
     "--objective",
     "cli worker run b",
   ]);
+  const cliMonitor = await cliRaw(baseUrl, [
+    "runs",
+    "monitor",
+    "--agents",
+    `${workerAgentBody.agent.id},${launchAgentBody.agent.id}`,
+    "--limit",
+    "2",
+  ]);
+  const monitored = JSON.parse(cliMonitor.stdout.trim()) as {
+    agents: Array<{
+      agentId: string;
+      runs: Array<{ id: string; status: string; messages: Array<{ type: string }> }>;
+    }>;
+  };
+  assert.deepEqual(
+    monitored.agents.map((agent) => agent.agentId).sort(),
+    [workerAgentBody.agent.id, launchAgentBody.agent.id].sort(),
+  );
+  assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id && run.status === "planned")));
+  assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id && run.messages.some((message) => message.type === "agent_run_planned"))));
+
   const cliWorker = await cliJson<{
     processed: Array<{
       runId: string;

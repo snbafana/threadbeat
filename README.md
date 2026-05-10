@@ -156,6 +156,7 @@ npm run cli -- runs work --agent <agent> --bootstrap --check-runtime
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
 npm run cli -- runs watch <run>
+npm run cli -- runs monitor --agents <agent>,<agent>
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
 npm run cli -- runs sandbox <run> [--bootstrap]
 npm run cli -- runs restart-sandbox <run> [--bootstrap]
@@ -210,8 +211,9 @@ orchestration over the existing run APIs. `runs launch` creates and starts
 multiple runs immediately. `runs work` drains already planned runs for one or
 more agents, with optional `--loop` polling for longer CLI worker sessions.
 `runs watch` polls one run's status and messages until it completes, fails, or
-stops. `runs step` executes one explicit shell command and can optionally
-finalize the run branch.
+stops. `runs monitor` snapshots all runs for one or more agents, including
+sandbox states and recent message types/text. `runs step` executes one explicit
+shell command and can optionally finalize the run branch.
 
 ## Phases
 
