@@ -563,6 +563,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       concurrency,
       undefined,
       options["include-stopped"] === "1",
+      options["dry-run"] === "1",
     );
     await printJson({ recovered: recovered.map(({ run: _run, ...item }) => item) });
     return;
@@ -1467,6 +1468,8 @@ type RecoverStaleRunResult = {
   agentId: string;
   runId: string;
   status?: string;
+  currentStatus?: string;
+  dryRun?: boolean;
   skipped?: string;
   run?: { id: string; agent_id: string; status: string };
 };
@@ -1477,6 +1480,7 @@ async function recoverStaleRuns(
   concurrency: number,
   workerIds?: Set<string>,
   includeStopped = false,
+  dryRun = false,
 ): Promise<RecoverStaleRunResult[]> {
   const candidateStatuses = includeStopped ? "running,stopped" : "running";
   const candidateRuns: Array<{
@@ -1510,6 +1514,9 @@ async function recoverStaleRuns(
     };
     if (status.sandboxes.some((sandbox) => sandbox.state === "running")) {
       return { agentId: run.agent_id, runId: run.id, skipped: "run has a running sandbox" };
+    }
+    if (dryRun) {
+      return { agentId: run.agent_id, runId: run.id, currentStatus: run.status, dryRun: true };
     }
     const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, workerPayload, [409]) as {
       run?: { id: string; agent_id: string; status: string };
@@ -1870,7 +1877,7 @@ Commands:
   runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--concurrency 2]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
-  runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--worker-id worker-a] [--concurrency 4]
+  runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--dry-run] [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped]

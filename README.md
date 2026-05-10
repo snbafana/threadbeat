@@ -192,6 +192,7 @@ npm run cli -- runs checkout <run> --dir ./checkouts/<run>
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
 npm run cli -- runs claim <run> --worker-id worker-a
 npm run cli -- runs requeue <run> --worker-id worker-a
+npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --dry-run
 npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --worker-id worker-a
 npm run cli -- runs watch <run>
 npm run cli -- runs backlog --agents <agent>,<agent>
@@ -293,10 +294,11 @@ The `runs launch`, `runs work`, and `runs step` CLI commands are client-side
 orchestration over the existing run APIs. `runs launch` creates and starts
 multiple runs immediately. `runs recover` requeues `running` runs that no longer
 have a running sandbox, so an operator can make orphaned claims available before
-starting workers again. Add `--include-stopped` to also requeue stopped branch
-runs that have no result commit before restarting a worker fleet. `runs
-supervise` snapshots backlog, optionally recovers orphaned claims, and starts a
-named detached worker session for one or more agents. `runs work` drains
+starting workers again. Add `--dry-run` to preview recoverable runs without
+changing their state. Add `--include-stopped` to also requeue stopped branch runs
+that have no result commit before restarting a worker fleet. `runs supervise`
+snapshots backlog, optionally recovers orphaned claims, and starts a named
+detached worker session for one or more agents. `runs work` drains
 already planned runs for one or more agents. Use `--until-empty` to keep
 claiming batches until the queue is idle, or `--loop` to poll for longer CLI
 worker sessions. Add `--recover` to

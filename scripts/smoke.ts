@@ -465,6 +465,33 @@ try {
     "--worker-id",
     "smoke-orphaned-worker",
   ]);
+  const recoverPreview = await cliJson<{
+    recovered: Array<{
+      agentId: string;
+      runId: string;
+      currentStatus?: string;
+      dryRun?: boolean;
+      skipped?: string;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "recover",
+    "--agent",
+    agentBody.agent.id,
+    "--dry-run",
+  ]);
+  assert.ok(recoverPreview.recovered.some((run) => (
+    run.agentId === agentBody.agent.id
+      && run.runId === recoverCommandPlan.run.id
+      && run.currentStatus === "running"
+      && run.dryRun === true
+  )));
+  const previewedRun = await cliJson<{ run: { id: string; status: string } }>(baseUrl, [
+    "runs",
+    "get",
+    recoverCommandPlan.run.id,
+  ]);
+  assert.equal(previewedRun.run.status, "running");
   const recoveredCommand = await cliJson<{
     recovered: Array<{ agentId: string; runId: string; status?: string; skipped?: string }>;
   }>(baseUrl, [
