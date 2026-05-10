@@ -235,6 +235,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.post("/api/runs/:id/claim", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const workerId = parseOptionalString(requestBody(request.body).workerId);
     const run = await db.claimAgentRun(id);
     if (!run) {
       const existing = await db.getAgentRun(id);
@@ -245,13 +246,14 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       agentId: run.agent_id,
       runId: run.id,
       type: "agent_run_claimed",
-      text: "Claimed run",
+      text: workerId ? `Claimed run by ${workerId}` : "Claimed run",
     });
     return { ok: true, run };
   });
 
   app.post("/api/runs/:id/requeue", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const workerId = parseOptionalString(requestBody(request.body).workerId);
     const existing = await db.getAgentRun(id);
     if (!existing) return reply.code(404).send({ ok: false, error: "run not found" });
     if (existing.status === "completed") {
@@ -268,7 +270,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       agentId: run.agent_id,
       runId: run.id,
       type: "agent_run_requeued",
-      text: "Requeued run",
+      text: workerId ? `Requeued run by ${workerId}` : "Requeued run",
     });
     return { ok: true, run };
   });

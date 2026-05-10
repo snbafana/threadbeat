@@ -228,15 +228,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     return;
   }
   if (subcommandName === "claim") {
-    const id = args[0];
+    const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs claim requires a run id");
-    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/claim`));
+    const options = parseOptions(optionArgs);
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/claim`, {
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+    }));
     return;
   }
   if (subcommandName === "requeue") {
-    const id = args[0];
+    const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs requeue requires a run id");
-    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/requeue`));
+    const options = parseOptions(optionArgs);
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/requeue`, {
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+    }));
     return;
   }
   if (subcommandName === "watch") {
@@ -374,6 +380,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const limit = parsePositiveInteger(options.limit ?? "10", "--limit");
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "5000", "--interval-ms");
     const idleExitAfter = parsePositiveInteger(options["idle-exit-after"] ?? "1", "--idle-exit-after");
+    const workerPayload = options["worker-id"] ? { workerId: options["worker-id"] } : undefined;
     const processed: unknown[] = [];
     const recovered: unknown[] = [];
     let idlePasses = 0;
@@ -390,7 +397,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               sandboxes: Array<{ state: string }>;
             };
             if (status.sandboxes.some((sandbox) => sandbox.state === "running")) continue;
-            const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, undefined, [409]) as {
+            const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, workerPayload, [409]) as {
               run?: { id: string; agent_id: string; status: string };
               error?: string;
             };
@@ -413,7 +420,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       idlePasses = 0;
       const results = await mapConcurrent(work, concurrency, async (run) => {
-        const claimed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/claim`, undefined, [409]) as {
+        const claimed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/claim`, workerPayload, [409]) as {
           ok: boolean;
           run?: { agent_id: string };
           error?: string;
@@ -733,13 +740,13 @@ Commands:
   runs list --agent <agent>
   runs get <run>
   runs status <run> [--limit 20]
-  runs claim <run>
-  runs requeue <run>
+  runs claim <run> [--worker-id worker-a]
+  runs requeue <run> [--worker-id worker-a]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs monitor --agent <agent>|--agents <agent,agent> [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
-  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--loop] [--limit 10] [--concurrency 2]
+  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--worker-id worker-a] [--loop] [--limit 10] [--concurrency 2]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]

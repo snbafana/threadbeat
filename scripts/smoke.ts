@@ -379,9 +379,20 @@ try {
     "runs",
     "claim",
     claimPlan.run.id,
+    "--worker-id",
+    "smoke-claimer",
   ]);
   assert.equal(claimedRun.run.id, claimPlan.run.id);
   assert.equal(claimedRun.run.status, "running");
+  const claimMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    claimPlan.run.id,
+  ]);
+  assert.ok(claimMessages.messages.some((message) => (
+    message.type === "agent_run_claimed" && message.text === "Claimed run by smoke-claimer"
+  )));
   const repeatedClaimResponse = await app.inject({
     method: "POST",
     url: `/api/runs/${claimPlan.run.id}/claim`,
@@ -392,6 +403,8 @@ try {
     "runs",
     "requeue",
     claimPlan.run.id,
+    "--worker-id",
+    "smoke-requeuer",
   ]);
   assert.equal(requeuedRun.run.id, claimPlan.run.id);
   assert.equal(requeuedRun.run.status, "planned");
@@ -444,12 +457,26 @@ try {
     "--agent",
     recoverAgentBody.agent.id,
     "--recover",
+    "--worker-id",
+    "smoke-worker",
     "--limit",
     "1",
   ]);
   assert.deepEqual(recoveredWorker.recovered.map((run) => run.runId), [recoverPlan.run.id]);
   assert.deepEqual(recoveredWorker.processed.map((run) => run.runId), [recoverPlan.run.id]);
   assert.equal(recoveredWorker.processed[0].sandbox.run_id, recoverPlan.run.id);
+  const recoveredMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    recoverPlan.run.id,
+  ]);
+  assert.ok(recoveredMessages.messages.some((message) => (
+    message.type === "agent_run_requeued" && message.text === "Requeued run by smoke-worker"
+  )));
+  assert.ok(recoveredMessages.messages.some((message) => (
+    message.type === "agent_run_claimed" && message.text === "Claimed run by smoke-worker"
+  )));
   await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", recoverPlan.run.id]);
 
   const launchAgentResponse = await app.inject({
