@@ -263,7 +263,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `GET /api/runs/:id` reads one run record.
 - `GET /api/runs/:id/status` reads one run with sandboxes and messages.
 - `runs inspect <run>` combines run state, branch/base refs, result commit,
-  GitHub links, sandbox states, and recent messages for branch-native review.
+  GitHub links, sandbox states, recent messages, and concrete checkout/watch
+  commands for branch-native review. Add `--checkout-dir <path>` to change the
+  suggested checkout command.
 - `runs checkout <run> --dir <path>` clones or refreshes the run branch into a
   local Git checkout and reports base/head commits, commits ahead, and changed
   files so the branch state can be reviewed directly.

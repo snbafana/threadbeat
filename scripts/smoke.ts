@@ -1949,6 +1949,11 @@ try {
       resultCommitUrl: string | null;
       resultTreeUrl: string | null;
     };
+    commands: {
+      checkoutBranch: string[];
+      watchRun: string[];
+      resumeBranch: string[] | null;
+    };
     sandboxes: Array<{ state: string }>;
     messages: Array<{ type: string }>;
   }>(baseUrl, [
@@ -1962,6 +1967,9 @@ try {
   assert.match(inspectedRun.links.branchTreeUrl ?? "", /github\.com\/example\/agent\/tree\/threadbeat\/runs\//);
   assert.match(inspectedRun.links.resultCommitUrl ?? "", new RegExp(`github\\.com/example/agent/commit/${cliRunFinalize.result.commitSha}`));
   assert.match(inspectedRun.links.resultTreeUrl ?? "", new RegExp(`github\\.com/example/agent/tree/${cliRunFinalize.result.commitSha}`));
+  assert.equal(inspectedRun.commands.checkoutBranch.join(" "), `npm run cli -- runs checkout ${cliRunPlan.run.id} --dir ./checkouts/${cliRunPlan.run.id}`);
+  assert.equal(inspectedRun.commands.watchRun.join(" "), `npm run cli -- runs watch ${cliRunPlan.run.id}`);
+  assert.equal(inspectedRun.commands.resumeBranch, null);
   assert.ok(inspectedRun.sandboxes.some((sandbox) => sandbox.state === "running"));
   assert.ok(inspectedRun.messages.length > 0);
   const branchSummary = await cliJson<{

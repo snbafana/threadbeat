@@ -266,6 +266,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       compareHeadRef: status.run.result_commit,
       treeRef: status.run.result_commit,
     });
+    const checkoutDir = options["checkout-dir"] ?? `./checkouts/${status.run.id}`;
     await printJson({
       run: {
         id: status.run.id,
@@ -285,6 +286,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         resultTreeUrl: resultLinks.treeUrl,
         resultCommitUrl: resultLinks.commitUrl,
         resultCompareUrl: resultLinks.compareUrl,
+      },
+      commands: {
+        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", status.run.id, "--dir", checkoutDir],
+        watchRun: ["npm", "run", "cli", "--", "runs", "watch", status.run.id],
+        resumeBranch: status.run.status === "stopped" && status.run.result_commit === null
+          ? ["npm", "run", "cli", "--", "runs", "resume-branch", status.run.id]
+          : null,
       },
       sandboxes: status.sandboxes.map((sandbox) => ({
         id: sandbox.id,
