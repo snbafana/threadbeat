@@ -439,7 +439,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     for (const flag of ["limit", "concurrency", "interval-ms", "idle-exit-after", "message", "prompt", "task"]) {
       if (options[flag]) workerArgs.push(`--${flag}`, options[flag]);
     }
-    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "until-empty"]) {
+    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "resume-stopped", "until-empty"]) {
       if (options[flag] === "1") workerArgs.push(`--${flag}`);
     }
     if (options.loop === "1" || options["until-empty"] !== "1") workerArgs.push("--loop");
@@ -465,7 +465,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-status") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
-    const statusFilter = new Set(parseList(options.status ?? "planned,running"));
+    const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     await printJson(await workerSessionStatus(required(sessionName, "runs session-status <session>"), statusFilter));
     return;
   }
@@ -473,7 +473,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const requiredSessionName = required(sessionName, "runs session-watch <session>");
-    const statusFilter = new Set(parseList(options.status ?? "planned,running"));
+    const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
     let polls = 0;
@@ -581,6 +581,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           return {
             id: status.run.id,
             status: status.run.status,
+            resumable: status.run.status === "stopped",
             workerId: status.run.worker_id,
             sandboxes: status.sandboxes.map((sandbox) => sandbox.state),
             messages: status.messages.map((message) => ({
@@ -1080,7 +1081,7 @@ async function git(args: string[], cwd = process.cwd()): Promise<string> {
   });
 }
 
-async function agentBacklog(agentIds: string[]): Promise<Array<{ agentId: string; total: number; statuses: Record<string, number> }>> {
+async function agentBacklog(agentIds: string[]): Promise<Array<{ agentId: string; total: number; statuses: Record<string, number>; resumableStopped: number }>> {
   return await mapConcurrent(agentIds, 4, async (agentId) => {
     const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
       runs: Array<{ status: string }>;
@@ -1089,7 +1090,7 @@ async function agentBacklog(agentIds: string[]): Promise<Array<{ agentId: string
     for (const run of listed.runs) {
       statuses[run.status] = (statuses[run.status] ?? 0) + 1;
     }
-    return { agentId, total: listed.runs.length, statuses };
+    return { agentId, total: listed.runs.length, statuses, resumableStopped: statuses.stopped ?? 0 };
   });
 }
 
@@ -1219,6 +1220,7 @@ async function workerSessionStatus(sessionName: string, statusFilter: Set<string
     agentId: string;
     total: number;
     statuses: Record<string, number>;
+    resumableStopped: number;
     unassigned: Array<{ id: string; status: string }>;
     otherWorkers: Array<{ id: string; status: string; workerId: string }>;
   }>;
@@ -1231,10 +1233,12 @@ async function workerSessionStatus(sessionName: string, statusFilter: Set<string
       runs: Array<{ id: string; status: string; worker_id: string | null }>;
     };
     const statuses: Record<string, number> = {};
+    let resumableStopped = 0;
     const unassigned: Array<{ id: string; status: string }> = [];
     const otherWorkers: Array<{ id: string; status: string; workerId: string }> = [];
     for (const run of listed.runs) {
       statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+      if (run.status === "stopped") resumableStopped += 1;
       if (!statusFilter.has(run.status)) continue;
       if (!run.worker_id) {
         unassigned.push({ id: run.id, status: run.status });
@@ -1247,7 +1251,7 @@ async function workerSessionStatus(sessionName: string, statusFilter: Set<string
       }
       otherWorkers.push({ id: run.id, status: run.status, workerId: run.worker_id });
     }
-    return { agentId, total: listed.runs.length, statuses, unassigned, otherWorkers };
+    return { agentId, total: listed.runs.length, statuses, resumableStopped, unassigned, otherWorkers };
   });
   return {
     session: {
@@ -1482,13 +1486,13 @@ Commands:
   runs backlog --agent <agent>|--agents <agent,agent>
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
-  runs session-status <name> [--status planned,running]
-  runs session-watch <name> [--status planned,running] [--interval-ms 2000] [--max-polls 10]
+  runs session-status <name> [--status planned,running,stopped]
+  runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
-  runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
-  runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--loop|--until-empty]
+  runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
+  runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--resume-stopped] [--loop|--until-empty]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]

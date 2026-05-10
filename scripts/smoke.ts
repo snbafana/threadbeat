@@ -614,7 +614,7 @@ try {
   assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id && run.status === "planned")));
   assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id && run.messages.some((message) => message.type === "agent_run_planned"))));
   const backlog = await cliJson<{
-    agents: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
+    agents: Array<{ agentId: string; total: number; statuses: Record<string, number>; resumableStopped: number }>;
   }>(baseUrl, [
     "runs",
     "backlog",
@@ -622,7 +622,7 @@ try {
     `${workerAgentBody.agent.id},${launchAgentBody.agent.id}`,
   ]);
   assert.ok(backlog.agents.some((agent) => (
-    agent.agentId === workerAgentBody.agent.id && agent.total >= 1 && agent.statuses.planned >= 1
+    agent.agentId === workerAgentBody.agent.id && agent.total >= 1 && agent.statuses.planned >= 1 && agent.resumableStopped === 0
   )));
   assert.ok(backlog.agents.some((agent) => (
     agent.agentId === launchAgentBody.agent.id && agent.total >= 1 && agent.statuses.planned >= 1
@@ -868,6 +868,19 @@ try {
     "--worker-id",
     "smoke-detached-worker-1",
   ]);
+  const detachedStoppedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--objective",
+    "detached session resumable stopped branch",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop",
+    detachedStoppedPlan.run.id,
+  ]);
   const detachedWorkerGroup = await cliJson<{
     session: {
       session: string;
@@ -906,7 +919,13 @@ try {
       session: string;
       workers: Array<{ workerId: string; alive: boolean; runs: Array<{ id: string; status: string }> }>;
     };
-    agents: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
+    agents: Array<{
+      agentId: string;
+      total: number;
+      statuses: Record<string, number>;
+      resumableStopped: number;
+      unassigned: Array<{ id: string; status: string }>;
+    }>;
   }>(baseUrl, ["runs", "session-status", detachedWorkerSessionName]);
   assert.equal(detachedWorkerStatus.session.session, detachedWorkerSessionName);
   assert.equal(detachedWorkerStatus.session.workers[0].workerId, "smoke-detached-worker-1");
@@ -914,13 +933,18 @@ try {
   assert.ok(detachedWorkerStatus.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id && agent.total >= workerGroupQueue.queued.length
   )));
+  assert.ok(detachedWorkerStatus.agents.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id
+    && agent.resumableStopped >= 1
+    && agent.unassigned.some((run) => run.id === detachedStoppedPlan.run.id && run.status === "stopped")
+  )));
   const watchedWorkerStatus = await cliJson<{
     observedAt: string;
     session: {
       session: string;
       workers: Array<{ workerId: string; alive: boolean; runs: Array<{ id: string; status: string }> }>;
     };
-    agents: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
+    agents: Array<{ agentId: string; total: number; statuses: Record<string, number>; resumableStopped: number }>;
   }>(baseUrl, ["runs", "session-watch", detachedWorkerSessionName, "--max-polls", "1", "--interval-ms", "1"]);
   assert.match(watchedWorkerStatus.observedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(watchedWorkerStatus.session.session, detachedWorkerSessionName);
@@ -928,6 +952,9 @@ try {
   assert.equal(watchedWorkerStatus.session.workers[0].alive, true);
   assert.ok(watchedWorkerStatus.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id && agent.total >= workerGroupQueue.queued.length
+  )));
+  assert.ok(watchedWorkerStatus.agents.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id && agent.resumableStopped >= 1
   )));
   const detachedWorkerLogs = await cliJson<{
     session: string;
@@ -1260,6 +1287,33 @@ try {
     stopMatchingAgentBody.agent.id,
   ]);
   assert.ok(stoppedMatchingList.runs.every((run) => run.status === "stopped"));
+  const stoppedMatchingBacklog = await cliJson<{
+    agents: Array<{ agentId: string; resumableStopped: number; statuses: Record<string, number> }>;
+  }>(baseUrl, [
+    "runs",
+    "backlog",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+  ]);
+  assert.ok(stoppedMatchingBacklog.agents.some((agent) => (
+    agent.agentId === stopMatchingAgentBody.agent.id
+    && agent.statuses.stopped === 2
+    && agent.resumableStopped === 2
+  )));
+  const stoppedMatchingMonitor = await cliRaw(baseUrl, [
+    "runs",
+    "monitor",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+    "--status",
+    "stopped",
+  ]);
+  const stoppedMonitored = JSON.parse(stoppedMatchingMonitor.stdout.trim()) as {
+    agents: Array<{ runs: Array<{ id: string; status: string; resumable: boolean }> }>;
+  };
+  assert.ok(stoppedMonitored.agents.some((agent) => (
+    agent.runs.length === 2 && agent.runs.every((run) => run.status === "stopped" && run.resumable)
+  )));
 
   const cliRestartPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",

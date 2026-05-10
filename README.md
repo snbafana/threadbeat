@@ -267,14 +267,17 @@ stdout/stderr, and `runs stop-session <name>` to terminate the recorded process
 group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed
 by that session's workers when those runs do not have a running sandbox.
 `runs watch` polls one run's status and messages until it completes, fails, or
-stops. `runs backlog` reports run counts by status for one or more agents.
+stops. `runs backlog` reports run counts by status for one or more agents and
+includes `resumableStopped` for stopped branch runs that `--resume-stopped` can
+pick up.
 `runs workers` groups running runs by the `worker_id` that claimed them.
 `runs stop-matching --status planned` cancels queued runs for one or more
 agents; include `running` in the status list to stop active run sandboxes too.
 `runs monitor` snapshots all runs for one or more agents, including
-sandbox states and recent message types/text. Use `--status planned,running` to
-focus the snapshot on queued or active work. `runs step` executes one explicit
-shell command and can optionally finalize the run branch.
+sandbox states, recent message types/text, and a `resumable` marker on stopped
+branch runs. Use `--status planned,running,stopped` to focus the snapshot on
+queued, active, or resumable work. `runs step` executes one explicit shell
+command and can optionally finalize the run branch.
 
 ## Phases
 
