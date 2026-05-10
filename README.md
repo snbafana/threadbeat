@@ -154,6 +154,7 @@ npm run cli -- agents repo <agent>
 npm run cli -- runs plan --agent <agent> --objective "one bounded task"
 npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt
 npm run cli -- runs work --agent <agent> --until-empty --bootstrap --check-runtime --recover --worker-id worker-a
+npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix worker --until-empty
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
 npm run cli -- runs claim <run> --worker-id worker-a
@@ -229,7 +230,8 @@ idle, or `--loop` to poll for longer CLI worker sessions. Add `--recover` to
 requeue unfinished running runs that no longer have a running sandbox before
 the worker claims new work. Add `--worker-id` so claim and requeue lifecycle
 messages show which CLI worker touched a run; claimed runs also expose
-`worker_id` in run status/list/monitor responses.
+`worker_id` in run status/list/monitor responses. Add `--workers <n>` to start
+multiple foreground worker subprocesses with `--worker-prefix` IDs.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs backlog` reports run counts by status for one or more agents.
 `runs workers` groups running runs by the `worker_id` that claimed them.

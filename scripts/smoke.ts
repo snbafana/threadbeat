@@ -759,6 +759,63 @@ try {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", worked.runId]);
   }
 
+  const workerGroupAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-worker-group-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(workerGroupAgentResponse.statusCode, 200);
+  const workerGroupAgentBody = JSON.parse(workerGroupAgentResponse.body) as { agent: { id: string } };
+  const workerGroupObjectivesFile = path.join(tempRoot, "worker-group-objectives.txt");
+  await fs.writeFile(workerGroupObjectivesFile, "worker group objective a\nworker group objective b\n");
+  const workerGroupQueue = await cliJson<{ queued: Array<{ run: { id: string } }> }>(baseUrl, [
+    "runs",
+    "queue",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--objectives-file",
+    workerGroupObjectivesFile,
+  ]);
+  const workerGroup = await cliJson<{
+    workers: Array<{ workerId: string; exitCode: number | null; stdout: string; stderr: string }>;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--workers",
+    "2",
+    "--worker-prefix",
+    "smoke-group-worker",
+    "--until-empty",
+    "--limit",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.deepEqual(workerGroup.workers.map((worker) => worker.workerId).sort(), [
+    "smoke-group-worker-1",
+    "smoke-group-worker-2",
+  ]);
+  assert.ok(workerGroup.workers.every((worker) => worker.exitCode === 0 && worker.stderr === ""));
+  const workerGroupProcessed = workerGroup.workers.flatMap((worker) => (
+    (JSON.parse(worker.stdout) as { processed: Array<{ runId: string; skipped?: string }> })
+      .processed
+      .filter((run) => !run.skipped)
+      .map((run) => run.runId)
+  ));
+  assert.deepEqual(
+    workerGroupProcessed.sort(),
+    workerGroupQueue.queued.map((item) => item.run.id).sort(),
+  );
+  for (const queued of workerGroupQueue.queued) {
+    await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
+  }
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",

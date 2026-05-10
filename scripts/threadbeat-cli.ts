@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -460,6 +461,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   }
   if (subcommandName === "work") {
     const options = parseOptions(args);
+    if (options.workers) {
+      const workerCount = parsePositiveInteger(options.workers, "--workers");
+      const workerPrefix = options["worker-prefix"] ?? options["worker-id"] ?? "worker";
+      const workerArgs = args.filter((arg, index) => {
+        const previous = args[index - 1];
+        return arg !== "--workers"
+          && previous !== "--workers"
+          && arg !== "--worker-prefix"
+          && previous !== "--worker-prefix"
+          && arg !== "--worker-id"
+          && previous !== "--worker-id";
+      });
+      const workers = await mapConcurrent(Array.from({ length: workerCount }, (_, index) => index + 1), workerCount, async (workerNumber) => {
+        const workerId = `${workerPrefix}-${workerNumber}`;
+        const result = await runCliWorker(["runs", "work", ...workerArgs, "--worker-id", workerId]);
+        return { workerId, ...result };
+      });
+      await printJson({ workers });
+      if (workers.some((worker) => worker.exitCode !== 0)) process.exitCode = 1;
+      return;
+    }
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
     const concurrency = parsePositiveInteger(options.concurrency ?? "2", "--concurrency");
     const limit = parsePositiveInteger(options.limit ?? "10", "--limit");
@@ -718,6 +740,23 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function runCliWorker(args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...args], {
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", reject);
+    child.on("close", (exitCode) => {
+      resolve({ exitCode, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+}
+
 async function requestJson(method: string, path: string, payload?: unknown, okStatuses: number[] = []): Promise<unknown> {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
@@ -848,6 +887,7 @@ Commands:
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--worker-id worker-a] [--loop|--until-empty] [--limit 10] [--concurrency 2]
+  runs work --agent <agent>|--agents <agent,agent> --workers 3 [--worker-prefix worker] [--until-empty] [--limit 10]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]
