@@ -366,6 +366,29 @@ try {
   assert.equal(watched.run.id, cliRunPlan.run.id);
   assert.ok(watched.messages.length > 0);
 
+  const claimPlan = await cliJson<{ run: { id: string; status: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli claim run",
+  ]);
+  assert.equal(claimPlan.run.status, "planned");
+  const claimedRun = await cliJson<{ run: { id: string; status: string } }>(baseUrl, [
+    "runs",
+    "claim",
+    claimPlan.run.id,
+  ]);
+  assert.equal(claimedRun.run.id, claimPlan.run.id);
+  assert.equal(claimedRun.run.status, "running");
+  const repeatedClaimResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${claimPlan.run.id}/claim`,
+  });
+  assert.equal(repeatedClaimResponse.statusCode, 409);
+  assert.match(repeatedClaimResponse.body, /already running/);
+
   const launchAgentResponse = await app.inject({
     method: "POST",
     url: "/api/agents",

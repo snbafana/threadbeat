@@ -155,6 +155,7 @@ npm run cli -- runs plan --agent <agent> --objective "one bounded task"
 npm run cli -- runs work --agent <agent> --bootstrap --check-runtime
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
+npm run cli -- runs claim <run>
 npm run cli -- runs watch <run>
 npm run cli -- runs monitor --agents <agent>,<agent>
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
@@ -191,6 +192,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `GET /api/agents/:id/runs` lists planned/completed runs for an agent.
 - `GET /api/runs/:id` reads one run record.
 - `GET /api/runs/:id/status` reads one run with sandboxes and messages.
+- `POST /api/runs/:id/claim` atomically moves a run from `planned` to
+  `running`. Workers use this before starting a sandbox so competing workers do
+  not process the same planned run.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts. Repeated calls return

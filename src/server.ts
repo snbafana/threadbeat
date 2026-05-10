@@ -233,6 +233,23 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     };
   });
 
+  app.post("/api/runs/:id/claim", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = await db.claimAgentRun(id);
+    if (!run) {
+      const existing = await db.getAgentRun(id);
+      if (!existing) return reply.code(404).send({ ok: false, error: "run not found" });
+      return reply.code(409).send({ ok: false, error: `run is already ${existing.status}` });
+    }
+    await db.appendMessage({
+      agentId: run.agent_id,
+      runId: run.id,
+      type: "agent_run_claimed",
+      text: "Claimed run",
+    });
+    return { ok: true, run };
+  });
+
   app.post("/api/runs/:id/sandbox", async (request, reply) => {
     let runId: string | undefined;
     try {

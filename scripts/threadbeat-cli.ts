@@ -227,6 +227,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)));
     return;
   }
+  if (subcommandName === "claim") {
+    const id = args[0];
+    if (!id) throw new Error("runs claim requires a run id");
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/claim`));
+    return;
+  }
   if (subcommandName === "watch") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs watch requires a run id");
@@ -382,6 +388,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       idlePasses = 0;
       const results = await mapConcurrent(work, concurrency, async (run) => {
+        const claimed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/claim`, undefined, [409]) as {
+          ok: boolean;
+          run?: { agent_id: string };
+          error?: string;
+        };
+        if (!claimed.run) {
+          return {
+            agentId: run.agent_id,
+            runId: run.id,
+            skipped: claimed.error ?? "run was not claimed",
+          };
+        }
         const sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/sandbox`, {
           bootstrap: options.bootstrap === "1",
         }) as { sandbox: unknown; bootstrap?: unknown };
@@ -401,7 +419,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           : null;
         const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status`);
         return {
-          agentId: run.agent_id,
+          agentId: claimed.run.agent_id,
           runId: run.id,
           sandbox: sandboxed.sandbox,
           ...(sandboxed.bootstrap ? { bootstrap: sandboxed.bootstrap } : {}),
@@ -581,7 +599,7 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function requestJson(method: string, path: string, payload?: unknown): Promise<unknown> {
+async function requestJson(method: string, path: string, payload?: unknown, okStatuses: number[] = []): Promise<unknown> {
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: payload === undefined ? undefined : { "content-type": "application/json" },
@@ -589,7 +607,9 @@ async function requestJson(method: string, path: string, payload?: unknown): Pro
   });
   const text = await response.text();
   const body = text.trim() ? JSON.parse(text) as { ok?: boolean; error?: string } : {};
-  if (!response.ok || body.ok === false) throw new Error(body.error ?? `${method} ${path} failed`);
+  if ((!response.ok || body.ok === false) && !okStatuses.includes(response.status)) {
+    throw new Error(body.error ?? `${method} ${path} failed`);
+  }
   return body;
 }
 
@@ -688,6 +708,7 @@ Commands:
   runs list --agent <agent>
   runs get <run>
   runs status <run> [--limit 20]
+  runs claim <run>
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs monitor --agent <agent>|--agents <agent,agent> [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]

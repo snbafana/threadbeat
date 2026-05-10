@@ -154,6 +154,19 @@ export class Database {
     });
   }
 
+  async claimAgentRun(id: string): Promise<AgentRunRow | null> {
+    const result = await this.client.execute({
+      sql: `
+        UPDATE agent_runs
+        SET status = 'running'
+        WHERE id = ? AND status = 'planned'
+      `,
+      args: [id],
+    });
+    if (result.rowsAffected === 0) return null;
+    return this.getAgentRun(id);
+  }
+
   async updateAgentRunCompleted(input: {
     id: string;
     status: string;
