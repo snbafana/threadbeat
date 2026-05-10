@@ -142,6 +142,26 @@ try {
   });
   assert.equal(stoppedRunResponse.statusCode, 200);
   assert.match(stoppedRunResponse.body, /"status":"stopped"/);
+  const stoppedRunListResponse = await app.inject({
+    method: "GET",
+    url: `/api/agents/${agentBody.agent.id}/runs?status=stopped`,
+  });
+  assert.equal(stoppedRunListResponse.statusCode, 200);
+  const stoppedRunList = JSON.parse(stoppedRunListResponse.body) as { runs: Array<{ id: string; status: string }> };
+  assert.equal(stoppedRunList.runs.length, 1);
+  assert.equal(stoppedRunList.runs[0].id, runPlanBody.run.id);
+  assert.equal(stoppedRunList.runs[0].status, "stopped");
+  const plannedRunListResponse = await app.inject({
+    method: "GET",
+    url: `/api/agents/${agentBody.agent.id}/runs?status=planned`,
+  });
+  assert.equal(plannedRunListResponse.statusCode, 200);
+  assert.deepEqual((JSON.parse(plannedRunListResponse.body) as { runs: unknown[] }).runs, []);
+  const invalidRunStatusResponse = await app.inject({
+    method: "GET",
+    url: `/api/agents/${agentBody.agent.id}/runs?status=queued`,
+  });
+  assert.equal(invalidRunStatusResponse.statusCode, 400);
 
   const restartStoppedRunSandboxResponse = await app.inject({
     method: "POST",
@@ -1575,6 +1595,8 @@ try {
     "list",
     "--agent",
     stopMatchingAgentBody.agent.id,
+    "--status",
+    "stopped",
   ]);
   assert.ok(stoppedMatchingList.runs.every((run) => run.status === "stopped"));
   const stoppedMatchingBacklog = await cliJson<{

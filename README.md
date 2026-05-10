@@ -185,7 +185,7 @@ npm run cli -- runs work --agent <agent> --until-empty --bootstrap --check-runti
 npm run cli -- runs work --agents <agent>,<agent> --resume-stopped --boot --until-empty
 npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix worker --until-empty
 npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix worker --detach --session overnight --loop --recover
-npm run cli -- runs list --agent <agent>
+npm run cli -- runs list --agent <agent> [--status planned,running,completed,stopped,failed]
 npm run cli -- runs status <run>
 npm run cli -- runs inspect <run>
 npm run cli -- runs checkout <run> --dir ./checkouts/<run>
@@ -243,7 +243,8 @@ Agent template generation is Pi-native but does not run Pi:
 Run planning is intentionally server-side and Pi-free for now:
 
 - `POST /api/agents/:id/runs` creates a persisted run plan and Git branch name.
-- `GET /api/agents/:id/runs` lists planned/completed runs for an agent.
+- `GET /api/agents/:id/runs` lists runs for an agent. Add `?status=planned,running`
+  to fetch only the states needed for monitors or long worker sessions.
 - `GET /api/runs/:id` reads one run record.
 - `GET /api/runs/:id/status` reads one run with sandboxes and messages.
 - `runs inspect <run>` combines run state, branch/base refs, result commit,

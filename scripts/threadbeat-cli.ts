@@ -212,7 +212,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (!subcommandName || subcommandName === "list") {
     const options = parseOptions(args);
     const agentId = required(options.agent, "--agent");
-    await printJson(await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`));
+    const params = new URLSearchParams();
+    if (options.status) params.set("status", options.status);
+    await printJson(await requestJson("GET", withQuery(`/api/agents/${encodeURIComponent(agentId)}/runs`, params)));
     return;
   }
   if (subcommandName === "get") {
@@ -306,11 +308,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     const session = await readWorkerSession(required(sessionName, "runs checkout-session <session>"));
     const rootDir = path.resolve(required(options.dir, "--dir"));
-    const statusFilter = new Set(parseList(options.status ?? "completed,stopped"));
+    const statusList = parseList(options.status ?? "completed,stopped");
+    const statusFilter = new Set(statusList);
     const concurrency = options.concurrency ? parsePositiveInteger(options.concurrency, "--concurrency") : 2;
     const agentIds = workerSessionAgentIds(session);
     const runs = (await mapConcurrent(agentIds, 4, async (agentId) => {
-      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+      const listed = await requestJson("GET", withQuery(
+        `/api/agents/${encodeURIComponent(agentId)}/runs`,
+        new URLSearchParams({ status: statusList.join(",") }),
+      )) as {
         runs: Array<{ id: string; status: string }>;
       };
       return listed.runs.filter((run) => statusFilter.has(run.status));
@@ -378,9 +384,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const agentIds = options.session
       ? workerSessionAgentIds(await readWorkerSession(options.session))
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
-    const statusFilter = new Set(parseList(options.status ?? "completed,stopped"));
+    const statusList = parseList(options.status ?? "completed,stopped");
+    const statusFilter = new Set(statusList);
     const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
-      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+      const listed = await requestJson("GET", withQuery(
+        `/api/agents/${encodeURIComponent(agentId)}/runs`,
+        new URLSearchParams({ status: statusList.join(",") }),
+      )) as {
         runs: Array<{
           id: string;
           objective: string;
@@ -424,13 +434,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const agentIds = options.session
       ? workerSessionAgentIds(await readWorkerSession(options.session))
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
-    const statusFilter = new Set(parseList(options.status ?? "completed,stopped"));
+    const statusList = parseList(options.status ?? "completed,stopped");
+    const statusFilter = new Set(statusList);
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
         const [listed, repository] = await Promise.all([
-          requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as Promise<{
+          requestJson("GET", withQuery(
+            `/api/agents/${encodeURIComponent(agentId)}/runs`,
+            new URLSearchParams({ status: statusList.join(",") }),
+          )) as Promise<{
             runs: Array<{
               id: string;
               objective: string;
@@ -792,11 +806,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "stop-matching") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
-    const statusFilter = new Set(parseList(options.status ?? "planned"));
+    const statusList = parseList(options.status ?? "planned");
+    const statusFilter = new Set(statusList);
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
     const runsToStop: Array<{ agentId: string; id: string; status: string }> = [];
     for (const agentId of agentIds) {
-      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+      const listed = await requestJson("GET", withQuery(
+        `/api/agents/${encodeURIComponent(agentId)}/runs`,
+        new URLSearchParams({ status: statusList.join(",") }),
+      )) as {
         runs: Array<{ id: string; status: string }>;
       };
       runsToStop.push(...listed.runs
@@ -813,13 +831,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "monitor") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
-    const statusFilter = options.status ? new Set(parseList(options.status)) : null;
+    const statusList = options.status ? parseList(options.status) : null;
+    const statusFilter = statusList ? new Set(statusList) : null;
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const agents = [];
       for (const agentId of agentIds) {
-        const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+        const params = new URLSearchParams();
+        if (statusList) params.set("status", statusList.join(","));
+        const listed = await requestJson("GET", withQuery(`/api/agents/${encodeURIComponent(agentId)}/runs`, params)) as {
           runs: Array<{ id: string; status: string }>;
         };
         const visibleRuns = statusFilter ? listed.runs.filter((run) => statusFilter.has(run.status)) : listed.runs;
@@ -1817,7 +1838,7 @@ Commands:
   agents repo <agent>
   agents hosted-git <agent>
   hosted-git list
-  runs list --agent <agent>
+  runs list --agent <agent> [--status planned,running,completed,stopped,failed]
   runs get <run>
   runs status <run> [--limit 20]
   runs inspect <run> [--limit 10]

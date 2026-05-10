@@ -132,15 +132,18 @@ export class Database {
     );
   }
 
-  async listAgentRuns(agentId: string): Promise<AgentRunRow[]> {
+  async listAgentRuns(agentId: string, statuses?: string[]): Promise<AgentRunRow[]> {
+    const statusClause = statuses && statuses.length > 0
+      ? ` AND status IN (${statuses.map(() => "?").join(", ")})`
+      : "";
     return this.all<AgentRunRow>(
       `
         SELECT id, agent_id, objective, input_ref, run_branch, result_commit, worker_id,
                status
         FROM agent_runs
-        WHERE agent_id = ?
+        WHERE agent_id = ?${statusClause}
       `,
-      [agentId],
+      [agentId, ...(statuses ?? [])],
     );
   }
 

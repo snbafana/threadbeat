@@ -169,10 +169,15 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   }));
 
   app.get("/api/agents/:id/runs", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const agent = await db.getAgent(id);
-    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-    return { ok: true, runs: await db.listAgentRuns(id) };
+    try {
+      const { id } = request.params as { id: string };
+      const query = request.query as Record<string, string | string[] | undefined>;
+      const agent = await db.getAgent(id);
+      if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+      return { ok: true, runs: await db.listAgentRuns(id, parseOptionalStatusList(query.status)) };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
   });
 
   app.post("/api/agents/:id/runs", async (request, reply) => {
@@ -717,6 +722,19 @@ const parseOptionalInteger = (value: unknown): number | undefined => {
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error("expected positive integer");
   return Math.floor(parsed);
+};
+
+const parseOptionalStatusList = (value: unknown): string[] | undefined => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const values = (Array.isArray(value) ? value : String(value).split(","))
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+  if (values.length === 0) return undefined;
+  const allowed = new Set(["planned", "running", "completed", "failed", "stopped"]);
+  for (const status of values) {
+    if (!allowed.has(status)) throw new Error(`unknown run status: ${status}`);
+  }
+  return values;
 };
 
 const parseCommand = (value: unknown): string[] => {
