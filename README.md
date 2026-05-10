@@ -121,6 +121,34 @@ hosted Git-backed agent repo, bootstraps it into Modal with the real Pi image,
 runs `runs boot`, checks that the worktree changed, finalizes the run branch,
 and deletes the temporary GitHub repo.
 
+To run the full local control-plane validation path in order:
+
+```bash
+npm run smoke:control-plane-live
+```
+
+This runs the GitHub hosted-agent CLI init smoke, the Modal server/CLI sandbox
+smoke, and the Modal Git-backed agent bootstrap smoke with the real Pi runtime.
+It does not run an autonomous model task by default.
+
+To include the credit-consuming autonomous Pi task and verify a pushed result
+commit on the run branch:
+
+```bash
+npm run smoke:control-plane-real-task
+```
+
+To run the server locally for manual control-plane work:
+
+```bash
+npm run dev
+npm run cli -- preflight
+npm run cli -- agents init --name research --repo-id research-agent --live
+```
+
+Then use the `runs queue`, `runs work`, `runs monitor`, `runs branches`, and
+`runs checkout` commands below against the live server.
+
 Hosted Git uses GitHub. The default owner and owner-type detection live in
 `src/config.ts`; live private repo creation uses `gh auth token` from the local
 GitHub CLI session.
