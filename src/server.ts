@@ -250,6 +250,29 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return { ok: true, run };
   });
 
+  app.post("/api/runs/:id/requeue", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const existing = await db.getAgentRun(id);
+    if (!existing) return reply.code(404).send({ ok: false, error: "run not found" });
+    if (existing.status === "completed") {
+      return reply.code(409).send({ ok: false, error: "completed run cannot be requeued" });
+    }
+    const hasRunningSandbox = (await db.listSandboxes({ runId: existing.id }))
+      .some((sandbox) => sandbox.state === "running");
+    if (hasRunningSandbox) {
+      return reply.code(409).send({ ok: false, error: "run has a running sandbox" });
+    }
+    const run = await db.requeueAgentRun(id);
+    if (!run) return reply.code(409).send({ ok: false, error: "run could not be requeued" });
+    await db.appendMessage({
+      agentId: run.agent_id,
+      runId: run.id,
+      type: "agent_run_requeued",
+      text: "Requeued run",
+    });
+    return { ok: true, run };
+  });
+
   app.post("/api/runs/:id/sandbox", async (request, reply) => {
     let runId: string | undefined;
     try {

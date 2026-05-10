@@ -167,6 +167,26 @@ export class Database {
     return this.getAgentRun(id);
   }
 
+  async requeueAgentRun(id: string): Promise<AgentRunRow | null> {
+    const result = await this.client.execute({
+      sql: `
+        UPDATE agent_runs
+        SET status = 'planned'
+        WHERE id = ?
+          AND status != 'completed'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sandboxes
+            WHERE sandboxes.run_id = agent_runs.id
+              AND sandboxes.state = 'running'
+          )
+      `,
+      args: [id],
+    });
+    if (result.rowsAffected === 0) return null;
+    return this.getAgentRun(id);
+  }
+
   async updateAgentRunCompleted(input: {
     id: string;
     status: string;

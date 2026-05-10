@@ -156,6 +156,7 @@ npm run cli -- runs work --agent <agent> --bootstrap --check-runtime
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
 npm run cli -- runs claim <run>
+npm run cli -- runs requeue <run>
 npm run cli -- runs watch <run>
 npm run cli -- runs monitor --agents <agent>,<agent>
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
@@ -195,6 +196,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.
+- `POST /api/runs/:id/requeue` moves an unfinished run with no running sandbox
+  back to `planned`, which lets an operator recover a worker that claimed a run
+  and exited before starting the sandbox.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts. Repeated calls return

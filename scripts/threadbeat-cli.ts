@@ -233,6 +233,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/claim`));
     return;
   }
+  if (subcommandName === "requeue") {
+    const id = args[0];
+    if (!id) throw new Error("runs requeue requires a run id");
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/requeue`));
+    return;
+  }
   if (subcommandName === "watch") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs watch requires a run id");
@@ -709,6 +715,7 @@ Commands:
   runs get <run>
   runs status <run> [--limit 20]
   runs claim <run>
+  runs requeue <run>
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs monitor --agent <agent>|--agents <agent,agent> [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]

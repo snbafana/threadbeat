@@ -388,6 +388,32 @@ try {
   });
   assert.equal(repeatedClaimResponse.statusCode, 409);
   assert.match(repeatedClaimResponse.body, /already running/);
+  const requeuedRun = await cliJson<{ run: { id: string; status: string } }>(baseUrl, [
+    "runs",
+    "requeue",
+    claimPlan.run.id,
+  ]);
+  assert.equal(requeuedRun.run.id, claimPlan.run.id);
+  assert.equal(requeuedRun.run.status, "planned");
+  const requeueBlockedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli requeue blocked run",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "sandbox",
+    requeueBlockedPlan.run.id,
+  ]);
+  const requeueRunningSandboxResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${requeueBlockedPlan.run.id}/requeue`,
+  });
+  assert.equal(requeueRunningSandboxResponse.statusCode, 409);
+  assert.match(requeueRunningSandboxResponse.body, /running sandbox/);
 
   const launchAgentResponse = await app.inject({
     method: "POST",
