@@ -1871,6 +1871,7 @@ try {
   )));
   const dispatchResults = await cliJson<{
     session: string;
+    summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number; changed: number | null };
     agents: Array<{
       agentId: string;
       runs: Array<{ id: string; location?: string; workerId: string | null }>;
@@ -1884,6 +1885,9 @@ try {
     "planned,running,completed,stopped",
   ]);
   assert.equal(dispatchResults.session, dispatchSessionName);
+  assert.equal(dispatchResults.summary.agents, 2);
+  assert.ok(dispatchResults.summary.total >= dispatched.queued.length);
+  assert.equal(dispatchResults.summary.changed, null);
   for (const queued of dispatched.queued) {
     const visibleRun = dispatchResults.agents.flatMap((agent) => agent.runs).find((run) => run.id === queued.run.id);
     assert.ok(visibleRun);
@@ -2436,6 +2440,7 @@ try {
   const resultsCheckoutDir = path.join(tempRoot, "results-checkouts");
   const checkedOutResults = await cliJson<{
     checkoutDir: string;
+    summary: { total: number; changed: number | null; resumable: number };
     agents: Array<{
       agentId: string;
       runs: Array<{
@@ -2460,6 +2465,13 @@ try {
     .find((agent) => agent.agentId === checkoutAgent.agent.id)
     ?.runs.find((run) => run.id === checkoutPlan.run.id);
   assert.equal(checkedOutResults.checkoutDir, resultsCheckoutDir);
+  assert.ok(checkedOutResults.summary.total >= 2);
+  assert.equal(checkedOutResults.summary.resumable, checkedOutResults.summary.total);
+  const checkedOutChangedCount = checkedOutResults.agents
+    .flatMap((agent) => agent.runs)
+    .filter((run) => (run.review?.changedFiles.length ?? 0) > 0).length;
+  assert.equal(checkedOutResults.summary.changed, checkedOutChangedCount);
+  assert.ok(checkedOutChangedCount >= 1);
   assert.equal(checkedOutResultRun?.status, "stopped");
   assert.equal(checkedOutResultRun?.commands.checkoutBranch.join(" "), `npm run cli -- runs checkout ${checkoutPlan.run.id} --dir ${resultsCheckoutDir}/${checkoutPlan.run.id}`);
   assert.equal(checkedOutResultRun?.checkout?.dir, path.join(resultsCheckoutDir, checkoutPlan.run.id));
@@ -2470,6 +2482,7 @@ try {
   const changedOnlyResultsDir = path.join(tempRoot, "changed-only-results");
   const changedOnlyResults = await cliJson<{
     checkoutDir: string;
+    summary: { total: number; changed: number | null };
     agents: Array<{
       agentId: string;
       summary: { total: number };
@@ -2488,6 +2501,12 @@ try {
   ]);
   const changedOnlyAgent = changedOnlyResults.agents.find((agent) => agent.agentId === checkoutAgent.agent.id);
   assert.equal(changedOnlyResults.checkoutDir, changedOnlyResultsDir);
+  const changedOnlyCount = changedOnlyResults.agents
+    .flatMap((agent) => agent.runs)
+    .filter((run) => (run.review?.changedFiles.length ?? 0) > 0).length;
+  assert.equal(changedOnlyResults.summary.total, changedOnlyCount);
+  assert.equal(changedOnlyResults.summary.changed, changedOnlyCount);
+  assert.ok(changedOnlyCount >= 1);
   assert.ok(changedOnlyAgent?.runs.some((run) => run.id === checkoutPlan.run.id));
   assert.equal(changedOnlyAgent?.runs.some((run) => run.id === unchangedCheckoutPlan.run.id), false);
   assert.ok(changedOnlyAgent?.runs.every((run) => (run.review?.changedFiles.length ?? 0) > 0));

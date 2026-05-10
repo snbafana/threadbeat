@@ -641,10 +641,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           runs: visibleRuns,
         };
       });
+      const visibleRuns = agents.flatMap((agent) => agent.runs);
+      const changedCount = checkoutRootDir
+        ? visibleRuns.filter((run) => {
+          const review = (run as { review?: { changedFiles: unknown[]; commits: unknown[]; error?: unknown } }).review;
+          return review && (review.changedFiles.length > 0 || review.commits.length > 0 || review.error);
+        }).length
+        : null;
       const snapshot = {
         observedAt: new Date().toISOString(),
         ...(options.session ? { session: options.session } : {}),
         ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
+        summary: {
+          agents: agents.length,
+          total: visibleRuns.length,
+          resultCommits: visibleRuns.filter((run) => run.resultCommit).length,
+          resumable: visibleRuns.filter((run) => run.state === "resumable").length,
+          warnings: visibleRuns.filter((run) => run.warning).length,
+          changed: changedCount,
+        },
         agents,
       };
       if (maxPolls === 1) {

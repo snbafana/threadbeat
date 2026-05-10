@@ -389,9 +389,9 @@ completed result branches alone. Add `--worker-id <id>` to target only that
 worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
-available, missing-result warnings, and optional local checkouts with
-`--checkout-dir`. Add `--worker-id <id>` to review only branches claimed by one
-worker.
+available, missing-result warnings, top-level result/resumable/changed counts,
+and optional local checkouts with `--checkout-dir`. Add `--worker-id <id>` to
+review only branches claimed by one worker.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
 Add `--resume-stopped` when the restarted workers should continue stopped branch
