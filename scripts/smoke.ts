@@ -1582,6 +1582,38 @@ try {
   assert.equal(checkedOutSession.checkouts[0].checkout.matchesResultCommit, null);
   assert.deepEqual(checkedOutSession.checkouts[0].review.changedFiles, [{ status: "A", path: "report.md" }]);
   assert.equal(await fs.readFile(path.join(sessionCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
+  const resultsCheckoutDir = path.join(tempRoot, "results-checkouts");
+  const checkedOutResults = await cliJson<{
+    checkoutDir: string;
+    agents: Array<{
+      agentId: string;
+      runs: Array<{
+        id: string;
+        status: string;
+        checkout?: { dir: string; headCommit: string; matchesResultCommit: boolean | null };
+        review?: { changedFiles: Array<{ status: string; path: string }> };
+      }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "results",
+    "--agent",
+    checkoutAgent.agent.id,
+    "--status",
+    "stopped",
+    "--checkout-dir",
+    resultsCheckoutDir,
+  ]);
+  const checkedOutResultRun = checkedOutResults.agents
+    .find((agent) => agent.agentId === checkoutAgent.agent.id)
+    ?.runs.find((run) => run.id === checkoutPlan.run.id);
+  assert.equal(checkedOutResults.checkoutDir, resultsCheckoutDir);
+  assert.equal(checkedOutResultRun?.status, "stopped");
+  assert.equal(checkedOutResultRun?.checkout?.dir, path.join(resultsCheckoutDir, checkoutPlan.run.id));
+  assert.equal(checkedOutResultRun?.checkout?.headCommit, expectedCheckoutHead);
+  assert.equal(checkedOutResultRun?.checkout?.matchesResultCommit, null);
+  assert.deepEqual(checkedOutResultRun?.review?.changedFiles, [{ status: "A", path: "report.md" }]);
+  assert.equal(await fs.readFile(path.join(resultsCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
 
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",

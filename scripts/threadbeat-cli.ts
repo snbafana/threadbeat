@@ -438,6 +438,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const statusFilter = new Set(statusList);
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+    const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
+    const checkoutConcurrency = options["checkout-concurrency"]
+      ? parsePositiveInteger(options["checkout-concurrency"], "--checkout-concurrency")
+      : 2;
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
         const [listed, repository] = await Promise.all([
@@ -496,6 +500,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               },
             };
           });
+        const checkoutByRunId = checkoutRootDir
+          ? new Map((await mapConcurrent(runs, checkoutConcurrency, async (run) => (
+            [run.id, await checkoutRunBranch(run.id, path.join(checkoutRootDir, run.id))] as const
+          ))))
+          : null;
         return {
           agentId,
           repository: {
@@ -507,12 +516,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             resumable: runs.filter((run) => run.state === "resumable").length,
             warnings: runs.filter((run) => run.warning).length,
           },
-          runs,
+          runs: checkoutByRunId
+            ? runs.map((run) => {
+              const checkout = checkoutByRunId.get(run.id);
+              return {
+                ...run,
+                checkout: checkout?.checkout,
+                review: checkout?.review,
+              };
+            })
+            : runs,
         };
       });
       const snapshot = {
         observedAt: new Date().toISOString(),
         ...(options.session ? { session: options.session } : {}),
+        ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
         agents,
       };
       if (maxPolls === 1) {
@@ -1881,7 +1900,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]

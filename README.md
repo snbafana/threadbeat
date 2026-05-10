@@ -199,6 +199,7 @@ npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs branches --agents <agent>,<agent>
 npm run cli -- runs branches --session overnight
 npm run cli -- runs results --session overnight
+npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
@@ -257,7 +258,9 @@ Run planning is intentionally server-side and Pi-free for now:
   stopped branch run from a detached worker session under `<path>/<run-id>`.
 - `runs results --session <name>` reports completed and stopped branch runs for
   a worker session with GitHub branch/result links and warnings for completed
-  runs that do not have a recorded result commit. Add `--max-polls` and
+  runs that do not have a recorded result commit. Add `--checkout-dir <path>` to
+  clone or refresh each listed run branch under `<path>/<run-id>` and include
+  changed files/commits in the result payload. Add `--max-polls` and
   `--interval-ms` to keep emitting result snapshots while a long session runs.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
@@ -322,7 +325,8 @@ by that session's workers when those runs do not have a running sandbox.
 result commits, and resumable stopped branches for that session's agents.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
-available, and missing-result warnings.
+available, missing-result warnings, and optional local checkouts with
+`--checkout-dir`.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
 `runs watch` polls one run's status and messages until it completes, fails, or
