@@ -1174,6 +1174,29 @@ try {
       && run.resultCommit === null
     ))
   )));
+  const detachedWorkerRecoverableStatus = await cliJson<{
+    session: { session: string };
+    recoveryPreview: Array<{
+      runId: string;
+      currentStatus?: string;
+      dryRun?: boolean;
+      resultCommit?: string | null;
+      workerId?: string | null;
+    }>;
+  }>(baseUrl, ["runs", "session-status", detachedWorkerSessionName, "--recoverable", "--include-stopped"]);
+  assert.equal(detachedWorkerRecoverableStatus.session.session, detachedWorkerSessionName);
+  assert.ok(detachedWorkerRecoverableStatus.recoveryPreview.some((run) => (
+    run.runId === detachedRecoverPlan.run.id
+    && run.currentStatus === "running"
+    && run.dryRun === true
+  )));
+  assert.ok(detachedWorkerRecoverableStatus.recoveryPreview.some((run) => (
+    run.runId === detachedStoppedPlan.run.id
+    && run.currentStatus === "stopped"
+    && run.resultCommit === null
+    && run.workerId === null
+    && run.dryRun === true
+  )));
   const detachedWorkerSummary = await cliJson<{
     session: { session: string; workers: { total: number; alive: number; dead: number } };
     totals: { runs: number; statuses: Record<string, number>; resultCommits: number; resumableStopped: number };
@@ -1306,7 +1329,17 @@ try {
       workers: Array<{ workerId: string; alive: boolean; runs: Array<{ id: string; status: string }> }>;
     };
     agents: Array<{ agentId: string; total: number; statuses: Record<string, number>; resumableStopped: number }>;
-  }>(baseUrl, ["runs", "session-watch", detachedWorkerSessionName, "--max-polls", "1", "--interval-ms", "1"]);
+    recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean }>;
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
   assert.match(watchedWorkerStatus.observedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(watchedWorkerStatus.session.session, detachedWorkerSessionName);
   assert.equal(watchedWorkerStatus.session.workers[0].workerId, "smoke-detached-worker-1");
@@ -1316,6 +1349,11 @@ try {
   )));
   assert.ok(watchedWorkerStatus.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id && agent.resumableStopped >= 1
+  )));
+  assert.ok(watchedWorkerStatus.recoveryPreview.some((run) => (
+    run.runId === detachedRecoverPlan.run.id
+    && run.currentStatus === "running"
+    && run.dryRun === true
   )));
   const detachedWorkerLogs = await cliJson<{
     session: string;

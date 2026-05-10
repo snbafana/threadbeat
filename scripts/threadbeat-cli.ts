@@ -750,7 +750,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
-    await printJson(await workerSessionStatus(required(sessionName, "runs session-status <session>"), statusFilter));
+    const requiredSessionName = required(sessionName, "runs session-status <session>");
+    const status = await workerSessionStatus(requiredSessionName, statusFilter);
+    const recoveryPreview = options.recoverable === "1"
+      ? await recoverableSessionRuns(status, options)
+      : null;
+    await printJson({
+      ...status,
+      ...(recoveryPreview ? { recoveryPreview } : {}),
+    });
     return;
   }
   if (subcommandName === "session-summary") {
@@ -924,9 +932,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
     let polls = 0;
     while (true) {
+      const status = await workerSessionStatus(requiredSessionName, statusFilter);
+      const recoveryPreview = options.recoverable === "1"
+        ? await recoverableSessionRuns(status, options)
+        : null;
       console.log(JSON.stringify({
         observedAt: new Date().toISOString(),
-        ...(await workerSessionStatus(requiredSessionName, statusFilter)),
+        ...status,
+        ...(recoveryPreview ? { recoveryPreview } : {}),
       }));
       polls += 1;
       if (maxPolls !== null && polls >= maxPolls) return;
@@ -1494,7 +1507,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -1964,6 +1977,23 @@ async function workerSessionStatus(sessionName: string, statusFilter: Set<string
     },
     agents,
   };
+}
+
+async function recoverableSessionRuns(
+  status: Awaited<ReturnType<typeof workerSessionStatus>>,
+  options: Record<string, string>,
+): Promise<Array<Omit<RecoverStaleRunResult, "run">>> {
+  const workerIds = new Set(status.session.workers.map((worker) => worker.workerId));
+  const preview = await recoverStaleRuns(
+    workerSessionAgentIds(status.session),
+    undefined,
+    parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+    workerIds,
+    options["include-stopped"] === "1",
+    true,
+    options["include-stopped"] === "1",
+  );
+  return preview.map(({ run: _run, ...item }) => item);
 }
 
 function workerSessionAgentIds(session: WorkerSession): string[] {

@@ -341,6 +341,9 @@ while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, and `runs stop-session <name>` to terminate the recorded process
 group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed
 by that session's workers when those runs do not have a running sandbox.
+Add `--recoverable` to `runs session-status` or `runs session-watch` to include
+a dry-run recovery preview in the live session snapshot; combine it with
+`--include-stopped` to surface unfinished stopped branches too.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents.
 `runs session-review <name> --include-stopped` is the read-only operator summary
