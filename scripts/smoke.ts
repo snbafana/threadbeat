@@ -906,6 +906,64 @@ try {
   assert.equal(stoppedWorkerSession.session, detachedWorkerSessionName);
   assert.equal(stoppedWorkerSession.stopped[0].stopped, true);
 
+  const superviseAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-supervise-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(superviseAgentResponse.statusCode, 200);
+  const superviseAgentBody = JSON.parse(superviseAgentResponse.body) as { agent: { id: string } };
+  const superviseObjectivesFile = path.join(tempRoot, "supervise-objectives.txt");
+  await fs.writeFile(superviseObjectivesFile, "supervise objective\n");
+  const superviseQueue = await cliJson<{ queued: Array<{ run: { id: string } }> }>(baseUrl, [
+    "runs",
+    "queue",
+    "--agent",
+    superviseAgentBody.agent.id,
+    "--objectives-file",
+    superviseObjectivesFile,
+  ]);
+  const superviseSessionName = `supervise-${superviseAgentBody.agent.id}`;
+  const supervised = await cliJson<{
+    before: Array<{ agentId: string; statuses: Record<string, number> }>;
+    session: { session: string; workers: Array<{ workerId: string; pid: number | null }> };
+    after: Array<{ agentId: string }>;
+  }>(baseUrl, [
+    "runs",
+    "supervise",
+    "--agent",
+    superviseAgentBody.agent.id,
+    "--session",
+    superviseSessionName,
+    "--workers",
+    "1",
+    "--worker-prefix",
+    "smoke-supervisor",
+    "--recover",
+    "--loop",
+    "--idle-exit-after",
+    "100",
+    "--interval-ms",
+    "100",
+    "--limit",
+    "1",
+  ]);
+  assert.equal(supervised.session.session, superviseSessionName);
+  assert.equal(supervised.session.workers[0].workerId, "smoke-supervisor-1");
+  assert.equal(typeof supervised.session.workers[0].pid, "number");
+  assert.ok(supervised.before.some((agent) => (
+    agent.agentId === superviseAgentBody.agent.id && agent.statuses.planned === superviseQueue.queued.length
+  )));
+  assert.ok(supervised.after.some((agent) => agent.agentId === superviseAgentBody.agent.id));
+  await cliJson(baseUrl, ["runs", "stop-session", superviseSessionName]);
+  for (const queued of superviseQueue.queued) {
+    await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
+  }
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",

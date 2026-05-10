@@ -270,17 +270,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "backlog") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
-    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
-      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-        runs: Array<{ status: string }>;
-      };
-      const statuses: Record<string, number> = {};
-      for (const run of listed.runs) {
-        statuses[run.status] = (statuses[run.status] ?? 0) + 1;
-      }
-      return { agentId, total: listed.runs.length, statuses };
-    });
-    await printJson({ agents });
+    await printJson({ agents: await agentBacklog(agentIds) });
     return;
   }
   if (subcommandName === "workers") {
@@ -318,6 +308,38 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
     const recovered = await recoverStaleRuns(agentIds, workerPayload, concurrency);
     await printJson({ recovered: recovered.map(({ run: _run, ...item }) => item) });
+    return;
+  }
+  if (subcommandName === "supervise") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const workerCount = parsePositiveInteger(options.workers ?? "1", "--workers");
+    const workerPrefix = options["worker-prefix"] ?? "worker";
+    const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
+    const before = await agentBacklog(agentIds);
+    const recovered = options.recover === "1"
+      ? await recoverStaleRuns(agentIds, undefined, concurrency)
+      : [];
+    const workerArgs = ["--agents", agentIds.join(",")];
+    for (const flag of ["limit", "concurrency", "interval-ms", "idle-exit-after", "message", "prompt", "task"]) {
+      if (options[flag]) workerArgs.push(`--${flag}`, options[flag]);
+    }
+    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "until-empty"]) {
+      if (options[flag] === "1") workerArgs.push(`--${flag}`);
+    }
+    if (options.loop === "1" || options["until-empty"] !== "1") workerArgs.push("--loop");
+    const session = await startDetachedWorkerSession(
+      required(options.session, "--session"),
+      workerCount,
+      workerPrefix,
+      workerArgs,
+    );
+    await printJson({
+      before,
+      recovered: recovered.map(({ run: _run, ...item }) => item),
+      session,
+      after: await agentBacklog(agentIds),
+    });
     return;
   }
   if (subcommandName === "sessions") {
@@ -827,6 +849,19 @@ async function runCliWorker(args: string[]): Promise<{ exitCode: number | null; 
   });
 }
 
+async function agentBacklog(agentIds: string[]): Promise<Array<{ agentId: string; total: number; statuses: Record<string, number> }>> {
+  return await mapConcurrent(agentIds, 4, async (agentId) => {
+    const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+      runs: Array<{ status: string }>;
+    };
+    const statuses: Record<string, number> = {};
+    for (const run of listed.runs) {
+      statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+    }
+    return { agentId, total: listed.runs.length, statuses };
+  });
+}
+
 type RecoverStaleRunResult = {
   agentId: string;
   runId: string;
@@ -1131,6 +1166,7 @@ Commands:
   runs stop-session <name>
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
+  runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--loop|--until-empty]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]

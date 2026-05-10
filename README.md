@@ -167,6 +167,7 @@ npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs session-status overnight
 npm run cli -- runs stop-session overnight
+npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover
 npm run cli -- runs stop-matching --agents <agent>,<agent> --status planned
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
@@ -231,7 +232,9 @@ The `runs launch`, `runs work`, and `runs step` CLI commands are client-side
 orchestration over the existing run APIs. `runs launch` creates and starts
 multiple runs immediately. `runs recover` requeues `running` runs that no longer
 have a running sandbox, so an operator can make orphaned claims available before
-starting workers again. `runs work` drains already planned runs for one or
+starting workers again. `runs supervise` snapshots backlog, optionally recovers
+orphaned claims, and starts a named detached worker session for one or more
+agents. `runs work` drains already planned runs for one or
 more agents. Use `--until-empty` to keep claiming batches until the queue is
 idle, or `--loop` to poll for longer CLI worker sessions. Add `--recover` to
 requeue unfinished running runs that no longer have a running sandbox before
