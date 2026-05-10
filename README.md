@@ -208,6 +208,7 @@ npm run cli -- runs branches --agents <agent>,<agent> --worker-id worker-a
 npm run cli -- runs results --session overnight
 npm run cli -- runs results --session overnight --worker-id worker-a
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results
+npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
@@ -284,7 +285,9 @@ Run planning is intentionally server-side and Pi-free for now:
   whether each visible run is still unassigned, claimed by a session worker, or
   claimed by another worker. Add `--checkout-dir <path>` to clone or refresh
   each listed run branch under `<path>/<run-id>` and include changed
-  files/commits in the result payload. Result rows also include a
+  files/commits in the result payload. Add `--changed-only` with `--checkout-dir`
+  to show only branches whose checkout has changed files, commits, or a review
+  error. Result rows also include a
   `commands.checkoutBranch` command for local branch inspection. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
   long session runs.

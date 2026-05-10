@@ -527,6 +527,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const checkoutConcurrency = options["checkout-concurrency"]
       ? parsePositiveInteger(options["checkout-concurrency"], "--checkout-concurrency")
       : 2;
+    if (options["changed-only"] === "1" && !checkoutRootDir) {
+      throw new Error("runs results --changed-only requires --checkout-dir");
+    }
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
         const [listed, repository] = await Promise.all([
@@ -611,19 +614,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             [run.id, await checkoutRunBranch(run.id, path.join(checkoutRootDir, run.id))] as const
           ))))
           : null;
-        return {
-          agentId,
-          repository: {
-            repoWebUrl: repository.repository.repoWebUrl,
-          },
-          summary: {
-            total: runs.length,
-            resultCommits: runs.filter((run) => run.resultCommit).length,
-            resumable: runs.filter((run) => run.state === "resumable").length,
-            warnings: runs.filter((run) => run.warning).length,
-          },
-          runs: checkoutByRunId
-            ? runs.map((run) => {
+        const visibleRuns = checkoutByRunId
+          ? runs
+            .map((run) => {
               const checkout = checkoutByRunId.get(run.id);
               return {
                 ...run,
@@ -631,7 +624,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                 review: checkout?.review,
               };
             })
-            : runs,
+            .filter((run) => options["changed-only"] !== "1"
+              || (run.review && (run.review.changedFiles.length > 0 || run.review.commits.length > 0 || run.review.error)))
+          : runs;
+        return {
+          agentId,
+          repository: {
+            repoWebUrl: repository.repository.repoWebUrl,
+          },
+          summary: {
+            total: visibleRuns.length,
+            resultCommits: visibleRuns.filter((run) => run.resultCommit).length,
+            resumable: visibleRuns.filter((run) => run.state === "resumable").length,
+            warnings: visibleRuns.filter((run) => run.warning).length,
+          },
+          runs: visibleRuns,
         };
       });
       const snapshot = {
@@ -1732,7 +1739,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -2459,7 +2466,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]

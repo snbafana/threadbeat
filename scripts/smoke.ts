@@ -2355,6 +2355,17 @@ try {
     await fs.readFile(path.join(workerSessionCheckoutDir, workerCheckoutPlan.run.id, "worker-report.md"), "utf8"),
     "worker branch report\n",
   );
+  const unchangedCheckoutPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    checkoutAgent.agent.id,
+    "--objective",
+    "checkout unchanged branch",
+  ]);
+  await execFileAsync("git", ["-C", checkoutSeed, "checkout", "-B", unchangedCheckoutPlan.plan.branchName, "main"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "push", "origin", `HEAD:${unchangedCheckoutPlan.plan.branchName}`]);
+  await cliJson(baseUrl, ["runs", "stop", unchangedCheckoutPlan.run.id]);
   const resultsCheckoutDir = path.join(tempRoot, "results-checkouts");
   const checkedOutResults = await cliJson<{
     checkoutDir: string;
@@ -2389,6 +2400,30 @@ try {
   assert.equal(checkedOutResultRun?.checkout?.matchesResultCommit, null);
   assert.deepEqual(checkedOutResultRun?.review?.changedFiles, [{ status: "A", path: "report.md" }]);
   assert.equal(await fs.readFile(path.join(resultsCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
+  const changedOnlyResultsDir = path.join(tempRoot, "changed-only-results");
+  const changedOnlyResults = await cliJson<{
+    checkoutDir: string;
+    agents: Array<{
+      agentId: string;
+      summary: { total: number };
+      runs: Array<{ id: string; review?: { changedFiles: Array<{ status: string; path: string }> } }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "results",
+    "--agent",
+    checkoutAgent.agent.id,
+    "--status",
+    "stopped",
+    "--checkout-dir",
+    changedOnlyResultsDir,
+    "--changed-only",
+  ]);
+  const changedOnlyAgent = changedOnlyResults.agents.find((agent) => agent.agentId === checkoutAgent.agent.id);
+  assert.equal(changedOnlyResults.checkoutDir, changedOnlyResultsDir);
+  assert.ok(changedOnlyAgent?.runs.some((run) => run.id === checkoutPlan.run.id));
+  assert.equal(changedOnlyAgent?.runs.some((run) => run.id === unchangedCheckoutPlan.run.id), false);
+  assert.ok(changedOnlyAgent?.runs.every((run) => (run.review?.changedFiles.length ?? 0) > 0));
   const sessionReviewCheckoutDir = path.join(tempRoot, "session-review-checkouts");
   const checkedOutSessionReview = await cliJson<{
     checkoutDir: string;
