@@ -340,6 +340,9 @@ available, missing-result warnings, and optional local checkouts with
 `--checkout-dir`.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
+Add `--resume-stopped` when the restarted workers should continue stopped branch
+runs from the same session; this updates the recorded worker command for later
+session inspection and restarts.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs backlog` reports run counts by status for one or more agents and
 includes `resumableStopped` for stopped branch runs that `--resume-stopped` can

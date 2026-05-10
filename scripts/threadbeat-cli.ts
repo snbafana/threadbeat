@@ -897,6 +897,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const commandArgs = session.command[0] === "runs" && session.command[1] === "work"
       ? session.command.slice(2)
       : session.command;
+    for (const flag of ["resume-stopped", "no-bootstrap"]) {
+      if (options[flag] === "1" && !commandArgs.includes(`--${flag}`)) {
+        commandArgs.push(`--${flag}`);
+      }
+    }
     const restarted = [];
     for (const worker of session.workers) {
       if (processIsAlive(worker.pid)) continue;
@@ -915,6 +920,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     delete session.stoppedAt;
     session.restartedAt = new Date().toISOString();
+    session.command = ["runs", "work", ...commandArgs];
     await writeWorkerSession(session);
     await printJson({
       session: session.session,
@@ -1134,10 +1140,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
           runs: Array<{ id: string; agent_id: string; status: string }>;
         };
-        workRuns.push(...listed.runs.filter((run) => run.status === "planned"));
         if (options["resume-stopped"] === "1") {
           workRuns.push(...listed.runs.filter((run) => run.status === "stopped"));
         }
+        workRuns.push(...listed.runs.filter((run) => run.status === "planned"));
       }
       if (options.recover === "1") {
         const recoveredRuns = await recoverStaleRuns(agentIds, workerPayload, concurrency);
@@ -2005,7 +2011,7 @@ Commands:
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
-  runs restart-session <name> [--recover] [--concurrency 4]
+  runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--resume-stopped] [--loop|--until-empty]

@@ -1305,23 +1305,51 @@ try {
     if (status.session.workers.every((worker) => !worker.alive)) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
+  const restartStoppedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    dispatchAgentBody.agent.id,
+    "--objective",
+    "restart session stopped branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", restartStoppedPlan.run.id]);
   const restartedDispatch = await cliJson<{
     session: string;
     restarted: Array<{ workerId: string; pid: number | null }>;
-    status: { session: { workers: Array<{ workerId: string; alive: boolean }> } };
+    status: {
+      session: {
+        command: string[];
+        workers: Array<{ workerId: string; alive: boolean }>;
+      };
+    };
   }>(baseUrl, [
     "runs",
     "restart-session",
     dispatchSessionName,
     "--recover",
+    "--resume-stopped",
   ]);
   assert.equal(restartedDispatch.session, dispatchSessionName);
   assert.deepEqual(restartedDispatch.restarted.map((worker) => worker.workerId), ["smoke-dispatcher-1"]);
   assert.equal(typeof restartedDispatch.restarted[0].pid, "number");
+  assert.ok(restartedDispatch.status.session.command.includes("--resume-stopped"));
   assert.ok(restartedDispatch.status.session.workers.some((worker) => (
     worker.workerId === "smoke-dispatcher-1" && worker.alive
   )));
+  let resumedStoppedRun: { run: { status: string } } | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    resumedStoppedRun = await cliJson<{ run: { status: string } }>(baseUrl, [
+      "runs",
+      "get",
+      restartStoppedPlan.run.id,
+    ]);
+    if (resumedStoppedRun.run.status === "running") break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(resumedStoppedRun?.run.status, "running");
   await cliJson(baseUrl, ["runs", "stop-session", dispatchSessionName]);
+  await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", restartStoppedPlan.run.id]);
   for (const queued of dispatched.queued) {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
   }
