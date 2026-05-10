@@ -371,8 +371,10 @@ result commits, and resumable stopped branches for that session's agents.
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete
 checkout/resume commands, dry-run recovery candidates, and recent worker logs in
-one payload. Add `--checkout-dir <path>` to include local checkouts for
-completed/stopped run branches in the same snapshot.
+one payload. It also includes an `actions` block with the exact restart,
+recover, resume, and changed-results commands to run next. Add
+`--checkout-dir <path>` to include local checkouts for completed/stopped run
+branches in the same snapshot.
 `runs recover-session <name>` requeues stale runs claimed by that session's
 workers without stopping or restarting the worker group; add `--dry-run` to
 preview the affected runs first. Add `--include-stopped` to also requeue

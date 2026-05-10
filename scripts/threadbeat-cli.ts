@@ -1023,6 +1023,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         return { agentId, total: checkouts.length, checkouts };
       })
       : null;
+    const deadWorkerCount = sessionWorkers.filter((worker) => !worker.alive).length;
+    const canResumeSession = resumableBranches.some((run) => run.location !== "other_worker");
+    const hasRecoverableActiveRun = recoveryPreview.some((item) => item.currentStatus !== "stopped");
+    const hasRecoverableStoppedRun = recoveryPreview.some((item) => item.currentStatus === "stopped");
     await printJson({
       observedAt: new Date().toISOString(),
       session: {
@@ -1033,11 +1037,41 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         restartedAt: status.session.restartedAt ?? null,
         workers: {
           total: sessionWorkers.length,
-          alive: sessionWorkers.filter((worker) => worker.alive).length,
-          dead: sessionWorkers.filter((worker) => !worker.alive).length,
+          alive: sessionWorkers.length - deadWorkerCount,
+          dead: deadWorkerCount,
         },
       },
       agents: status.agents,
+      actions: {
+        restartSession: deadWorkerCount > 0
+          ? ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover"]
+          : null,
+        restartSessionWithStopped: deadWorkerCount > 0 && canResumeSession
+          ? ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover", "--resume-stopped"]
+          : null,
+        recoverSession: hasRecoverableActiveRun
+          ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session]
+          : null,
+        recoverStopped: hasRecoverableStoppedRun
+          ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"]
+          : null,
+        resumeSession: canResumeSession
+          ? ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session]
+          : null,
+        changedResults: [
+          "npm",
+          "run",
+          "cli",
+          "--",
+          "runs",
+          "results",
+          "--session",
+          status.session.session,
+          "--checkout-dir",
+          resultCheckoutDir,
+          "--changed-only",
+        ],
+      },
       resumableBranches,
       resultBranches,
       recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),

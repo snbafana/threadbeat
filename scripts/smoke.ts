@@ -1399,6 +1399,14 @@ try {
       commands: { checkoutBranch: string[]; inspectRun: string[] };
     }>;
     recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; skipped?: string }>;
+    actions: {
+      restartSession: string[] | null;
+      restartSessionWithStopped: string[] | null;
+      recoverSession: string[] | null;
+      recoverStopped: string[] | null;
+      resumeSession: string[] | null;
+      changedResults: string[];
+    };
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--lines", "5"]);
   assert.match(detachedWorkerReview.observedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -1406,6 +1414,20 @@ try {
   assert.equal(detachedWorkerReview.session.workers.total, 1);
   assert.equal(detachedWorkerReview.session.workers.alive, 1);
   assert.equal(detachedWorkerReview.session.workers.dead, 0);
+  assert.equal(detachedWorkerReview.actions.restartSession, null);
+  assert.equal(detachedWorkerReview.actions.restartSessionWithStopped, null);
+  assert.equal(
+    detachedWorkerReview.actions.recoverStopped?.join(" "),
+    `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`,
+  );
+  assert.equal(
+    detachedWorkerReview.actions.resumeSession?.join(" "),
+    `npm run cli -- runs resume-session ${detachedWorkerSessionName}`,
+  );
+  assert.equal(
+    detachedWorkerReview.actions.changedResults.join(" "),
+    `npm run cli -- runs results --session ${detachedWorkerSessionName} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results --changed-only`,
+  );
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"
