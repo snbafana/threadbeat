@@ -322,6 +322,47 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await git(["fetch", "origin", `${status.run.run_branch}:refs/remotes/origin/${status.run.run_branch}`], targetDir);
     await git(["checkout", "-B", status.run.run_branch, `refs/remotes/origin/${status.run.run_branch}`], targetDir);
     const headCommit = (await git(["rev-parse", "HEAD"], targetDir)).trim();
+    const reviewBaseRef = `refs/threadbeat/bases/${status.run.id}`;
+    let review: {
+      baseRef: string;
+      baseCommit: string | null;
+      headCommit: string;
+      changedFiles: Array<{ status: string; path: string }>;
+      commits: Array<{ sha: string; subject: string }>;
+      error?: string;
+    };
+    try {
+      await git(["fetch", "origin", `+${status.run.input_ref}:${reviewBaseRef}`], targetDir);
+      const baseCommit = (await git(["rev-parse", reviewBaseRef], targetDir)).trim();
+      const changedOutput = (await git(["diff", "--name-status", `${reviewBaseRef}...HEAD`], targetDir)).trim();
+      const commitOutput = (await git(["log", "--format=%H%x09%s", `${reviewBaseRef}..HEAD`], targetDir)).trim();
+      review = {
+        baseRef: status.run.input_ref,
+        baseCommit,
+        headCommit,
+        changedFiles: changedOutput
+          ? changedOutput.split("\n").map((line) => {
+            const [fileStatus, ...filePath] = line.split("\t");
+            return { status: fileStatus, path: filePath.join("\t") };
+          })
+          : [],
+        commits: commitOutput
+          ? commitOutput.split("\n").map((line) => {
+            const [sha, ...subject] = line.split("\t");
+            return { sha, subject: subject.join("\t") };
+          })
+          : [],
+      };
+    } catch (error) {
+      review = {
+        baseRef: status.run.input_ref,
+        baseCommit: null,
+        headCommit,
+        changedFiles: [],
+        commits: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
     await printJson({
       run: {
         id: status.run.id,
@@ -338,6 +379,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         headCommit,
         matchesResultCommit: status.run.result_commit ? headCommit === status.run.result_commit : null,
       },
+      review,
       repository: {
         repoWebUrl: repository.repository.repoWebUrl,
       },

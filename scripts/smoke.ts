@@ -1204,6 +1204,13 @@ try {
   const checkedOutRun = await cliJson<{
     run: { id: string; branchName: string; resultCommit: string | null };
     checkout: { dir: string; created: boolean; branchName: string; headCommit: string; matchesResultCommit: boolean | null };
+    review: {
+      baseRef: string;
+      baseCommit: string | null;
+      headCommit: string;
+      changedFiles: Array<{ status: string; path: string }>;
+      commits: Array<{ sha: string; subject: string }>;
+    };
   }>(baseUrl, [
     "runs",
     "checkout",
@@ -1218,6 +1225,13 @@ try {
   assert.equal(checkedOutRun.checkout.branchName, checkoutPlan.plan.branchName);
   assert.equal(checkedOutRun.checkout.headCommit, expectedCheckoutHead);
   assert.equal(checkedOutRun.checkout.matchesResultCommit, null);
+  assert.equal(checkedOutRun.review.baseRef, "main");
+  assert.match(checkedOutRun.review.baseCommit ?? "", /^[a-f0-9]{40}$/);
+  assert.equal(checkedOutRun.review.headCommit, expectedCheckoutHead);
+  assert.deepEqual(checkedOutRun.review.changedFiles, [{ status: "A", path: "report.md" }]);
+  assert.ok(checkedOutRun.review.commits.some((commit) => (
+    commit.sha === expectedCheckoutHead && commit.subject === "Write branch report"
+  )));
   assert.equal(await fs.readFile(path.join(checkoutDir, "report.md"), "utf8"), "branch report\n");
 
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [

@@ -213,7 +213,8 @@ Run planning is intentionally server-side and Pi-free for now:
 - `runs inspect <run>` combines run state, branch/base refs, result commit,
   GitHub links, sandbox states, and recent messages for branch-native review.
 - `runs checkout <run> --dir <path>` clones or refreshes the run branch into a
-  local Git checkout so the branch state can be reviewed directly.
+  local Git checkout and reports base/head commits, commits ahead, and changed
+  files so the branch state can be reviewed directly.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.
