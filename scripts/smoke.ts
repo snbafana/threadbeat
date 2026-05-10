@@ -850,6 +850,19 @@ try {
   }>(baseUrl, ["runs", "sessions", "--session", detachedWorkerSessionName]);
   assert.equal(listedWorkerSessions.sessions.length, 1);
   assert.equal(listedWorkerSessions.sessions[0].workers[0].alive, true);
+  const detachedWorkerStatus = await cliJson<{
+    session: {
+      session: string;
+      workers: Array<{ workerId: string; alive: boolean; runs: Array<{ id: string; status: string }> }>;
+    };
+    agents: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
+  }>(baseUrl, ["runs", "session-status", detachedWorkerSessionName]);
+  assert.equal(detachedWorkerStatus.session.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerStatus.session.workers[0].workerId, "smoke-detached-worker-1");
+  assert.equal(detachedWorkerStatus.session.workers[0].alive, true);
+  assert.ok(detachedWorkerStatus.agents.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id && agent.total >= workerGroupQueue.queued.length
+  )));
   const stoppedWorkerSession = await cliJson<{
     session: string;
     stopped: Array<{ workerId: string; pid: number | null; stopped: boolean }>;

@@ -164,6 +164,7 @@ npm run cli -- runs watch <run>
 npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
+npm run cli -- runs session-status overnight
 npm run cli -- runs stop-session overnight
 npm run cli -- runs stop-matching --agents <agent>,<agent> --status planned
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
@@ -238,7 +239,9 @@ multiple foreground worker subprocesses with `--worker-prefix` IDs. Add
 `--detach --session <name>` to leave that worker group running after the parent
 CLI exits; Threadbeat records worker PIDs and stdout/stderr log paths under
 `.threadbeat/worker-sessions/`. Use `runs sessions` to inspect local worker
-sessions and `runs stop-session <name>` to terminate the recorded process group.
+sessions, `runs session-status <name>` to see worker liveness plus matching
+queued/claimed runs, and `runs stop-session <name>` to terminate the recorded
+process group.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs backlog` reports run counts by status for one or more agents.
 `runs workers` groups running runs by the `worker_id` that claimed them.
