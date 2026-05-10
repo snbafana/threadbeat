@@ -1312,6 +1312,24 @@ try {
     && run.currentStatus === "running"
     && run.dryRun === true
   )));
+  const sessionStoppedRecoveryPreview = await cliJson<{
+    session: string;
+    recovered: Array<{
+      runId: string;
+      currentStatus?: string;
+      dryRun?: boolean;
+      resultCommit?: string | null;
+      workerId?: string | null;
+    }>;
+  }>(baseUrl, ["runs", "recover-session", detachedWorkerSessionName, "--include-stopped", "--dry-run"]);
+  assert.equal(sessionStoppedRecoveryPreview.session, detachedWorkerSessionName);
+  assert.ok(sessionStoppedRecoveryPreview.recovered.some((run) => (
+    run.runId === detachedStoppedPlan.run.id
+    && run.currentStatus === "stopped"
+    && run.dryRun === true
+    && run.resultCommit === null
+    && run.workerId === null
+  )));
   const sessionRecovered = await cliJson<{
     session: string;
     recovered: Array<{ runId: string; status?: string }>;

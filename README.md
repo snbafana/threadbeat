@@ -336,7 +336,8 @@ list, dry-run recovery candidates, and recent worker logs in one payload. Add
 branches in the same snapshot.
 `runs recover-session <name>` requeues stale runs claimed by that session's
 workers without stopping or restarting the worker group; add `--dry-run` to
-preview the affected runs first.
+preview the affected runs first. Add `--include-stopped` to also requeue
+unfinished stopped branch runs for that session's agents.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, and optional local checkouts with

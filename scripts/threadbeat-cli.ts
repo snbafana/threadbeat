@@ -959,6 +959,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       workerIds,
       options["include-stopped"] === "1",
       options["dry-run"] === "1",
+      options["include-stopped"] === "1",
     );
     await printJson({
       session: session.session,
@@ -1693,6 +1694,7 @@ async function recoverStaleRuns(
   workerIds?: Set<string>,
   includeStopped = false,
   dryRun = false,
+  includeUnassignedStopped = false,
 ): Promise<RecoverStaleRunResult[]> {
   const candidateStatuses = includeStopped ? "running,stopped" : "running";
   const candidateRuns: Array<{
@@ -1719,10 +1721,12 @@ async function recoverStaleRuns(
         result_commit: string | null;
       }>;
     };
-    candidateRuns.push(...listed.runs.filter((run) => (
-      (!workerIds || (run.worker_id !== null && workerIds.has(run.worker_id)))
-        && (run.status === "running" || (includeStopped && run.status === "stopped" && run.result_commit === null))
-    )));
+    candidateRuns.push(...listed.runs.filter((run) => {
+      const matchesWorker = !workerIds || (run.worker_id !== null && workerIds.has(run.worker_id));
+      const isStoppedBranch = includeStopped && run.status === "stopped" && run.result_commit === null;
+      const isUnassignedStoppedBranch = includeUnassignedStopped && run.worker_id === null && isStoppedBranch;
+      return (matchesWorker || isUnassignedStoppedBranch) && (run.status === "running" || isStoppedBranch);
+    }));
   }
   return await mapConcurrent(candidateRuns, concurrency, async (run) => {
     const runDetails = {
