@@ -430,6 +430,42 @@ try {
   assert.equal(requeueRunningSandboxResponse.statusCode, 409);
   assert.match(requeueRunningSandboxResponse.body, /running sandbox/);
 
+  const recoverCommandPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli recover command",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    recoverCommandPlan.run.id,
+    "--worker-id",
+    "smoke-orphaned-worker",
+  ]);
+  const recoveredCommand = await cliJson<{
+    recovered: Array<{ agentId: string; runId: string; status?: string; skipped?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "recover",
+    "--agent",
+    agentBody.agent.id,
+    "--worker-id",
+    "smoke-recover-operator",
+  ]);
+  assert.ok(recoveredCommand.recovered.some((run) => (
+    run.agentId === agentBody.agent.id
+      && run.runId === requeueBlockedPlan.run.id
+      && run.skipped === "run has a running sandbox"
+  )));
+  assert.ok(recoveredCommand.recovered.some((run) => (
+    run.agentId === agentBody.agent.id
+      && run.runId === recoverCommandPlan.run.id
+      && run.status === "planned"
+  )));
+
   const recoverAgentResponse = await app.inject({
     method: "POST",
     url: "/api/agents",

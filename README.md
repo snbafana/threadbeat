@@ -160,6 +160,7 @@ npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
 npm run cli -- runs claim <run> --worker-id worker-a
 npm run cli -- runs requeue <run> --worker-id worker-a
+npm run cli -- runs recover --agents <agent>,<agent> --worker-id worker-a
 npm run cli -- runs watch <run>
 npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs workers --agents <agent>,<agent>
@@ -228,7 +229,9 @@ Run planning is intentionally server-side and Pi-free for now:
 
 The `runs launch`, `runs work`, and `runs step` CLI commands are client-side
 orchestration over the existing run APIs. `runs launch` creates and starts
-multiple runs immediately. `runs work` drains already planned runs for one or
+multiple runs immediately. `runs recover` requeues `running` runs that no longer
+have a running sandbox, so an operator can make orphaned claims available before
+starting workers again. `runs work` drains already planned runs for one or
 more agents. Use `--until-empty` to keep claiming batches until the queue is
 idle, or `--loop` to poll for longer CLI worker sessions. Add `--recover` to
 requeue unfinished running runs that no longer have a running sandbox before

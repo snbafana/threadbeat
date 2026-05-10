@@ -311,6 +311,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ agents });
     return;
   }
+  if (subcommandName === "recover") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const workerPayload = options["worker-id"] ? { workerId: options["worker-id"] } : undefined;
+    const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
+    const recovered = await recoverStaleRuns(agentIds, workerPayload, concurrency);
+    await printJson({ recovered: recovered.map(({ run: _run, ...item }) => item) });
+    return;
+  }
   if (subcommandName === "sessions") {
     const options = parseOptions(args);
     await printJson({ sessions: await listWorkerSessions(options.session) });
@@ -573,25 +582,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
           runs: Array<{ id: string; agent_id: string; status: string }>;
         };
-        if (options.recover === "1") {
-          for (const run of listed.runs.filter((item) => item.status === "running")) {
-            const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status?limit=1`) as {
-              sandboxes: Array<{ state: string }>;
-            };
-            if (status.sandboxes.some((sandbox) => sandbox.state === "running")) continue;
-            const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, workerPayload, [409]) as {
-              run?: { id: string; agent_id: string; status: string };
-              error?: string;
-            };
-            if (!requeued.run) {
-              recovered.push({ agentId: run.agent_id, runId: run.id, skipped: requeued.error ?? "run was not requeued" });
-              continue;
-            }
-            recovered.push({ agentId: requeued.run.agent_id, runId: requeued.run.id, status: requeued.run.status });
-            plannedRuns.push(requeued.run);
-          }
-        }
         plannedRuns.push(...listed.runs.filter((run) => run.status === "planned"));
+      }
+      if (options.recover === "1") {
+        const recoveredRuns = await recoverStaleRuns(agentIds, workerPayload, concurrency);
+        recovered.push(...recoveredRuns.map(({ run: _run, ...item }) => item));
+        plannedRuns.push(...recoveredRuns.flatMap((item) => item.run ? [item.run] : []));
       }
       const batchLimit = untilEmpty ? limit : limit - processed.length;
       const work = plannedRuns.slice(0, batchLimit);
@@ -828,6 +824,49 @@ async function runCliWorker(args: string[]): Promise<{ exitCode: number | null; 
     child.on("close", (exitCode) => {
       resolve({ exitCode, stdout: stdout.trim(), stderr: stderr.trim() });
     });
+  });
+}
+
+type RecoverStaleRunResult = {
+  agentId: string;
+  runId: string;
+  status?: string;
+  skipped?: string;
+  run?: { id: string; agent_id: string; status: string };
+};
+
+async function recoverStaleRuns(
+  agentIds: string[],
+  workerPayload: { workerId: string } | undefined,
+  concurrency: number,
+): Promise<RecoverStaleRunResult[]> {
+  const runningRuns = [];
+  for (const agentId of agentIds) {
+    const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+      runs: Array<{ id: string; agent_id: string; status: string }>;
+    };
+    runningRuns.push(...listed.runs.filter((run) => run.status === "running"));
+  }
+  return await mapConcurrent(runningRuns, concurrency, async (run) => {
+    const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status?limit=1`) as {
+      sandboxes: Array<{ state: string }>;
+    };
+    if (status.sandboxes.some((sandbox) => sandbox.state === "running")) {
+      return { agentId: run.agent_id, runId: run.id, skipped: "run has a running sandbox" };
+    }
+    const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, workerPayload, [409]) as {
+      run?: { id: string; agent_id: string; status: string };
+      error?: string;
+    };
+    if (!requeued.run) {
+      return { agentId: run.agent_id, runId: run.id, skipped: requeued.error ?? "run was not requeued" };
+    }
+    return {
+      agentId: requeued.run.agent_id,
+      runId: requeued.run.id,
+      status: requeued.run.status,
+      run: requeued.run,
+    };
   });
 }
 
@@ -1083,6 +1122,7 @@ Commands:
   runs status <run> [--limit 20]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
+  runs recover --agent <agent>|--agents <agent,agent> [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
