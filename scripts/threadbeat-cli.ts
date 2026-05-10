@@ -1669,6 +1669,14 @@ type WorkerSession = {
   restartedAt?: string;
 };
 
+type SessionVisibleRun = {
+  id: string;
+  status: string;
+  objective: string;
+  branchName: string;
+  resultCommit: string | null;
+};
+
 async function startDetachedWorkerSession(
   sessionName: string,
   workerCount: number,
@@ -1728,7 +1736,7 @@ async function workerSessionStatus(sessionName: string, statusFilter: Set<string
   session: WorkerSession & {
     workers: Array<WorkerSession["workers"][number] & {
       alive: boolean;
-      runs: Array<{ agentId: string; id: string; status: string }>;
+      runs: Array<SessionVisibleRun & { agentId: string }>;
     }>;
   };
   agents: Array<{
@@ -1736,35 +1744,52 @@ async function workerSessionStatus(sessionName: string, statusFilter: Set<string
     total: number;
     statuses: Record<string, number>;
     resumableStopped: number;
-    unassigned: Array<{ id: string; status: string }>;
-    otherWorkers: Array<{ id: string; status: string; workerId: string }>;
+    unassigned: SessionVisibleRun[];
+    otherWorkers: Array<SessionVisibleRun & { workerId: string }>;
   }>;
 }> {
   const session = await readWorkerSession(sessionName);
   const agentIds = workerSessionAgentIds(session);
-  const workerRuns = new Map(session.workers.map((worker) => [worker.workerId, [] as Array<{ agentId: string; id: string; status: string }>]));
+  const workerRuns = new Map(session.workers.map((worker) => [
+    worker.workerId,
+    [] as Array<SessionVisibleRun & { agentId: string }>,
+  ]));
   const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
     const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-      runs: Array<{ id: string; status: string; worker_id: string | null }>;
+      runs: Array<{
+        id: string;
+        objective: string;
+        run_branch: string;
+        result_commit: string | null;
+        status: string;
+        worker_id: string | null;
+      }>;
     };
     const statuses: Record<string, number> = {};
     let resumableStopped = 0;
-    const unassigned: Array<{ id: string; status: string }> = [];
-    const otherWorkers: Array<{ id: string; status: string; workerId: string }> = [];
+    const unassigned: SessionVisibleRun[] = [];
+    const otherWorkers: Array<SessionVisibleRun & { workerId: string }> = [];
     for (const run of listed.runs) {
       statuses[run.status] = (statuses[run.status] ?? 0) + 1;
       if (run.status === "stopped") resumableStopped += 1;
       if (!statusFilter.has(run.status)) continue;
+      const visibleRun = {
+        id: run.id,
+        status: run.status,
+        objective: run.objective,
+        branchName: run.run_branch,
+        resultCommit: run.result_commit,
+      };
       if (!run.worker_id) {
-        unassigned.push({ id: run.id, status: run.status });
+        unassigned.push(visibleRun);
         continue;
       }
       const sessionRuns = workerRuns.get(run.worker_id);
       if (sessionRuns) {
-        sessionRuns.push({ agentId, id: run.id, status: run.status });
+        sessionRuns.push({ agentId, ...visibleRun });
         continue;
       }
-      otherWorkers.push({ id: run.id, status: run.status, workerId: run.worker_id });
+      otherWorkers.push({ ...visibleRun, workerId: run.worker_id });
     }
     return { agentId, total: listed.runs.length, statuses, resumableStopped, unassigned, otherWorkers };
   });

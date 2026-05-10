@@ -319,7 +319,7 @@ multiple foreground worker subprocesses with `--worker-prefix` IDs. Add
 CLI exits; Threadbeat records worker PIDs and stdout/stderr log paths under
 `.threadbeat/worker-sessions/`. Use `runs sessions` to inspect local worker
 sessions, `runs session-status <name>` to see worker liveness plus matching
-queued/claimed runs, `runs session-watch <name>` to stream those snapshots
+queued/claimed run branches, `runs session-watch <name>` to stream those snapshots
 while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, and `runs stop-session <name>` to terminate the recorded process
 group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed

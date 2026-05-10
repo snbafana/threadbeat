@@ -990,14 +990,18 @@ try {
   const detachedWorkerStatus = await cliJson<{
     session: {
       session: string;
-      workers: Array<{ workerId: string; alive: boolean; runs: Array<{ id: string; status: string }> }>;
+      workers: Array<{
+        workerId: string;
+        alive: boolean;
+        runs: Array<{ id: string; status: string; branchName: string; resultCommit: string | null }>;
+      }>;
     };
     agents: Array<{
       agentId: string;
       total: number;
       statuses: Record<string, number>;
       resumableStopped: number;
-      unassigned: Array<{ id: string; status: string }>;
+      unassigned: Array<{ id: string; status: string; branchName: string; resultCommit: string | null }>;
     }>;
   }>(baseUrl, ["runs", "session-status", detachedWorkerSessionName]);
   assert.equal(detachedWorkerStatus.session.session, detachedWorkerSessionName);
@@ -1009,7 +1013,12 @@ try {
   assert.ok(detachedWorkerStatus.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id
     && agent.resumableStopped >= 1
-    && agent.unassigned.some((run) => run.id === detachedStoppedPlan.run.id && run.status === "stopped")
+    && agent.unassigned.some((run) => (
+      run.id === detachedStoppedPlan.run.id
+      && run.status === "stopped"
+      && run.branchName.startsWith("threadbeat/runs/")
+      && run.resultCommit === null
+    ))
   )));
   const detachedWorkerSummary = await cliJson<{
     session: { session: string; workers: { total: number; alive: number; dead: number } };
