@@ -268,6 +268,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "monitor") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const statusFilter = options.status ? new Set(parseList(options.status)) : null;
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
     for (let poll = 0; poll < maxPolls; poll += 1) {
@@ -276,7 +277,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
           runs: Array<{ id: string; status: string }>;
         };
-        const runs = await mapConcurrent(listed.runs, 4, async (run) => {
+        const visibleRuns = statusFilter ? listed.runs.filter((run) => statusFilter.has(run.status)) : listed.runs;
+        const runs = await mapConcurrent(visibleRuns, 4, async (run) => {
           const params = new URLSearchParams();
           params.set("limit", options.limit ?? "3");
           const status = await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(run.id)}/status`, params)) as {
@@ -771,7 +773,7 @@ Commands:
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
-  runs monitor --agent <agent>|--agents <agent,agent> [--limit 3] [--interval-ms 2000] [--max-polls 1]
+  runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]

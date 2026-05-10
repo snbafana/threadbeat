@@ -577,6 +577,20 @@ try {
   );
   assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id && run.status === "planned")));
   assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id && run.messages.some((message) => message.type === "agent_run_planned"))));
+  const cliPlannedMonitor = await cliRaw(baseUrl, [
+    "runs",
+    "monitor",
+    "--agents",
+    `${workerAgentBody.agent.id},${launchAgentBody.agent.id}`,
+    "--status",
+    "planned",
+  ]);
+  const plannedMonitored = JSON.parse(cliPlannedMonitor.stdout.trim()) as {
+    agents: Array<{ runs: Array<{ id: string; status: string }> }>;
+  };
+  assert.ok(plannedMonitored.agents.every((agent) => agent.runs.every((run) => run.status === "planned")));
+  assert.ok(plannedMonitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id)));
+  assert.ok(plannedMonitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id)));
 
   const cliWorker = await cliJson<{
     processed: Array<{
