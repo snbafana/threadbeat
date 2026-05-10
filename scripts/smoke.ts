@@ -1076,6 +1076,26 @@ try {
       && run.links.resultCommitUrl === null
     ))
   )));
+  const detachedWorkerReview = await cliJson<{
+    observedAt: string;
+    session: { session: string; workers: { total: number; alive: number; dead: number } };
+    recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; skipped?: string }>;
+    logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--lines", "5"]);
+  assert.match(detachedWorkerReview.observedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(detachedWorkerReview.session.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerReview.session.workers.total, 1);
+  assert.equal(detachedWorkerReview.session.workers.alive, 1);
+  assert.equal(detachedWorkerReview.session.workers.dead, 0);
+  assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
+    run.runId === detachedStoppedPlan.run.id
+    && run.currentStatus === "stopped"
+    && run.dryRun === true
+  )));
+  assert.equal(detachedWorkerReview.logs[0].workerId, "smoke-detached-worker-1");
+  assert.equal(detachedWorkerReview.logs[0].alive, true);
+  assert.ok(Array.isArray(detachedWorkerReview.logs[0].stdout.lines));
+  assert.ok(Array.isArray(detachedWorkerReview.logs[0].stderr.lines));
   const watchedWorkerStatus = await cliJson<{
     observedAt: string;
     session: {

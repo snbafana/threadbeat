@@ -719,6 +719,58 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "session-review") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-review <session>");
+    const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
+    const status = await workerSessionStatus(requiredSessionName, statusFilter);
+    const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & {
+      alive: boolean;
+      runs: Array<{ agentId: string; id: string; status: string }>;
+    }>;
+    const agentIds = workerSessionAgentIds(status.session);
+    const recoveryPreview = await recoverStaleRuns(
+      agentIds,
+      undefined,
+      parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+      undefined,
+      options["include-stopped"] === "1",
+      true,
+    );
+    const lines = parsePositiveInteger(options.lines ?? "20", "--lines");
+    await printJson({
+      observedAt: new Date().toISOString(),
+      session: {
+        session: status.session.session,
+        command: status.session.command,
+        startedAt: status.session.startedAt,
+        stoppedAt: status.session.stoppedAt ?? null,
+        restartedAt: status.session.restartedAt ?? null,
+        workers: {
+          total: sessionWorkers.length,
+          alive: sessionWorkers.filter((worker) => worker.alive).length,
+          dead: sessionWorkers.filter((worker) => !worker.alive).length,
+        },
+      },
+      agents: status.agents,
+      recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),
+      logs: await Promise.all(sessionWorkers.map(async (worker) => ({
+        workerId: worker.workerId,
+        pid: worker.pid,
+        alive: worker.alive,
+        stdout: {
+          path: worker.stdoutPath,
+          lines: await tailFileLines(worker.stdoutPath, lines),
+        },
+        stderr: {
+          path: worker.stderrPath,
+          lines: await tailFileLines(worker.stderrPath, lines),
+        },
+      }))),
+    });
+    return;
+  }
   if (subcommandName === "session-watch") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -1905,6 +1957,7 @@ Commands:
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
+  runs session-review <name> [--include-stopped] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
