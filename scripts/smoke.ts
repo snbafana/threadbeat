@@ -396,6 +396,69 @@ try {
     ]);
   }
 
+  const workerAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-worker-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(workerAgentResponse.statusCode, 200);
+  const workerAgentBody = JSON.parse(workerAgentResponse.body) as { agent: { id: string } };
+  const workerRunA = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    workerAgentBody.agent.id,
+    "--objective",
+    "cli worker run a",
+  ]);
+  const workerRunB = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    launchAgentBody.agent.id,
+    "--objective",
+    "cli worker run b",
+  ]);
+  const cliWorker = await cliJson<{
+    processed: Array<{
+      runId: string;
+      sandbox: { run_id: string | null };
+      runtime: { result: { exitCode: number } };
+      status: { run: { status: string } };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agents",
+    `${workerAgentBody.agent.id},${launchAgentBody.agent.id}`,
+    "--bootstrap",
+    "--check-runtime",
+    "--limit",
+    "2",
+    "--concurrency",
+    "2",
+  ]);
+  assert.equal(cliWorker.processed.length, 2);
+  assert.deepEqual(
+    cliWorker.processed.map((run) => run.runId).sort(),
+    [workerRunA.run.id, workerRunB.run.id].sort(),
+  );
+  for (const worked of cliWorker.processed) {
+    assert.equal(worked.sandbox.run_id, worked.runId);
+    assert.equal(worked.runtime.result.exitCode, 0);
+    assert.equal(worked.status.run.status, "running");
+    await cliJson(baseUrl, [
+      "sandboxes",
+      "stop-running",
+      "--run",
+      worked.runId,
+    ]);
+  }
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",

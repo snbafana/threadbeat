@@ -299,6 +299,68 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ runs: results });
     return;
   }
+  if (subcommandName === "work") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const concurrency = parsePositiveInteger(options.concurrency ?? "2", "--concurrency");
+    const limit = parsePositiveInteger(options.limit ?? "10", "--limit");
+    const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "5000", "--interval-ms");
+    const idleExitAfter = parsePositiveInteger(options["idle-exit-after"] ?? "1", "--idle-exit-after");
+    const processed: unknown[] = [];
+    let idlePasses = 0;
+
+    do {
+      const plannedRuns = [];
+      for (const agentId of agentIds) {
+        const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+          runs: Array<{ id: string; agent_id: string; status: string }>;
+        };
+        plannedRuns.push(...listed.runs.filter((run) => run.status === "planned"));
+      }
+      const work = plannedRuns.slice(0, limit - processed.length);
+      if (work.length === 0) {
+        idlePasses += 1;
+        if (options.loop !== "1" || idlePasses >= idleExitAfter) break;
+        await sleep(intervalMs);
+        continue;
+      }
+      idlePasses = 0;
+      const results = await mapConcurrent(work, concurrency, async (run) => {
+        const sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/sandbox`, {
+          bootstrap: options.bootstrap === "1",
+        }) as { sandbox: unknown; bootstrap?: unknown };
+        const runtime = options["check-runtime"] === "1"
+          ? await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/check-runtime`)
+          : null;
+        const booted = options.boot === "1"
+          ? await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/boot`, {
+            ...(options.prompt ? { promptPath: options.prompt } : {}),
+            ...(options.task ? { taskPath: options.task } : {}),
+          })
+          : null;
+        const finalized = options.finalize === "1"
+          ? await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/finalize`, {
+            ...(options.message ? { commitMessage: options.message } : {}),
+          })
+          : null;
+        const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status`);
+        return {
+          agentId: run.agent_id,
+          runId: run.id,
+          sandbox: sandboxed.sandbox,
+          ...(sandboxed.bootstrap ? { bootstrap: sandboxed.bootstrap } : {}),
+          ...(runtime ? { runtime } : {}),
+          ...(booted ? { boot: booted } : {}),
+          ...(finalized ? { finalized } : {}),
+          status,
+        };
+      });
+      processed.push(...results);
+    } while (options.loop === "1" && processed.length < limit);
+
+    await printJson({ processed, idlePasses });
+    return;
+  }
   if (subcommandName === "sandbox") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error(`runs ${subcommandName} requires a run id`);
@@ -417,7 +479,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop") {
       options[key] = "1";
       continue;
     }
@@ -457,6 +519,10 @@ async function mapConcurrent<T, R>(
   });
   await Promise.all(workers);
   return results;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function requestJson(method: string, path: string, payload?: unknown): Promise<unknown> {
@@ -568,6 +634,7 @@ Commands:
   runs status <run> [--limit 20]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
+  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--loop] [--limit 10] [--concurrency 2]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]
