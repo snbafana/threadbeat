@@ -198,6 +198,7 @@ npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs branches --agents <agent>,<agent>
 npm run cli -- runs branches --session overnight
 npm run cli -- runs results --session overnight
+npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs session-status overnight
@@ -254,7 +255,8 @@ Run planning is intentionally server-side and Pi-free for now:
   stopped branch run from a detached worker session under `<path>/<run-id>`.
 - `runs results --session <name>` reports completed and stopped branch runs for
   a worker session with GitHub branch/result links and warnings for completed
-  runs that do not have a recorded result commit.
+  runs that do not have a recorded result commit. Add `--max-polls` and
+  `--interval-ms` to keep emitting result snapshots while a long session runs.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.

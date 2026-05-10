@@ -973,6 +973,7 @@ try {
     ))
   )));
   const detachedWorkerResults = await cliJson<{
+    observedAt: string;
     session: string;
     agents: Array<{
       agentId: string;
@@ -987,6 +988,7 @@ try {
       }>;
     }>;
   }>(baseUrl, ["runs", "results", "--session", detachedWorkerSessionName]);
+  assert.match(detachedWorkerResults.observedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(detachedWorkerResults.session, detachedWorkerSessionName);
   assert.ok(detachedWorkerResults.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id
@@ -1337,6 +1339,7 @@ try {
     ))
   )));
   const resultSummary = await cliJson<{
+    observedAt: string;
     agents: Array<{
       agentId: string;
       summary: { total: number; resultCommits: number; resumable: number; warnings: number };
@@ -1358,6 +1361,7 @@ try {
       }>;
     }>;
   }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id]);
+  assert.match(resultSummary.observedAt, /^\d{4}-\d{2}-\d{2}T/);
   assert.ok(resultSummary.agents.some((agent) => (
     agent.agentId === agentBody.agent.id
     && agent.summary.resultCommits >= 1
@@ -1374,6 +1378,29 @@ try {
       && new RegExp(`github\\.com/example/agent/commit/${cliRunFinalize.result.commitSha}`).test(run.links.resultCommitUrl ?? "")
       && new RegExp(`github\\.com/example/agent/compare/main\\.\\.\\.${cliRunFinalize.result.commitSha}`).test(run.links.resultCompareUrl ?? "")
     ))
+  )));
+  const watchedResults = await cliRaw(baseUrl, [
+    "runs",
+    "results",
+    "--agent",
+    agentBody.agent.id,
+    "--status",
+    "completed",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const resultSnapshots = watchedResults.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    observedAt: string;
+    agents: Array<{ runs: Array<{ id: string; resultCommit: string | null }> }>;
+  });
+  assert.equal(resultSnapshots.length, 2);
+  assert.ok(resultSnapshots.every((snapshot) => (
+    /^\d{4}-\d{2}-\d{2}T/.test(snapshot.observedAt)
+    && snapshot.agents.some((agent) => agent.runs.some((run) => (
+      run.id === cliRunPlan.run.id && run.resultCommit === cliRunFinalize.result.commitSha
+    )))
   )));
 
   const checkoutRemote = path.join(tempRoot, "run-checkout-remote.git");
