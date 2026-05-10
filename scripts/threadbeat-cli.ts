@@ -694,13 +694,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
     const before = await agentBacklog(agentIds);
     const recovered = options.recover === "1"
-      ? await recoverStaleRuns(agentIds, undefined, concurrency)
+      ? await recoverStaleRuns(
+        agentIds,
+        undefined,
+        concurrency,
+        undefined,
+        options["include-stopped"] === "1",
+      )
       : [];
     const workerArgs = ["--agents", agentIds.join(",")];
     for (const flag of ["limit", "concurrency", "interval-ms", "idle-exit-after", "message", "prompt", "task"]) {
       if (options[flag]) workerArgs.push(`--${flag}`, options[flag]);
     }
-    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "resume-stopped", "until-empty"]) {
+    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "include-stopped", "resume-stopped", "until-empty"]) {
       if (options[flag] === "1") workerArgs.push(`--${flag}`);
     }
     if (options.loop === "1" || options["until-empty"] !== "1") workerArgs.push("--loop");
@@ -731,7 +737,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     for (const flag of ["limit", "concurrency", "interval-ms", "idle-exit-after", "message", "prompt", "task"]) {
       if (options[flag]) workerArgs.push(`--${flag}`, options[flag]);
     }
-    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "resume-stopped", "until-empty"]) {
+    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "include-stopped", "resume-stopped", "until-empty"]) {
       if (options[flag] === "1") workerArgs.push(`--${flag}`);
     }
     if (options.loop === "1" || options["until-empty"] !== "1") workerArgs.push("--loop");
@@ -758,6 +764,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }) as { plan: unknown; run: unknown };
       return { agentId: item.agentId, objective: item.objective, ...planned };
     });
+    const recovered = options.recover === "1"
+      ? await recoverStaleRuns(
+        agentIds,
+        undefined,
+        parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+        undefined,
+        options["include-stopped"] === "1",
+      )
+      : [];
     const session = await startDetachedWorkerSession(
       sessionName,
       workerCount,
@@ -767,6 +782,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({
       assignment,
       queued,
+      ...(options.recover === "1" ? { recovered: recovered.map(({ run: _run, ...item }) => item) } : {}),
       session,
       backlog: await agentBacklog(agentIds),
     });
@@ -1453,6 +1469,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
 
     do {
       const workRuns = [];
+      const plannedRuns = [];
       for (const agentId of agentIds) {
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
           runs: Array<{ id: string; agent_id: string; status: string; worker_id: string | null; result_commit: string | null }>;
@@ -1464,7 +1481,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             && (run.worker_id === null || run.worker_id === workerPayload?.workerId)
           )));
         }
-        workRuns.push(...listed.runs.filter((run) => run.status === "planned"));
+        plannedRuns.push(...listed.runs.filter((run) => run.status === "planned"));
       }
       if (options.recover === "1") {
         const recoveredRuns = await recoverStaleRuns(
@@ -1479,6 +1496,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         recovered.push(...recoveredRuns.map(({ run: _run, ...item }) => item));
         workRuns.push(...recoveredRuns.flatMap((item) => item.run ? [item.run] : []));
       }
+      workRuns.push(...plannedRuns);
       const batchLimit = untilEmpty ? limit : limit - processed.length;
       const work = workRuns.slice(0, batchLimit);
       if (work.length === 0) {
@@ -2448,8 +2466,8 @@ Commands:
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
-  runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--resume-stopped] [--loop|--until-empty]
-  runs dispatch --agents <agent,agent> --objectives-file ./tasks.txt --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover]
+  runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty]
+  runs dispatch --agents <agent,agent> --objectives-file ./tasks.txt --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--assignment fanout|round-robin] [--dry-run] [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]

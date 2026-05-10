@@ -1626,9 +1626,19 @@ try {
     "--objectives-file",
     superviseObjectivesFile,
   ]);
+  const superviseStoppedPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    superviseAgentBody.agent.id,
+    "--objective",
+    "supervise recovered stopped branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", superviseStoppedPlan.run.id]);
   const superviseSessionName = `supervise-${superviseAgentBody.agent.id}`;
   const supervised = await cliJson<{
     before: Array<{ agentId: string; statuses: Record<string, number> }>;
+    recovered: Array<{ runId: string; status?: string; branchName: string }>;
     session: { session: string; workers: Array<{ workerId: string; pid: number | null }> };
     after: Array<{ agentId: string }>;
   }>(baseUrl, [
@@ -1643,6 +1653,7 @@ try {
     "--worker-prefix",
     "smoke-supervisor",
     "--recover",
+    "--include-stopped",
     "--loop",
     "--idle-exit-after",
     "100",
@@ -1657,11 +1668,17 @@ try {
   assert.ok(supervised.before.some((agent) => (
     agent.agentId === superviseAgentBody.agent.id && agent.statuses.planned === superviseQueue.queued.length
   )));
+  assert.ok(supervised.recovered.some((run) => (
+    run.runId === superviseStoppedPlan.run.id
+    && run.branchName === superviseStoppedPlan.plan.branchName
+    && run.status === "planned"
+  )));
   assert.ok(supervised.after.some((agent) => agent.agentId === superviseAgentBody.agent.id));
   await cliJson(baseUrl, ["runs", "stop-session", superviseSessionName]);
   for (const queued of superviseQueue.queued) {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
   }
+  await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", superviseStoppedPlan.run.id]);
 
   const dispatchAgentResponse = await app.inject({
     method: "POST",
@@ -1688,6 +1705,15 @@ try {
   const dispatchObjectivesFile = path.join(tempRoot, "dispatch-objectives.txt");
   await fs.writeFile(dispatchObjectivesFile, "dispatch objective a\ndispatch objective b\n");
   const dispatchSessionName = `dispatch-${dispatchAgentBody.agent.id}`;
+  const dispatchRecoveredPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    dispatchAgentBody.agent.id,
+    "--objective",
+    "dispatch recovered stopped branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", dispatchRecoveredPlan.run.id]);
   const dispatchPreview = await cliJson<{
     assignment: string;
     dryRun: boolean;
@@ -1729,6 +1755,7 @@ try {
   const dispatched = await cliJson<{
     assignment: string;
     queued: Array<{ agentId: string; objective: string; run: { id: string; status: string } }>;
+    recovered: Array<{ runId: string; status?: string; branchName: string }>;
     session: { session: string; workers: Array<{ workerId: string; pid: number | null }> };
     backlog: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
   }>(baseUrl, [
@@ -1747,6 +1774,7 @@ try {
     "--worker-prefix",
     "smoke-dispatcher",
     "--recover",
+    "--include-stopped",
     "--interval-ms",
     "100",
     "--idle-exit-after",
@@ -1763,6 +1791,11 @@ try {
   assert.equal(dispatched.session.session, dispatchSessionName);
   assert.equal(dispatched.session.workers[0].workerId, "smoke-dispatcher-1");
   assert.equal(typeof dispatched.session.workers[0].pid, "number");
+  assert.ok(dispatched.recovered.some((run) => (
+    run.runId === dispatchRecoveredPlan.run.id
+    && run.branchName === dispatchRecoveredPlan.plan.branchName
+    && run.status === "planned"
+  )));
   assert.ok(dispatched.backlog.some((agent) => (
     agent.agentId === dispatchAgentBody.agent.id && agent.total >= 1
   )));
@@ -1847,6 +1880,7 @@ try {
   for (const queued of dispatched.queued) {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
   }
+  await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", dispatchRecoveredPlan.run.id]);
 
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
