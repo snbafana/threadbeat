@@ -924,6 +924,28 @@ try {
   const queuePeerBody = JSON.parse(queuePeerResponse.body) as { agent: { id: string } };
   const roundRobinObjectivesFile = path.join(tempRoot, "round-robin-objectives.txt");
   await fs.writeFile(roundRobinObjectivesFile, "round robin a\nround robin b\nround robin c\n");
+  const roundRobinPreview = await cliJson<{
+    assignment: string;
+    dryRun: boolean;
+    planned: Array<{ agentId: string; objective: string }>;
+  }>(baseUrl, [
+    "runs",
+    "queue",
+    "--agents",
+    `${queueAgentBody.agent.id},${queuePeerBody.agent.id}`,
+    "--objectives-file",
+    roundRobinObjectivesFile,
+    "--assignment",
+    "round-robin",
+    "--dry-run",
+  ]);
+  assert.equal(roundRobinPreview.assignment, "round-robin");
+  assert.equal(roundRobinPreview.dryRun, true);
+  assert.deepEqual(roundRobinPreview.planned.map((item) => item.agentId), [
+    queueAgentBody.agent.id,
+    queuePeerBody.agent.id,
+    queueAgentBody.agent.id,
+  ]);
   const roundRobinQueued = await cliJson<{
     assignment: string;
     queued: Array<{ agentId: string; objective: string; run: { status: string } }>;
@@ -1470,6 +1492,44 @@ try {
   const dispatchObjectivesFile = path.join(tempRoot, "dispatch-objectives.txt");
   await fs.writeFile(dispatchObjectivesFile, "dispatch objective a\ndispatch objective b\n");
   const dispatchSessionName = `dispatch-${dispatchAgentBody.agent.id}`;
+  const dispatchPreview = await cliJson<{
+    assignment: string;
+    dryRun: boolean;
+    planned: Array<{ agentId: string; objective: string }>;
+    session: { session: string; workerCount: number; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "dispatch",
+    "--agents",
+    `${dispatchAgentBody.agent.id},${dispatchPeerBody.agent.id}`,
+    "--objectives-file",
+    dispatchObjectivesFile,
+    "--assignment",
+    "round-robin",
+    "--session",
+    dispatchSessionName,
+    "--workers",
+    "1",
+    "--worker-prefix",
+    "smoke-dispatcher",
+    "--recover",
+    "--interval-ms",
+    "100",
+    "--idle-exit-after",
+    "100",
+    "--limit",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(dispatchPreview.assignment, "round-robin");
+  assert.equal(dispatchPreview.dryRun, true);
+  assert.deepEqual(dispatchPreview.planned.map((item) => item.agentId), [
+    dispatchAgentBody.agent.id,
+    dispatchPeerBody.agent.id,
+  ]);
+  assert.equal(dispatchPreview.session.session, dispatchSessionName);
+  assert.equal(dispatchPreview.session.workerCount, 1);
+  assert.ok(dispatchPreview.session.command.includes("--loop"));
   const dispatched = await cliJson<{
     assignment: string;
     queued: Array<{ agentId: string; objective: string; run: { id: string; status: string } }>;
