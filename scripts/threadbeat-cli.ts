@@ -656,6 +656,49 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "restart-session") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const session = await readWorkerSession(required(sessionName, "runs restart-session <session>"));
+    const workerIds = new Set(session.workers.map((worker) => worker.workerId));
+    const recovered = options.recover === "1"
+      ? await recoverStaleRuns(
+        workerSessionAgentIds(session),
+        { workerId: session.session },
+        parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+        workerIds,
+      )
+      : [];
+    const commandArgs = session.command[0] === "runs" && session.command[1] === "work"
+      ? session.command.slice(2)
+      : session.command;
+    const restarted = [];
+    for (const worker of session.workers) {
+      if (processIsAlive(worker.pid)) continue;
+      const stdout = await fs.open(worker.stdoutPath, "a");
+      const stderr = await fs.open(worker.stderrPath, "a");
+      const child = spawn("npm", ["run", "--silent", "cli", "--", "runs", "work", ...commandArgs, "--worker-id", worker.workerId], {
+        detached: true,
+        env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+        stdio: ["ignore", stdout.fd, stderr.fd],
+      });
+      child.unref();
+      await stdout.close();
+      await stderr.close();
+      worker.pid = child.pid ?? null;
+      restarted.push({ workerId: worker.workerId, pid: worker.pid });
+    }
+    delete session.stoppedAt;
+    session.restartedAt = new Date().toISOString();
+    await writeWorkerSession(session);
+    await printJson({
+      session: session.session,
+      restarted,
+      recovered: recovered.map(({ run: _run, ...item }) => item),
+      status: await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"])),
+    });
+    return;
+  }
   if (subcommandName === "stop-matching") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
@@ -1272,6 +1315,7 @@ type WorkerSession = {
     stderrPath: string;
   }>;
   stoppedAt?: string;
+  restartedAt?: string;
 };
 
 async function startDetachedWorkerSession(
@@ -1611,6 +1655,7 @@ Commands:
   runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
+  runs restart-session <name> [--recover] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--resume-stopped] [--loop|--until-empty]

@@ -1096,6 +1096,32 @@ try {
     agent.agentId === dispatchAgentBody.agent.id && agent.total >= dispatched.queued.length
   )));
   await cliJson(baseUrl, ["runs", "stop-session", dispatchSessionName]);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const status = await cliJson<{ session: { workers: Array<{ alive: boolean }> } }>(baseUrl, [
+      "runs",
+      "session-status",
+      dispatchSessionName,
+    ]);
+    if (status.session.workers.every((worker) => !worker.alive)) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  const restartedDispatch = await cliJson<{
+    session: string;
+    restarted: Array<{ workerId: string; pid: number | null }>;
+    status: { session: { workers: Array<{ workerId: string; alive: boolean }> } };
+  }>(baseUrl, [
+    "runs",
+    "restart-session",
+    dispatchSessionName,
+    "--recover",
+  ]);
+  assert.equal(restartedDispatch.session, dispatchSessionName);
+  assert.deepEqual(restartedDispatch.restarted.map((worker) => worker.workerId), ["smoke-dispatcher-1"]);
+  assert.equal(typeof restartedDispatch.restarted[0].pid, "number");
+  assert.ok(restartedDispatch.status.session.workers.some((worker) => (
+    worker.workerId === "smoke-dispatcher-1" && worker.alive
+  )));
+  await cliJson(baseUrl, ["runs", "stop-session", dispatchSessionName]);
   for (const queued of dispatched.queued) {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
   }
