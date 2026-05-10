@@ -281,6 +281,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ agents });
     return;
   }
+  if (subcommandName === "stop-matching") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const statusFilter = new Set(parseList(options.status ?? "planned"));
+    const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
+    const runsToStop: Array<{ agentId: string; id: string; status: string }> = [];
+    for (const agentId of agentIds) {
+      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+        runs: Array<{ id: string; status: string }>;
+      };
+      runsToStop.push(...listed.runs
+        .filter((run) => statusFilter.has(run.status))
+        .map((run) => ({ agentId, id: run.id, status: run.status })));
+    }
+    const stopped = await mapConcurrent(runsToStop, concurrency, async (run) => {
+      await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/stop`);
+      return { agentId: run.agentId, runId: run.id, previousStatus: run.status };
+    });
+    await printJson({ stopped });
+    return;
+  }
   if (subcommandName === "monitor") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
@@ -790,6 +811,7 @@ Commands:
   runs requeue <run> [--worker-id worker-a]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
+  runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]

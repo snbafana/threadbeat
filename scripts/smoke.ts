@@ -801,6 +801,54 @@ try {
   ]);
   assert.equal(cliStoppedRun.run.status, "stopped");
 
+  const stopMatchingAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-stop-matching-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(stopMatchingAgentResponse.statusCode, 200);
+  const stopMatchingAgentBody = JSON.parse(stopMatchingAgentResponse.body) as { agent: { id: string } };
+  const stopMatchingRunA = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+    "--objective",
+    "cli stopped matching run a",
+  ]);
+  const stopMatchingRunB = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+    "--objective",
+    "cli stopped matching run b",
+  ]);
+  const stoppedMatching = await cliJson<{
+    stopped: Array<{ runId: string; previousStatus: string }>;
+  }>(baseUrl, [
+    "runs",
+    "stop-matching",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+  ]);
+  assert.deepEqual(
+    stoppedMatching.stopped.map((run) => run.runId).sort(),
+    [stopMatchingRunA.run.id, stopMatchingRunB.run.id].sort(),
+  );
+  assert.ok(stoppedMatching.stopped.every((run) => run.previousStatus === "planned"));
+  const stoppedMatchingList = await cliJson<{ runs: Array<{ id: string; status: string }> }>(baseUrl, [
+    "runs",
+    "list",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+  ]);
+  assert.ok(stoppedMatchingList.runs.every((run) => run.status === "stopped"));
+
   const cliRestartPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",
