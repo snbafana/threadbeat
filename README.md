@@ -206,6 +206,7 @@ npm run cli -- runs sessions
 npm run cli -- runs session-status overnight
 npm run cli -- runs session-summary overnight
 npm run cli -- runs session-review overnight --include-stopped --lines 40
+npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs stop-session overnight --recover
@@ -326,7 +327,9 @@ by that session's workers when those runs do not have a running sandbox.
 result commits, and resumable stopped branches for that session's agents.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, dry-run recovery
-candidates, and recent worker logs in one payload.
+candidates, and recent worker logs in one payload. Add `--checkout-dir <path>`
+to include local checkouts for completed/stopped run branches in the same
+snapshot.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, and optional local checkouts with

@@ -1634,6 +1634,40 @@ try {
   assert.equal(checkedOutResultRun?.checkout?.matchesResultCommit, null);
   assert.deepEqual(checkedOutResultRun?.review?.changedFiles, [{ status: "A", path: "report.md" }]);
   assert.equal(await fs.readFile(path.join(resultsCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
+  const sessionReviewCheckoutDir = path.join(tempRoot, "session-review-checkouts");
+  const checkedOutSessionReview = await cliJson<{
+    checkoutDir: string;
+    recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean }>;
+    resultCheckouts: Array<{
+      agentId: string;
+      total: number;
+      checkouts: Array<{
+        run: { id: string; status: string; branchName: string };
+        checkout: { dir: string; headCommit: string };
+        review: { changedFiles: Array<{ status: string; path: string }> };
+      }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-review",
+    checkoutSessionName,
+    "--include-stopped",
+    "--checkout-dir",
+    sessionReviewCheckoutDir,
+  ]);
+  const checkedOutReviewRun = checkedOutSessionReview.resultCheckouts
+    .find((agent) => agent.agentId === checkoutAgent.agent.id)
+    ?.checkouts.find((item) => item.run.id === checkoutPlan.run.id);
+  assert.equal(checkedOutSessionReview.checkoutDir, sessionReviewCheckoutDir);
+  assert.ok(checkedOutSessionReview.recoveryPreview.some((run) => (
+    run.runId === checkoutPlan.run.id && run.currentStatus === "stopped" && run.dryRun === true
+  )));
+  assert.equal(checkedOutReviewRun?.run.status, "stopped");
+  assert.equal(checkedOutReviewRun?.run.branchName, checkoutPlan.plan.branchName);
+  assert.equal(checkedOutReviewRun?.checkout.dir, path.join(sessionReviewCheckoutDir, checkoutPlan.run.id));
+  assert.equal(checkedOutReviewRun?.checkout.headCommit, expectedCheckoutHead);
+  assert.deepEqual(checkedOutReviewRun?.review.changedFiles, [{ status: "A", path: "report.md" }]);
+  assert.equal(await fs.readFile(path.join(sessionReviewCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
 
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",

@@ -739,6 +739,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       true,
     );
     const lines = parsePositiveInteger(options.lines ?? "20", "--lines");
+    const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
+    const resultStatusList = parseList(options["result-status"] ?? "completed,stopped");
+    const resultStatusFilter = new Set(resultStatusList);
+    const resultCheckouts = checkoutRootDir
+      ? await mapConcurrent(agentIds, 4, async (agentId) => {
+        const listed = await requestJson("GET", withQuery(
+          `/api/agents/${encodeURIComponent(agentId)}/runs`,
+          new URLSearchParams({ status: resultStatusList.join(",") }),
+        )) as {
+          runs: Array<{ id: string; status: string }>;
+        };
+        const runs = listed.runs.filter((run) => resultStatusFilter.has(run.status));
+        const checkouts = await mapConcurrent(
+          runs,
+          parsePositiveInteger(options["checkout-concurrency"] ?? "2", "--checkout-concurrency"),
+          async (run) => await checkoutRunBranch(run.id, path.join(checkoutRootDir, run.id)),
+        );
+        return { agentId, total: checkouts.length, checkouts };
+      })
+      : null;
     await printJson({
       observedAt: new Date().toISOString(),
       session: {
@@ -755,6 +775,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       },
       agents: status.agents,
       recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),
+      ...(checkoutRootDir ? { checkoutDir: checkoutRootDir, resultCheckouts } : {}),
       logs: await Promise.all(sessionWorkers.map(async (worker) => ({
         workerId: worker.workerId,
         pid: worker.pid,
@@ -1957,7 +1978,7 @@ Commands:
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
-  runs session-review <name> [--include-stopped] [--lines 20] [--status planned,running,stopped]
+  runs session-review <name> [--include-stopped] [--checkout-dir ./checkouts] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
