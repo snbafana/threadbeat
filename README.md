@@ -152,6 +152,7 @@ npm run cli -- agents create --name research --repo https://github.com/org/repo.
 npm run cli -- agents list
 npm run cli -- agents repo <agent>
 npm run cli -- runs plan --agent <agent> --objective "one bounded task"
+npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt
 npm run cli -- runs work --agent <agent> --bootstrap --check-runtime --recover --worker-id worker-a
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
@@ -196,6 +197,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.
+- `runs queue --objectives-file <file>` creates planned runs from a newline
+  separated task file for one or more agents. Blank lines and `#` comments are
+  ignored; workers can then drain the backlog with `runs work --loop --recover`.
 - `POST /api/runs/:id/requeue` moves an unfinished run with no running sandbox
   back to `planned`, which lets an operator recover a worker that claimed a run
   and exited before starting the sandbox.

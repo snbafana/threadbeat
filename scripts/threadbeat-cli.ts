@@ -308,6 +308,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options)));
     return;
   }
+  if (subcommandName === "queue") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const objectives = await readObjectivesFile(required(options["objectives-file"], "--objectives-file"));
+    const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
+    const queueItems = agentIds.flatMap((agentId) => objectives.map((objective) => ({ agentId, objective })));
+    const queued = await mapConcurrent(queueItems, concurrency, async (item) => {
+      const planned = await requestJson("POST", `/api/agents/${encodeURIComponent(item.agentId)}/runs`, {
+        objective: item.objective,
+        ...(options["input-ref"] ? { inputRef: options["input-ref"] } : {}),
+        ...(options.prefix ? { prefix: options.prefix } : {}),
+      }) as { plan: unknown; run: unknown };
+      return { agentId: item.agentId, objective: item.objective, ...planned };
+    });
+    await printJson({ queued });
+    return;
+  }
   if (subcommandName === "step") {
     const separatorIndex = args.indexOf("--");
     const optionArgs = separatorIndex >= 0 ? args.slice(0, separatorIndex) : args;
@@ -672,6 +689,16 @@ async function planRunForStep(options: Record<string, string>): Promise<string> 
   return run.id;
 }
 
+async function readObjectivesFile(filePath: string): Promise<string[]> {
+  const text = await fs.readFile(filePath, "utf8");
+  const objectives = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  if (objectives.length === 0) throw new Error("--objectives-file did not contain any objectives");
+  return objectives;
+}
+
 type AgentTemplateResponse = {
   template: {
     files: Array<{ path: string; content: string }>;
@@ -746,6 +773,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs monitor --agent <agent>|--agents <agent,agent> [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
+  runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--worker-id worker-a] [--loop] [--limit 10] [--concurrency 2]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>

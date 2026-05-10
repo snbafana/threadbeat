@@ -617,6 +617,53 @@ try {
     ]);
   }
 
+  const queueAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-queue-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(queueAgentResponse.statusCode, 200);
+  const queueAgentBody = JSON.parse(queueAgentResponse.body) as { agent: { id: string } };
+  const objectivesFile = path.join(tempRoot, "queue-objectives.txt");
+  await fs.writeFile(objectivesFile, "# smoke queue\nqueued objective a\n\nqueued objective b\n");
+  const queuedRuns = await cliJson<{
+    queued: Array<{ agentId: string; objective: string; run: { id: string; status: string } }>;
+  }>(baseUrl, [
+    "runs",
+    "queue",
+    "--agent",
+    queueAgentBody.agent.id,
+    "--objectives-file",
+    objectivesFile,
+  ]);
+  assert.deepEqual(queuedRuns.queued.map((item) => item.objective), ["queued objective a", "queued objective b"]);
+  assert.ok(queuedRuns.queued.every((item) => item.agentId === queueAgentBody.agent.id));
+  assert.ok(queuedRuns.queued.every((item) => item.run.status === "planned"));
+  const queuedWorker = await cliJson<{
+    processed: Array<{ runId: string; status: { run: { worker_id: string | null } } }>;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    queueAgentBody.agent.id,
+    "--limit",
+    "2",
+    "--worker-id",
+    "smoke-queue-worker",
+  ]);
+  assert.deepEqual(
+    queuedWorker.processed.map((item) => item.runId).sort(),
+    queuedRuns.queued.map((item) => item.run.id).sort(),
+  );
+  assert.ok(queuedWorker.processed.every((item) => item.status.run.worker_id === "smoke-queue-worker"));
+  for (const worked of queuedWorker.processed) {
+    await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", worked.runId]);
+  }
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",
