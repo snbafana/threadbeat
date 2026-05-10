@@ -202,7 +202,9 @@ npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs branches --agents <agent>,<agent>
 npm run cli -- runs branches --session overnight
 npm run cli -- runs branches --session overnight --resumable
+npm run cli -- runs branches --agents <agent>,<agent> --worker-id worker-a
 npm run cli -- runs results --session overnight
+npm run cli -- runs results --session overnight --worker-id worker-a
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
@@ -360,7 +362,8 @@ unfinished stopped branch runs for that session's agents.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, and optional local checkouts with
-`--checkout-dir`.
+`--checkout-dir`. Add `--worker-id <id>` to review only branches claimed by one
+worker.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
 Add `--resume-stopped` when the restarted workers should continue stopped branch
@@ -372,7 +375,8 @@ includes `resumableStopped` for stopped branch runs that `--resume-stopped` can
 pick up. `runs branches` lists completed and stopped branch runs across agents,
 including base refs, branch names, result commits, and resumable stopped runs;
 pass `--session <name>` to inspect the branch state for a detached worker group,
-or add `--resumable` to show only stopped branches without a result commit.
+add `--worker-id <id>` to focus on one worker's claimed branches, or add
+`--resumable` to show only stopped branches without a result commit.
 Use `runs resume-branch <run>` to requeue one of those stopped branch runs back to
 `planned` without touching the rest of the session.
 `runs workers` groups running runs by the `worker_id` that claimed them.

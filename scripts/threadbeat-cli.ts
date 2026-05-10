@@ -432,6 +432,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const session = options.session ? await readWorkerSession(options.session) : null;
     const sessionWorkerIds = session ? new Set(session.workers.map((worker) => worker.workerId)) : null;
+    const workerIdFilter = options["worker-id"] ?? null;
     const agentIds = session
       ? workerSessionAgentIds(session)
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
@@ -454,6 +455,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       };
       const runs = listed.runs
         .filter((run) => statusFilter.has(run.status))
+        .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
         .filter((run) => options.resumable !== "1" || (run.status === "stopped" && !run.result_commit))
         .map((run) => ({
           id: run.id,
@@ -492,6 +494,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const session = options.session ? await readWorkerSession(options.session) : null;
     const sessionWorkerIds = session ? new Set(session.workers.map((worker) => worker.workerId)) : null;
+    const workerIdFilter = options["worker-id"] ?? null;
     const agentIds = session
       ? workerSessionAgentIds(session)
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
@@ -526,6 +529,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ]);
         const runs = listed.runs
           .filter((run) => statusFilter.has(run.status))
+          .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
           .map((run) => {
             const branchLinks = deriveGitHubLinks(repository.repository.repoUrl, {
               compareBaseRef: run.input_ref,
@@ -2245,8 +2249,8 @@ Commands:
   runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--dry-run] [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
-  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 1]
+  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]

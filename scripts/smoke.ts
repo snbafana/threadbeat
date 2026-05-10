@@ -1897,6 +1897,76 @@ try {
       && run.resultCommit === cliRunFinalize.result.commitSha
     ))
   )));
+  const workerFilteredPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "worker filtered stopped branch",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    workerFilteredPlan.run.id,
+    "--worker-id",
+    "smoke-branch-filter-worker",
+  ]);
+  await cliJson(baseUrl, ["runs", "sandbox", workerFilteredPlan.run.id]);
+  await cliJson(baseUrl, ["runs", "stop", workerFilteredPlan.run.id]);
+  const workerFilteredBranches = await cliJson<{
+    agents: Array<{
+      runs: Array<{ id: string; workerId: string | null; branchName: string }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "branches",
+    "--agent",
+    agentBody.agent.id,
+    "--status",
+    "stopped",
+    "--worker-id",
+    "smoke-branch-filter-worker",
+  ]);
+  assert.ok(workerFilteredBranches.agents.some((agent) => agent.runs.some((run) => (
+    run.id === workerFilteredPlan.run.id
+    && run.workerId === "smoke-branch-filter-worker"
+    && run.branchName === workerFilteredPlan.plan.branchName
+  ))));
+  const otherWorkerBranches = await cliJson<{
+    agents: Array<{ runs: Array<{ id: string }> }>;
+  }>(baseUrl, [
+    "runs",
+    "branches",
+    "--agent",
+    agentBody.agent.id,
+    "--status",
+    "stopped",
+    "--worker-id",
+    "smoke-other-branch-worker",
+  ]);
+  assert.ok(otherWorkerBranches.agents.every((agent) => (
+    !agent.runs.some((run) => run.id === workerFilteredPlan.run.id)
+  )));
+  const workerFilteredResults = await cliJson<{
+    agents: Array<{
+      runs: Array<{ id: string; workerId: string | null; state: string }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "results",
+    "--agent",
+    agentBody.agent.id,
+    "--status",
+    "stopped",
+    "--worker-id",
+    "smoke-branch-filter-worker",
+  ]);
+  assert.ok(workerFilteredResults.agents.some((agent) => agent.runs.some((run) => (
+    run.id === workerFilteredPlan.run.id
+    && run.workerId === "smoke-branch-filter-worker"
+    && run.state === "resumable"
+  ))));
   const resultSummary = await cliJson<{
     observedAt: string;
     agents: Array<{
