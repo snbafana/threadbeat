@@ -217,6 +217,7 @@ npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs recover-session overnight --dry-run
+npm run cli -- runs resume-session overnight --worker-id worker-a --dry-run
 npm run cli -- runs stop-session overnight --recover
 npm run cli -- runs restart-session overnight --recover
 npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover
@@ -362,6 +363,10 @@ branches in the same snapshot.
 workers without stopping or restarting the worker group; add `--dry-run` to
 preview the affected runs first. Add `--include-stopped` to also requeue
 unfinished stopped branch runs for that session's agents.
+`runs resume-session <name>` is the branch-only bulk resume path for a detached
+worker session: it requeues stopped runs with no result commit while leaving
+completed result branches alone. Add `--worker-id <id>` to target only that
+worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, and optional local checkouts with

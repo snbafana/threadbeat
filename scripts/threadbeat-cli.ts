@@ -1026,6 +1026,76 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "resume-session") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const session = await readWorkerSession(required(sessionName, "runs resume-session <session>"));
+    const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+    const workerIds = options["worker-id"] ? new Set([options["worker-id"]]) : sessionWorkerIds;
+    if (options["worker-id"] && !sessionWorkerIds.has(options["worker-id"])) {
+      throw new Error(`worker ${options["worker-id"]} is not recorded in session ${session.session}`);
+    }
+    const includeUnassigned = !options["worker-id"];
+    const candidateRuns: Array<{
+      id: string;
+      agent_id: string;
+      objective: string;
+      run_branch: string;
+      result_commit: string | null;
+      status: string;
+      worker_id: string | null;
+    }> = [];
+    for (const agentId of workerSessionAgentIds(session)) {
+      const listed = await requestJson("GET", withQuery(
+        `/api/agents/${encodeURIComponent(agentId)}/runs`,
+        new URLSearchParams({ status: "stopped" }),
+      )) as {
+        runs: Array<{
+          id: string;
+          agent_id: string;
+          objective: string;
+          run_branch: string;
+          result_commit: string | null;
+          status: string;
+          worker_id: string | null;
+        }>;
+      };
+      candidateRuns.push(...listed.runs.filter((run) => (
+        run.result_commit === null
+        && (run.worker_id === null ? includeUnassigned : workerIds.has(run.worker_id))
+      )));
+    }
+    const operator = { workerId: options["worker-id"] ?? session.session };
+    const resumed = await mapConcurrent(
+      candidateRuns,
+      parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+      async (run) => {
+        const item = {
+          agentId: run.agent_id,
+          runId: run.id,
+          objective: run.objective,
+          branchName: run.run_branch,
+          resultCommit: run.result_commit,
+          workerId: run.worker_id,
+        };
+        if (options["dry-run"] === "1") return { ...item, currentStatus: run.status, dryRun: true };
+        const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, operator, [409]) as {
+          run?: { status: string; worker_id: string | null };
+          error?: string;
+        };
+        if (!requeued.run) return { ...item, skipped: requeued.error ?? "run was not resumed" };
+        return { ...item, status: requeued.run.status, workerId: requeued.run.worker_id };
+      },
+    );
+    await printJson({
+      session: session.session,
+      resumed,
+      ...(options["dry-run"] === "1" ? {} : {
+        status: await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"])),
+      }),
+    });
+    return;
+  }
   if (subcommandName === "restart-session") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -2264,6 +2334,7 @@ Commands:
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
+  runs resume-session <name> [--worker-id worker-a] [--dry-run] [--concurrency 4]
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]

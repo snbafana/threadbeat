@@ -1506,6 +1506,45 @@ try {
   ]);
   assert.equal(sessionRecoveredRun.run.status, "planned");
   assert.equal(sessionRecoveredRun.run.worker_id, null);
+  const sessionResumePlan = await cliJson<{
+    run: { id: string };
+    plan: { branchName: string };
+  }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--objective",
+    "detached session branch-only resume",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    sessionResumePlan.run.id,
+    "--worker-id",
+    "smoke-detached-worker-1",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", sessionResumePlan.run.id]);
+  const sessionResumePreview = await cliJson<{
+    session: string;
+    resumed: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; branchName: string; workerId: string | null }>;
+  }>(baseUrl, ["runs", "resume-session", detachedWorkerSessionName, "--worker-id", "smoke-detached-worker-1", "--dry-run"]);
+  assert.equal(sessionResumePreview.session, detachedWorkerSessionName);
+  assert.deepEqual(sessionResumePreview.resumed.map((run) => run.runId), [sessionResumePlan.run.id]);
+  assert.equal(sessionResumePreview.resumed[0].branchName, sessionResumePlan.plan.branchName);
+  assert.equal(sessionResumePreview.resumed[0].workerId, "smoke-detached-worker-1");
+  assert.equal(sessionResumePreview.resumed[0].currentStatus, "stopped");
+  assert.equal(sessionResumePreview.resumed[0].dryRun, true);
+  const sessionResumed = await cliJson<{
+    session: string;
+    resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+    status: { session: { session: string } };
+  }>(baseUrl, ["runs", "resume-session", detachedWorkerSessionName, "--worker-id", "smoke-detached-worker-1"]);
+  assert.equal(sessionResumed.session, detachedWorkerSessionName);
+  assert.equal(sessionResumed.status.session.session, detachedWorkerSessionName);
+  assert.deepEqual(sessionResumed.resumed.map((run) => run.runId), [sessionResumePlan.run.id]);
+  assert.equal(sessionResumed.resumed[0].status, "planned");
+  assert.equal(sessionResumed.resumed[0].workerId, null);
 
   const superviseAgentResponse = await app.inject({
     method: "POST",
