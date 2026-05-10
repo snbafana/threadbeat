@@ -168,7 +168,7 @@ npm run cli -- runs sessions
 npm run cli -- runs session-status overnight
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-logs overnight --lines 40
-npm run cli -- runs stop-session overnight
+npm run cli -- runs stop-session overnight --recover
 npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover
 npm run cli -- runs stop-matching --agents <agent>,<agent> --status planned
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
@@ -251,7 +251,8 @@ sessions, `runs session-status <name>` to see worker liveness plus matching
 queued/claimed runs, `runs session-watch <name>` to stream those snapshots
 while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, and `runs stop-session <name>` to terminate the recorded process
-group.
+group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed
+by that session's workers when those runs do not have a running sandbox.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs backlog` reports run counts by status for one or more agents.
 `runs workers` groups running runs by the `worker_id` that claimed them.

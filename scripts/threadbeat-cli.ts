@@ -396,15 +396,29 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     return;
   }
   if (subcommandName === "stop-session") {
-    const sessionName = required(args[0], "runs stop-session <session>");
-    const session = await readWorkerSession(sessionName);
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const session = await readWorkerSession(required(sessionName, "runs stop-session <session>"));
     const stopped = session.workers.map((worker) => {
       const stopped = stopProcessGroup(worker.pid);
       return { workerId: worker.workerId, pid: worker.pid, stopped };
     });
     session.stoppedAt = new Date().toISOString();
     await writeWorkerSession(session);
-    await printJson({ session: session.session, stopped });
+    const workerIds = new Set(session.workers.map((worker) => worker.workerId));
+    const recovered = options.recover === "1"
+      ? await recoverStaleRuns(
+        workerSessionAgentIds(session),
+        { workerId: session.session },
+        parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+        workerIds,
+      )
+      : [];
+    await printJson({
+      session: session.session,
+      stopped,
+      ...(options.recover === "1" ? { recovered: recovered.map(({ run: _run, ...item }) => item) } : {}),
+    });
     return;
   }
   if (subcommandName === "stop-matching") {
@@ -879,13 +893,16 @@ async function recoverStaleRuns(
   agentIds: string[],
   workerPayload: { workerId: string } | undefined,
   concurrency: number,
+  workerIds?: Set<string>,
 ): Promise<RecoverStaleRunResult[]> {
-  const runningRuns = [];
+  const runningRuns: Array<{ id: string; agent_id: string; status: string; worker_id: string | null }> = [];
   for (const agentId of agentIds) {
     const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-      runs: Array<{ id: string; agent_id: string; status: string }>;
+      runs: Array<{ id: string; agent_id: string; status: string; worker_id: string | null }>;
     };
-    runningRuns.push(...listed.runs.filter((run) => run.status === "running"));
+    runningRuns.push(...listed.runs.filter((run) => (
+      run.status === "running" && (!workerIds || (run.worker_id !== null && workerIds.has(run.worker_id)))
+    )));
   }
   return await mapConcurrent(runningRuns, concurrency, async (run) => {
     const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status?limit=1`) as {
@@ -1236,7 +1253,7 @@ Commands:
   runs session-status <name> [--status planned,running]
   runs session-watch <name> [--status planned,running] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
-  runs stop-session <name>
+  runs stop-session <name> [--recover] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--loop|--until-empty]
