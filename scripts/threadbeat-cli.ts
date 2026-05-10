@@ -1587,6 +1587,10 @@ async function agentBacklog(agentIds: string[]): Promise<Array<{ agentId: string
 type RecoverStaleRunResult = {
   agentId: string;
   runId: string;
+  objective: string;
+  branchName: string;
+  resultCommit: string | null;
+  workerId: string | null;
   status?: string;
   currentStatus?: string;
   dryRun?: boolean;
@@ -1606,6 +1610,8 @@ async function recoverStaleRuns(
   const candidateRuns: Array<{
     id: string;
     agent_id: string;
+    objective: string;
+    run_branch: string;
     status: string;
     worker_id: string | null;
     result_commit: string | null;
@@ -1618,6 +1624,8 @@ async function recoverStaleRuns(
       runs: Array<{
         id: string;
         agent_id: string;
+        objective: string;
+        run_branch: string;
         status: string;
         worker_id: string | null;
         result_commit: string | null;
@@ -1629,25 +1637,45 @@ async function recoverStaleRuns(
     )));
   }
   return await mapConcurrent(candidateRuns, concurrency, async (run) => {
+    const runDetails = {
+      agentId: run.agent_id,
+      runId: run.id,
+      objective: run.objective,
+      branchName: run.run_branch,
+      resultCommit: run.result_commit,
+      workerId: run.worker_id,
+    };
     const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status?limit=1`) as {
       sandboxes: Array<{ state: string }>;
     };
     if (status.sandboxes.some((sandbox) => sandbox.state === "running")) {
-      return { agentId: run.agent_id, runId: run.id, skipped: "run has a running sandbox" };
+      return { ...runDetails, skipped: "run has a running sandbox" };
     }
     if (dryRun) {
-      return { agentId: run.agent_id, runId: run.id, currentStatus: run.status, dryRun: true };
+      return { ...runDetails, currentStatus: run.status, dryRun: true };
     }
     const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, workerPayload, [409]) as {
-      run?: { id: string; agent_id: string; status: string };
+      run?: {
+        id: string;
+        agent_id: string;
+        objective: string;
+        run_branch: string;
+        result_commit: string | null;
+        status: string;
+        worker_id: string | null;
+      };
       error?: string;
     };
     if (!requeued.run) {
-      return { agentId: run.agent_id, runId: run.id, skipped: requeued.error ?? "run was not requeued" };
+      return { ...runDetails, skipped: requeued.error ?? "run was not requeued" };
     }
     return {
       agentId: requeued.run.agent_id,
       runId: requeued.run.id,
+      objective: requeued.run.objective,
+      branchName: requeued.run.run_branch,
+      resultCommit: requeued.run.result_commit,
+      workerId: requeued.run.worker_id,
       status: requeued.run.status,
       run: requeued.run,
     };

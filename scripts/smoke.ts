@@ -450,7 +450,10 @@ try {
   assert.equal(requeueRunningSandboxResponse.statusCode, 409);
   assert.match(requeueRunningSandboxResponse.body, /running sandbox/);
 
-  const recoverCommandPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const recoverCommandPlan = await cliJson<{
+    run: { id: string; objective: string };
+    plan: { branchName: string };
+  }>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -469,6 +472,10 @@ try {
     recovered: Array<{
       agentId: string;
       runId: string;
+      objective: string;
+      branchName: string;
+      resultCommit: string | null;
+      workerId: string | null;
       currentStatus?: string;
       dryRun?: boolean;
       skipped?: string;
@@ -483,6 +490,10 @@ try {
   assert.ok(recoverPreview.recovered.some((run) => (
     run.agentId === agentBody.agent.id
       && run.runId === recoverCommandPlan.run.id
+      && run.objective === "cli recover command"
+      && run.branchName === recoverCommandPlan.plan.branchName
+      && run.resultCommit === null
+      && run.workerId === "smoke-orphaned-worker"
       && run.currentStatus === "running"
       && run.dryRun === true
   )));
@@ -493,7 +504,16 @@ try {
   ]);
   assert.equal(previewedRun.run.status, "running");
   const recoveredCommand = await cliJson<{
-    recovered: Array<{ agentId: string; runId: string; status?: string; skipped?: string }>;
+    recovered: Array<{
+      agentId: string;
+      runId: string;
+      objective: string;
+      branchName: string;
+      resultCommit: string | null;
+      workerId: string | null;
+      status?: string;
+      skipped?: string;
+    }>;
   }>(baseUrl, [
     "runs",
     "recover",
@@ -510,9 +530,14 @@ try {
   assert.ok(recoveredCommand.recovered.some((run) => (
     run.agentId === agentBody.agent.id
       && run.runId === recoverCommandPlan.run.id
+      && run.branchName === recoverCommandPlan.plan.branchName
       && run.status === "planned"
+      && run.workerId === null
   )));
-  const recoverStoppedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const recoverStoppedPlan = await cliJson<{
+    run: { id: string; objective: string };
+    plan: { branchName: string };
+  }>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -523,7 +548,16 @@ try {
   await cliJson(baseUrl, ["runs", "sandbox", recoverStoppedPlan.run.id]);
   await cliJson(baseUrl, ["runs", "stop", recoverStoppedPlan.run.id]);
   const recoveredStoppedCommand = await cliJson<{
-    recovered: Array<{ agentId: string; runId: string; status?: string; skipped?: string }>;
+    recovered: Array<{
+      agentId: string;
+      runId: string;
+      objective: string;
+      branchName: string;
+      resultCommit: string | null;
+      workerId: string | null;
+      status?: string;
+      skipped?: string;
+    }>;
   }>(baseUrl, [
     "runs",
     "recover",
@@ -536,6 +570,10 @@ try {
   assert.ok(recoveredStoppedCommand.recovered.some((run) => (
     run.agentId === agentBody.agent.id
       && run.runId === recoverStoppedPlan.run.id
+      && run.objective === "cli recover stopped branch"
+      && run.branchName === recoverStoppedPlan.plan.branchName
+      && run.resultCommit === null
+      && run.workerId === null
       && run.status === "planned"
   )));
 

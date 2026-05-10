@@ -300,9 +300,10 @@ The `runs launch`, `runs work`, and `runs step` CLI commands are client-side
 orchestration over the existing run APIs. `runs launch` creates and starts
 multiple runs immediately. `runs recover` requeues `running` runs that no longer
 have a running sandbox, so an operator can make orphaned claims available before
-starting workers again. Add `--dry-run` to preview recoverable runs without
-changing their state. Add `--include-stopped` to also requeue stopped branch runs
-that have no result commit before restarting a worker fleet. `runs supervise`
+starting workers again. Recovery output includes objective, branch name, result
+commit, and worker claim state. Add `--dry-run` to preview recoverable runs
+without changing their state. Add `--include-stopped` to also requeue stopped
+branch runs that have no result commit before restarting a worker fleet. `runs supervise`
 snapshots backlog, optionally recovers orphaned claims, and starts a named
 detached worker session for one or more agents. `runs work` drains
 already planned runs for one or more agents. Use `--until-empty` to keep
