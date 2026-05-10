@@ -384,7 +384,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const agentIds = options.session
       ? workerSessionAgentIds(await readWorkerSession(options.session))
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
-    const statusList = parseList(options.status ?? "completed,stopped");
+    const statusList = parseList(options.status ?? (options.resumable === "1" ? "stopped" : "completed,stopped"));
     const statusFilter = new Set(statusList);
     const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
       const listed = await requestJson("GET", withQuery(
@@ -403,6 +403,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       };
       const runs = listed.runs
         .filter((run) => statusFilter.has(run.status))
+        .filter((run) => options.resumable !== "1" || (run.status === "stopped" && !run.result_commit))
         .map((run) => ({
           id: run.id,
           status: run.status,
@@ -1403,7 +1404,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "resume-stopped" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -2091,7 +2092,7 @@ Commands:
   runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--dry-run] [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
-  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped]
+  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]

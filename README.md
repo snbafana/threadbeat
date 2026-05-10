@@ -198,6 +198,7 @@ npm run cli -- runs watch <run>
 npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs branches --agents <agent>,<agent>
 npm run cli -- runs branches --session overnight
+npm run cli -- runs branches --session overnight --resumable
 npm run cli -- runs results --session overnight
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
@@ -349,7 +350,8 @@ stops. `runs backlog` reports run counts by status for one or more agents and
 includes `resumableStopped` for stopped branch runs that `--resume-stopped` can
 pick up. `runs branches` lists completed and stopped branch runs across agents,
 including base refs, branch names, result commits, and resumable stopped runs;
-pass `--session <name>` to inspect the branch state for a detached worker group.
+pass `--session <name>` to inspect the branch state for a detached worker group,
+or add `--resumable` to show only stopped branches without a result commit.
 `runs workers` groups running runs by the `worker_id` that claimed them.
 `runs stop-matching --status planned` cancels queued runs for one or more
 agents; include `running` in the status list to stop active run sandboxes too.

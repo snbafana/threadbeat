@@ -1095,6 +1095,26 @@ try {
       && run.resultCommit === null
     ))
   )));
+  const detachedWorkerResumableBranches = await cliJson<{
+    agents: Array<{
+      agentId: string;
+      summary: { total: number; resultCommits: number; resumable: number };
+      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null }>;
+    }>;
+  }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName, "--resumable"]);
+  const detachedWorkerResumableAgent = detachedWorkerResumableBranches.agents.find((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id
+  ));
+  assert.ok(detachedWorkerResumableAgent);
+  assert.equal(detachedWorkerResumableAgent.summary.total, detachedWorkerResumableAgent.runs.length);
+  assert.equal(detachedWorkerResumableAgent.summary.resultCommits, 0);
+  assert.equal(detachedWorkerResumableAgent.summary.resumable, detachedWorkerResumableAgent.runs.length);
+  assert.ok(detachedWorkerResumableAgent.runs.some((run) => (
+    run.id === detachedStoppedPlan.run.id
+    && run.status === "stopped"
+    && run.state === "resumable"
+    && run.resultCommit === null
+  )));
   const detachedWorkerResults = await cliJson<{
     observedAt: string;
     session: string;
