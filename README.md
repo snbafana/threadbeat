@@ -265,6 +265,9 @@ Run planning is intentionally server-side and Pi-free for now:
   files so the branch state can be reviewed directly.
 - `runs checkout-session <name> --dir <path>` checks out every completed or
   stopped branch run from a detached worker session under `<path>/<run-id>`.
+- `runs branches --session <name>` adds an ownership `location` to each listed
+  branch run so an operator can see whether it is unassigned, owned by that
+  session, or claimed by another worker.
 - `runs results --session <name>` reports completed and stopped branch runs for
   a worker session with GitHub branch/result links and warnings for completed
   runs that do not have a recorded result commit. Session results include

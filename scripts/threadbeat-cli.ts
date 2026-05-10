@@ -430,8 +430,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.session && (options.agent || options.agents)) {
       throw new Error("runs branches accepts either --session or --agent/--agents");
     }
-    const agentIds = options.session
-      ? workerSessionAgentIds(await readWorkerSession(options.session))
+    const session = options.session ? await readWorkerSession(options.session) : null;
+    const sessionWorkerIds = session ? new Set(session.workers.map((worker) => worker.workerId)) : null;
+    const agentIds = session
+      ? workerSessionAgentIds(session)
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
     const statusList = parseList(options.status ?? (options.resumable === "1" ? "stopped" : "completed,stopped"));
     const statusFilter = new Set(statusList);
@@ -462,6 +464,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           branchName: run.run_branch,
           resultCommit: run.result_commit,
           workerId: run.worker_id,
+          ...(sessionWorkerIds ? {
+            location: run.worker_id === null
+              ? "unassigned"
+              : sessionWorkerIds.has(run.worker_id)
+                ? "session_worker"
+                : "other_worker",
+          } : {}),
         }));
       return {
         agentId,

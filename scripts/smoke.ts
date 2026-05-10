@@ -1195,7 +1195,7 @@ try {
     agents: Array<{
       agentId: string;
       summary: { total: number; resultCommits: number; resumable: number };
-      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null }>;
+      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null; location: string }>;
     }>;
   }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName]);
   assert.ok(detachedWorkerBranches.agents.some((agent) => (
@@ -1206,13 +1206,14 @@ try {
       && run.status === "stopped"
       && run.state === "resumable"
       && run.resultCommit === null
+      && run.location === "unassigned"
     ))
   )));
   const detachedWorkerResumableBranches = await cliJson<{
     agents: Array<{
       agentId: string;
       summary: { total: number; resultCommits: number; resumable: number };
-      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null }>;
+      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null; location: string }>;
     }>;
   }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName, "--resumable"]);
   const detachedWorkerResumableAgent = detachedWorkerResumableBranches.agents.find((agent) => (
@@ -1227,6 +1228,7 @@ try {
     && run.status === "stopped"
     && run.state === "resumable"
     && run.resultCommit === null
+    && run.location === "unassigned"
   )));
   const detachedWorkerResults = await cliJson<{
     observedAt: string;
