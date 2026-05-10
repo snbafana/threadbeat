@@ -308,8 +308,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     const session = await readWorkerSession(required(sessionName, "runs checkout-session <session>"));
     const rootDir = path.resolve(required(options.dir, "--dir"));
-    const statusList = parseList(options.status ?? "completed,stopped");
+    const statusList = parseList(options.status ?? (options.resumable === "1" ? "stopped" : "completed,stopped"));
     const statusFilter = new Set(statusList);
+    const workerIdFilter = options["worker-id"] ?? null;
     const concurrency = options.concurrency ? parsePositiveInteger(options.concurrency, "--concurrency") : 2;
     const agentIds = workerSessionAgentIds(session);
     const runs = (await mapConcurrent(agentIds, 4, async (agentId) => {
@@ -317,9 +318,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         `/api/agents/${encodeURIComponent(agentId)}/runs`,
         new URLSearchParams({ status: statusList.join(",") }),
       )) as {
-        runs: Array<{ id: string; status: string }>;
+        runs: Array<{ id: string; status: string; result_commit: string | null; worker_id: string | null }>;
       };
-      return listed.runs.filter((run) => statusFilter.has(run.status));
+      return listed.runs
+        .filter((run) => statusFilter.has(run.status))
+        .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
+        .filter((run) => options.resumable !== "1" || (run.status === "stopped" && !run.result_commit));
     })).flat();
     const checkouts = await mapConcurrent(runs, concurrency, async (run) => (
       await checkoutRunBranch(run.id, path.join(rootDir, run.id))
@@ -2242,7 +2246,7 @@ Commands:
   runs status <run> [--limit 20]
   runs inspect <run> [--limit 10]
   runs checkout <run> --dir ./checkouts/run
-  runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--concurrency 2]
+  runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--resumable] [--worker-id worker-a] [--concurrency 2]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
   runs resume-branch <run> [--dry-run] [--worker-id worker-a]

@@ -2138,6 +2138,58 @@ try {
   assert.equal(checkedOutSession.checkouts[0].checkout.matchesResultCommit, null);
   assert.deepEqual(checkedOutSession.checkouts[0].review.changedFiles, [{ status: "A", path: "report.md" }]);
   assert.equal(await fs.readFile(path.join(sessionCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
+  const workerCheckoutPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    checkoutAgent.agent.id,
+    "--objective",
+    "checkout one worker branch",
+  ]);
+  await execFileAsync("git", ["-C", checkoutSeed, "checkout", "-B", workerCheckoutPlan.plan.branchName, "main"]);
+  await fs.writeFile(path.join(checkoutSeed, "worker-report.md"), "worker branch report\n");
+  await execFileAsync("git", ["-C", checkoutSeed, "add", "worker-report.md"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "commit", "-m", "Write worker branch report"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "push", "origin", `HEAD:${workerCheckoutPlan.plan.branchName}`]);
+  const expectedWorkerCheckoutHead = (await execFileAsync("git", ["-C", checkoutSeed, "rev-parse", "HEAD"])).stdout.trim();
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    workerCheckoutPlan.run.id,
+    "--worker-id",
+    "smoke-checkout-worker",
+  ]);
+  await cliJson(baseUrl, ["runs", "sandbox", workerCheckoutPlan.run.id]);
+  await cliJson(baseUrl, ["runs", "stop", workerCheckoutPlan.run.id]);
+  const workerSessionCheckoutDir = path.join(tempRoot, "worker-session-checkouts");
+  const checkedOutWorkerSession = await cliJson<{
+    total: number;
+    checkouts: Array<{
+      run: { id: string; branchName: string; resultCommit: string | null };
+      checkout: { dir: string; headCommit: string };
+      review: { changedFiles: Array<{ status: string; path: string }> };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "checkout-session",
+    checkoutSessionName,
+    "--dir",
+    workerSessionCheckoutDir,
+    "--resumable",
+    "--worker-id",
+    "smoke-checkout-worker",
+  ]);
+  assert.equal(checkedOutWorkerSession.total, 1);
+  assert.equal(checkedOutWorkerSession.checkouts[0].run.id, workerCheckoutPlan.run.id);
+  assert.equal(checkedOutWorkerSession.checkouts[0].run.branchName, workerCheckoutPlan.plan.branchName);
+  assert.equal(checkedOutWorkerSession.checkouts[0].run.resultCommit, null);
+  assert.equal(checkedOutWorkerSession.checkouts[0].checkout.dir, path.join(workerSessionCheckoutDir, workerCheckoutPlan.run.id));
+  assert.equal(checkedOutWorkerSession.checkouts[0].checkout.headCommit, expectedWorkerCheckoutHead);
+  assert.deepEqual(checkedOutWorkerSession.checkouts[0].review.changedFiles, [{ status: "A", path: "worker-report.md" }]);
+  assert.equal(
+    await fs.readFile(path.join(workerSessionCheckoutDir, workerCheckoutPlan.run.id, "worker-report.md"), "utf8"),
+    "worker branch report\n",
+  );
   const resultsCheckoutDir = path.join(tempRoot, "results-checkouts");
   const checkedOutResults = await cliJson<{
     checkoutDir: string;

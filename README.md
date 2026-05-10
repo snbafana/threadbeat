@@ -192,6 +192,7 @@ npm run cli -- runs status <run>
 npm run cli -- runs inspect <run>
 npm run cli -- runs checkout <run> --dir ./checkouts/<run>
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
+npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight-resume --resumable --worker-id worker-a
 npm run cli -- runs claim <run> --worker-id worker-a
 npm run cli -- runs requeue <run> --worker-id worker-a
 npm run cli -- runs resume-branch <stopped-run> --worker-id worker-a
@@ -267,6 +268,8 @@ Run planning is intentionally server-side and Pi-free for now:
   files so the branch state can be reviewed directly.
 - `runs checkout-session <name> --dir <path>` checks out every completed or
   stopped branch run from a detached worker session under `<path>/<run-id>`.
+  Add `--resumable` to pull only stopped branches without result commits, or
+  `--worker-id <id>` to pull only branches claimed by one worker.
 - `runs branches --session <name>` adds an ownership `location` to each listed
   branch run so an operator can see whether it is unassigned, owned by that
   session, or claimed by another worker.
