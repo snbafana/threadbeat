@@ -263,6 +263,42 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "launch") {
+    const options = parseOptions(args);
+    const agentIds = parseList(required(options.agents, "--agents"));
+    const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
+    const results = await mapConcurrent(agentIds, concurrency, async (agentId) => {
+      const planned = await requestJson("POST", `/api/agents/${encodeURIComponent(agentId)}/runs`, runPlanPayload(options)) as {
+        plan: unknown;
+        run: { id: string };
+      };
+      const sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(planned.run.id)}/sandbox`, {
+        bootstrap: options.bootstrap === "1",
+      }) as { sandbox: unknown; bootstrap?: unknown };
+      const runtime = options["check-runtime"] === "1"
+        ? await requestJson("POST", `/api/runs/${encodeURIComponent(planned.run.id)}/check-runtime`)
+        : null;
+      const booted = options.boot === "1"
+        ? await requestJson("POST", `/api/runs/${encodeURIComponent(planned.run.id)}/boot`, {
+          ...(options.prompt ? { promptPath: options.prompt } : {}),
+          ...(options.task ? { taskPath: options.task } : {}),
+        })
+        : null;
+      const status = await requestJson("GET", `/api/runs/${encodeURIComponent(planned.run.id)}/status`);
+      return {
+        agentId,
+        run: planned.run,
+        plan: planned.plan,
+        sandbox: sandboxed.sandbox,
+        ...(sandboxed.bootstrap ? { bootstrap: sandboxed.bootstrap } : {}),
+        ...(runtime ? { runtime } : {}),
+        ...(booted ? { boot: booted } : {}),
+        status,
+      };
+    });
+    await printJson({ runs: results });
+    return;
+  }
   if (subcommandName === "sandbox") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error(`runs ${subcommandName} requires a run id`);
@@ -381,7 +417,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "finalize" || key === "live" || key === "dry-run") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run") {
       options[key] = "1";
       continue;
     }
@@ -391,6 +427,36 @@ function parseOptions(args: string[]): Record<string, string> {
     index += 1;
   }
   return options;
+}
+
+function parseList(value: string): string[] {
+  const values = value.split(",").map((item) => item.trim()).filter(Boolean);
+  if (values.length === 0) throw new Error("expected at least one value");
+  return values;
+}
+
+function parsePositiveInteger(value: string, flag: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${flag} must be a positive integer`);
+  return parsed;
+}
+
+async function mapConcurrent<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await worker(items[currentIndex]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 async function requestJson(method: string, path: string, payload?: unknown): Promise<unknown> {
@@ -501,6 +567,7 @@ Commands:
   runs get <run>
   runs status <run> [--limit 20]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
+  runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]

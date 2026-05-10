@@ -348,6 +348,54 @@ try {
   assert.equal(cliRunStatus.sandboxes.length, 0);
   assert.ok(cliRunStatus.messages.length > 0);
 
+  const launchAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-launch-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(launchAgentResponse.statusCode, 200);
+  const launchAgentBody = JSON.parse(launchAgentResponse.body) as { agent: { id: string } };
+  const cliLaunch = await cliJson<{
+    runs: Array<{
+      agentId: string;
+      run: { id: string };
+      sandbox: { run_id: string | null };
+      runtime: { result: { exitCode: number } };
+      status: { run: { status: string } };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "launch",
+    "--agents",
+    `${agentBody.agent.id},${launchAgentBody.agent.id}`,
+    "--objective",
+    "cli fanout run",
+    "--bootstrap",
+    "--check-runtime",
+    "--concurrency",
+    "2",
+  ]);
+  assert.equal(cliLaunch.runs.length, 2);
+  assert.deepEqual(
+    cliLaunch.runs.map((run) => run.agentId).sort(),
+    [agentBody.agent.id, launchAgentBody.agent.id].sort(),
+  );
+  for (const launched of cliLaunch.runs) {
+    assert.equal(launched.sandbox.run_id, launched.run.id);
+    assert.equal(launched.runtime.result.exitCode, 0);
+    assert.equal(launched.status.run.status, "running");
+    await cliJson(baseUrl, [
+      "sandboxes",
+      "stop-running",
+      "--run",
+      launched.run.id,
+    ]);
+  }
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",
