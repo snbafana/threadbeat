@@ -938,6 +938,23 @@ try {
     && agent.resumableStopped >= 1
     && agent.unassigned.some((run) => run.id === detachedStoppedPlan.run.id && run.status === "stopped")
   )));
+  const detachedWorkerSummary = await cliJson<{
+    session: { session: string; workers: { total: number; alive: number; dead: number } };
+    totals: { runs: number; statuses: Record<string, number>; resultCommits: number; resumableStopped: number };
+    agents: Array<{ agentId: string; total: number; resultCommits: number; resumableStopped: number }>;
+  }>(baseUrl, ["runs", "session-summary", detachedWorkerSessionName]);
+  assert.equal(detachedWorkerSummary.session.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerSummary.session.workers.total, 1);
+  assert.equal(detachedWorkerSummary.session.workers.alive, 1);
+  assert.equal(detachedWorkerSummary.session.workers.dead, 0);
+  assert.ok(detachedWorkerSummary.totals.runs >= workerGroupQueue.queued.length);
+  assert.ok((detachedWorkerSummary.totals.statuses.stopped ?? 0) >= 1);
+  assert.ok(detachedWorkerSummary.totals.resumableStopped >= 1);
+  assert.ok(detachedWorkerSummary.agents.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id
+    && agent.total >= workerGroupQueue.queued.length
+    && agent.resumableStopped >= 1
+  )));
   const watchedWorkerStatus = await cliJson<{
     observedAt: string;
     session: {

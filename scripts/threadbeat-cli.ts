@@ -589,6 +589,57 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await workerSessionStatus(required(sessionName, "runs session-status <session>"), statusFilter));
     return;
   }
+  if (subcommandName === "session-summary") {
+    const sessionName = required(args[0], "runs session-summary <session>");
+    const status = await workerSessionStatus(sessionName, new Set(["planned", "running", "stopped"]));
+    const agentIds = workerSessionAgentIds(status.session);
+    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+        runs: Array<{ id: string; status: string; result_commit: string | null }>;
+      };
+      const statuses: Record<string, number> = {};
+      for (const run of listed.runs) {
+        statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+      }
+      return {
+        agentId,
+        total: listed.runs.length,
+        statuses,
+        resultCommits: listed.runs.filter((run) => run.result_commit).length,
+        resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+      };
+    });
+    const totals = {
+      runs: agents.reduce((sum, agent) => sum + agent.total, 0),
+      resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
+      resumableStopped: agents.reduce((sum, agent) => sum + agent.resumableStopped, 0),
+      statuses: {} as Record<string, number>,
+    };
+    for (const agent of agents) {
+      for (const [runStatus, count] of Object.entries(agent.statuses)) {
+        totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+      }
+    }
+    const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+    await printJson({
+      observedAt: new Date().toISOString(),
+      session: {
+        session: status.session.session,
+        command: status.session.command,
+        startedAt: status.session.startedAt,
+        stoppedAt: status.session.stoppedAt ?? null,
+        restartedAt: status.session.restartedAt ?? null,
+        workers: {
+          total: sessionWorkers.length,
+          alive: sessionWorkers.filter((worker) => worker.alive).length,
+          dead: sessionWorkers.filter((worker) => !worker.alive).length,
+        },
+      },
+      totals,
+      agents,
+    });
+    return;
+  }
   if (subcommandName === "session-watch") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -1652,6 +1703,7 @@ Commands:
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]
+  runs session-summary <name>
   runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
