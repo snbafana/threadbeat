@@ -416,6 +416,89 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ agents });
     return;
   }
+  if (subcommandName === "results") {
+    const options = parseOptions(args);
+    if (options.session && (options.agent || options.agents)) {
+      throw new Error("runs results accepts either --session or --agent/--agents");
+    }
+    const agentIds = options.session
+      ? workerSessionAgentIds(await readWorkerSession(options.session))
+      : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
+    const statusFilter = new Set(parseList(options.status ?? "completed,stopped"));
+    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+      const [listed, repository] = await Promise.all([
+        requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as Promise<{
+          runs: Array<{
+            id: string;
+            objective: string;
+            input_ref: string;
+            run_branch: string;
+            result_commit: string | null;
+            status: string;
+            worker_id: string | null;
+          }>;
+        }>,
+        requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/repository`) as Promise<{
+          repository: { repoUrl: string; repoWebUrl: string | null };
+        }>,
+      ]);
+      const runs = listed.runs
+        .filter((run) => statusFilter.has(run.status))
+        .map((run) => {
+          const branchLinks = deriveGitHubLinks(repository.repository.repoUrl, {
+            compareBaseRef: run.input_ref,
+            compareHeadRef: run.run_branch,
+            treeRef: run.run_branch,
+          });
+          const resultLinks = deriveGitHubLinks(repository.repository.repoUrl, {
+            commitRef: run.result_commit,
+            compareBaseRef: run.input_ref,
+            compareHeadRef: run.result_commit,
+            treeRef: run.result_commit,
+          });
+          const warning = run.status === "completed" && !run.result_commit
+            ? "completed_without_result_commit"
+            : null;
+          return {
+            id: run.id,
+            status: run.status,
+            state: run.result_commit ? "result" : run.status === "stopped" ? "resumable" : run.status,
+            warning,
+            objective: run.objective,
+            baseRef: run.input_ref,
+            branchName: run.run_branch,
+            resultCommit: run.result_commit,
+            workerId: run.worker_id,
+            links: {
+              repoUrl: branchLinks.repoUrl,
+              branchTreeUrl: branchLinks.treeUrl,
+              branchCompareUrl: branchLinks.compareUrl,
+              resultTreeUrl: resultLinks.treeUrl,
+              resultCommitUrl: resultLinks.commitUrl,
+              resultCompareUrl: resultLinks.compareUrl,
+            },
+          };
+        });
+      return {
+        agentId,
+        repository: {
+          repoWebUrl: repository.repository.repoWebUrl,
+        },
+        summary: {
+          total: runs.length,
+          resultCommits: runs.filter((run) => run.resultCommit).length,
+          resumable: runs.filter((run) => run.state === "resumable").length,
+          warnings: runs.filter((run) => run.warning).length,
+        },
+        runs,
+      };
+    });
+    await printJson({
+      ...(options.session ? { session: options.session } : {}),
+      agents,
+    });
+    return;
+  }
   if (subcommandName === "workers") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
@@ -1735,6 +1818,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]

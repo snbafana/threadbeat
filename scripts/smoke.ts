@@ -972,6 +972,35 @@ try {
       && run.resultCommit === null
     ))
   )));
+  const detachedWorkerResults = await cliJson<{
+    session: string;
+    agents: Array<{
+      agentId: string;
+      summary: { total: number; resultCommits: number; resumable: number; warnings: number };
+      runs: Array<{
+        id: string;
+        status: string;
+        state: string;
+        warning: string | null;
+        resultCommit: string | null;
+        links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
+      }>;
+    }>;
+  }>(baseUrl, ["runs", "results", "--session", detachedWorkerSessionName]);
+  assert.equal(detachedWorkerResults.session, detachedWorkerSessionName);
+  assert.ok(detachedWorkerResults.agents.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id
+    && agent.summary.resumable >= 1
+    && agent.runs.some((run) => (
+      run.id === detachedStoppedPlan.run.id
+      && run.status === "stopped"
+      && run.state === "resumable"
+      && run.warning === null
+      && run.resultCommit === null
+      && run.links.branchTreeUrl !== null
+      && run.links.resultCommitUrl === null
+    ))
+  )));
   const watchedWorkerStatus = await cliJson<{
     observedAt: string;
     session: {
@@ -1305,6 +1334,45 @@ try {
       && run.baseRef === "main"
       && run.branchName === cliRunPlan.plan.branchName
       && run.resultCommit === cliRunFinalize.result.commitSha
+    ))
+  )));
+  const resultSummary = await cliJson<{
+    agents: Array<{
+      agentId: string;
+      summary: { total: number; resultCommits: number; resumable: number; warnings: number };
+      runs: Array<{
+        id: string;
+        status: string;
+        state: string;
+        warning: string | null;
+        baseRef: string;
+        branchName: string;
+        resultCommit: string | null;
+        links: {
+          branchTreeUrl: string | null;
+          branchCompareUrl: string | null;
+          resultTreeUrl: string | null;
+          resultCommitUrl: string | null;
+          resultCompareUrl: string | null;
+        };
+      }>;
+    }>;
+  }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id]);
+  assert.ok(resultSummary.agents.some((agent) => (
+    agent.agentId === agentBody.agent.id
+    && agent.summary.resultCommits >= 1
+    && agent.summary.warnings === 0
+    && agent.runs.some((run) => (
+      run.id === cliRunPlan.run.id
+      && run.status === "completed"
+      && run.state === "result"
+      && run.warning === null
+      && run.baseRef === "main"
+      && run.branchName === cliRunPlan.plan.branchName
+      && run.resultCommit === cliRunFinalize.result.commitSha
+      && /github\.com\/example\/agent\/tree\/threadbeat\/runs\//.test(run.links.branchTreeUrl ?? "")
+      && new RegExp(`github\\.com/example/agent/commit/${cliRunFinalize.result.commitSha}`).test(run.links.resultCommitUrl ?? "")
+      && new RegExp(`github\\.com/example/agent/compare/main\\.\\.\\.${cliRunFinalize.result.commitSha}`).test(run.links.resultCompareUrl ?? "")
     ))
   )));
 

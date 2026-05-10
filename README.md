@@ -197,6 +197,7 @@ npm run cli -- runs watch <run>
 npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs branches --agents <agent>,<agent>
 npm run cli -- runs branches --session overnight
+npm run cli -- runs results --session overnight
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs session-status overnight
@@ -251,6 +252,9 @@ Run planning is intentionally server-side and Pi-free for now:
   files so the branch state can be reviewed directly.
 - `runs checkout-session <name> --dir <path>` checks out every completed or
   stopped branch run from a detached worker session under `<path>/<run-id>`.
+- `runs results --session <name>` reports completed and stopped branch runs for
+  a worker session with GitHub branch/result links and warnings for completed
+  runs that do not have a recorded result commit.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.
@@ -309,6 +313,9 @@ group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed
 by that session's workers when those runs do not have a running sandbox.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents.
+`runs results --session <name>` shows the branch-native output surface for those
+runs without creating PRs: branch compare/tree links, result commit links when
+available, and missing-result warnings.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
 `runs watch` polls one run's status and messages until it completes, fails, or
