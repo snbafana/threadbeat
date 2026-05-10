@@ -733,20 +733,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     let idlePasses = 0;
 
     do {
-      const plannedRuns = [];
+      const workRuns = [];
       for (const agentId of agentIds) {
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
           runs: Array<{ id: string; agent_id: string; status: string }>;
         };
-        plannedRuns.push(...listed.runs.filter((run) => run.status === "planned"));
+        workRuns.push(...listed.runs.filter((run) => run.status === "planned"));
+        if (options["resume-stopped"] === "1") {
+          workRuns.push(...listed.runs.filter((run) => run.status === "stopped"));
+        }
       }
       if (options.recover === "1") {
         const recoveredRuns = await recoverStaleRuns(agentIds, workerPayload, concurrency);
         recovered.push(...recoveredRuns.map(({ run: _run, ...item }) => item));
-        plannedRuns.push(...recoveredRuns.flatMap((item) => item.run ? [item.run] : []));
+        workRuns.push(...recoveredRuns.flatMap((item) => item.run ? [item.run] : []));
       }
       const batchLimit = untilEmpty ? limit : limit - processed.length;
-      const work = plannedRuns.slice(0, batchLimit);
+      const work = workRuns.slice(0, batchLimit);
       if (work.length === 0) {
         idlePasses += 1;
         if ((!untilEmpty && options.loop !== "1") || idlePasses >= idleExitAfter) break;
@@ -755,21 +758,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       idlePasses = 0;
       const results = await mapConcurrent(work, concurrency, async (run) => {
-        const claimed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/claim`, workerPayload, [409]) as {
-          ok: boolean;
-          run?: { agent_id: string };
-          error?: string;
-        };
-        if (!claimed.run) {
-          return {
-            agentId: run.agent_id,
-            runId: run.id,
-            skipped: claimed.error ?? "run was not claimed",
+        let agentId = run.agent_id;
+        if (run.status === "planned") {
+          const claimed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/claim`, workerPayload, [409]) as {
+            ok: boolean;
+            run?: { agent_id: string };
+            error?: string;
           };
+          if (!claimed.run) {
+            return {
+              agentId: run.agent_id,
+              runId: run.id,
+              skipped: claimed.error ?? "run was not claimed",
+            };
+          }
+          agentId = claimed.run.agent_id;
         }
-        const sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/sandbox`, {
-          bootstrap: options.bootstrap === "1",
-        }) as { sandbox: unknown; bootstrap?: unknown };
+        const sandboxed = await resumeRunSandbox(run.id, {
+          bootstrap: options.bootstrap === "1" || (run.status === "stopped" && options["no-bootstrap"] !== "1"),
+          allowRestart: run.status === "stopped",
+        });
         const runtime = options["check-runtime"] === "1"
           ? await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/check-runtime`)
           : null;
@@ -786,8 +794,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           : null;
         const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status`);
         return {
-          agentId: claimed.run.agent_id,
+          agentId,
           runId: run.id,
+          action: sandboxed.action,
           sandbox: sandboxed.sandbox,
           ...(sandboxed.bootstrap ? { bootstrap: sandboxed.bootstrap } : {}),
           ...(runtime ? { runtime } : {}),
@@ -824,36 +833,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs resume requires a run id");
     const options = parseOptions(optionArgs);
-    const initialStatus = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=5`) as {
-      run: { id: string; status: string; run_branch: string; result_commit: string | null };
-      sandboxes: Array<{ id: string; state: string }>;
-    };
-    if (initialStatus.run.status === "completed" || initialStatus.run.status === "failed") {
-      throw new Error(`run is already ${initialStatus.run.status}`);
-    }
-    const runningSandbox = initialStatus.sandboxes.find((sandbox) => sandbox.state === "running");
-    const restartableSandbox = initialStatus.sandboxes.find((sandbox) => sandbox.state === "stopped" || sandbox.state === "failed");
-    const bootstrap = options["no-bootstrap"] !== "1";
-    let action: "existing" | "started" | "restarted";
-    let sandboxed: { sandbox: unknown; bootstrap?: unknown };
-    if (runningSandbox) {
-      action = "existing";
-      sandboxed = { sandbox: runningSandbox };
-    } else if (restartableSandbox) {
-      action = "restarted";
-      sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/restart-sandbox`, { bootstrap }) as {
-        sandbox: unknown;
-        bootstrap?: unknown;
-      };
-    } else if (initialStatus.sandboxes.length === 0) {
-      action = "started";
-      sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/sandbox`, { bootstrap }) as {
-        sandbox: unknown;
-        bootstrap?: unknown;
-      };
-    } else {
-      throw new Error(`run sandbox cannot resume from ${initialStatus.sandboxes.map((sandbox) => sandbox.state).join(", ")}`);
-    }
+    const sandboxed = await resumeRunSandbox(id, { bootstrap: options["no-bootstrap"] !== "1" });
     const runtime = options["check-runtime"] === "1"
       ? await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/check-runtime`)
       : null;
@@ -868,7 +848,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       run: { id: string; status: string; run_branch: string; result_commit: string | null };
     };
     await printJson({
-      action,
+      action: sandboxed.action,
       run: {
         id: status.run.id,
         status: status.run.status,
@@ -983,7 +963,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "resume-stopped" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -1027,6 +1007,38 @@ async function mapConcurrent<T, R>(
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resumeRunSandbox(
+  runId: string,
+  input: { bootstrap: boolean; allowRestart?: boolean },
+): Promise<{ action: "existing" | "started" | "restarted"; sandbox: unknown; bootstrap?: unknown }> {
+  const initialStatus = await requestJson("GET", `/api/runs/${encodeURIComponent(runId)}/status?limit=5`) as {
+    run: { status: string };
+    sandboxes: Array<{ id: string; state: string }>;
+  };
+  if (initialStatus.run.status === "completed" || initialStatus.run.status === "failed") {
+    throw new Error(`run is already ${initialStatus.run.status}`);
+  }
+  const runningSandbox = initialStatus.sandboxes.find((sandbox) => sandbox.state === "running");
+  if (runningSandbox) return { action: "existing", sandbox: runningSandbox };
+  const restartableSandbox = initialStatus.sandboxes.find((sandbox) => sandbox.state === "stopped" || sandbox.state === "failed");
+  if (restartableSandbox) {
+    if (input.allowRestart === false) {
+      throw new Error(`run sandbox is already ${restartableSandbox.state}`);
+    }
+    const restarted = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/restart-sandbox`, {
+      bootstrap: input.bootstrap,
+    }) as { sandbox: unknown; bootstrap?: unknown };
+    return { action: "restarted", ...restarted };
+  }
+  if (initialStatus.sandboxes.length === 0) {
+    const started = await requestJson("POST", `/api/runs/${encodeURIComponent(runId)}/sandbox`, {
+      bootstrap: input.bootstrap,
+    }) as { sandbox: unknown; bootstrap?: unknown };
+    return { action: "started", ...started };
+  }
+  throw new Error(`run sandbox cannot resume from ${initialStatus.sandboxes.map((sandbox) => sandbox.state).join(", ")}`);
 }
 
 async function runCliWorker(args: string[]): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
@@ -1480,7 +1492,7 @@ Commands:
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
-  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--worker-id worker-a] [--loop|--until-empty] [--limit 10] [--concurrency 2]
+  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--resume-stopped] [--worker-id worker-a] [--loop|--until-empty] [--limit 10] [--concurrency 2]
   runs work --agent <agent>|--agents <agent,agent> --workers 3 [--worker-prefix worker] [--until-empty] [--limit 10]
   runs work --agent <agent>|--agents <agent,agent> --workers 3 --detach --session overnight [--worker-prefix worker] [--loop]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>

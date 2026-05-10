@@ -1354,6 +1354,55 @@ try {
     cliResumePlan.run.id,
   ]);
 
+  const cliResumeWorkAgent = await cliJson<{ agent: { id: string } }>(baseUrl, [
+    "agents",
+    "create",
+    "--name",
+    "resume-work-agent",
+    "--repo",
+    "https://github.com/example/resume-work",
+  ]);
+  const cliResumeWorkPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    cliResumeWorkAgent.agent.id,
+    "--objective",
+    "resume stopped branch from work loop",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "sandbox",
+    cliResumeWorkPlan.run.id,
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop",
+    cliResumeWorkPlan.run.id,
+  ]);
+  const cliResumeStoppedWork = await cliJson<{
+    processed: Array<{ action: string; runId: string; status: { run: { status: string } } }>;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    cliResumeWorkAgent.agent.id,
+    "--resume-stopped",
+    "--no-bootstrap",
+    "--until-empty",
+    "--limit",
+    "1",
+  ]);
+  assert.equal(cliResumeStoppedWork.processed.length, 1);
+  assert.equal(cliResumeStoppedWork.processed[0].runId, cliResumeWorkPlan.run.id);
+  assert.equal(cliResumeStoppedWork.processed[0].action, "restarted");
+  assert.equal(cliResumeStoppedWork.processed[0].status.run.status, "running");
+  await cliJson(baseUrl, [
+    "runs",
+    "stop",
+    cliResumeWorkPlan.run.id,
+  ]);
+
   const cliStep = await cliJson<{
     result: { stdout: string };
     finalized: { commitSha: string };
