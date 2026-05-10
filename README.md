@@ -202,6 +202,7 @@ npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs stop-session overnight --recover
 npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover
+npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.txt --session overnight --workers 3 --boot --recover
 npm run cli -- runs stop-matching --agents <agent>,<agent> --status planned
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
@@ -250,6 +251,10 @@ Run planning is intentionally server-side and Pi-free for now:
 - `runs queue --objectives-file <file>` creates planned runs from a newline
   separated task file for one or more agents. Blank lines and `#` comments are
   ignored; workers can then drain the backlog with `runs work --loop --recover`.
+- `runs dispatch --objectives-file <file> --session <name>` queues the file
+  across agents and starts a detached worker session in one command, leaving
+  branch state visible through `runs monitor`, `runs branches`, and
+  `runs checkout`.
 - `POST /api/runs/:id/requeue` moves an unfinished run with no running sandbox
   back to `planned`, which lets an operator recover a worker that claimed a run
   and exited before starting the sandbox.

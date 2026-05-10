@@ -1048,6 +1048,58 @@ try {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
   }
 
+  const dispatchAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-dispatch-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(dispatchAgentResponse.statusCode, 200);
+  const dispatchAgentBody = JSON.parse(dispatchAgentResponse.body) as { agent: { id: string } };
+  const dispatchObjectivesFile = path.join(tempRoot, "dispatch-objectives.txt");
+  await fs.writeFile(dispatchObjectivesFile, "dispatch objective a\ndispatch objective b\n");
+  const dispatchSessionName = `dispatch-${dispatchAgentBody.agent.id}`;
+  const dispatched = await cliJson<{
+    queued: Array<{ agentId: string; objective: string; run: { id: string; status: string } }>;
+    session: { session: string; workers: Array<{ workerId: string; pid: number | null }> };
+    backlog: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
+  }>(baseUrl, [
+    "runs",
+    "dispatch",
+    "--agent",
+    dispatchAgentBody.agent.id,
+    "--objectives-file",
+    dispatchObjectivesFile,
+    "--session",
+    dispatchSessionName,
+    "--workers",
+    "1",
+    "--worker-prefix",
+    "smoke-dispatcher",
+    "--recover",
+    "--interval-ms",
+    "100",
+    "--idle-exit-after",
+    "100",
+    "--limit",
+    "1",
+  ]);
+  assert.deepEqual(dispatched.queued.map((item) => item.objective), ["dispatch objective a", "dispatch objective b"]);
+  assert.ok(dispatched.queued.every((item) => item.agentId === dispatchAgentBody.agent.id));
+  assert.equal(dispatched.session.session, dispatchSessionName);
+  assert.equal(dispatched.session.workers[0].workerId, "smoke-dispatcher-1");
+  assert.equal(typeof dispatched.session.workers[0].pid, "number");
+  assert.ok(dispatched.backlog.some((agent) => (
+    agent.agentId === dispatchAgentBody.agent.id && agent.total >= dispatched.queued.length
+  )));
+  await cliJson(baseUrl, ["runs", "stop-session", dispatchSessionName]);
+  for (const queued of dispatched.queued) {
+    await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
+  }
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",

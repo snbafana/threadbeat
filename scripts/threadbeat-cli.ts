@@ -540,6 +540,43 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "dispatch") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const objectives = await readObjectivesFile(required(options["objectives-file"], "--objectives-file"));
+    const queueConcurrency = parsePositiveInteger(options["queue-concurrency"] ?? options.concurrency ?? "4", "--queue-concurrency");
+    const workerCount = parsePositiveInteger(options.workers ?? "1", "--workers");
+    const workerPrefix = options["worker-prefix"] ?? "worker";
+    const queueItems = agentIds.flatMap((agentId) => objectives.map((objective) => ({ agentId, objective })));
+    const queued = await mapConcurrent(queueItems, queueConcurrency, async (item) => {
+      const planned = await requestJson("POST", `/api/agents/${encodeURIComponent(item.agentId)}/runs`, {
+        objective: item.objective,
+        ...(options["input-ref"] ? { inputRef: options["input-ref"] } : {}),
+        ...(options.prefix ? { prefix: options.prefix } : {}),
+      }) as { plan: unknown; run: unknown };
+      return { agentId: item.agentId, objective: item.objective, ...planned };
+    });
+    const workerArgs = ["--agents", agentIds.join(",")];
+    for (const flag of ["limit", "concurrency", "interval-ms", "idle-exit-after", "message", "prompt", "task"]) {
+      if (options[flag]) workerArgs.push(`--${flag}`, options[flag]);
+    }
+    for (const flag of ["bootstrap", "check-runtime", "boot", "finalize", "recover", "resume-stopped", "until-empty"]) {
+      if (options[flag] === "1") workerArgs.push(`--${flag}`);
+    }
+    if (options.loop === "1" || options["until-empty"] !== "1") workerArgs.push("--loop");
+    const session = await startDetachedWorkerSession(
+      required(options.session, "--session"),
+      workerCount,
+      workerPrefix,
+      workerArgs,
+    );
+    await printJson({
+      queued,
+      session,
+      backlog: await agentBacklog(agentIds),
+    });
+    return;
+  }
   if (subcommandName === "sessions") {
     const options = parseOptions(args);
     await printJson({ sessions: await listWorkerSessions(options.session) });
@@ -1577,6 +1614,7 @@ Commands:
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--resume-stopped] [--loop|--until-empty]
+  runs dispatch --agents <agent,agent> --objectives-file ./tasks.txt --session <name> [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
