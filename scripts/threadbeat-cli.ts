@@ -648,6 +648,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           return review && (review.changedFiles.length > 0 || review.commits.length > 0 || review.error);
         }).length
         : null;
+      const changedFiles = checkoutRootDir
+        ? agents.flatMap((agent) => agent.runs.flatMap((run) => {
+          const review = (run as { review?: { changedFiles: Array<{ status: string; path: string }> } }).review;
+          return (review?.changedFiles ?? []).map((file) => ({
+            agentId: agent.agentId,
+            runId: run.id,
+            status: file.status,
+            path: file.path,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+          }));
+        }))
+        : null;
       const snapshot = {
         observedAt: new Date().toISOString(),
         ...(options.session ? { session: options.session } : {}),
@@ -659,7 +672,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           resumable: visibleRuns.filter((run) => run.state === "resumable").length,
           warnings: visibleRuns.filter((run) => run.warning).length,
           changed: changedCount,
+          changedFiles: changedFiles?.length ?? null,
         },
+        ...(changedFiles ? { changedFiles } : {}),
         agents,
       };
       if (maxPolls === 1) {
