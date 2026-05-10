@@ -115,6 +115,7 @@ export class Database {
       input_ref: input.inputRef,
       run_branch: input.runBranch,
       result_commit: null,
+      worker_id: null,
       status: "planned",
     };
   }
@@ -122,7 +123,7 @@ export class Database {
   async getAgentRun(id: string): Promise<AgentRunRow | null> {
     return this.first<AgentRunRow>(
       `
-        SELECT id, agent_id, objective, input_ref, run_branch, result_commit,
+        SELECT id, agent_id, objective, input_ref, run_branch, result_commit, worker_id,
                status
         FROM agent_runs
         WHERE id = ?
@@ -134,7 +135,7 @@ export class Database {
   async listAgentRuns(agentId: string): Promise<AgentRunRow[]> {
     return this.all<AgentRunRow>(
       `
-        SELECT id, agent_id, objective, input_ref, run_branch, result_commit,
+        SELECT id, agent_id, objective, input_ref, run_branch, result_commit, worker_id,
                status
         FROM agent_runs
         WHERE agent_id = ?
@@ -154,14 +155,14 @@ export class Database {
     });
   }
 
-  async claimAgentRun(id: string): Promise<AgentRunRow | null> {
+  async claimAgentRun(id: string, workerId?: string): Promise<AgentRunRow | null> {
     const result = await this.client.execute({
       sql: `
         UPDATE agent_runs
-        SET status = 'running'
+        SET status = 'running', worker_id = ?
         WHERE id = ? AND status = 'planned'
       `,
-      args: [id],
+      args: [workerId ?? null, id],
     });
     if (result.rowsAffected === 0) return null;
     return this.getAgentRun(id);
@@ -171,7 +172,7 @@ export class Database {
     const result = await this.client.execute({
       sql: `
         UPDATE agent_runs
-        SET status = 'planned'
+        SET status = 'planned', worker_id = NULL
         WHERE id = ?
           AND status != 'completed'
           AND NOT EXISTS (

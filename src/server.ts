@@ -236,7 +236,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.post("/api/runs/:id/claim", async (request, reply) => {
     const { id } = request.params as { id: string };
     const workerId = parseOptionalString(requestBody(request.body).workerId);
-    const run = await db.claimAgentRun(id);
+    const run = await db.claimAgentRun(id, workerId);
     if (!run) {
       const existing = await db.getAgentRun(id);
       if (!existing) return reply.code(404).send({ ok: false, error: "run not found" });

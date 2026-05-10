@@ -220,7 +220,8 @@ multiple runs immediately. `runs work` drains already planned runs for one or
 more agents, with optional `--loop` polling for longer CLI worker sessions. Add
 `--recover` to requeue unfinished running runs that no longer have a running
 sandbox before the worker claims new work. Add `--worker-id` so claim and
-requeue lifecycle messages show which CLI worker touched a run.
+requeue lifecycle messages show which CLI worker touched a run; claimed runs
+also expose `worker_id` in run status/list/monitor responses.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs monitor` snapshots all runs for one or more agents, including
 sandbox states and recent message types/text. `runs step` executes one explicit

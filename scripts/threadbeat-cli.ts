@@ -280,13 +280,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           const params = new URLSearchParams();
           params.set("limit", options.limit ?? "3");
           const status = await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(run.id)}/status`, params)) as {
-            run: { id: string; status: string };
+            run: { id: string; status: string; worker_id: string | null };
             sandboxes: Array<{ state: string }>;
             messages: Array<{ type: string; text: string }>;
           };
           return {
             id: status.run.id,
             status: status.run.status,
+            workerId: status.run.worker_id,
             sandboxes: status.sandboxes.map((sandbox) => sandbox.state),
             messages: status.messages.map((message) => ({
               type: message.type,

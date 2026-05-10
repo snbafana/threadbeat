@@ -375,7 +375,7 @@ try {
     "cli claim run",
   ]);
   assert.equal(claimPlan.run.status, "planned");
-  const claimedRun = await cliJson<{ run: { id: string; status: string } }>(baseUrl, [
+  const claimedRun = await cliJson<{ run: { id: string; status: string; worker_id: string | null } }>(baseUrl, [
     "runs",
     "claim",
     claimPlan.run.id,
@@ -384,6 +384,7 @@ try {
   ]);
   assert.equal(claimedRun.run.id, claimPlan.run.id);
   assert.equal(claimedRun.run.status, "running");
+  assert.equal(claimedRun.run.worker_id, "smoke-claimer");
   const claimMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [
     "messages",
     "list",
@@ -399,7 +400,7 @@ try {
   });
   assert.equal(repeatedClaimResponse.statusCode, 409);
   assert.match(repeatedClaimResponse.body, /already running/);
-  const requeuedRun = await cliJson<{ run: { id: string; status: string } }>(baseUrl, [
+  const requeuedRun = await cliJson<{ run: { id: string; status: string; worker_id: string | null } }>(baseUrl, [
     "runs",
     "requeue",
     claimPlan.run.id,
@@ -408,6 +409,7 @@ try {
   ]);
   assert.equal(requeuedRun.run.id, claimPlan.run.id);
   assert.equal(requeuedRun.run.status, "planned");
+  assert.equal(requeuedRun.run.worker_id, null);
   const requeueBlockedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",
@@ -450,7 +452,7 @@ try {
   await cliJson(baseUrl, ["runs", "claim", recoverPlan.run.id]);
   const recoveredWorker = await cliJson<{
     recovered: Array<{ runId: string; status: string }>;
-    processed: Array<{ runId: string; sandbox: { run_id: string | null } }>;
+    processed: Array<{ runId: string; sandbox: { run_id: string | null }; status: { run: { worker_id: string | null } } }>;
   }>(baseUrl, [
     "runs",
     "work",
@@ -465,6 +467,7 @@ try {
   assert.deepEqual(recoveredWorker.recovered.map((run) => run.runId), [recoverPlan.run.id]);
   assert.deepEqual(recoveredWorker.processed.map((run) => run.runId), [recoverPlan.run.id]);
   assert.equal(recoveredWorker.processed[0].sandbox.run_id, recoverPlan.run.id);
+  assert.equal(recoveredWorker.processed[0].status.run.worker_id, "smoke-worker");
   const recoveredMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [
     "messages",
     "list",
@@ -565,7 +568,7 @@ try {
   const monitored = JSON.parse(cliMonitor.stdout.trim()) as {
     agents: Array<{
       agentId: string;
-      runs: Array<{ id: string; status: string; messages: Array<{ type: string }> }>;
+      runs: Array<{ id: string; status: string; workerId: string | null; messages: Array<{ type: string }> }>;
     }>;
   };
   assert.deepEqual(
@@ -580,7 +583,7 @@ try {
       runId: string;
       sandbox: { run_id: string | null };
       runtime: { result: { exitCode: number } };
-      status: { run: { status: string } };
+      status: { run: { status: string; worker_id: string | null } };
     }>;
   }>(baseUrl, [
     "runs",
@@ -593,6 +596,8 @@ try {
     "2",
     "--concurrency",
     "2",
+    "--worker-id",
+    "smoke-batch-worker",
   ]);
   assert.equal(cliWorker.processed.length, 2);
   assert.deepEqual(
@@ -603,6 +608,7 @@ try {
     assert.equal(worked.sandbox.run_id, worked.runId);
     assert.equal(worked.runtime.result.exitCode, 0);
     assert.equal(worked.status.run.status, "running");
+    assert.equal(worked.status.run.worker_id, "smoke-batch-worker");
     await cliJson(baseUrl, [
       "sandboxes",
       "stop-running",

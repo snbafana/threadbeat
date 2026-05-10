@@ -12,6 +12,7 @@ export type AgentRunRow = {
   input_ref: string;
   run_branch: string;
   result_commit: string | null;
+  worker_id: string | null;
   status: string;
 };
 

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   input_ref TEXT NOT NULL,
   run_branch TEXT NOT NULL,
   result_commit TEXT,
+  worker_id TEXT,
   status TEXT NOT NULL DEFAULT 'queued',
   FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 );
