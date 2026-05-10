@@ -155,6 +155,7 @@ npm run cli -- runs plan --agent <agent> --objective "one bounded task"
 npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt
 npm run cli -- runs work --agent <agent> --until-empty --bootstrap --check-runtime --recover --worker-id worker-a
 npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix worker --until-empty
+npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix worker --detach --session overnight --loop --recover
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
 npm run cli -- runs claim <run> --worker-id worker-a
@@ -162,6 +163,8 @@ npm run cli -- runs requeue <run> --worker-id worker-a
 npm run cli -- runs watch <run>
 npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs workers --agents <agent>,<agent>
+npm run cli -- runs sessions
+npm run cli -- runs stop-session overnight
 npm run cli -- runs stop-matching --agents <agent>,<agent> --status planned
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
@@ -231,7 +234,11 @@ requeue unfinished running runs that no longer have a running sandbox before
 the worker claims new work. Add `--worker-id` so claim and requeue lifecycle
 messages show which CLI worker touched a run; claimed runs also expose
 `worker_id` in run status/list/monitor responses. Add `--workers <n>` to start
-multiple foreground worker subprocesses with `--worker-prefix` IDs.
+multiple foreground worker subprocesses with `--worker-prefix` IDs. Add
+`--detach --session <name>` to leave that worker group running after the parent
+CLI exits; Threadbeat records worker PIDs and stdout/stderr log paths under
+`.threadbeat/worker-sessions/`. Use `runs sessions` to inspect local worker
+sessions and `runs stop-session <name>` to terminate the recorded process group.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs backlog` reports run counts by status for one or more agents.
 `runs workers` groups running runs by the `worker_id` that claimed them.

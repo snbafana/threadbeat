@@ -816,6 +816,47 @@ try {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", queued.run.id]);
   }
 
+  const detachedWorkerSessionName = `smoke-${workerGroupAgentBody.agent.id}`;
+  const detachedWorkerGroup = await cliJson<{
+    session: {
+      session: string;
+      workers: Array<{ workerId: string; pid: number | null; stdoutPath: string; stderrPath: string }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--workers",
+    "1",
+    "--worker-prefix",
+    "smoke-detached-worker",
+    "--detach",
+    "--session",
+    detachedWorkerSessionName,
+    "--loop",
+    "--idle-exit-after",
+    "100",
+    "--interval-ms",
+    "100",
+  ]);
+  assert.equal(detachedWorkerGroup.session.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerGroup.session.workers.length, 1);
+  assert.equal(detachedWorkerGroup.session.workers[0].workerId, "smoke-detached-worker-1");
+  assert.equal(typeof detachedWorkerGroup.session.workers[0].pid, "number");
+  assert.match(detachedWorkerGroup.session.workers[0].stdoutPath, /worker-sessions/);
+  const listedWorkerSessions = await cliJson<{
+    sessions: Array<{ session: string; workers: Array<{ workerId: string; pid: number | null; alive: boolean }> }>;
+  }>(baseUrl, ["runs", "sessions", "--session", detachedWorkerSessionName]);
+  assert.equal(listedWorkerSessions.sessions.length, 1);
+  assert.equal(listedWorkerSessions.sessions[0].workers[0].alive, true);
+  const stoppedWorkerSession = await cliJson<{
+    session: string;
+    stopped: Array<{ workerId: string; pid: number | null; stopped: boolean }>;
+  }>(baseUrl, ["runs", "stop-session", detachedWorkerSessionName]);
+  assert.equal(stoppedWorkerSession.session, detachedWorkerSessionName);
+  assert.equal(stoppedWorkerSession.stopped[0].stopped, true);
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",

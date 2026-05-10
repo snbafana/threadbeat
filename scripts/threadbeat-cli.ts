@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
+const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
 
 const [command, subcommand, ...rest] = process.argv.slice(2);
 
@@ -310,6 +311,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ agents });
     return;
   }
+  if (subcommandName === "sessions") {
+    const options = parseOptions(args);
+    await printJson({ sessions: await listWorkerSessions(options.session) });
+    return;
+  }
+  if (subcommandName === "stop-session") {
+    const sessionName = required(args[0], "runs stop-session <session>");
+    const session = await readWorkerSession(sessionName);
+    const stopped = session.workers.map((worker) => {
+      const stopped = stopProcessGroup(worker.pid);
+      return { workerId: worker.workerId, pid: worker.pid, stopped };
+    });
+    session.stoppedAt = new Date().toISOString();
+    await writeWorkerSession(session);
+    await printJson({ session: session.session, stopped });
+    return;
+  }
   if (subcommandName === "stop-matching") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
@@ -471,8 +489,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           && arg !== "--worker-prefix"
           && previous !== "--worker-prefix"
           && arg !== "--worker-id"
-          && previous !== "--worker-id";
+          && previous !== "--worker-id"
+          && arg !== "--detach"
+          && arg !== "--session"
+          && previous !== "--session";
       });
+      if (options.detach === "1") {
+        const session = await startDetachedWorkerSession(
+          required(options.session, "--session"),
+          workerCount,
+          workerPrefix,
+          workerArgs,
+        );
+        await printJson({ session });
+        return;
+      }
       const workers = await mapConcurrent(Array.from({ length: workerCount }, (_, index) => index + 1), workerCount, async (workerNumber) => {
         const workerId = `${workerPrefix}-${workerNumber}`;
         const result = await runCliWorker(["runs", "work", ...workerArgs, "--worker-id", workerId]);
@@ -694,7 +725,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "recover" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "recover" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -755,6 +786,129 @@ async function runCliWorker(args: string[]): Promise<{ exitCode: number | null; 
       resolve({ exitCode, stdout: stdout.trim(), stderr: stderr.trim() });
     });
   });
+}
+
+type WorkerSession = {
+  session: string;
+  baseUrl: string;
+  startedAt: string;
+  command: string[];
+  workers: Array<{
+    workerId: string;
+    pid: number | null;
+    stdoutPath: string;
+    stderrPath: string;
+  }>;
+  stoppedAt?: string;
+};
+
+async function startDetachedWorkerSession(
+  sessionName: string,
+  workerCount: number,
+  workerPrefix: string,
+  workerArgs: string[],
+): Promise<WorkerSession> {
+  assertSafeSessionName(sessionName);
+  await fs.mkdir(workerSessionDir, { recursive: true });
+  const sessionPath = workerSessionPath(sessionName);
+  await fs.writeFile(sessionPath, "", { encoding: "utf8", flag: "wx" });
+  const logDir = path.join(workerSessionDir, sessionName);
+  await fs.mkdir(logDir, { recursive: true });
+  const session: WorkerSession = {
+    session: sessionName,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: ["runs", "work", ...workerArgs],
+    workers: [],
+  };
+  try {
+    for (let workerNumber = 1; workerNumber <= workerCount; workerNumber += 1) {
+      const workerId = `${workerPrefix}-${workerNumber}`;
+      const stdoutPath = path.join(logDir, `${workerId}.out.log`);
+      const stderrPath = path.join(logDir, `${workerId}.err.log`);
+      const stdout = await fs.open(stdoutPath, "a");
+      const stderr = await fs.open(stderrPath, "a");
+      const child = spawn("npm", ["run", "--silent", "cli", "--", "runs", "work", ...workerArgs, "--worker-id", workerId], {
+        detached: true,
+        env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+        stdio: ["ignore", stdout.fd, stderr.fd],
+      });
+      child.unref();
+      await stdout.close();
+      await stderr.close();
+      session.workers.push({ workerId, pid: child.pid ?? null, stdoutPath, stderrPath });
+    }
+    await writeWorkerSession(session);
+    return session;
+  } catch (error) {
+    await fs.rm(sessionPath, { force: true });
+    throw error;
+  }
+}
+
+async function listWorkerSessions(sessionName?: string): Promise<Array<WorkerSession & { workers: Array<WorkerSession["workers"][number] & { alive: boolean }> }>> {
+  const names = sessionName ? [sessionName] : await listWorkerSessionNames();
+  return await Promise.all(names.map(async (name) => {
+    const session = await readWorkerSession(name);
+    return {
+      ...session,
+      workers: session.workers.map((worker) => ({ ...worker, alive: processIsAlive(worker.pid) })),
+    };
+  }));
+}
+
+async function listWorkerSessionNames(): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(workerSessionDir);
+    return entries
+      .filter((entry) => entry.endsWith(".json"))
+      .map((entry) => entry.slice(0, -".json".length))
+      .sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function readWorkerSession(sessionName: string): Promise<WorkerSession> {
+  assertSafeSessionName(sessionName);
+  const text = await fs.readFile(workerSessionPath(sessionName), "utf8");
+  return JSON.parse(text) as WorkerSession;
+}
+
+async function writeWorkerSession(session: WorkerSession): Promise<void> {
+  await fs.writeFile(workerSessionPath(session.session), `${JSON.stringify(session, null, 2)}\n`);
+}
+
+function workerSessionPath(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, `${sessionName}.json`);
+}
+
+function assertSafeSessionName(value: string): void {
+  if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
+    throw new Error("session names may only contain letters, numbers, '.', '_', and '-'");
+  }
+}
+
+function processIsAlive(pid: number | null): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function stopProcessGroup(pid: number | null): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(process.platform === "win32" ? pid : -pid, "SIGTERM");
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 async function requestJson(method: string, path: string, payload?: unknown, okStatuses: number[] = []): Promise<unknown> {
@@ -881,6 +1035,8 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
+  runs sessions [--session <name>]
+  runs stop-session <name>
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
@@ -888,6 +1044,7 @@ Commands:
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--worker-id worker-a] [--loop|--until-empty] [--limit 10] [--concurrency 2]
   runs work --agent <agent>|--agents <agent,agent> --workers 3 [--worker-prefix worker] [--until-empty] [--limit 10]
+  runs work --agent <agent>|--agents <agent,agent> --workers 3 --detach --session overnight [--worker-prefix worker] [--loop]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]
