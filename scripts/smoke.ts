@@ -899,6 +899,21 @@ try {
   assert.ok(detachedWorkerStatus.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id && agent.total >= workerGroupQueue.queued.length
   )));
+  const watchedWorkerStatus = await cliJson<{
+    observedAt: string;
+    session: {
+      session: string;
+      workers: Array<{ workerId: string; alive: boolean; runs: Array<{ id: string; status: string }> }>;
+    };
+    agents: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
+  }>(baseUrl, ["runs", "session-watch", detachedWorkerSessionName, "--max-polls", "1", "--interval-ms", "1"]);
+  assert.match(watchedWorkerStatus.observedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(watchedWorkerStatus.session.session, detachedWorkerSessionName);
+  assert.equal(watchedWorkerStatus.session.workers[0].workerId, "smoke-detached-worker-1");
+  assert.equal(watchedWorkerStatus.session.workers[0].alive, true);
+  assert.ok(watchedWorkerStatus.agents.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id && agent.total >= workerGroupQueue.queued.length
+  )));
   const stoppedWorkerSession = await cliJson<{
     session: string;
     stopped: Array<{ workerId: string; pid: number | null; stopped: boolean }>;

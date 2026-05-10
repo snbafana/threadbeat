@@ -350,45 +350,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-status") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
-    const session = await readWorkerSession(required(sessionName, "runs session-status <session>"));
-    const agentIds = workerSessionAgentIds(session);
     const statusFilter = new Set(parseList(options.status ?? "planned,running"));
-    const workerRuns = new Map(session.workers.map((worker) => [worker.workerId, [] as Array<{ agentId: string; id: string; status: string }>]));
-    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
-      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-        runs: Array<{ id: string; status: string; worker_id: string | null }>;
-      };
-      const statuses: Record<string, number> = {};
-      const unassigned: Array<{ id: string; status: string }> = [];
-      const otherWorkers: Array<{ id: string; status: string; workerId: string }> = [];
-      for (const run of listed.runs) {
-        statuses[run.status] = (statuses[run.status] ?? 0) + 1;
-        if (!statusFilter.has(run.status)) continue;
-        if (!run.worker_id) {
-          unassigned.push({ id: run.id, status: run.status });
-          continue;
-        }
-        const sessionRuns = workerRuns.get(run.worker_id);
-        if (sessionRuns) {
-          sessionRuns.push({ agentId, id: run.id, status: run.status });
-          continue;
-        }
-        otherWorkers.push({ id: run.id, status: run.status, workerId: run.worker_id });
-      }
-      return { agentId, total: listed.runs.length, statuses, unassigned, otherWorkers };
-    });
-    await printJson({
-      session: {
-        ...session,
-        workers: session.workers.map((worker) => ({
-          ...worker,
-          alive: processIsAlive(worker.pid),
-          runs: workerRuns.get(worker.workerId) ?? [],
-        })),
-      },
-      agents,
-    });
+    await printJson(await workerSessionStatus(required(sessionName, "runs session-status <session>"), statusFilter));
     return;
+  }
+  if (subcommandName === "session-watch") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-watch <session>");
+    const statusFilter = new Set(parseList(options.status ?? "planned,running"));
+    const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
+    let polls = 0;
+    while (true) {
+      console.log(JSON.stringify({
+        observedAt: new Date().toISOString(),
+        ...(await workerSessionStatus(requiredSessionName, statusFilter)),
+      }));
+      polls += 1;
+      if (maxPolls !== null && polls >= maxPolls) return;
+      await sleep(intervalMs);
+    }
   }
   if (subcommandName === "stop-session") {
     const sessionName = required(args[0], "runs stop-session <session>");
@@ -974,6 +956,60 @@ async function listWorkerSessions(sessionName?: string): Promise<Array<WorkerSes
   }));
 }
 
+async function workerSessionStatus(sessionName: string, statusFilter: Set<string>): Promise<{
+  session: WorkerSession & {
+    workers: Array<WorkerSession["workers"][number] & {
+      alive: boolean;
+      runs: Array<{ agentId: string; id: string; status: string }>;
+    }>;
+  };
+  agents: Array<{
+    agentId: string;
+    total: number;
+    statuses: Record<string, number>;
+    unassigned: Array<{ id: string; status: string }>;
+    otherWorkers: Array<{ id: string; status: string; workerId: string }>;
+  }>;
+}> {
+  const session = await readWorkerSession(sessionName);
+  const agentIds = workerSessionAgentIds(session);
+  const workerRuns = new Map(session.workers.map((worker) => [worker.workerId, [] as Array<{ agentId: string; id: string; status: string }>]));
+  const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+    const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+      runs: Array<{ id: string; status: string; worker_id: string | null }>;
+    };
+    const statuses: Record<string, number> = {};
+    const unassigned: Array<{ id: string; status: string }> = [];
+    const otherWorkers: Array<{ id: string; status: string; workerId: string }> = [];
+    for (const run of listed.runs) {
+      statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+      if (!statusFilter.has(run.status)) continue;
+      if (!run.worker_id) {
+        unassigned.push({ id: run.id, status: run.status });
+        continue;
+      }
+      const sessionRuns = workerRuns.get(run.worker_id);
+      if (sessionRuns) {
+        sessionRuns.push({ agentId, id: run.id, status: run.status });
+        continue;
+      }
+      otherWorkers.push({ id: run.id, status: run.status, workerId: run.worker_id });
+    }
+    return { agentId, total: listed.runs.length, statuses, unassigned, otherWorkers };
+  });
+  return {
+    session: {
+      ...session,
+      workers: session.workers.map((worker) => ({
+        ...worker,
+        alive: processIsAlive(worker.pid),
+        runs: workerRuns.get(worker.workerId) ?? [],
+      })),
+    },
+    agents,
+  };
+}
+
 function workerSessionAgentIds(session: WorkerSession): string[] {
   const commandArgs = session.command[0] === "runs" && session.command[1] === "work"
     ? session.command.slice(2)
@@ -1163,6 +1199,7 @@ Commands:
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running]
+  runs session-watch <name> [--status planned,running] [--interval-ms 2000] [--max-polls 10]
   runs stop-session <name>
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
