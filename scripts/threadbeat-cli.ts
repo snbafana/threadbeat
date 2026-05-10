@@ -820,6 +820,69 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     return;
   }
+  if (subcommandName === "resume") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs resume requires a run id");
+    const options = parseOptions(optionArgs);
+    const initialStatus = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=5`) as {
+      run: { id: string; status: string; run_branch: string; result_commit: string | null };
+      sandboxes: Array<{ id: string; state: string }>;
+    };
+    if (initialStatus.run.status === "completed" || initialStatus.run.status === "failed") {
+      throw new Error(`run is already ${initialStatus.run.status}`);
+    }
+    const runningSandbox = initialStatus.sandboxes.find((sandbox) => sandbox.state === "running");
+    const restartableSandbox = initialStatus.sandboxes.find((sandbox) => sandbox.state === "stopped" || sandbox.state === "failed");
+    const bootstrap = options["no-bootstrap"] !== "1";
+    let action: "existing" | "started" | "restarted";
+    let sandboxed: { sandbox: unknown; bootstrap?: unknown };
+    if (runningSandbox) {
+      action = "existing";
+      sandboxed = { sandbox: runningSandbox };
+    } else if (restartableSandbox) {
+      action = "restarted";
+      sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/restart-sandbox`, { bootstrap }) as {
+        sandbox: unknown;
+        bootstrap?: unknown;
+      };
+    } else if (initialStatus.sandboxes.length === 0) {
+      action = "started";
+      sandboxed = await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/sandbox`, { bootstrap }) as {
+        sandbox: unknown;
+        bootstrap?: unknown;
+      };
+    } else {
+      throw new Error(`run sandbox cannot resume from ${initialStatus.sandboxes.map((sandbox) => sandbox.state).join(", ")}`);
+    }
+    const runtime = options["check-runtime"] === "1"
+      ? await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/check-runtime`)
+      : null;
+    const booted = options.boot === "1"
+      ? await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/boot`, {
+        ...(options.objective ? { objective: options.objective } : {}),
+        ...(options.prompt ? { promptPath: options.prompt } : {}),
+        ...(options.task ? { taskPath: options.task } : {}),
+      })
+      : null;
+    const status = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=5`) as {
+      run: { id: string; status: string; run_branch: string; result_commit: string | null };
+    };
+    await printJson({
+      action,
+      run: {
+        id: status.run.id,
+        status: status.run.status,
+        branchName: status.run.run_branch,
+        resultCommit: status.run.result_commit,
+      },
+      sandbox: sandboxed.sandbox,
+      ...(sandboxed.bootstrap ? { bootstrap: sandboxed.bootstrap } : {}),
+      ...(runtime ? { runtime } : {}),
+      ...(booted ? { boot: booted } : {}),
+      status,
+    });
+    return;
+  }
   if (subcommandName === "exec") {
     const [id, ...commandArgs] = args;
     if (!id) throw new Error("runs exec requires a run id");
@@ -920,7 +983,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "recover" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -1424,6 +1487,7 @@ Commands:
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]
   runs restart-sandbox <run> [--bootstrap]
+  runs resume <run> [--no-bootstrap] [--check-runtime] [--boot]
   runs exec <run> [--cwd /workspace/agent] [--timeout-ms 120000] -- <command>
   runs boot <run> [--objective "..."] [--prompt .pi/prompts/heartbeat.md] [--task tasks/inbox/run.md]
   runs check-runtime <run>

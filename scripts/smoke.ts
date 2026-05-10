@@ -1299,6 +1299,61 @@ try {
     cliRestartPlan.run.id,
   ]);
 
+  const cliResumePlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli resumed run",
+  ]);
+  const cliResumedStarted = await cliJson<{
+    action: string;
+    run: { status: string };
+    sandbox: { id: string };
+  }>(baseUrl, [
+    "runs",
+    "resume",
+    cliResumePlan.run.id,
+    "--no-bootstrap",
+  ]);
+  assert.equal(cliResumedStarted.action, "started");
+  assert.equal(cliResumedStarted.run.status, "running");
+  const cliResumedExisting = await cliJson<{
+    action: string;
+    sandbox: { id: string };
+  }>(baseUrl, [
+    "runs",
+    "resume",
+    cliResumePlan.run.id,
+    "--no-bootstrap",
+  ]);
+  assert.equal(cliResumedExisting.action, "existing");
+  assert.equal(cliResumedExisting.sandbox.id, cliResumedStarted.sandbox.id);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop",
+    cliResumePlan.run.id,
+  ]);
+  const cliResumedRestarted = await cliJson<{
+    action: string;
+    run: { status: string };
+    sandbox: { id: string };
+  }>(baseUrl, [
+    "runs",
+    "resume",
+    cliResumePlan.run.id,
+    "--no-bootstrap",
+  ]);
+  assert.equal(cliResumedRestarted.action, "restarted");
+  assert.equal(cliResumedRestarted.run.status, "running");
+  assert.notEqual(cliResumedRestarted.sandbox.id, cliResumedStarted.sandbox.id);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop",
+    cliResumePlan.run.id,
+  ]);
+
   const cliStep = await cliJson<{
     result: { stdout: string };
     finalized: { commitSha: string };
