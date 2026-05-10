@@ -227,6 +227,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)));
     return;
   }
+  if (subcommandName === "watch") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs watch requires a run id");
+    const options = parseOptions(optionArgs);
+    const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
+    let polls = 0;
+    while (true) {
+      const params = new URLSearchParams();
+      if (options.limit) params.set("limit", options.limit);
+      const status = await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)) as {
+        run: { status: string };
+      };
+      console.log(JSON.stringify(status));
+      polls += 1;
+      if (["completed", "failed", "stopped"].includes(status.run.status)) return;
+      if (maxPolls !== null && polls >= maxPolls) return;
+      await sleep(intervalMs);
+    }
+  }
   if (subcommandName === "plan") {
     const options = parseOptions(args);
     const agentId = required(options.agent, "--agent");
@@ -632,6 +652,7 @@ Commands:
   runs list --agent <agent>
   runs get <run>
   runs status <run> [--limit 20]
+  runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--loop] [--limit 10] [--concurrency 2]

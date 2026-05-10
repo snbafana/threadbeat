@@ -348,6 +348,24 @@ try {
   assert.equal(cliRunStatus.sandboxes.length, 0);
   assert.ok(cliRunStatus.messages.length > 0);
 
+  const cliRunWatch = await cliRaw(baseUrl, [
+    "runs",
+    "watch",
+    cliRunPlan.run.id,
+    "--limit",
+    "2",
+    "--interval-ms",
+    "1",
+    "--max-polls",
+    "1",
+  ]);
+  const watched = JSON.parse(cliRunWatch.stdout.trim()) as {
+    run: { id: string };
+    messages: unknown[];
+  };
+  assert.equal(watched.run.id, cliRunPlan.run.id);
+  assert.ok(watched.messages.length > 0);
+
   const launchAgentResponse = await app.inject({
     method: "POST",
     url: "/api/agents",
