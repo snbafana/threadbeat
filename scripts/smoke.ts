@@ -1166,6 +1166,31 @@ try {
     "stop",
     detachedStoppedPlan.run.id,
   ]);
+  const detachedResultPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--objective",
+    "detached session completed result branch",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    detachedResultPlan.run.id,
+    "--worker-id",
+    "smoke-detached-worker-1",
+  ]);
+  await cliJson(baseUrl, ["runs", "sandbox", detachedResultPlan.run.id]);
+  await cliJson(baseUrl, ["runs", "boot", detachedResultPlan.run.id]);
+  const detachedResultFinalized = await cliJson<{ result: { commitSha: string } }>(baseUrl, [
+    "runs",
+    "finalize",
+    detachedResultPlan.run.id,
+    "--message",
+    "Finalize detached session result",
+  ]);
+  await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", detachedResultPlan.run.id]);
   const detachedWorkerGroup = await cliJson<{
     session: {
       session: string;
@@ -1362,6 +1387,17 @@ try {
         checkoutSession: string[] | null;
       };
     }>;
+    resultBranches: Array<{
+      agentId: string;
+      runId: string;
+      status: string;
+      objective: string;
+      branchName: string;
+      resultCommit: string;
+      workerId: string | null;
+      location: string;
+      commands: { checkoutBranch: string[]; inspectRun: string[] };
+    }>;
     recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; skipped?: string }>;
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--lines", "5"]);
@@ -1386,6 +1422,18 @@ try {
     && run.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
     && run.commands.resumeSession?.join(" ") === `npm run cli -- runs resume-session ${detachedWorkerSessionName}`
     && run.commands.checkoutSession?.join(" ") === `npm run cli -- runs checkout-session ${detachedWorkerSessionName} --dir ./checkouts/${detachedWorkerSessionName}-resumable --resumable`
+  )));
+  assert.ok(detachedWorkerReview.resultBranches.some((run) => (
+    run.agentId === workerGroupAgentBody.agent.id
+    && run.runId === detachedResultPlan.run.id
+    && run.status === "completed"
+    && run.objective === "detached session completed result branch"
+    && run.branchName === detachedResultPlan.plan.branchName
+    && run.resultCommit === detachedResultFinalized.result.commitSha
+    && run.workerId === "smoke-detached-worker-1"
+    && run.location === "session_worker"
+    && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedResultPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
+    && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedResultPlan.run.id}`
   )));
   assert.equal(detachedWorkerReview.logs[0].workerId, "smoke-detached-worker-1");
   assert.equal(detachedWorkerReview.logs[0].alive, true);

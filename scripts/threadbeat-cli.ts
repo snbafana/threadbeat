@@ -845,6 +845,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       alive: boolean;
       runs: Array<SessionVisibleRun & { agentId: string }>;
     }>;
+    const sessionWorkerIds = new Set(sessionWorkers.map((worker) => worker.workerId));
     const resumableBranches = [
       ...sessionWorkers.flatMap((worker) => worker.runs
         .filter((run) => run.status === "stopped" && run.resultCommit === null)
@@ -931,6 +932,42 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
     const resultStatusList = parseList(options["result-status"] ?? "completed,stopped");
     const resultStatusFilter = new Set(resultStatusList);
+    const resultCheckoutDir = options["checkout-dir"] ?? `./checkouts/${status.session.session}-results`;
+    const resultBranches = (await mapConcurrent(agentIds, 4, async (agentId) => {
+      const listed = await requestJson("GET", withQuery(
+        `/api/agents/${encodeURIComponent(agentId)}/runs`,
+        new URLSearchParams({ status: resultStatusList.join(",") }),
+      )) as {
+        runs: Array<{
+          id: string;
+          objective: string;
+          run_branch: string;
+          result_commit: string | null;
+          status: string;
+          worker_id: string | null;
+        }>;
+      };
+      return listed.runs
+        .filter((run) => resultStatusFilter.has(run.status) && run.result_commit !== null)
+        .map((run) => ({
+          agentId,
+          runId: run.id,
+          status: run.status,
+          objective: run.objective,
+          branchName: run.run_branch,
+          resultCommit: run.result_commit,
+          workerId: run.worker_id,
+          location: run.worker_id === null
+            ? "unassigned"
+            : sessionWorkerIds.has(run.worker_id)
+              ? "session_worker"
+              : "other_worker",
+          commands: {
+            checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resultCheckoutDir}/${run.id}`],
+            inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+          },
+        }));
+    })).flat();
     const resultCheckouts = checkoutRootDir
       ? await mapConcurrent(agentIds, 4, async (agentId) => {
         const listed = await requestJson("GET", withQuery(
@@ -964,6 +1001,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       },
       agents: status.agents,
       resumableBranches,
+      resultBranches,
       recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),
       ...(checkoutRootDir ? { checkoutDir: checkoutRootDir, resultCheckouts } : {}),
       logs: await Promise.all(sessionWorkers.map(async (worker) => ({
