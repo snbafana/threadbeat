@@ -859,6 +859,28 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "recover-session") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const session = await readWorkerSession(required(sessionName, "runs recover-session <session>"));
+    const workerIds = new Set(session.workers.map((worker) => worker.workerId));
+    const recovered = await recoverStaleRuns(
+      workerSessionAgentIds(session),
+      { workerId: session.session },
+      parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+      workerIds,
+      options["include-stopped"] === "1",
+      options["dry-run"] === "1",
+    );
+    await printJson({
+      session: session.session,
+      recovered: recovered.map(({ run: _run, ...item }) => item),
+      ...(options["dry-run"] === "1" ? {} : {
+        status: await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"])),
+      }),
+    });
+    return;
+  }
   if (subcommandName === "restart-session") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -1982,6 +2004,7 @@ Commands:
   runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
+  runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
   runs restart-session <name> [--recover] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]

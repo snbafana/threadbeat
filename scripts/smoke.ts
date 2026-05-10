@@ -1147,6 +1147,48 @@ try {
   ]);
   assert.equal(recoveredDetachedRun.run.status, "planned");
   assert.equal(recoveredDetachedRun.run.worker_id, null);
+  const detachedSessionRecoverPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--objective",
+    "detached session direct recovery",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    detachedSessionRecoverPlan.run.id,
+    "--worker-id",
+    "smoke-detached-worker-1",
+  ]);
+  const sessionRecoverPreview = await cliJson<{
+    session: string;
+    recovered: Array<{ runId: string; currentStatus?: string; dryRun?: boolean }>;
+  }>(baseUrl, ["runs", "recover-session", detachedWorkerSessionName, "--dry-run"]);
+  assert.equal(sessionRecoverPreview.session, detachedWorkerSessionName);
+  assert.ok(sessionRecoverPreview.recovered.some((run) => (
+    run.runId === detachedSessionRecoverPlan.run.id
+    && run.currentStatus === "running"
+    && run.dryRun === true
+  )));
+  const sessionRecovered = await cliJson<{
+    session: string;
+    recovered: Array<{ runId: string; status?: string }>;
+    status: { session: { session: string } };
+  }>(baseUrl, ["runs", "recover-session", detachedWorkerSessionName]);
+  assert.equal(sessionRecovered.session, detachedWorkerSessionName);
+  assert.equal(sessionRecovered.status.session.session, detachedWorkerSessionName);
+  assert.ok(sessionRecovered.recovered.some((run) => (
+    run.runId === detachedSessionRecoverPlan.run.id && run.status === "planned"
+  )));
+  const sessionRecoveredRun = await cliJson<{ run: { status: string; worker_id: string | null } }>(baseUrl, [
+    "runs",
+    "get",
+    detachedSessionRecoverPlan.run.id,
+  ]);
+  assert.equal(sessionRecoveredRun.run.status, "planned");
+  assert.equal(sessionRecoveredRun.run.worker_id, null);
 
   const superviseAgentResponse = await app.inject({
     method: "POST",

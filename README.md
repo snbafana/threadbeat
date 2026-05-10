@@ -209,6 +209,7 @@ npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-logs overnight --lines 40
+npm run cli -- runs recover-session overnight --dry-run
 npm run cli -- runs stop-session overnight --recover
 npm run cli -- runs restart-session overnight --recover
 npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover
@@ -330,6 +331,9 @@ for a long-running session: worker liveness, agent run status, dry-run recovery
 candidates, and recent worker logs in one payload. Add `--checkout-dir <path>`
 to include local checkouts for completed/stopped run branches in the same
 snapshot.
+`runs recover-session <name>` requeues stale runs claimed by that session's
+workers without stopping or restarting the worker group; add `--dry-run` to
+preview the affected runs first.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, and optional local checkouts with
