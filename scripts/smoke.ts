@@ -979,7 +979,10 @@ try {
     "--worker-id",
     "smoke-detached-worker-1",
   ]);
-  const detachedStoppedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const detachedStoppedPlan = await cliJson<{
+    run: { id: string };
+    plan: { branchName: string };
+  }>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -1126,6 +1129,15 @@ try {
   const detachedWorkerReview = await cliJson<{
     observedAt: string;
     session: { session: string; workers: { total: number; alive: number; dead: number } };
+    resumableBranches: Array<{
+      agentId: string;
+      runId: string;
+      objective: string;
+      branchName: string;
+      resultCommit: string | null;
+      workerId: string | null;
+      location: string;
+    }>;
     recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; skipped?: string }>;
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--lines", "5"]);
@@ -1138,6 +1150,15 @@ try {
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"
     && run.dryRun === true
+  )));
+  assert.ok(detachedWorkerReview.resumableBranches.some((run) => (
+    run.agentId === workerGroupAgentBody.agent.id
+    && run.runId === detachedStoppedPlan.run.id
+    && run.objective === "detached session resumable stopped branch"
+    && run.branchName === detachedStoppedPlan.plan.branchName
+    && run.resultCommit === null
+    && run.workerId === null
+    && run.location === "unassigned"
   )));
   assert.equal(detachedWorkerReview.logs[0].workerId, "smoke-detached-worker-1");
   assert.equal(detachedWorkerReview.logs[0].alive, true);

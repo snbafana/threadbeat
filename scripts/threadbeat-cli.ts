@@ -727,8 +727,45 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const status = await workerSessionStatus(requiredSessionName, statusFilter);
     const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & {
       alive: boolean;
-      runs: Array<{ agentId: string; id: string; status: string }>;
+      runs: Array<SessionVisibleRun & { agentId: string }>;
     }>;
+    const resumableBranches = [
+      ...sessionWorkers.flatMap((worker) => worker.runs
+        .filter((run) => run.status === "stopped" && run.resultCommit === null)
+        .map((run) => ({
+          agentId: run.agentId,
+          runId: run.id,
+          objective: run.objective,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          workerId: worker.workerId,
+          location: "session_worker",
+        }))),
+      ...status.agents.flatMap((agent) => [
+        ...agent.unassigned
+          .filter((run) => run.status === "stopped" && run.resultCommit === null)
+          .map((run) => ({
+            agentId: agent.agentId,
+            runId: run.id,
+            objective: run.objective,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+            workerId: null,
+            location: "unassigned",
+          })),
+        ...agent.otherWorkers
+          .filter((run) => run.status === "stopped" && run.resultCommit === null)
+          .map((run) => ({
+            agentId: agent.agentId,
+            runId: run.id,
+            objective: run.objective,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+            workerId: run.workerId,
+            location: "other_worker",
+          })),
+      ]),
+    ];
     const agentIds = workerSessionAgentIds(status.session);
     const recoveryPreview = await recoverStaleRuns(
       agentIds,
@@ -774,6 +811,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         },
       },
       agents: status.agents,
+      resumableBranches,
       recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),
       ...(checkoutRootDir ? { checkoutDir: checkoutRootDir, resultCheckouts } : {}),
       logs: await Promise.all(sessionWorkers.map(async (worker) => ({

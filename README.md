@@ -328,10 +328,10 @@ by that session's workers when those runs do not have a running sandbox.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents.
 `runs session-review <name> --include-stopped` is the read-only operator summary
-for a long-running session: worker liveness, agent run status, dry-run recovery
-candidates, and recent worker logs in one payload. Add `--checkout-dir <path>`
-to include local checkouts for completed/stopped run branches in the same
-snapshot.
+for a long-running session: worker liveness, agent run status, resumable branch
+list, dry-run recovery candidates, and recent worker logs in one payload. Add
+`--checkout-dir <path>` to include local checkouts for completed/stopped run
+branches in the same snapshot.
 `runs recover-session <name>` requeues stale runs claimed by that session's
 workers without stopping or restarting the worker group; add `--dry-run` to
 preview the affected runs first.
