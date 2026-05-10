@@ -557,7 +557,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
     const workerPayload = options["worker-id"] ? { workerId: options["worker-id"] } : undefined;
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
-    const recovered = await recoverStaleRuns(agentIds, workerPayload, concurrency);
+    const recovered = await recoverStaleRuns(
+      agentIds,
+      workerPayload,
+      concurrency,
+      undefined,
+      options["include-stopped"] === "1",
+    );
     await printJson({ recovered: recovered.map(({ run: _run, ...item }) => item) });
     return;
   }
@@ -1238,7 +1244,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "resume-stopped" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "resume-stopped" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -1470,17 +1476,35 @@ async function recoverStaleRuns(
   workerPayload: { workerId: string } | undefined,
   concurrency: number,
   workerIds?: Set<string>,
+  includeStopped = false,
 ): Promise<RecoverStaleRunResult[]> {
-  const runningRuns: Array<{ id: string; agent_id: string; status: string; worker_id: string | null }> = [];
+  const candidateStatuses = includeStopped ? "running,stopped" : "running";
+  const candidateRuns: Array<{
+    id: string;
+    agent_id: string;
+    status: string;
+    worker_id: string | null;
+    result_commit: string | null;
+  }> = [];
   for (const agentId of agentIds) {
-    const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-      runs: Array<{ id: string; agent_id: string; status: string; worker_id: string | null }>;
+    const listed = await requestJson("GET", withQuery(
+      `/api/agents/${encodeURIComponent(agentId)}/runs`,
+      new URLSearchParams({ status: candidateStatuses }),
+    )) as {
+      runs: Array<{
+        id: string;
+        agent_id: string;
+        status: string;
+        worker_id: string | null;
+        result_commit: string | null;
+      }>;
     };
-    runningRuns.push(...listed.runs.filter((run) => (
-      run.status === "running" && (!workerIds || (run.worker_id !== null && workerIds.has(run.worker_id)))
+    candidateRuns.push(...listed.runs.filter((run) => (
+      (!workerIds || (run.worker_id !== null && workerIds.has(run.worker_id)))
+        && (run.status === "running" || (includeStopped && run.status === "stopped" && run.result_commit === null))
     )));
   }
-  return await mapConcurrent(runningRuns, concurrency, async (run) => {
+  return await mapConcurrent(candidateRuns, concurrency, async (run) => {
     const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status?limit=1`) as {
       sandboxes: Array<{ state: string }>;
     };
@@ -1846,7 +1870,7 @@ Commands:
   runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--concurrency 2]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
-  runs recover --agent <agent>|--agents <agent,agent> [--worker-id worker-a] [--concurrency 4]
+  runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped]

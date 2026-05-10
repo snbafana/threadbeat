@@ -485,6 +485,32 @@ try {
       && run.runId === recoverCommandPlan.run.id
       && run.status === "planned"
   )));
+  const recoverStoppedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli recover stopped branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "sandbox", recoverStoppedPlan.run.id]);
+  await cliJson(baseUrl, ["runs", "stop", recoverStoppedPlan.run.id]);
+  const recoveredStoppedCommand = await cliJson<{
+    recovered: Array<{ agentId: string; runId: string; status?: string; skipped?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "recover",
+    "--agent",
+    agentBody.agent.id,
+    "--include-stopped",
+    "--worker-id",
+    "smoke-recover-stopped",
+  ]);
+  assert.ok(recoveredStoppedCommand.recovered.some((run) => (
+    run.agentId === agentBody.agent.id
+      && run.runId === recoverStoppedPlan.run.id
+      && run.status === "planned"
+  )));
 
   const recoverAgentResponse = await app.inject({
     method: "POST",
