@@ -1138,6 +1138,61 @@ try {
   assert.ok(inspectedRun.sandboxes.some((sandbox) => sandbox.state === "running"));
   assert.ok(inspectedRun.messages.length > 0);
 
+  const checkoutRemote = path.join(tempRoot, "run-checkout-remote.git");
+  const checkoutSeed = path.join(tempRoot, "run-checkout-seed");
+  await execFileAsync("git", ["init", "--bare", checkoutRemote]);
+  await fs.mkdir(checkoutSeed);
+  await execFileAsync("git", ["-C", checkoutSeed, "init"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "config", "user.name", "Threadbeat Smoke"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "config", "user.email", "threadbeat-smoke@example.local"]);
+  await fs.writeFile(path.join(checkoutSeed, "README.md"), "base\n");
+  await execFileAsync("git", ["-C", checkoutSeed, "add", "README.md"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "commit", "-m", "Initial checkout smoke repo"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "branch", "-M", "main"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "remote", "add", "origin", checkoutRemote]);
+  await execFileAsync("git", ["-C", checkoutSeed, "push", "-u", "origin", "main"]);
+  const checkoutAgent = await cliJson<{ agent: { id: string } }>(baseUrl, [
+    "agents",
+    "create",
+    "--name",
+    "checkout-agent",
+    "--repo",
+    checkoutRemote,
+  ]);
+  const checkoutPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    checkoutAgent.agent.id,
+    "--objective",
+    "checkout run branch",
+  ]);
+  await execFileAsync("git", ["-C", checkoutSeed, "checkout", "-B", checkoutPlan.plan.branchName]);
+  await fs.writeFile(path.join(checkoutSeed, "report.md"), "branch report\n");
+  await execFileAsync("git", ["-C", checkoutSeed, "add", "report.md"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "commit", "-m", "Write branch report"]);
+  await execFileAsync("git", ["-C", checkoutSeed, "push", "origin", `HEAD:${checkoutPlan.plan.branchName}`]);
+  const expectedCheckoutHead = (await execFileAsync("git", ["-C", checkoutSeed, "rev-parse", "HEAD"])).stdout.trim();
+  const checkoutDir = path.join(tempRoot, "run-checkout");
+  const checkedOutRun = await cliJson<{
+    run: { id: string; branchName: string; resultCommit: string | null };
+    checkout: { dir: string; created: boolean; branchName: string; headCommit: string; matchesResultCommit: boolean | null };
+  }>(baseUrl, [
+    "runs",
+    "checkout",
+    checkoutPlan.run.id,
+    "--dir",
+    checkoutDir,
+  ]);
+  assert.equal(checkedOutRun.run.branchName, checkoutPlan.plan.branchName);
+  assert.equal(checkedOutRun.run.resultCommit, null);
+  assert.equal(checkedOutRun.checkout.dir, checkoutDir);
+  assert.equal(checkedOutRun.checkout.created, true);
+  assert.equal(checkedOutRun.checkout.branchName, checkoutPlan.plan.branchName);
+  assert.equal(checkedOutRun.checkout.headCommit, expectedCheckoutHead);
+  assert.equal(checkedOutRun.checkout.matchesResultCommit, null);
+  assert.equal(await fs.readFile(path.join(checkoutDir, "report.md"), "utf8"), "branch report\n");
+
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",

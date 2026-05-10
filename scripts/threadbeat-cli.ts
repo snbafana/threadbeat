@@ -293,6 +293,57 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "checkout") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs checkout requires a run id");
+    const options = parseOptions(optionArgs);
+    const targetDir = path.resolve(required(options.dir, "--dir"));
+    const status = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=1`) as {
+      run: {
+        id: string;
+        agent_id: string;
+        input_ref: string;
+        run_branch: string;
+        result_commit: string | null;
+        status: string;
+      };
+    };
+    const repository = await requestJson("GET", `/api/agents/${encodeURIComponent(status.run.agent_id)}/repository`) as {
+      repository: { repoUrl: string; repoWebUrl: string | null };
+    };
+    const existed = await pathExists(targetDir);
+    if (existed && !(await pathExists(path.join(targetDir, ".git")))) {
+      throw new Error("--dir exists but is not a git checkout");
+    }
+    if (!existed) {
+      await fs.mkdir(path.dirname(targetDir), { recursive: true });
+      await git(["clone", "--no-checkout", "--", repository.repository.repoUrl, targetDir]);
+    }
+    await git(["fetch", "origin", `${status.run.run_branch}:refs/remotes/origin/${status.run.run_branch}`], targetDir);
+    await git(["checkout", "-B", status.run.run_branch, `refs/remotes/origin/${status.run.run_branch}`], targetDir);
+    const headCommit = (await git(["rev-parse", "HEAD"], targetDir)).trim();
+    await printJson({
+      run: {
+        id: status.run.id,
+        agentId: status.run.agent_id,
+        status: status.run.status,
+        baseRef: status.run.input_ref,
+        branchName: status.run.run_branch,
+        resultCommit: status.run.result_commit,
+      },
+      checkout: {
+        dir: targetDir,
+        created: !existed,
+        branchName: status.run.run_branch,
+        headCommit,
+        matchesResultCommit: status.run.result_commit ? headCommit === status.run.result_commit : null,
+      },
+      repository: {
+        repoWebUrl: repository.repository.repoWebUrl,
+      },
+    });
+    return;
+  }
   if (subcommandName === "claim") {
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs claim requires a run id");
@@ -932,6 +983,28 @@ async function runCliWorker(args: string[]): Promise<{ exitCode: number | null; 
   });
 }
 
+async function git(args: string[], cwd = process.cwd()): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn("git", args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", reject);
+    child.on("close", (exitCode) => {
+      if (exitCode === 0) {
+        resolve(stdout);
+        return;
+      }
+      const detail = stderr.trim() || stdout.trim() || `exit ${exitCode}`;
+      reject(new Error(`git ${redactSecretUrl(args).join(" ")} failed: ${redactSecretUrlText(detail)}`));
+    });
+  });
+}
+
 async function agentBacklog(agentIds: string[]): Promise<Array<{ agentId: string; total: number; statuses: Record<string, number> }>> {
   return await mapConcurrent(agentIds, 4, async (agentId) => {
     const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
@@ -1269,6 +1342,24 @@ function isSafeRelativePath(value: string): boolean {
   return value !== "" && !path.isAbsolute(value) && !value.split(/[\\/]/).includes("..");
 }
 
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function redactSecretUrl(args: string[]): string[] {
+  return args.map(redactSecretUrlText);
+}
+
+function redactSecretUrlText(value: string): string {
+  return value.replace(/:\/\/([^:@/]+):([^@/]+)@/g, "://$1:REDACTED@");
+}
+
 function runPlanPayload(options: Record<string, string>): Record<string, string> {
   return {
     objective: required(options.objective, "--objective"),
@@ -1308,6 +1399,7 @@ Commands:
   runs get <run>
   runs status <run> [--limit 20]
   runs inspect <run> [--limit 10]
+  runs checkout <run> --dir ./checkouts/run
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
   runs recover --agent <agent>|--agents <agent,agent> [--worker-id worker-a] [--concurrency 4]
