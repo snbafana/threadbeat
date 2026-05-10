@@ -415,6 +415,43 @@ try {
   assert.equal(requeueRunningSandboxResponse.statusCode, 409);
   assert.match(requeueRunningSandboxResponse.body, /running sandbox/);
 
+  const recoverAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-recover-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(recoverAgentResponse.statusCode, 200);
+  const recoverAgentBody = JSON.parse(recoverAgentResponse.body) as { agent: { id: string } };
+  const recoverPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    recoverAgentBody.agent.id,
+    "--objective",
+    "cli recover orphaned claim",
+  ]);
+  await cliJson(baseUrl, ["runs", "claim", recoverPlan.run.id]);
+  const recoveredWorker = await cliJson<{
+    recovered: Array<{ runId: string; status: string }>;
+    processed: Array<{ runId: string; sandbox: { run_id: string | null } }>;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    recoverAgentBody.agent.id,
+    "--recover",
+    "--limit",
+    "1",
+  ]);
+  assert.deepEqual(recoveredWorker.recovered.map((run) => run.runId), [recoverPlan.run.id]);
+  assert.deepEqual(recoveredWorker.processed.map((run) => run.runId), [recoverPlan.run.id]);
+  assert.equal(recoveredWorker.processed[0].sandbox.run_id, recoverPlan.run.id);
+  await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", recoverPlan.run.id]);
+
   const launchAgentResponse = await app.inject({
     method: "POST",
     url: "/api/agents",

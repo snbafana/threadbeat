@@ -375,6 +375,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "5000", "--interval-ms");
     const idleExitAfter = parsePositiveInteger(options["idle-exit-after"] ?? "1", "--idle-exit-after");
     const processed: unknown[] = [];
+    const recovered: unknown[] = [];
     let idlePasses = 0;
 
     do {
@@ -383,6 +384,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
           runs: Array<{ id: string; agent_id: string; status: string }>;
         };
+        if (options.recover === "1") {
+          for (const run of listed.runs.filter((item) => item.status === "running")) {
+            const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status?limit=1`) as {
+              sandboxes: Array<{ state: string }>;
+            };
+            if (status.sandboxes.some((sandbox) => sandbox.state === "running")) continue;
+            const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, undefined, [409]) as {
+              run?: { id: string; agent_id: string; status: string };
+              error?: string;
+            };
+            if (!requeued.run) {
+              recovered.push({ agentId: run.agent_id, runId: run.id, skipped: requeued.error ?? "run was not requeued" });
+              continue;
+            }
+            recovered.push({ agentId: requeued.run.agent_id, runId: requeued.run.id, status: requeued.run.status });
+            plannedRuns.push(requeued.run);
+          }
+        }
         plannedRuns.push(...listed.runs.filter((run) => run.status === "planned"));
       }
       const work = plannedRuns.slice(0, limit - processed.length);
@@ -438,7 +457,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       processed.push(...results);
     } while (options.loop === "1" && processed.length < limit);
 
-    await printJson({ processed, idlePasses });
+    await printJson({ processed, recovered, idlePasses });
     return;
   }
   if (subcommandName === "sandbox") {
@@ -559,7 +578,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "recover") {
       options[key] = "1";
       continue;
     }
@@ -720,7 +739,7 @@ Commands:
   runs monitor --agent <agent>|--agents <agent,agent> [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
-  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--loop] [--limit 10] [--concurrency 2]
+  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--loop] [--limit 10] [--concurrency 2]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]
