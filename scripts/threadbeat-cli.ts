@@ -1462,11 +1462,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             ...(options.message ? { commitMessage: options.message } : {}),
           })
           : null;
-        const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status`);
+        const status = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/status`) as {
+          run: {
+            status: string;
+            input_ref: string;
+            run_branch: string;
+            result_commit: string | null;
+          };
+        };
         return {
           agentId,
           runId: run.id,
           action: sandboxed.action,
+          branch: {
+            baseRef: status.run.input_ref,
+            branchName: status.run.run_branch,
+            resultCommit: status.run.result_commit,
+            status: status.run.status,
+          },
           sandbox: sandboxed.sandbox,
           ...(sandboxed.bootstrap ? { bootstrap: sandboxed.bootstrap } : {}),
           ...(runtime ? { runtime } : {}),

@@ -339,7 +339,9 @@ unassigned or already claimed by that worker id; use `--recover --include-stoppe
 when an operator needs to reclaim stopped branches first. Add `--worker-id` so
 claim and requeue lifecycle messages show which CLI worker touched a run;
 claimed runs also expose `worker_id` in run status/list/monitor responses. Add
-`--workers <n>` to start multiple foreground worker subprocesses with `--worker-prefix` IDs. Add
+`--finalize` to have processed items include the run branch and result commit
+directly in the worker output. Add `--workers <n>` to start multiple foreground
+worker subprocesses with `--worker-prefix` IDs. Add
 `--detach --session <name>` to leave that worker group running after the parent
 CLI exits; Threadbeat records worker PIDs and stdout/stderr log paths under
 `.threadbeat/worker-sessions/`. Use `runs sessions` to inspect local worker

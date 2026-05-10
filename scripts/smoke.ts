@@ -2563,6 +2563,53 @@ try {
     cliResumeWorkPlan.run.id,
   ]);
 
+  const cliWorkFinalizeAgent = await cliJson<{ agent: { id: string } }>(baseUrl, [
+    "agents",
+    "create",
+    "--name",
+    "work-finalize-agent",
+    "--repo",
+    "https://github.com/example/work-finalize",
+  ]);
+  const cliWorkFinalizePlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    cliWorkFinalizeAgent.agent.id,
+    "--objective",
+    "worker finalize visibility",
+  ]);
+  const cliWorkFinalized = await cliJson<{
+    processed: Array<{
+      runId: string;
+      branch: { baseRef: string; branchName: string; resultCommit: string | null; status: string };
+      finalized: { result: { commitSha: string } };
+      status: { run: { status: string; result_commit: string | null } };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    cliWorkFinalizeAgent.agent.id,
+    "--bootstrap",
+    "--boot",
+    "--finalize",
+    "--message",
+    "Finalize worker smoke",
+    "--until-empty",
+    "--limit",
+    "1",
+  ]);
+  assert.equal(cliWorkFinalized.processed.length, 1);
+  assert.equal(cliWorkFinalized.processed[0].runId, cliWorkFinalizePlan.run.id);
+  assert.equal(cliWorkFinalized.processed[0].branch.baseRef, "main");
+  assert.equal(cliWorkFinalized.processed[0].branch.branchName, cliWorkFinalizePlan.plan.branchName);
+  assert.equal(cliWorkFinalized.processed[0].branch.status, "completed");
+  assert.equal(cliWorkFinalized.processed[0].branch.resultCommit, cliWorkFinalized.processed[0].finalized.result.commitSha);
+  assert.equal(cliWorkFinalized.processed[0].status.run.status, "completed");
+  assert.equal(cliWorkFinalized.processed[0].status.run.result_commit, cliWorkFinalized.processed[0].finalized.result.commitSha);
+  await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", cliWorkFinalizePlan.run.id]);
+
   const cliStep = await cliJson<{
     result: { stdout: string };
     finalized: { commitSha: string };
