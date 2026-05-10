@@ -166,6 +166,7 @@ npm run cli -- runs requeue <run> --worker-id worker-a
 npm run cli -- runs recover --agents <agent>,<agent> --worker-id worker-a
 npm run cli -- runs watch <run>
 npm run cli -- runs backlog --agents <agent>,<agent>
+npm run cli -- runs branches --agents <agent>,<agent>
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs session-status overnight
@@ -270,7 +271,8 @@ by that session's workers when those runs do not have a running sandbox.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs backlog` reports run counts by status for one or more agents and
 includes `resumableStopped` for stopped branch runs that `--resume-stopped` can
-pick up.
+pick up. `runs branches` lists completed and stopped branch runs across agents,
+including base refs, branch names, result commits, and resumable stopped runs.
 `runs workers` groups running runs by the `worker_id` that claimed them.
 `runs stop-matching --status planned` cancels queued runs for one or more
 agents; include `running` in the status list to stop active run sandboxes too.

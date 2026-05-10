@@ -1164,6 +1164,37 @@ try {
   assert.match(inspectedRun.links.resultTreeUrl ?? "", new RegExp(`github\\.com/example/agent/tree/${cliRunFinalize.result.commitSha}`));
   assert.ok(inspectedRun.sandboxes.some((sandbox) => sandbox.state === "running"));
   assert.ok(inspectedRun.messages.length > 0);
+  const branchSummary = await cliJson<{
+    agents: Array<{
+      agentId: string;
+      summary: { total: number; resultCommits: number; resumable: number };
+      runs: Array<{
+        id: string;
+        status: string;
+        state: string;
+        baseRef: string;
+        branchName: string;
+        resultCommit: string | null;
+      }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "branches",
+    "--agent",
+    agentBody.agent.id,
+  ]);
+  assert.ok(branchSummary.agents.some((agent) => (
+    agent.agentId === agentBody.agent.id
+    && agent.summary.resultCommits >= 1
+    && agent.runs.some((run) => (
+      run.id === cliRunPlan.run.id
+      && run.status === "completed"
+      && run.state === "result"
+      && run.baseRef === "main"
+      && run.branchName === cliRunPlan.plan.branchName
+      && run.resultCommit === cliRunFinalize.result.commitSha
+    ))
+  )));
 
   const checkoutRemote = path.join(tempRoot, "run-checkout-remote.git");
   const checkoutSeed = path.join(tempRoot, "run-checkout-seed");
@@ -1327,6 +1358,25 @@ try {
   };
   assert.ok(stoppedMonitored.agents.some((agent) => (
     agent.runs.length === 2 && agent.runs.every((run) => run.status === "stopped" && run.resumable)
+  )));
+  const stoppedMatchingBranches = await cliJson<{
+    agents: Array<{
+      agentId: string;
+      summary: { total: number; resultCommits: number; resumable: number };
+      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "branches",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+  ]);
+  assert.ok(stoppedMatchingBranches.agents.some((agent) => (
+    agent.agentId === stopMatchingAgentBody.agent.id
+    && agent.summary.total === 2
+    && agent.summary.resultCommits === 0
+    && agent.summary.resumable === 2
+    && agent.runs.every((run) => run.status === "stopped" && run.state === "resumable" && run.resultCommit === null)
   )));
 
   const cliRestartPlan = await cliJson<{ run: { id: string } }>(baseUrl, [

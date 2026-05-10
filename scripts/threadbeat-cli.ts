@@ -430,6 +430,47 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ agents: await agentBacklog(agentIds) });
     return;
   }
+  if (subcommandName === "branches") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const statusFilter = new Set(parseList(options.status ?? "completed,stopped"));
+    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+        runs: Array<{
+          id: string;
+          objective: string;
+          input_ref: string;
+          run_branch: string;
+          result_commit: string | null;
+          status: string;
+          worker_id: string | null;
+        }>;
+      };
+      const runs = listed.runs
+        .filter((run) => statusFilter.has(run.status))
+        .map((run) => ({
+          id: run.id,
+          status: run.status,
+          state: run.result_commit ? "result" : run.status === "stopped" ? "resumable" : run.status,
+          objective: run.objective,
+          baseRef: run.input_ref,
+          branchName: run.run_branch,
+          resultCommit: run.result_commit,
+          workerId: run.worker_id,
+        }));
+      return {
+        agentId,
+        summary: {
+          total: runs.length,
+          resultCommits: runs.filter((run) => run.resultCommit).length,
+          resumable: runs.filter((run) => run.state === "resumable").length,
+        },
+        runs,
+      };
+    });
+    await printJson({ agents });
+    return;
+  }
   if (subcommandName === "workers") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
@@ -1526,6 +1567,7 @@ Commands:
   runs recover --agent <agent>|--agents <agent,agent> [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
+  runs branches --agent <agent>|--agents <agent,agent> [--status completed,stopped]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]
