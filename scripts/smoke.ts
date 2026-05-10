@@ -430,6 +430,58 @@ try {
   assert.equal(requeuedRun.run.id, claimPlan.run.id);
   assert.equal(requeuedRun.run.status, "planned");
   assert.equal(requeuedRun.run.worker_id, null);
+  const resumePlan = await cliJson<{
+    run: { id: string; status: string };
+    plan: { branchName: string };
+  }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentBody.agent.id,
+    "--objective",
+    "cli selective resume branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", resumePlan.run.id]);
+  const resumePreview = await cliJson<{
+    resumable: {
+      runId: string;
+      branchName: string;
+      resultCommit: string | null;
+      currentStatus: string;
+    };
+    dryRun: boolean;
+  }>(baseUrl, ["runs", "resume-branch", resumePlan.run.id, "--dry-run"]);
+  assert.equal(resumePreview.resumable.runId, resumePlan.run.id);
+  assert.equal(resumePreview.resumable.branchName, resumePlan.plan.branchName);
+  assert.equal(resumePreview.resumable.resultCommit, null);
+  assert.equal(resumePreview.resumable.currentStatus, "stopped");
+  assert.equal(resumePreview.dryRun, true);
+  const resumedRun = await cliJson<{
+    resumed: { runId: string; branchName: string; status: string; workerId: string | null };
+    run: { id: string; status: string; worker_id: string | null };
+  }>(baseUrl, [
+    "runs",
+    "resume-branch",
+    resumePlan.run.id,
+    "--worker-id",
+    "smoke-resumer",
+  ]);
+  assert.equal(resumedRun.resumed.runId, resumePlan.run.id);
+  assert.equal(resumedRun.resumed.branchName, resumePlan.plan.branchName);
+  assert.equal(resumedRun.resumed.status, "planned");
+  assert.equal(resumedRun.resumed.workerId, null);
+  assert.equal(resumedRun.run.id, resumePlan.run.id);
+  assert.equal(resumedRun.run.status, "planned");
+  assert.equal(resumedRun.run.worker_id, null);
+  const resumedMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    resumePlan.run.id,
+  ]);
+  assert.ok(resumedMessages.messages.some((message) => (
+    message.type === "agent_run_requeued" && message.text === "Requeued run by smoke-resumer"
+  )));
   const requeueBlockedPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",

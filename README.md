@@ -192,6 +192,7 @@ npm run cli -- runs checkout <run> --dir ./checkouts/<run>
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
 npm run cli -- runs claim <run> --worker-id worker-a
 npm run cli -- runs requeue <run> --worker-id worker-a
+npm run cli -- runs resume-branch <stopped-run> --worker-id worker-a
 npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --dry-run
 npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --worker-id worker-a
 npm run cli -- runs watch <run>
@@ -352,6 +353,8 @@ pick up. `runs branches` lists completed and stopped branch runs across agents,
 including base refs, branch names, result commits, and resumable stopped runs;
 pass `--session <name>` to inspect the branch state for a detached worker group,
 or add `--resumable` to show only stopped branches without a result commit.
+Use `runs resume-branch <run>` to requeue one of those stopped branch runs back to
+`planned` without touching the rest of the session.
 `runs workers` groups running runs by the `worker_id` that claimed them.
 `runs stop-matching --status planned` cancels queued runs for one or more
 agents; include `running` in the status list to stop active run sandboxes too.
