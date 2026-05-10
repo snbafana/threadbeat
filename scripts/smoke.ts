@@ -628,6 +628,64 @@ try {
       && run.workerId === null
       && run.status === "planned"
   )));
+  const stoppedOwnerAgent = await cliJson<{ agent: { id: string } }>(baseUrl, [
+    "agents",
+    "create",
+    "--name",
+    "stopped-owner-agent",
+    "--repo",
+    "https://github.com/example/agent.git",
+  ]);
+  const stoppedOwnerPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    stoppedOwnerAgent.agent.id,
+    "--objective",
+    "owned stopped branch",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    stoppedOwnerPlan.run.id,
+    "--worker-id",
+    "smoke-stopped-owner",
+  ]);
+  await cliJson(baseUrl, ["runs", "sandbox", stoppedOwnerPlan.run.id]);
+  await cliJson(baseUrl, ["runs", "stop", stoppedOwnerPlan.run.id]);
+  const skippedStoppedOwner = await cliJson<{ processed: Array<{ runId?: string }>; idlePasses: number }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    stoppedOwnerAgent.agent.id,
+    "--resume-stopped",
+    "--worker-id",
+    "smoke-other-stopped-worker",
+    "--limit",
+    "1",
+    "--idle-exit-after",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.deepEqual(skippedStoppedOwner.processed, []);
+  assert.equal(skippedStoppedOwner.idlePasses, 1);
+  const resumedStoppedOwner = await cliJson<{ processed: Array<{ runId?: string; action?: string }> }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    stoppedOwnerAgent.agent.id,
+    "--resume-stopped",
+    "--worker-id",
+    "smoke-stopped-owner",
+    "--limit",
+    "1",
+    "--no-bootstrap",
+  ]);
+  assert.ok(resumedStoppedOwner.processed.some((run) => (
+    run.runId === stoppedOwnerPlan.run.id && run.action === "restarted"
+  )));
+  await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", stoppedOwnerPlan.run.id]);
 
   const recoverAgentResponse = await app.inject({
     method: "POST",

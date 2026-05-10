@@ -1280,15 +1280,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const workRuns = [];
       for (const agentId of agentIds) {
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-          runs: Array<{ id: string; agent_id: string; status: string }>;
+          runs: Array<{ id: string; agent_id: string; status: string; worker_id: string | null; result_commit: string | null }>;
         };
-        if (options["resume-stopped"] === "1") {
-          workRuns.push(...listed.runs.filter((run) => run.status === "stopped"));
+        if (options["resume-stopped"] === "1" && !(options.recover === "1" && options["include-stopped"] === "1")) {
+          workRuns.push(...listed.runs.filter((run) => (
+            run.status === "stopped"
+            && run.result_commit === null
+            && (run.worker_id === null || run.worker_id === workerPayload?.workerId)
+          )));
         }
         workRuns.push(...listed.runs.filter((run) => run.status === "planned"));
       }
       if (options.recover === "1") {
-        const recoveredRuns = await recoverStaleRuns(agentIds, workerPayload, concurrency);
+        const recoveredRuns = await recoverStaleRuns(
+          agentIds,
+          workerPayload,
+          concurrency,
+          undefined,
+          options["include-stopped"] === "1",
+          false,
+          options["include-stopped"] === "1",
+        );
         recovered.push(...recoveredRuns.map(({ run: _run, ...item }) => item));
         workRuns.push(...recoveredRuns.flatMap((item) => item.run ? [item.run] : []));
       }

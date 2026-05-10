@@ -328,10 +328,12 @@ worker sessions. Add `--recover` to
 requeue unfinished running runs that no longer have a running sandbox before
 the worker claims new work. Add `--resume-stopped` to include stopped unfinished
 runs in the worker queue; those branches are bootstrapped by default unless
-`--no-bootstrap` is also passed. Add `--worker-id` so claim and requeue lifecycle
-messages show which CLI worker touched a run; claimed runs also expose
-`worker_id` in run status/list/monitor responses. Add `--workers <n>` to start
-multiple foreground worker subprocesses with `--worker-prefix` IDs. Add
+`--no-bootstrap` is also passed. A worker only resumes stopped branches that are
+unassigned or already claimed by that worker id; use `--recover --include-stopped`
+when an operator needs to reclaim stopped branches first. Add `--worker-id` so
+claim and requeue lifecycle messages show which CLI worker touched a run;
+claimed runs also expose `worker_id` in run status/list/monitor responses. Add
+`--workers <n>` to start multiple foreground worker subprocesses with `--worker-prefix` IDs. Add
 `--detach --session <name>` to leave that worker group running after the parent
 CLI exits; Threadbeat records worker PIDs and stdout/stderr log paths under
 `.threadbeat/worker-sessions/`. Use `runs sessions` to inspect local worker
