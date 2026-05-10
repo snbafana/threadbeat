@@ -911,6 +911,45 @@ try {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", worked.runId]);
   }
 
+  const queuePeerResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-queue-peer-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(queuePeerResponse.statusCode, 200);
+  const queuePeerBody = JSON.parse(queuePeerResponse.body) as { agent: { id: string } };
+  const roundRobinObjectivesFile = path.join(tempRoot, "round-robin-objectives.txt");
+  await fs.writeFile(roundRobinObjectivesFile, "round robin a\nround robin b\nround robin c\n");
+  const roundRobinQueued = await cliJson<{
+    assignment: string;
+    queued: Array<{ agentId: string; objective: string; run: { status: string } }>;
+  }>(baseUrl, [
+    "runs",
+    "queue",
+    "--agents",
+    `${queueAgentBody.agent.id},${queuePeerBody.agent.id}`,
+    "--objectives-file",
+    roundRobinObjectivesFile,
+    "--assignment",
+    "round-robin",
+  ]);
+  assert.equal(roundRobinQueued.assignment, "round-robin");
+  assert.deepEqual(roundRobinQueued.queued.map((item) => item.objective), [
+    "round robin a",
+    "round robin b",
+    "round robin c",
+  ]);
+  assert.deepEqual(roundRobinQueued.queued.map((item) => item.agentId), [
+    queueAgentBody.agent.id,
+    queuePeerBody.agent.id,
+    queueAgentBody.agent.id,
+  ]);
+  assert.ok(roundRobinQueued.queued.every((item) => item.run.status === "planned"));
+
   const drainAgentResponse = await app.inject({
     method: "POST",
     url: "/api/agents",
@@ -1417,20 +1456,34 @@ try {
   });
   assert.equal(dispatchAgentResponse.statusCode, 200);
   const dispatchAgentBody = JSON.parse(dispatchAgentResponse.body) as { agent: { id: string } };
+  const dispatchPeerResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-dispatch-peer-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(dispatchPeerResponse.statusCode, 200);
+  const dispatchPeerBody = JSON.parse(dispatchPeerResponse.body) as { agent: { id: string } };
   const dispatchObjectivesFile = path.join(tempRoot, "dispatch-objectives.txt");
   await fs.writeFile(dispatchObjectivesFile, "dispatch objective a\ndispatch objective b\n");
   const dispatchSessionName = `dispatch-${dispatchAgentBody.agent.id}`;
   const dispatched = await cliJson<{
+    assignment: string;
     queued: Array<{ agentId: string; objective: string; run: { id: string; status: string } }>;
     session: { session: string; workers: Array<{ workerId: string; pid: number | null }> };
     backlog: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
   }>(baseUrl, [
     "runs",
     "dispatch",
-    "--agent",
-    dispatchAgentBody.agent.id,
+    "--agents",
+    `${dispatchAgentBody.agent.id},${dispatchPeerBody.agent.id}`,
     "--objectives-file",
     dispatchObjectivesFile,
+    "--assignment",
+    "round-robin",
     "--session",
     dispatchSessionName,
     "--workers",
@@ -1445,13 +1498,20 @@ try {
     "--limit",
     "1",
   ]);
+  assert.equal(dispatched.assignment, "round-robin");
   assert.deepEqual(dispatched.queued.map((item) => item.objective), ["dispatch objective a", "dispatch objective b"]);
-  assert.ok(dispatched.queued.every((item) => item.agentId === dispatchAgentBody.agent.id));
+  assert.deepEqual(dispatched.queued.map((item) => item.agentId), [
+    dispatchAgentBody.agent.id,
+    dispatchPeerBody.agent.id,
+  ]);
   assert.equal(dispatched.session.session, dispatchSessionName);
   assert.equal(dispatched.session.workers[0].workerId, "smoke-dispatcher-1");
   assert.equal(typeof dispatched.session.workers[0].pid, "number");
   assert.ok(dispatched.backlog.some((agent) => (
-    agent.agentId === dispatchAgentBody.agent.id && agent.total >= dispatched.queued.length
+    agent.agentId === dispatchAgentBody.agent.id && agent.total >= 1
+  )));
+  assert.ok(dispatched.backlog.some((agent) => (
+    agent.agentId === dispatchPeerBody.agent.id && agent.total >= 1
   )));
   await cliJson(baseUrl, ["runs", "stop-session", dispatchSessionName]);
   for (let attempt = 0; attempt < 20; attempt += 1) {

@@ -676,7 +676,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const queueConcurrency = parsePositiveInteger(options["queue-concurrency"] ?? options.concurrency ?? "4", "--queue-concurrency");
     const workerCount = parsePositiveInteger(options.workers ?? "1", "--workers");
     const workerPrefix = options["worker-prefix"] ?? "worker";
-    const queueItems = agentIds.flatMap((agentId) => objectives.map((objective) => ({ agentId, objective })));
+    const assignment = options.assignment ?? "fanout";
+    const queueItems = assignObjectives(agentIds, objectives, assignment);
     const queued = await mapConcurrent(queueItems, queueConcurrency, async (item) => {
       const planned = await requestJson("POST", `/api/agents/${encodeURIComponent(item.agentId)}/runs`, {
         objective: item.objective,
@@ -700,6 +701,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       workerArgs,
     );
     await printJson({
+      assignment,
       queued,
       session,
       backlog: await agentBacklog(agentIds),
@@ -1098,7 +1100,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
     const objectives = await readObjectivesFile(required(options["objectives-file"], "--objectives-file"));
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
-    const queueItems = agentIds.flatMap((agentId) => objectives.map((objective) => ({ agentId, objective })));
+    const assignment = options.assignment ?? "fanout";
+    const queueItems = assignObjectives(agentIds, objectives, assignment);
     const queued = await mapConcurrent(queueItems, concurrency, async (item) => {
       const planned = await requestJson("POST", `/api/agents/${encodeURIComponent(item.agentId)}/runs`, {
         objective: item.objective,
@@ -1107,7 +1110,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }) as { plan: unknown; run: unknown };
       return { agentId: item.agentId, objective: item.objective, ...planned };
     });
-    await printJson({ queued });
+    await printJson({ assignment, queued });
     return;
   }
   if (subcommandName === "step") {
@@ -2107,6 +2110,23 @@ function runPlanPayload(options: Record<string, string>): Record<string, string>
   };
 }
 
+function assignObjectives(
+  agentIds: string[],
+  objectives: string[],
+  assignment: string,
+): Array<{ agentId: string; objective: string }> {
+  if (assignment === "fanout") {
+    return agentIds.flatMap((agentId) => objectives.map((objective) => ({ agentId, objective })));
+  }
+  if (assignment === "round-robin") {
+    return objectives.map((objective, index) => ({
+      agentId: agentIds[index % agentIds.length],
+      objective,
+    }));
+  }
+  throw new Error("--assignment must be fanout or round-robin");
+}
+
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
 }
@@ -2161,9 +2181,9 @@ Commands:
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--resume-stopped] [--loop|--until-empty]
-  runs dispatch --agents <agent,agent> --objectives-file ./tasks.txt --session <name> [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover]
+  runs dispatch --agents <agent,agent> --objectives-file ./tasks.txt --session <name> [--assignment fanout|round-robin] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
-  runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
+  runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--assignment fanout|round-robin] [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
   runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--resume-stopped] [--worker-id worker-a] [--loop|--until-empty] [--limit 10] [--concurrency 2]
   runs work --agent <agent>|--agents <agent,agent> --workers 3 [--worker-prefix worker] [--until-empty] [--limit 10]

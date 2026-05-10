@@ -181,6 +181,7 @@ npm run cli -- agents list
 npm run cli -- agents repo <agent>
 npm run cli -- runs plan --agent <agent> --objective "one bounded task"
 npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt
+npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt --assignment round-robin
 npm run cli -- runs work --agent <agent> --until-empty --bootstrap --check-runtime --recover --worker-id worker-a
 npm run cli -- runs work --agents <agent>,<agent> --resume-stopped --boot --until-empty
 npm run cli -- runs work --agents <agent>,<agent> --workers 3 --worker-prefix worker --until-empty
@@ -216,6 +217,7 @@ npm run cli -- runs stop-session overnight --recover
 npm run cli -- runs restart-session overnight --recover
 npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover
 npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.txt --session overnight --workers 3 --boot --recover
+npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 3 --boot --recover
 npm run cli -- runs stop-matching --agents <agent>,<agent> --status planned
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
@@ -273,10 +275,13 @@ Run planning is intentionally server-side and Pi-free for now:
 - `runs queue --objectives-file <file>` creates planned runs from a newline
   separated task file for one or more agents. Blank lines and `#` comments are
   ignored; workers can then drain the backlog with `runs work --loop --recover`.
+  The default assignment is `fanout`, which gives every listed agent every
+  objective. Use `--assignment round-robin` to split the file across agents.
 - `runs dispatch --objectives-file <file> --session <name>` queues the file
   across agents and starts a detached worker session in one command, leaving
   branch state visible through `runs monitor`, `runs branches`, and
-  `runs checkout`.
+  `runs checkout`. It uses the same `--assignment fanout|round-robin` behavior
+  as `runs queue`.
 - `POST /api/runs/:id/requeue` moves an unfinished run with no running sandbox
   back to `planned`, which lets an operator recover a worker that claimed a run
   and exited before starting the sandbox.
