@@ -153,7 +153,7 @@ npm run cli -- agents list
 npm run cli -- agents repo <agent>
 npm run cli -- runs plan --agent <agent> --objective "one bounded task"
 npm run cli -- runs queue --agents <agent>,<agent> --objectives-file ./tasks.txt
-npm run cli -- runs work --agent <agent> --bootstrap --check-runtime --recover --worker-id worker-a
+npm run cli -- runs work --agent <agent> --until-empty --bootstrap --check-runtime --recover --worker-id worker-a
 npm run cli -- runs list --agent <agent>
 npm run cli -- runs status <run>
 npm run cli -- runs claim <run> --worker-id worker-a
@@ -223,11 +223,12 @@ Run planning is intentionally server-side and Pi-free for now:
 The `runs launch`, `runs work`, and `runs step` CLI commands are client-side
 orchestration over the existing run APIs. `runs launch` creates and starts
 multiple runs immediately. `runs work` drains already planned runs for one or
-more agents, with optional `--loop` polling for longer CLI worker sessions. Add
-`--recover` to requeue unfinished running runs that no longer have a running
-sandbox before the worker claims new work. Add `--worker-id` so claim and
-requeue lifecycle messages show which CLI worker touched a run; claimed runs
-also expose `worker_id` in run status/list/monitor responses.
+more agents. Use `--until-empty` to keep claiming batches until the queue is
+idle, or `--loop` to poll for longer CLI worker sessions. Add `--recover` to
+requeue unfinished running runs that no longer have a running sandbox before
+the worker claims new work. Add `--worker-id` so claim and requeue lifecycle
+messages show which CLI worker touched a run; claimed runs also expose
+`worker_id` in run status/list/monitor responses.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops. `runs backlog` reports run counts by status for one or more agents.
 `runs stop-matching --status planned` cancels queued runs for one or more

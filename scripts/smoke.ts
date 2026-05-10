@@ -692,6 +692,53 @@ try {
     await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", worked.runId]);
   }
 
+  const drainAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "smoke-drain-agent",
+      repoUrl: "https://github.com/example/agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(drainAgentResponse.statusCode, 200);
+  const drainAgentBody = JSON.parse(drainAgentResponse.body) as { agent: { id: string } };
+  const drainObjectivesFile = path.join(tempRoot, "drain-objectives.txt");
+  await fs.writeFile(drainObjectivesFile, "drain objective a\ndrain objective b\ndrain objective c\n");
+  const drainQueue = await cliJson<{ queued: Array<{ run: { id: string } }> }>(baseUrl, [
+    "runs",
+    "queue",
+    "--agent",
+    drainAgentBody.agent.id,
+    "--objectives-file",
+    drainObjectivesFile,
+  ]);
+  const drainedWorker = await cliJson<{
+    processed: Array<{ runId: string; status: { run: { worker_id: string | null } } }>;
+    idlePasses: number;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    drainAgentBody.agent.id,
+    "--until-empty",
+    "--limit",
+    "2",
+    "--worker-id",
+    "smoke-drain-worker",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.deepEqual(
+    drainedWorker.processed.map((item) => item.runId).sort(),
+    drainQueue.queued.map((item) => item.run.id).sort(),
+  );
+  assert.equal(drainedWorker.idlePasses, 1);
+  assert.ok(drainedWorker.processed.every((item) => item.status.run.worker_id === "smoke-drain-worker"));
+  for (const worked of drainedWorker.processed) {
+    await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", worked.runId]);
+  }
+
   const cliRunSandbox = await cliJson<{ sandbox: { id: string; run_id: string | null } }>(baseUrl, [
     "runs",
     "sandbox",

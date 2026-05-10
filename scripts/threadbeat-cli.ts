@@ -438,6 +438,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "5000", "--interval-ms");
     const idleExitAfter = parsePositiveInteger(options["idle-exit-after"] ?? "1", "--idle-exit-after");
     const workerPayload = options["worker-id"] ? { workerId: options["worker-id"] } : undefined;
+    const untilEmpty = options["until-empty"] === "1";
     const processed: unknown[] = [];
     const recovered: unknown[] = [];
     let idlePasses = 0;
@@ -468,10 +469,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         }
         plannedRuns.push(...listed.runs.filter((run) => run.status === "planned"));
       }
-      const work = plannedRuns.slice(0, limit - processed.length);
+      const batchLimit = untilEmpty ? limit : limit - processed.length;
+      const work = plannedRuns.slice(0, batchLimit);
       if (work.length === 0) {
         idlePasses += 1;
-        if (options.loop !== "1" || idlePasses >= idleExitAfter) break;
+        if ((!untilEmpty && options.loop !== "1") || idlePasses >= idleExitAfter) break;
         await sleep(intervalMs);
         continue;
       }
@@ -519,7 +521,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         };
       });
       processed.push(...results);
-    } while (options.loop === "1" && processed.length < limit);
+    } while ((untilEmpty || options.loop === "1") && (untilEmpty || processed.length < limit));
 
     await printJson({ processed, recovered, idlePasses });
     return;
@@ -642,7 +644,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "recover") {
+    if (key === "bootstrap" || key === "boot" || key === "check-runtime" || key === "finalize" || key === "live" || key === "dry-run" || key === "loop" || key === "recover" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -816,7 +818,7 @@ Commands:
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]
-  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--worker-id worker-a] [--loop] [--limit 10] [--concurrency 2]
+  runs work --agent <agent>|--agents <agent,agent> [--bootstrap] [--check-runtime] [--boot] [--finalize] [--recover] [--worker-id worker-a] [--loop|--until-empty] [--limit 10] [--concurrency 2]
   runs step --agent <agent> --objective <objective> [--bootstrap] [--finalize] [--message "Finalize run"] -- <command>
   runs step --run <run> [--bootstrap] [--finalize] [--cwd /workspace/agent] -- <command>
   runs sandbox <run> [--bootstrap]
