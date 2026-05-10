@@ -507,6 +507,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
     const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
+    const checkoutCommandRootDir = options["checkout-dir"]
+      ?? (options.session ? `./checkouts/${options.session}-results` : "./checkouts/results");
     const checkoutConcurrency = options["checkout-concurrency"]
       ? parsePositiveInteger(options["checkout-concurrency"], "--checkout-concurrency")
       : 2;
@@ -559,6 +561,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               branchName: run.run_branch,
               resultCommit: run.result_commit,
               workerId: run.worker_id,
+              commands: {
+                checkoutBranch: [
+                  "npm",
+                  "run",
+                  "cli",
+                  "--",
+                  "runs",
+                  "checkout",
+                  run.id,
+                  "--dir",
+                  `${checkoutCommandRootDir}/${run.id}`,
+                ],
+              },
               ...(sessionWorkerIds ? {
                 location: run.worker_id === null
                   ? "unassigned"
