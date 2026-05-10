@@ -281,6 +281,34 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ agents });
     return;
   }
+  if (subcommandName === "workers") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const statusFilter = new Set(parseList(options.status ?? "running"));
+    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+        runs: Array<{ id: string; status: string; worker_id: string | null }>;
+      };
+      const workerRuns: Record<string, Array<{ id: string; status: string }>> = {};
+      const unassigned: Array<{ id: string; status: string }> = [];
+      for (const run of listed.runs.filter((item) => statusFilter.has(item.status))) {
+        const item = { id: run.id, status: run.status };
+        if (!run.worker_id) {
+          unassigned.push(item);
+          continue;
+        }
+        workerRuns[run.worker_id] ??= [];
+        workerRuns[run.worker_id].push(item);
+      }
+      return {
+        agentId,
+        workers: Object.entries(workerRuns).map(([workerId, runs]) => ({ workerId, runs })),
+        unassigned,
+      };
+    });
+    await printJson({ agents });
+    return;
+  }
   if (subcommandName === "stop-matching") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
@@ -813,6 +841,7 @@ Commands:
   runs requeue <run> [--worker-id worker-a]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
+  runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]

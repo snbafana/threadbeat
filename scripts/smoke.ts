@@ -637,6 +637,26 @@ try {
     assert.equal(worked.runtime.result.exitCode, 0);
     assert.equal(worked.status.run.status, "running");
     assert.equal(worked.status.run.worker_id, "smoke-batch-worker");
+  }
+  const cliWorkers = await cliJson<{
+    agents: Array<{ workers: Array<{ workerId: string; runs: Array<{ id: string; status: string }> }> }>;
+  }>(baseUrl, [
+    "runs",
+    "workers",
+    "--agents",
+    `${workerAgentBody.agent.id},${launchAgentBody.agent.id}`,
+  ]);
+  const smokeWorkerRuns = cliWorkers.agents.flatMap((agent) => (
+    agent.workers
+      .filter((worker) => worker.workerId === "smoke-batch-worker")
+      .flatMap((worker) => worker.runs)
+  ));
+  assert.deepEqual(
+    smokeWorkerRuns.map((run) => run.id).sort(),
+    [workerRunA.run.id, workerRunB.run.id].sort(),
+  );
+  assert.ok(smokeWorkerRuns.every((run) => run.status === "running"));
+  for (const worked of cliWorker.processed) {
     await cliJson(baseUrl, [
       "sandboxes",
       "stop-running",
