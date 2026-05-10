@@ -1376,6 +1376,44 @@ try {
     commit.sha === expectedCheckoutHead && commit.subject === "Write branch report"
   )));
   assert.equal(await fs.readFile(path.join(checkoutDir, "report.md"), "utf8"), "branch report\n");
+  await cliJson(baseUrl, ["runs", "stop", checkoutPlan.run.id]);
+  const checkoutSessionName = `checkout-session-${process.pid}`;
+  await fs.mkdir(path.join(".threadbeat", "worker-sessions"), { recursive: true });
+  await fs.writeFile(path.join(".threadbeat", "worker-sessions", `${checkoutSessionName}.json`), `${JSON.stringify({
+    session: checkoutSessionName,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: ["runs", "work", "--agent", checkoutAgent.agent.id],
+    workers: [],
+  })}\n`);
+  const sessionCheckoutDir = path.join(tempRoot, "session-checkouts");
+  const checkedOutSession = await cliJson<{
+    session: string;
+    dir: string;
+    total: number;
+    checkouts: Array<{
+      run: { id: string; status: string; branchName: string; resultCommit: string | null };
+      checkout: { dir: string; headCommit: string; matchesResultCommit: boolean | null };
+      review: { changedFiles: Array<{ status: string; path: string }> };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "checkout-session",
+    checkoutSessionName,
+    "--dir",
+    sessionCheckoutDir,
+  ]);
+  assert.equal(checkedOutSession.session, checkoutSessionName);
+  assert.equal(checkedOutSession.dir, sessionCheckoutDir);
+  assert.equal(checkedOutSession.total, 1);
+  assert.equal(checkedOutSession.checkouts[0].run.id, checkoutPlan.run.id);
+  assert.equal(checkedOutSession.checkouts[0].run.status, "stopped");
+  assert.equal(checkedOutSession.checkouts[0].run.branchName, checkoutPlan.plan.branchName);
+  assert.equal(checkedOutSession.checkouts[0].checkout.dir, path.join(sessionCheckoutDir, checkoutPlan.run.id));
+  assert.equal(checkedOutSession.checkouts[0].checkout.headCommit, expectedCheckoutHead);
+  assert.equal(checkedOutSession.checkouts[0].checkout.matchesResultCommit, null);
+  assert.deepEqual(checkedOutSession.checkouts[0].review.changedFiles, [{ status: "A", path: "report.md" }]);
+  assert.equal(await fs.readFile(path.join(sessionCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
 
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",

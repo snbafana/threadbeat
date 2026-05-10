@@ -298,91 +298,31 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (!id) throw new Error("runs checkout requires a run id");
     const options = parseOptions(optionArgs);
     const targetDir = path.resolve(required(options.dir, "--dir"));
-    const status = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=1`) as {
-      run: {
-        id: string;
-        agent_id: string;
-        input_ref: string;
-        run_branch: string;
-        result_commit: string | null;
-        status: string;
+    await printJson(await checkoutRunBranch(id, targetDir));
+    return;
+  }
+  if (subcommandName === "checkout-session") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const session = await readWorkerSession(required(sessionName, "runs checkout-session <session>"));
+    const rootDir = path.resolve(required(options.dir, "--dir"));
+    const statusFilter = new Set(parseList(options.status ?? "completed,stopped"));
+    const concurrency = options.concurrency ? parsePositiveInteger(options.concurrency, "--concurrency") : 2;
+    const agentIds = workerSessionAgentIds(session);
+    const runs = (await mapConcurrent(agentIds, 4, async (agentId) => {
+      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+        runs: Array<{ id: string; status: string }>;
       };
-    };
-    const repository = await requestJson("GET", `/api/agents/${encodeURIComponent(status.run.agent_id)}/repository`) as {
-      repository: { repoUrl: string; repoWebUrl: string | null };
-    };
-    const existed = await pathExists(targetDir);
-    if (existed && !(await pathExists(path.join(targetDir, ".git")))) {
-      throw new Error("--dir exists but is not a git checkout");
-    }
-    if (!existed) {
-      await fs.mkdir(path.dirname(targetDir), { recursive: true });
-      await git(["clone", "--no-checkout", "--", repository.repository.repoUrl, targetDir]);
-    }
-    await git(["fetch", "origin", `${status.run.run_branch}:refs/remotes/origin/${status.run.run_branch}`], targetDir);
-    await git(["checkout", "-B", status.run.run_branch, `refs/remotes/origin/${status.run.run_branch}`], targetDir);
-    const headCommit = (await git(["rev-parse", "HEAD"], targetDir)).trim();
-    const reviewBaseRef = `refs/threadbeat/bases/${status.run.id}`;
-    let review: {
-      baseRef: string;
-      baseCommit: string | null;
-      headCommit: string;
-      changedFiles: Array<{ status: string; path: string }>;
-      commits: Array<{ sha: string; subject: string }>;
-      error?: string;
-    };
-    try {
-      await git(["fetch", "origin", `+${status.run.input_ref}:${reviewBaseRef}`], targetDir);
-      const baseCommit = (await git(["rev-parse", reviewBaseRef], targetDir)).trim();
-      const changedOutput = (await git(["diff", "--name-status", `${reviewBaseRef}...HEAD`], targetDir)).trim();
-      const commitOutput = (await git(["log", "--format=%H%x09%s", `${reviewBaseRef}..HEAD`], targetDir)).trim();
-      review = {
-        baseRef: status.run.input_ref,
-        baseCommit,
-        headCommit,
-        changedFiles: changedOutput
-          ? changedOutput.split("\n").map((line) => {
-            const [fileStatus, ...filePath] = line.split("\t");
-            return { status: fileStatus, path: filePath.join("\t") };
-          })
-          : [],
-        commits: commitOutput
-          ? commitOutput.split("\n").map((line) => {
-            const [sha, ...subject] = line.split("\t");
-            return { sha, subject: subject.join("\t") };
-          })
-          : [],
-      };
-    } catch (error) {
-      review = {
-        baseRef: status.run.input_ref,
-        baseCommit: null,
-        headCommit,
-        changedFiles: [],
-        commits: [],
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+      return listed.runs.filter((run) => statusFilter.has(run.status));
+    })).flat();
+    const checkouts = await mapConcurrent(runs, concurrency, async (run) => (
+      await checkoutRunBranch(run.id, path.join(rootDir, run.id))
+    ));
     await printJson({
-      run: {
-        id: status.run.id,
-        agentId: status.run.agent_id,
-        status: status.run.status,
-        baseRef: status.run.input_ref,
-        branchName: status.run.run_branch,
-        resultCommit: status.run.result_commit,
-      },
-      checkout: {
-        dir: targetDir,
-        created: !existed,
-        branchName: status.run.run_branch,
-        headCommit,
-        matchesResultCommit: status.run.result_commit ? headCommit === status.run.result_commit : null,
-      },
-      review,
-      repository: {
-        repoWebUrl: repository.repository.repoWebUrl,
-      },
+      session: session.session,
+      dir: rootDir,
+      total: checkouts.length,
+      checkouts,
     });
     return;
   }
@@ -1300,6 +1240,95 @@ async function git(args: string[], cwd = process.cwd()): Promise<string> {
   });
 }
 
+async function checkoutRunBranch(id: string, targetDir: string) {
+  const status = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=1`) as {
+    run: {
+      id: string;
+      agent_id: string;
+      input_ref: string;
+      run_branch: string;
+      result_commit: string | null;
+      status: string;
+    };
+  };
+  const repository = await requestJson("GET", `/api/agents/${encodeURIComponent(status.run.agent_id)}/repository`) as {
+    repository: { repoUrl: string; repoWebUrl: string | null };
+  };
+  const existed = await pathExists(targetDir);
+  if (existed && !(await pathExists(path.join(targetDir, ".git")))) {
+    throw new Error(`${targetDir} exists but is not a git checkout`);
+  }
+  if (!existed) {
+    await fs.mkdir(path.dirname(targetDir), { recursive: true });
+    await git(["clone", "--no-checkout", "--", repository.repository.repoUrl, targetDir]);
+  }
+  await git(["fetch", "origin", `${status.run.run_branch}:refs/remotes/origin/${status.run.run_branch}`], targetDir);
+  await git(["checkout", "-B", status.run.run_branch, `refs/remotes/origin/${status.run.run_branch}`], targetDir);
+  const headCommit = (await git(["rev-parse", "HEAD"], targetDir)).trim();
+  const reviewBaseRef = `refs/threadbeat/bases/${status.run.id}`;
+  let review: {
+    baseRef: string;
+    baseCommit: string | null;
+    headCommit: string;
+    changedFiles: Array<{ status: string; path: string }>;
+    commits: Array<{ sha: string; subject: string }>;
+    error?: string;
+  };
+  try {
+    await git(["fetch", "origin", `+${status.run.input_ref}:${reviewBaseRef}`], targetDir);
+    const baseCommit = (await git(["rev-parse", reviewBaseRef], targetDir)).trim();
+    const changedOutput = (await git(["diff", "--name-status", `${reviewBaseRef}...HEAD`], targetDir)).trim();
+    const commitOutput = (await git(["log", "--format=%H%x09%s", `${reviewBaseRef}..HEAD`], targetDir)).trim();
+    review = {
+      baseRef: status.run.input_ref,
+      baseCommit,
+      headCommit,
+      changedFiles: changedOutput
+        ? changedOutput.split("\n").map((line) => {
+          const [fileStatus, ...filePath] = line.split("\t");
+          return { status: fileStatus, path: filePath.join("\t") };
+        })
+        : [],
+      commits: commitOutput
+        ? commitOutput.split("\n").map((line) => {
+          const [sha, ...subject] = line.split("\t");
+          return { sha, subject: subject.join("\t") };
+        })
+        : [],
+    };
+  } catch (error) {
+    review = {
+      baseRef: status.run.input_ref,
+      baseCommit: null,
+      headCommit,
+      changedFiles: [],
+      commits: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  return {
+    run: {
+      id: status.run.id,
+      agentId: status.run.agent_id,
+      status: status.run.status,
+      baseRef: status.run.input_ref,
+      branchName: status.run.run_branch,
+      resultCommit: status.run.result_commit,
+    },
+    checkout: {
+      dir: targetDir,
+      created: !existed,
+      branchName: status.run.run_branch,
+      headCommit,
+      matchesResultCommit: status.run.result_commit ? headCommit === status.run.result_commit : null,
+    },
+    review,
+    repository: {
+      repoWebUrl: repository.repository.repoWebUrl,
+    },
+  };
+}
+
 async function agentBacklog(agentIds: string[]): Promise<Array<{ agentId: string; total: number; statuses: Record<string, number>; resumableStopped: number }>> {
   return await mapConcurrent(agentIds, 4, async (agentId) => {
     const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
@@ -1699,6 +1728,7 @@ Commands:
   runs status <run> [--limit 20]
   runs inspect <run> [--limit 10]
   runs checkout <run> --dir ./checkouts/run
+  runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--concurrency 2]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
   runs recover --agent <agent>|--agents <agent,agent> [--worker-id worker-a] [--concurrency 4]
