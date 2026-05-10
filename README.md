@@ -267,10 +267,12 @@ Run planning is intentionally server-side and Pi-free for now:
   stopped branch run from a detached worker session under `<path>/<run-id>`.
 - `runs results --session <name>` reports completed and stopped branch runs for
   a worker session with GitHub branch/result links and warnings for completed
-  runs that do not have a recorded result commit. Add `--checkout-dir <path>` to
-  clone or refresh each listed run branch under `<path>/<run-id>` and include
-  changed files/commits in the result payload. Add `--max-polls` and
-  `--interval-ms` to keep emitting result snapshots while a long session runs.
+  runs that do not have a recorded result commit. Session results include
+  whether each visible run is still unassigned, claimed by a session worker, or
+  claimed by another worker. Add `--checkout-dir <path>` to clone or refresh
+  each listed run branch under `<path>/<run-id>` and include changed
+  files/commits in the result payload. Add `--max-polls` and `--interval-ms` to
+  keep emitting result snapshots while a long session runs.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.

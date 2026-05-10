@@ -1573,6 +1573,26 @@ try {
   assert.ok(dispatched.backlog.some((agent) => (
     agent.agentId === dispatchPeerBody.agent.id && agent.total >= 1
   )));
+  const dispatchResults = await cliJson<{
+    session: string;
+    agents: Array<{
+      agentId: string;
+      runs: Array<{ id: string; location?: string; workerId: string | null }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "results",
+    "--session",
+    dispatchSessionName,
+    "--status",
+    "planned,running,completed,stopped",
+  ]);
+  assert.equal(dispatchResults.session, dispatchSessionName);
+  for (const queued of dispatched.queued) {
+    const visibleRun = dispatchResults.agents.flatMap((agent) => agent.runs).find((run) => run.id === queued.run.id);
+    assert.ok(visibleRun);
+    assert.ok(visibleRun.location === "unassigned" || visibleRun.location === "session_worker");
+  }
   await cliJson(baseUrl, ["runs", "stop-session", dispatchSessionName]);
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const status = await cliJson<{ session: { workers: Array<{ alive: boolean }> } }>(baseUrl, [
