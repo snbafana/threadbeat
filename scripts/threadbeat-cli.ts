@@ -265,6 +265,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await sleep(intervalMs);
     }
   }
+  if (subcommandName === "backlog") {
+    const options = parseOptions(args);
+    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+        runs: Array<{ status: string }>;
+      };
+      const statuses: Record<string, number> = {};
+      for (const run of listed.runs) {
+        statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+      }
+      return { agentId, total: listed.runs.length, statuses };
+    });
+    await printJson({ agents });
+    return;
+  }
   if (subcommandName === "monitor") {
     const options = parseOptions(args);
     const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
@@ -773,6 +789,7 @@ Commands:
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
+  runs backlog --agent <agent>|--agents <agent,agent>
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> --objectives-file ./tasks.txt [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]

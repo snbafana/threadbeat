@@ -159,6 +159,7 @@ npm run cli -- runs status <run>
 npm run cli -- runs claim <run> --worker-id worker-a
 npm run cli -- runs requeue <run> --worker-id worker-a
 npm run cli -- runs watch <run>
+npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
 npm run cli -- runs sandbox <run> [--bootstrap]
@@ -227,7 +228,8 @@ sandbox before the worker claims new work. Add `--worker-id` so claim and
 requeue lifecycle messages show which CLI worker touched a run; claimed runs
 also expose `worker_id` in run status/list/monitor responses.
 `runs watch` polls one run's status and messages until it completes, fails, or
-stops. `runs monitor` snapshots all runs for one or more agents, including
+stops. `runs backlog` reports run counts by status for one or more agents.
+`runs monitor` snapshots all runs for one or more agents, including
 sandbox states and recent message types/text. Use `--status planned,running` to
 focus the snapshot on queued or active work. `runs step` executes one explicit
 shell command and can optionally finalize the run branch.

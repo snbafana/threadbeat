@@ -577,6 +577,20 @@ try {
   );
   assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id && run.status === "planned")));
   assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id && run.messages.some((message) => message.type === "agent_run_planned"))));
+  const backlog = await cliJson<{
+    agents: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
+  }>(baseUrl, [
+    "runs",
+    "backlog",
+    "--agents",
+    `${workerAgentBody.agent.id},${launchAgentBody.agent.id}`,
+  ]);
+  assert.ok(backlog.agents.some((agent) => (
+    agent.agentId === workerAgentBody.agent.id && agent.total >= 1 && agent.statuses.planned >= 1
+  )));
+  assert.ok(backlog.agents.some((agent) => (
+    agent.agentId === launchAgentBody.agent.id && agent.total >= 1 && agent.statuses.planned >= 1
+  )));
   const cliPlannedMonitor = await cliRaw(baseUrl, [
     "runs",
     "monitor",
