@@ -432,7 +432,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   }
   if (subcommandName === "branches") {
     const options = parseOptions(args);
-    const agentIds = parseList(options.agents ?? required(options.agent, "--agent or --agents"));
+    if (options.session && (options.agent || options.agents)) {
+      throw new Error("runs branches accepts either --session or --agent/--agents");
+    }
+    const agentIds = options.session
+      ? workerSessionAgentIds(await readWorkerSession(options.session))
+      : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
     const statusFilter = new Set(parseList(options.status ?? "completed,stopped"));
     const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
       const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
@@ -1699,7 +1704,7 @@ Commands:
   runs recover --agent <agent>|--agents <agent,agent> [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
-  runs branches --agent <agent>|--agents <agent,agent> [--status completed,stopped]
+  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]

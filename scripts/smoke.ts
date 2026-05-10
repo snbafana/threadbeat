@@ -955,6 +955,23 @@ try {
     && agent.total >= workerGroupQueue.queued.length
     && agent.resumableStopped >= 1
   )));
+  const detachedWorkerBranches = await cliJson<{
+    agents: Array<{
+      agentId: string;
+      summary: { total: number; resultCommits: number; resumable: number };
+      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null }>;
+    }>;
+  }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName]);
+  assert.ok(detachedWorkerBranches.agents.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id
+    && agent.summary.resumable >= 1
+    && agent.runs.some((run) => (
+      run.id === detachedStoppedPlan.run.id
+      && run.status === "stopped"
+      && run.state === "resumable"
+      && run.resultCommit === null
+    ))
+  )));
   const watchedWorkerStatus = await cliJson<{
     observedAt: string;
     session: {
