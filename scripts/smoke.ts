@@ -2553,6 +2553,17 @@ try {
   const checkedOutSessionReview = await cliJson<{
     checkoutDir: string;
     recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean }>;
+    changedResults: Array<{
+      agentId: string;
+      runId: string;
+      status: string;
+      branchName: string;
+      resultCommit: string | null;
+      checkoutDir: string;
+      changedFiles: Array<{ status: string; path: string }>;
+      commits: Array<{ sha: string; subject: string }>;
+      error: string | null;
+    }>;
     resultCheckouts: Array<{
       agentId: string;
       total: number;
@@ -2582,6 +2593,16 @@ try {
   assert.equal(checkedOutReviewRun?.checkout.dir, path.join(sessionReviewCheckoutDir, checkoutPlan.run.id));
   assert.equal(checkedOutReviewRun?.checkout.headCommit, expectedCheckoutHead);
   assert.deepEqual(checkedOutReviewRun?.review.changedFiles, [{ status: "A", path: "report.md" }]);
+  assert.ok(checkedOutSessionReview.changedResults.some((run) => (
+    run.agentId === checkoutAgent.agent.id
+    && run.runId === checkoutPlan.run.id
+    && run.status === "stopped"
+    && run.branchName === checkoutPlan.plan.branchName
+    && run.resultCommit === null
+    && run.checkoutDir === path.join(sessionReviewCheckoutDir, checkoutPlan.run.id)
+    && run.error === null
+    && run.changedFiles.some((file) => file.status === "A" && file.path === "report.md")
+  )));
   assert.equal(await fs.readFile(path.join(sessionReviewCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
 
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [

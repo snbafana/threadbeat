@@ -1059,6 +1059,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         return { agentId, total: checkouts.length, checkouts };
       })
       : null;
+    const changedResults = resultCheckouts
+      ? resultCheckouts.flatMap((agent) => agent.checkouts
+        .filter((checkout) => checkout.review.changedFiles.length > 0 || checkout.review.commits.length > 0 || checkout.review.error)
+        .map((checkout) => ({
+          agentId: agent.agentId,
+          runId: checkout.run.id,
+          status: checkout.run.status,
+          branchName: checkout.run.branchName,
+          resultCommit: checkout.run.resultCommit,
+          checkoutDir: checkout.checkout.dir,
+          changedFiles: checkout.review.changedFiles,
+          commits: checkout.review.commits,
+          error: checkout.review.error ?? null,
+        })))
+      : null;
     const deadWorkerCount = sessionWorkers.filter((worker) => !worker.alive).length;
     const canResumeSession = resumableBranches.some((run) => run.location !== "other_worker");
     const hasRecoverableActiveRun = recoveryPreview.some((item) => item.currentStatus !== "stopped");
@@ -1111,7 +1126,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       resumableBranches,
       resultBranches,
       recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),
-      ...(checkoutRootDir ? { checkoutDir: checkoutRootDir, resultCheckouts } : {}),
+      ...(checkoutRootDir ? { checkoutDir: checkoutRootDir, changedResults, resultCheckouts } : {}),
       logs: await Promise.all(sessionWorkers.map(async (worker) => ({
         workerId: worker.workerId,
         pid: worker.pid,
