@@ -305,8 +305,8 @@ npm run cli -- messages listen --sandbox <sandbox>
 
 `runs dispatch` queues the requested objectives, starts the detached worker
 session, and returns an `actions` block with the exact `session-status`,
-`session-watch`, `session-review`, branch queue, results, checkout, and
-stop/recover/restart/resume commands for that session. The dry-run form returns
+`session-watch`, `monitor --next`, `session-review`, branch queue, results,
+checkout, and stop/recover/restart/resume commands for that session. The dry-run form returns
 the same action commands and any recoverable branch preview without queuing
 runs, requeueing branches, or starting workers, so the local control-plane flow
 can be reviewed before launching a multi-agent batch.
@@ -452,7 +452,7 @@ session's workers when those runs do not have a running sandbox. Add
 `--include-stopped` to also requeue unfinished stopped branches in the same
 stop/recover step.
 Use `runs session-actions <name>` when returning to an existing session and you
-only need the exact status/wait/watch/summary/review/results/checkout/logs/stop
+only need the exact status/wait/watch/summary/monitor/review/results/checkout/logs/stop
 commands.
 Use `runs session-wait <name>` to attach a foreground wait to an already running
 or recently finished detached session; it returns the same final/timeout summary

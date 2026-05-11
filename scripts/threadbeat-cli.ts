@@ -1010,6 +1010,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
       sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next"],
       sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+      monitor: ["npm", "run", "cli", "--", "runs", "monitor", "--agents", agentIds.join(","), "--status", "planned,running,stopped", "--next", "--checkout-dir", `./checkouts/${sessionName}-monitor`],
       sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
@@ -1082,6 +1083,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           sessionWatch: superviseActions.sessionWatch,
           sessionSummary: superviseActions.sessionSummary,
           sessionSummaryWatch: superviseActions.sessionSummaryWatch,
+          monitor: superviseActions.monitor,
           sessionReview: superviseActions.sessionReview,
           branchQueue: superviseActions.branchQueue,
           results: superviseActions.results,
@@ -1136,6 +1138,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
       sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next"],
       sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+      monitor: ["npm", "run", "cli", "--", "runs", "monitor", "--agents", agentIds.join(","), "--status", "planned,running,stopped", "--next", "--checkout-dir", `./checkouts/${sessionName}-monitor`],
       sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
@@ -1255,6 +1258,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           sessionWatch: dispatchActions.sessionWatch,
           sessionSummary: dispatchActions.sessionSummary,
           sessionSummaryWatch: dispatchActions.sessionSummaryWatch,
+          monitor: dispatchActions.monitor,
           sessionReview: dispatchActions.sessionReview,
           branchQueue: dispatchActions.branchQueue,
           results: dispatchActions.results,
@@ -1513,10 +1517,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const waitIntervalMs = parsePositiveInteger(options["wait-interval-ms"] ?? options["interval-ms"] ?? "2000", "--wait-interval-ms");
     const maxPolls = parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls");
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped,completed,failed"));
+    const sessionAgentIds = workerSessionAgentIds(await readWorkerSession(requiredSessionName));
     const actions = {
       sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
       sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", requiredSessionName, "--next"],
       sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", requiredSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+      monitor: ["npm", "run", "cli", "--", "runs", "monitor", "--agents", sessionAgentIds.join(","), "--status", "planned,running,stopped", "--next", "--checkout-dir", `./checkouts/${requiredSessionName}-monitor`],
       sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", requiredSessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
@@ -1623,6 +1629,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-actions") {
     const sessionName = required(args[0], "runs session-actions <session>");
     const session = await readWorkerSession(sessionName);
+    const agentIds = workerSessionAgentIds(session);
     await printJson({
       session: {
         session: session.session,
@@ -1638,6 +1645,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
         sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next"],
         sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+        monitor: ["npm", "run", "cli", "--", "runs", "monitor", "--agents", agentIds.join(","), "--status", "planned,running,stopped", "--next", "--checkout-dir", `./checkouts/${sessionName}-monitor`],
         sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
         branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
         results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
@@ -2725,6 +2733,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const restartActions = {
         sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
         sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", session.session, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+        monitor: ["npm", "run", "cli", "--", "runs", "monitor", "--agents", workerSessionAgentIds(session).join(","), "--status", "planned,running,stopped", "--next", "--checkout-dir", `./checkouts/${session.session}-monitor`],
         sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
         branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", session.session, "--next"],
         results: ["npm", "run", "cli", "--", "runs", "results", "--session", session.session],
@@ -4116,7 +4125,7 @@ Commands:
   runs resume-session <name> [--worker-id worker-a] [--dry-run] [--concurrency 4]
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--wait] [--max-polls 60] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
-  runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--next] [--limit 3] [--interval-ms 2000] [--max-polls 1]
+  runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--next] [--checkout-dir ./checkouts/monitor] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty] [--wait] [--max-polls 60]
   runs dispatch --agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped] [--until-empty] [--wait] [--max-polls 60]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
