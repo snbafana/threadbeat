@@ -411,10 +411,11 @@ snapshots backlog, optionally recovers orphaned claims or stopped unfinished
 branches with `--recover --include-stopped`, and starts a named detached worker
 session for one or more agents. Add `--until-empty --wait` for a bounded
 foreground supervise call that waits for the worker session to exit and returns a
-final status summary plus branch review/result commands. `runs dispatch` uses the same recovery flags
-after queueing its objective file and before starting workers; add
-`--until-empty --wait` to wait for that bounded dispatch session and receive the
-same final status and branch review/result commands. `runs work` drains
+final status summary, `nextStep`, and branch review/result/watch/log/stop
+commands. `runs dispatch` uses the same recovery flags after queueing its
+objective file and before starting workers; add `--until-empty --wait` to wait
+for that bounded dispatch session and receive the same final status and
+branch-native next actions. `runs work` drains
 already planned runs for one or more agents. Use `--until-empty` to keep
 claiming batches until the queue is idle, or `--loop` to poll for longer CLI
 worker sessions. Add `--recover` to

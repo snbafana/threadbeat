@@ -1070,11 +1070,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         },
         status: finalStatus,
         commands: {
+          sessionWatch: superviseActions.sessionWatch,
           sessionReview: superviseActions.sessionReview,
           branchQueue: superviseActions.branchQueue,
           results: superviseActions.results,
           checkoutSession: superviseActions.checkoutSession,
+          sessionLogs: superviseActions.sessionLogs,
+          stopSession: superviseActions.stopSession,
         },
+        nextStep: aliveWorkers > 0
+          ? {
+            action: "continue_watch",
+            reason: "workers_still_alive",
+            command: superviseActions.sessionWatch,
+          }
+          : {
+            action: "review_session",
+            reason: "bounded_session_finished",
+            command: superviseActions.sessionReview,
+          },
       };
       response.after = await agentBacklog(agentIds);
     }
@@ -1216,11 +1230,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         },
         status: finalStatus,
         commands: {
+          sessionWatch: dispatchActions.sessionWatch,
           sessionReview: dispatchActions.sessionReview,
           branchQueue: dispatchActions.branchQueue,
           results: dispatchActions.results,
           checkoutSession: dispatchActions.checkoutSession,
+          sessionLogs: dispatchActions.sessionLogs,
+          stopSession: dispatchActions.stopSession,
         },
+        nextStep: aliveWorkers > 0
+          ? {
+            action: "continue_watch",
+            reason: "workers_still_alive",
+            command: dispatchActions.sessionWatch,
+          }
+          : {
+            action: "review_session",
+            reason: "bounded_session_finished",
+            command: dispatchActions.sessionReview,
+          },
       };
       response.backlog = await agentBacklog(agentIds);
     }

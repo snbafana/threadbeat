@@ -140,7 +140,8 @@ try {
       completed: boolean;
       timedOut: boolean;
       summary: { workers: { total: number; alive: number; dead: number }; runs: number; statuses: Record<string, number> };
-      commands: { sessionReview: string[]; branchQueue: string[]; results: string[]; checkoutSession: string[] };
+      commands: { sessionWatch: string[]; sessionReview: string[]; branchQueue: string[]; results: string[]; checkoutSession: string[]; sessionLogs: string[]; stopSession: string[] };
+      nextStep: { action: string; reason: string; command: string[] };
     };
   }>(baseUrl, [
     "runs",
@@ -171,10 +172,16 @@ try {
   assert.equal(supervised.wait.summary.workers.dead, 1);
   assert.ok(supervised.wait.summary.runs >= 1);
   assert.ok(Object.values(supervised.wait.summary.statuses).reduce((sum, count) => sum + count, 0) >= 1);
+  assert.equal(supervised.wait.nextStep.action, "review_session");
+  assert.equal(supervised.wait.nextStep.reason, "bounded_session_finished");
+  assert.equal(supervised.wait.nextStep.command.join(" "), `npm run cli -- runs session-review ${superviseSessionName} --include-stopped`);
+  assert.equal(supervised.wait.commands.sessionWatch.join(" "), `npm run cli -- runs session-watch ${superviseSessionName} --recoverable --include-stopped --next`);
   assert.equal(supervised.wait.commands.sessionReview.join(" "), `npm run cli -- runs session-review ${superviseSessionName} --include-stopped`);
   assert.equal(supervised.wait.commands.branchQueue.join(" "), `npm run cli -- runs branches --session ${superviseSessionName} --next`);
   assert.equal(supervised.wait.commands.results.join(" "), `npm run cli -- runs results --session ${superviseSessionName}`);
   assert.equal(supervised.wait.commands.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${superviseSessionName} --dir ./checkouts/${superviseSessionName}`);
+  assert.equal(supervised.wait.commands.sessionLogs.join(" "), `npm run cli -- runs session-logs ${superviseSessionName}`);
+  assert.equal(supervised.wait.commands.stopSession.join(" "), `npm run cli -- runs stop-session ${superviseSessionName} --recover`);
   superviseStarted = false;
 
   dispatchWaitStarted = true;
@@ -186,7 +193,8 @@ try {
       completed: boolean;
       timedOut: boolean;
       summary: { workers: { total: number; alive: number; dead: number }; runs: number; statuses: Record<string, number> };
-      commands: { sessionReview: string[]; branchQueue: string[]; results: string[]; checkoutSession: string[] };
+      commands: { sessionWatch: string[]; sessionReview: string[]; branchQueue: string[]; results: string[]; checkoutSession: string[]; sessionLogs: string[]; stopSession: string[] };
+      nextStep: { action: string; reason: string; command: string[] };
     };
   }>(baseUrl, [
     "runs",
@@ -226,10 +234,16 @@ try {
   assert.equal(dispatchWait.wait.summary.workers.dead, 1);
   assert.ok(dispatchWait.wait.summary.runs >= 1);
   assert.ok(Object.values(dispatchWait.wait.summary.statuses).reduce((sum, count) => sum + count, 0) >= 1);
+  assert.equal(dispatchWait.wait.nextStep.action, "review_session");
+  assert.equal(dispatchWait.wait.nextStep.reason, "bounded_session_finished");
+  assert.equal(dispatchWait.wait.nextStep.command.join(" "), `npm run cli -- runs session-review ${dispatchWaitSessionName} --include-stopped`);
+  assert.equal(dispatchWait.wait.commands.sessionWatch.join(" "), `npm run cli -- runs session-watch ${dispatchWaitSessionName} --recoverable --include-stopped --next`);
   assert.equal(dispatchWait.wait.commands.sessionReview.join(" "), `npm run cli -- runs session-review ${dispatchWaitSessionName} --include-stopped`);
   assert.equal(dispatchWait.wait.commands.branchQueue.join(" "), `npm run cli -- runs branches --session ${dispatchWaitSessionName} --next`);
   assert.equal(dispatchWait.wait.commands.results.join(" "), `npm run cli -- runs results --session ${dispatchWaitSessionName}`);
   assert.equal(dispatchWait.wait.commands.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${dispatchWaitSessionName} --dir ./checkouts/${dispatchWaitSessionName}`);
+  assert.equal(dispatchWait.wait.commands.sessionLogs.join(" "), `npm run cli -- runs session-logs ${dispatchWaitSessionName}`);
+  assert.equal(dispatchWait.wait.commands.stopSession.join(" "), `npm run cli -- runs stop-session ${dispatchWaitSessionName} --recover`);
 
   const preview = await cliJson<{
     assignment: string;
