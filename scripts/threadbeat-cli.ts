@@ -538,10 +538,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             treeRef: run.result_commit,
           });
           const state = run.result_commit ? "result" : run.status === "stopped" ? "resumable" : run.status;
+          const warning = run.status === "completed" && !run.result_commit
+            ? "completed_without_result_commit"
+            : null;
           return {
             id: run.id,
             status: run.status,
             state,
+            warning,
             objective: run.objective,
             baseRef: run.input_ref,
             branchName: run.run_branch,
@@ -581,6 +585,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           total: runs.length,
           resultCommits: runs.filter((run) => run.resultCommit).length,
           resumable: runs.filter((run) => run.state === "resumable").length,
+          warnings: runs.filter((run) => run.warning).length,
         },
         runs,
       };
@@ -592,6 +597,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       total: visibleRuns.length,
       resultCommits: visibleRuns.filter(({ run }) => run.resultCommit).length,
       resumable: visibleRuns.filter(({ run }) => run.state === "resumable").length,
+      warnings: visibleRuns.filter(({ run }) => run.warning).length,
     };
     if (options.next === "1") {
       await printJson({
@@ -603,13 +609,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           action: run.state === "resumable" ? "resume_branch" : "review_branch",
           reason: run.state === "resumable"
             ? "stopped_branch_without_result_commit"
-            : run.resultCommit
-              ? "result_commit_available"
-              : "branch_available",
+            : run.warning ?? (run.resultCommit ? "result_commit_available" : "branch_available"),
           agentId,
           runId: run.id,
           status: run.status,
           state: run.state,
+          warning: run.warning,
           objective: run.objective,
           workerId: run.workerId,
           location: run.location ?? null,

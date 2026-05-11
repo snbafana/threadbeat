@@ -292,7 +292,8 @@ Run planning is intentionally server-side and Pi-free for now:
   branch review still has ownership context.
 - `runs branches --session <name>` adds ownership context to each listed branch
   run so an operator can see its objective, worker claim, and whether it is
-  unassigned, owned by that session, or claimed by another worker.
+  unassigned, owned by that session, or claimed by another worker. Branch rows
+  also surface completed-without-result warnings directly in the branch queue.
 - `runs results --session <name>` reports completed and stopped branch runs for
   a worker session with GitHub branch/result links and warnings for completed
   runs that do not have a recorded result commit. Session results include
@@ -418,7 +419,7 @@ worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
 each row includes branch/result state, GitHub branch/result links, and exact
 checkout/review/inspect/resume commands. Add `--next` to return only the ordered
 branch review/resume queue while preserving objective, worker ownership, session
-location, and the same per-run command set.
+location, missing-result warnings, and the same per-run command set.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, top-level result/resumable/changed counts,

@@ -1340,14 +1340,15 @@ try {
     observedAt: string;
     session: string;
     checkoutDir: string;
-    summary: { total: number; resultCommits: number; resumable: number };
+    summary: { total: number; resultCommits: number; resumable: number; warnings: number };
     agents: Array<{
       agentId: string;
-      summary: { total: number; resultCommits: number; resumable: number };
+      summary: { total: number; resultCommits: number; resumable: number; warnings: number };
       runs: Array<{
         id: string;
         status: string;
         state: string;
+        warning: string | null;
         resultCommit: string | null;
         location: string;
         commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[]; resumeBranch: string[] | null };
@@ -1359,13 +1360,16 @@ try {
   assert.equal(detachedWorkerBranches.session, detachedWorkerSessionName);
   assert.equal(detachedWorkerBranches.checkoutDir, `./checkouts/${detachedWorkerSessionName}-branches`);
   assert.ok(detachedWorkerBranches.summary.resumable >= 1);
+  assert.equal(detachedWorkerBranches.summary.warnings, 0);
   assert.ok(detachedWorkerBranches.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id
     && agent.summary.resumable >= 1
+    && agent.summary.warnings === 0
     && agent.runs.some((run) => (
       run.id === detachedStoppedPlan.run.id
       && run.status === "stopped"
       && run.state === "resumable"
+      && run.warning === null
       && run.resultCommit === null
       && run.location === "unassigned"
       && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-branches/${detachedStoppedPlan.run.id}`
@@ -1380,11 +1384,12 @@ try {
     observedAt: string;
     session: string;
     checkoutDir: string;
-    summary: { total: number; resultCommits: number; resumable: number };
+    summary: { total: number; resultCommits: number; resumable: number; warnings: number };
     nextSteps: Array<{
       action: string;
       reason: string;
       runId: string;
+      warning: string | null;
       objective: string;
       workerId: string | null;
       location: string | null;
@@ -1400,6 +1405,7 @@ try {
     step.action === "resume_branch"
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
+    && step.warning === null
     && step.objective === "detached stopped branch"
     && step.workerId === null
     && step.location === "unassigned"
