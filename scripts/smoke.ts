@@ -1891,11 +1891,20 @@ try {
   assert.ok(Array.isArray(detachedWorkerLogs.workers[0].stderr.lines));
   const stoppedWorkerSession = await cliJson<{
     session: string;
-    stopped: Array<{ workerId: string; pid: number | null; stopped: boolean }>;
+    stopped: Array<{
+      workerId: string;
+      pid: number | null;
+      stopped: boolean;
+      signalSent: boolean;
+      forced: boolean;
+      alive: boolean;
+    }>;
     recovered: Array<{ runId: string; status?: string; skipped?: string }>;
   }>(baseUrl, ["runs", "stop-session", detachedWorkerSessionName, "--recover"]);
   assert.equal(stoppedWorkerSession.session, detachedWorkerSessionName);
   assert.equal(stoppedWorkerSession.stopped[0].stopped, true);
+  assert.equal(stoppedWorkerSession.stopped[0].alive, false);
+  assert.equal(stoppedWorkerSession.stopped[0].signalSent, true);
   assert.ok(stoppedWorkerSession.recovered.some((item) => (
     item.runId === detachedRecoverPlan.run.id && item.status === "planned"
   )));

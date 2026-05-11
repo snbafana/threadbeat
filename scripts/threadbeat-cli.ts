@@ -1762,10 +1762,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const session = await readWorkerSession(required(sessionName, "runs stop-session <session>"));
-    const stopped = session.workers.map((worker) => {
-      const stopped = stopProcessGroup(worker.pid);
-      return { workerId: worker.workerId, pid: worker.pid, stopped };
-    });
+    const stopped = await Promise.all(session.workers.map(async (worker) => {
+      const result = await stopProcessGroup(worker.pid);
+      return {
+        workerId: worker.workerId,
+        pid: worker.pid,
+        stopped: !result.alive,
+        signalSent: result.signalSent,
+        forced: result.forced,
+        alive: result.alive,
+      };
+    }));
     session.stoppedAt = new Date().toISOString();
     await writeWorkerSession(session);
     const workerIds = new Set(session.workers.map((worker) => worker.workerId));
@@ -3028,13 +3035,46 @@ function processIsAlive(pid: number | null): boolean {
   }
 }
 
-function stopProcessGroup(pid: number | null): boolean {
-  if (!pid) return false;
+type StopProcessGroupResult = {
+  signalSent: boolean;
+  forced: boolean;
+  alive: boolean;
+};
+
+async function stopProcessGroup(pid: number | null): Promise<StopProcessGroupResult> {
+  if (!pid) return { signalSent: false, forced: false, alive: false };
+  const target = process.platform === "win32" ? pid : -pid;
+  let signalSent = false;
   try {
-    process.kill(process.platform === "win32" ? pid : -pid, "SIGTERM");
-    return true;
+    process.kill(target, "SIGTERM");
+    signalSent = true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") {
+      return { signalSent, forced: false, alive: processIsAlive(pid) };
+    }
+    signalSent = true;
+  }
+  await waitForProcessExit(pid, 750);
+  if (!processIsAlive(pid)) return { signalSent, forced: false, alive: false };
+
+  let forced = false;
+  try {
+    process.kill(target, "SIGKILL");
+    forced = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") {
+      return { signalSent, forced, alive: processIsAlive(pid) };
+    }
+  }
+  await waitForProcessExit(pid, 750);
+  return { signalSent, forced, alive: processIsAlive(pid) };
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processIsAlive(pid)) return;
+    await sleep(50);
   }
 }
 
