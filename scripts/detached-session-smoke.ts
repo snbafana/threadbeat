@@ -292,6 +292,41 @@ try {
   }>(baseUrl, ["runs", "sessions", "--session", sessionName]);
   assert.equal(stoppedSessions.sessions[0].workers[0].alive, false);
 
+  const deadWorkerPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session dead worker recovery",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    deadWorkerPlan.run.id,
+    "--worker-id",
+    "detached-smoke-worker-1",
+  ]);
+  const deadWorkerRecovery = await cliJson<{
+    session: string;
+    recovered: Array<{ runId: string; status?: string; workerId: string | null }>;
+    actions: { sessionWait: string[]; restartSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
+    status: { session: { workers: Array<{ alive: boolean }> } };
+  }>(baseUrl, ["runs", "recover-session", sessionName]);
+  assert.equal(deadWorkerRecovery.session, sessionName);
+  assert.ok(deadWorkerRecovery.recovered.some((run) => (
+    run.runId === deadWorkerPlan.run.id
+    && run.status === "planned"
+    && run.workerId === null
+  )));
+  assert.equal(deadWorkerRecovery.status.session.workers[0].alive, false);
+  assert.equal(deadWorkerRecovery.nextStep.action, "restart_session");
+  assert.equal(deadWorkerRecovery.nextStep.reason, "recovered_runs_without_live_workers");
+  assert.equal(deadWorkerRecovery.nextStep.command.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
+  assert.equal(deadWorkerRecovery.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${sessionName}`);
+  assert.equal(deadWorkerRecovery.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
+
   const restarted = await cliJson<{
     session: string;
     restarted: Array<{ workerId: string; pid: number | null }>;
