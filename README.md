@@ -270,6 +270,7 @@ npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --format shell
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --branch-action resume_branch --format shell
+npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --run <run-id> --dry-run
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
@@ -529,6 +530,9 @@ commands, or `--format shell` to print one copyable command per line. Use
 `--action <name>` or `--branch-action resume_branch|review_branch` with
 `--next` to narrow a session-review queue to one class of recovery, result
 inspection, or branch resume commands without touching the branch state. Add
+`runs session-apply <name> --action ...` or `--branch-action ...` to execute an
+explicitly filtered queue; use `--dry-run`, `--run <id>`, `--limit`, and
+`--concurrency` to preview or bound that execution before changing run state. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

@@ -2736,6 +2736,85 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : sessionReview);
     return;
   }
+  if (subcommandName === "session-apply") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-apply <session>");
+    if (!options.action && !options["branch-action"]) {
+      throw new Error("runs session-apply requires --action or --branch-action");
+    }
+    const reviewArgs = [
+      "runs",
+      "session-review",
+      requiredSessionName,
+      "--next",
+      "--commands-only",
+      ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
+      ...(options.action ? ["--action", options.action] : []),
+      ...(options["branch-action"] ? ["--branch-action", options["branch-action"]] : []),
+      ...(options["checkout-dir"] ? ["--checkout-dir", options["checkout-dir"]] : []),
+      ...(options["changed-only"] === "1" ? ["--changed-only"] : []),
+      ...(options["changed-path"] ? ["--changed-path", options["changed-path"]] : []),
+      ...(options["result-status"] ? ["--result-status", options["result-status"]] : []),
+    ];
+    const review = await runCliWorker(reviewArgs);
+    if (review.exitCode !== 0) {
+      throw new Error(review.stderr || review.stdout || "runs session-apply failed to build session-review queue");
+    }
+    const queue = JSON.parse(review.stdout) as {
+      observedAt: string;
+      filter?: Record<string, unknown>;
+      commands: Array<{
+        scope: string;
+        action: string;
+        reason: string;
+        runId?: string;
+        command: string[];
+      }>;
+    };
+    const runFilter = options.run ? new Set(parseList(options.run)) : null;
+    const limit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
+    const selectedCommands = (runFilter
+      ? queue.commands.filter((item) => item.runId && runFilter.has(item.runId))
+      : queue.commands).slice(0, limit ?? undefined);
+    const responseBase = {
+      observedAt: queue.observedAt,
+      session: requiredSessionName,
+      dryRun: options["dry-run"] === "1",
+      filter: {
+        ...(queue.filter ?? {}),
+        ...(runFilter ? { run: [...runFilter] } : {}),
+        ...(limit ? { limit } : {}),
+      },
+      selected: selectedCommands.length,
+      commands: selectedCommands,
+    };
+    if (options["dry-run"] === "1") {
+      await printJson(responseBase);
+      return;
+    }
+    const executions = await mapConcurrent(
+      selectedCommands,
+      parsePositiveInteger(options.concurrency ?? "1", "--concurrency"),
+      async (item) => {
+        const execution = await runCliWorker(cliCommandArgs(item.command));
+        return {
+          scope: item.scope,
+          action: item.action,
+          reason: item.reason,
+          runId: item.runId ?? null,
+          command: item.command,
+          exitCode: execution.exitCode,
+          stdout: execution.stdout,
+          stderr: execution.stderr,
+          output: parseJsonMaybe(execution.stdout),
+        };
+      },
+    );
+    if (executions.some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
+    await printJson({ ...responseBase, executions });
+    return;
+  }
   if (subcommandName === "session-watch") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -3820,6 +3899,23 @@ type CommandQueueOutput = {
   commands: Array<{ command: string[] }>;
 };
 
+function cliCommandArgs(command: string[]): string[] {
+  const prefix = ["npm", "run", "cli", "--"];
+  if (prefix.some((part, index) => command[index] !== part)) {
+    throw new Error(`expected npm run cli command, got: ${command.join(" ")}`);
+  }
+  return command.slice(prefix.length);
+}
+
+function parseJsonMaybe(value: string): unknown {
+  if (!value.trim()) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 function printCommandQueueShell(commands: CommandQueueOutput["commands"]): void {
   for (const item of commands) {
     console.log(item.command.map(shellArg).join(" "));
@@ -4599,6 +4695,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--concurrency 1]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

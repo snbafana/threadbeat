@@ -2025,6 +2025,23 @@ try {
   assert.equal(detachedReviewChangedResultsOnly.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
   assert.ok(detachedReviewChangedResultsOnly.nextSteps.every((step) => step.action === "review_changed_results"));
   assert.equal(detachedReviewChangedResultsOnly.branchNextSteps.length, detachedWorkerReview.branchNextSteps.length);
+  const detachedApplyResumePreview = await cliJson<{
+    session: string;
+    dryRun: boolean;
+    selected: number;
+    filter: { branchAction: string[]; run: string[]; limit: number };
+    commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", detachedStoppedPlan.run.id, "--limit", "1", "--dry-run"]);
+  assert.equal(detachedApplyResumePreview.session, detachedWorkerSessionName);
+  assert.equal(detachedApplyResumePreview.dryRun, true);
+  assert.equal(detachedApplyResumePreview.selected, 1);
+  assert.deepEqual(detachedApplyResumePreview.filter.branchAction, ["resume_branch"]);
+  assert.deepEqual(detachedApplyResumePreview.filter.run, [detachedStoppedPlan.run.id]);
+  assert.equal(detachedApplyResumePreview.filter.limit, 1);
+  assert.equal(detachedApplyResumePreview.commands[0].scope, "branch");
+  assert.equal(detachedApplyResumePreview.commands[0].action, "resume_branch");
+  assert.equal(detachedApplyResumePreview.commands[0].runId, detachedStoppedPlan.run.id);
+  assert.equal(detachedApplyResumePreview.commands[0].command.join(" "), `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`);
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"
@@ -2357,6 +2374,50 @@ try {
   assert.equal(sessionResumed.nextStep.command.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
   assert.equal(sessionResumed.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
   assert.equal(sessionResumed.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
+  const sessionApplyPlan = await cliJson<{
+    run: { id: string };
+    plan: { branchName: string };
+  }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    workerGroupAgentBody.agent.id,
+    "--objective",
+    "detached session apply resume branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", sessionApplyPlan.run.id]);
+  const sessionApplyResumed = await cliJson<{
+    session: string;
+    dryRun: boolean;
+    selected: number;
+    commands: Array<{ action: string; runId?: string }>;
+    executions: Array<{
+      action: string;
+      runId: string | null;
+      exitCode: number | null;
+      output: { resumed?: { runId: string; branchName: string; status: string; workerId: string | null }; run?: { status: string; worker_id: string | null } };
+    }>;
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1"]);
+  assert.equal(sessionApplyResumed.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyResumed.dryRun, false);
+  assert.equal(sessionApplyResumed.selected, 1);
+  assert.equal(sessionApplyResumed.commands[0].action, "resume_branch");
+  assert.equal(sessionApplyResumed.commands[0].runId, sessionApplyPlan.run.id);
+  assert.equal(sessionApplyResumed.executions[0].action, "resume_branch");
+  assert.equal(sessionApplyResumed.executions[0].runId, sessionApplyPlan.run.id);
+  assert.equal(sessionApplyResumed.executions[0].exitCode, 0);
+  assert.equal(sessionApplyResumed.executions[0].output.resumed?.runId, sessionApplyPlan.run.id);
+  assert.equal(sessionApplyResumed.executions[0].output.resumed?.branchName, sessionApplyPlan.plan.branchName);
+  assert.equal(sessionApplyResumed.executions[0].output.resumed?.status, "planned");
+  assert.equal(sessionApplyResumed.executions[0].output.run?.status, "planned");
+  assert.equal(sessionApplyResumed.executions[0].output.run?.worker_id, null);
+  const sessionApplyRun = await cliJson<{ run: { status: string; worker_id: string | null } }>(baseUrl, [
+    "runs",
+    "get",
+    sessionApplyPlan.run.id,
+  ]);
+  assert.equal(sessionApplyRun.run.status, "planned");
+  assert.equal(sessionApplyRun.run.worker_id, null);
 
   const superviseAgentResponse = await app.inject({
     method: "POST",
