@@ -2369,6 +2369,39 @@ try {
     commit.sha === expectedCheckoutHead && commit.subject === "Write branch report"
   )));
   assert.equal(await fs.readFile(path.join(checkoutDir, "report.md"), "utf8"), "branch report\n");
+  const reviewDir = path.join(tempRoot, "run-review");
+  const reviewedRun = await cliJson<{
+    run: { id: string; branchName: string; resultCommit: string | null };
+    checkout: { dir: string; headCommit: string; matchesResultCommit: boolean | null };
+    review: {
+      changedFiles: Array<{ status: string; path: string }>;
+      commits: Array<{ sha: string; subject: string }>;
+    };
+    commands: {
+      changedFiles: string[];
+      diff: string[];
+      commits: string[];
+    };
+  }>(baseUrl, [
+    "runs",
+    "review",
+    checkoutPlan.run.id,
+    "--checkout-dir",
+    reviewDir,
+  ]);
+  assert.equal(reviewedRun.run.branchName, checkoutPlan.plan.branchName);
+  assert.equal(reviewedRun.run.resultCommit, null);
+  assert.equal(reviewedRun.checkout.dir, reviewDir);
+  assert.equal(reviewedRun.checkout.headCommit, expectedCheckoutHead);
+  assert.equal(reviewedRun.checkout.matchesResultCommit, null);
+  assert.deepEqual(reviewedRun.review.changedFiles, [{ status: "A", path: "report.md" }]);
+  assert.ok(reviewedRun.review.commits.some((commit) => (
+    commit.sha === expectedCheckoutHead && commit.subject === "Write branch report"
+  )));
+  assert.equal(reviewedRun.commands.changedFiles.join(" "), `git -C ${reviewDir} diff --name-status refs/threadbeat/bases/${checkoutPlan.run.id}...HEAD`);
+  assert.equal(reviewedRun.commands.diff.join(" "), `git -C ${reviewDir} diff refs/threadbeat/bases/${checkoutPlan.run.id}...HEAD`);
+  assert.equal(reviewedRun.commands.commits.join(" "), `git -C ${reviewDir} log --oneline refs/threadbeat/bases/${checkoutPlan.run.id}..HEAD`);
+  assert.equal(await fs.readFile(path.join(reviewDir, "report.md"), "utf8"), "branch report\n");
   const inspectCheckoutDir = path.join(tempRoot, "inspect-checkout");
   const inspectedCheckoutRun = await cliJson<{
     run: { id: string; branchName: string; resultCommit: string | null };

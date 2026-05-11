@@ -193,6 +193,7 @@ npm run cli -- runs status <run>
 npm run cli -- runs inspect <run>
 npm run cli -- runs inspect <run> --checkout --checkout-dir ./checkouts/<run>
 npm run cli -- runs checkout <run> --dir ./checkouts/<run>
+npm run cli -- runs review <run> --checkout-dir ./checkouts/<run>
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight-resume --resumable --worker-id worker-a
 npm run cli -- runs claim <run> --worker-id worker-a
@@ -276,6 +277,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `runs checkout <run> --dir <path>` clones or refreshes the run branch into a
   local Git checkout and reports base/head commits, commits ahead, and changed
   files so the branch state can be reviewed directly.
+- `runs review <run> --checkout-dir <path>` is the compact single-run review
+  path: it checks out the run branch and returns changed files, commits, and the
+  exact `git diff`/`git log` commands for that branch.
 - `runs checkout-session <name> --dir <path>` checks out every completed or
   stopped branch run from a detached worker session under `<path>/<run-id>`.
   Add `--resumable` to pull only stopped branches without result commits, or

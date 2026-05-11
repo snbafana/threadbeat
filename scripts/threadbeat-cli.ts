@@ -318,6 +318,28 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await checkoutRunBranch(id, targetDir));
     return;
   }
+  if (subcommandName === "review") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs review requires a run id");
+    const options = parseOptions(optionArgs);
+    const checkoutDir = options["checkout-dir"] ?? `./checkouts/${id}`;
+    const reviewed = await checkoutRunBranch(id, path.resolve(checkoutDir));
+    const baseRef = `refs/threadbeat/bases/${id}`;
+    await printJson({
+      run: reviewed.run,
+      checkout: reviewed.checkout,
+      review: reviewed.review,
+      commands: {
+        inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", id],
+        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", id, "--dir", checkoutDir],
+        changedFiles: ["git", "-C", checkoutDir, "diff", "--name-status", `${baseRef}...HEAD`],
+        diff: ["git", "-C", checkoutDir, "diff", `${baseRef}...HEAD`],
+        commits: ["git", "-C", checkoutDir, "log", "--oneline", `${baseRef}..HEAD`],
+      },
+      repository: reviewed.repository,
+    });
+    return;
+  }
   if (subcommandName === "checkout-session") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -2663,6 +2685,7 @@ Commands:
   runs status <run> [--limit 20]
   runs inspect <run> [--limit 10] [--checkout] [--checkout-dir ./checkouts/run]
   runs checkout <run> --dir ./checkouts/run
+  runs review <run> [--checkout-dir ./checkouts/run]
   runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--resumable] [--worker-id worker-a] [--concurrency 2]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
