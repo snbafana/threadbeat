@@ -155,6 +155,12 @@ For the focused detached-worker control-plane smoke:
 npm run smoke:detached-session
 ```
 
+For a focused local multi-agent dispatch smoke:
+
+```bash
+npm run smoke:multi-agent-dispatch
+```
+
 For a branch-native multi-agent local run:
 
 ```bash

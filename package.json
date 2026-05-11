@@ -21,6 +21,7 @@
     "smoke:modal-agent-real-task": "tsx scripts/modal-agent-real-task-live-smoke.ts",
     "smoke:modal-agent-boot": "tsx scripts/modal-agent-boot-live-smoke.ts",
     "smoke:detached-session": "tsx scripts/detached-session-smoke.ts",
+    "smoke:multi-agent-dispatch": "tsx scripts/multi-agent-dispatch-smoke.ts",
     "smoke:control-plane-live": "tsx scripts/control-plane-live-smoke.ts",
     "smoke:control-plane-real-task": "tsx scripts/control-plane-live-smoke.ts --real-task",
     "cli": "tsx scripts/threadbeat-cli.ts"
