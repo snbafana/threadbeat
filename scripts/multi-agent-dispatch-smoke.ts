@@ -486,7 +486,16 @@ try {
     session: { workers: { total: number; alive: number } };
     totals: { runs: number; statuses: Record<string, number> };
     agents: Array<{ agentId: string; total: number }>;
-    commands: { sessionWatch: string[]; sessionReview: string[]; results: string[]; checkoutSession: string[]; restartSession: string[]; restartSessionWithStopped: string[] };
+    commands: {
+      sessionWatch: string[];
+      sessionReview: string[];
+      results: string[];
+      resultsNext: string[];
+      changedResults: string[];
+      checkoutSession: string[];
+      restartSession: string[];
+      restartSessionWithStopped: string[];
+    };
     nextStep: { action: string; reason: string; command: string[] };
   }>(baseUrl, ["runs", "session-summary", sessionName, "--next"]);
   assert.equal(summary.session.workers.total, 2);
@@ -499,6 +508,11 @@ try {
   assert.equal(summary.nextStep.command.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
   assert.equal(summary.commands.sessionReview.join(" "), `npm run cli -- runs session-review ${sessionName} --include-stopped`);
   assert.equal(summary.commands.results.join(" "), `npm run cli -- runs results --session ${sessionName}`);
+  assert.equal(summary.commands.resultsNext.join(" "), `npm run cli -- runs results --session ${sessionName} --next`);
+  assert.equal(
+    summary.commands.changedResults.join(" "),
+    `npm run cli -- runs results --session ${sessionName} --checkout-dir ./checkouts/${sessionName}-results --changed-only --next`,
+  );
   assert.equal(summary.commands.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${sessionName} --dir ./checkouts/${sessionName}`);
   assert.equal(summary.commands.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
   assert.equal(summary.commands.restartSessionWithStopped.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover --resume-stopped`);

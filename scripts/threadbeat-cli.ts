@@ -1541,6 +1541,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
         sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
         results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
+        resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName, "--next"],
+        changedResults: [
+          "npm",
+          "run",
+          "cli",
+          "--",
+          "runs",
+          "results",
+          "--session",
+          requiredSessionName,
+          "--checkout-dir",
+          `./checkouts/${requiredSessionName}-results`,
+          "--changed-only",
+          "--next",
+        ],
         checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", requiredSessionName, "--dir", `./checkouts/${requiredSessionName}`],
         recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", requiredSessionName],
         restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover"],
@@ -1576,7 +1591,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                 ? {
                   action: "inspect_results",
                   reason: "result_commits_available",
-                  command: commands.results,
+                  command: commands.resultsNext,
                 }
                 : {
                   action: "review_session",
