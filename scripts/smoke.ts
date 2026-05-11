@@ -825,14 +825,28 @@ try {
   const monitored = JSON.parse(cliMonitor.stdout.trim()) as {
     agents: Array<{
       agentId: string;
-      runs: Array<{ id: string; status: string; workerId: string | null; messages: Array<{ type: string }> }>;
+      runs: Array<{
+        id: string;
+        status: string;
+        objective: string;
+        branchName: string;
+        resultCommit: string | null;
+        workerId: string | null;
+        messages: Array<{ type: string }>;
+      }>;
     }>;
   };
   assert.deepEqual(
     monitored.agents.map((agent) => agent.agentId).sort(),
     [workerAgentBody.agent.id, launchAgentBody.agent.id].sort(),
   );
-  assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id && run.status === "planned")));
+  assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => (
+    run.id === workerRunA.run.id
+    && run.status === "planned"
+    && run.objective === "cli worker run a"
+    && run.branchName.startsWith("threadbeat/runs/")
+    && run.resultCommit === null
+  ))));
   assert.ok(monitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id && run.messages.some((message) => message.type === "agent_run_planned"))));
   const backlog = await cliJson<{
     agents: Array<{ agentId: string; total: number; statuses: Record<string, number>; resumableStopped: number }>;
@@ -863,8 +877,24 @@ try {
   assert.ok(plannedMonitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id)));
   assert.ok(plannedMonitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id)));
   const plannedMonitorNext = await cliJson<{
-    summary: { runs: number; statuses: Record<string, number> };
-    nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+    summary: { runs: number; statuses: Record<string, number>; resumable: number; warnings: number };
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      runId: string;
+      objective: string;
+      branchName: string;
+      resultCommit: string | null;
+      warning: string | null;
+      resumable: boolean;
+      command: string[];
+      commands: {
+        claimRun: string[];
+        watchRun: string[];
+        inspectRun: string[];
+        resumeBranch: string[] | null;
+      };
+    }>;
     agents?: unknown;
   }>(baseUrl, [
     "runs",
@@ -878,11 +908,21 @@ try {
   assert.equal(plannedMonitorNext.agents, undefined);
   assert.ok(plannedMonitorNext.summary.runs >= 2);
   assert.ok(plannedMonitorNext.summary.statuses.planned >= 2);
+  assert.equal(plannedMonitorNext.summary.resumable, 0);
+  assert.equal(plannedMonitorNext.summary.warnings, 0);
   assert.ok(plannedMonitorNext.nextSteps.some((step) => (
     step.action === "claim_run"
     && step.reason === "queued_run"
     && step.runId === workerRunA.run.id
+    && step.objective === "cli worker run a"
+    && step.branchName.startsWith("threadbeat/runs/")
+    && step.resultCommit === null
+    && step.warning === null
+    && step.resumable === false
     && step.command.join(" ") === `npm run cli -- runs claim ${workerRunA.run.id}`
+    && step.commands.claimRun.join(" ") === `npm run cli -- runs claim ${workerRunA.run.id}`
+    && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${workerRunA.run.id}`
+    && step.commands.resumeBranch === null
   )));
 
   const cliWorker = await cliJson<{
@@ -3215,14 +3255,23 @@ try {
     "stopped",
   ]);
   const stoppedMonitored = JSON.parse(stoppedMatchingMonitor.stdout.trim()) as {
-    agents: Array<{ runs: Array<{ id: string; status: string; resumable: boolean }> }>;
+    agents: Array<{ runs: Array<{ id: string; status: string; resultCommit: string | null; resumable: boolean }> }>;
   };
   assert.ok(stoppedMonitored.agents.some((agent) => (
-    agent.runs.length === 2 && agent.runs.every((run) => run.status === "stopped" && run.resumable)
+    agent.runs.length === 2 && agent.runs.every((run) => run.status === "stopped" && run.resultCommit === null && run.resumable)
   )));
   const stoppedMonitorNext = await cliJson<{
-    summary: { statuses: Record<string, number> };
-    nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+    summary: { statuses: Record<string, number>; resumable: number; warnings: number };
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      runId: string;
+      resultCommit: string | null;
+      warning: string | null;
+      resumable: boolean;
+      command: string[];
+      commands: { resumeBranch: string[] | null; inspectRun: string[] };
+    }>;
   }>(baseUrl, [
     "runs",
     "monitor",
@@ -3233,10 +3282,20 @@ try {
     "--next",
   ]);
   assert.equal(stoppedMonitorNext.summary.statuses.stopped, 2);
-  assert.ok(stoppedMonitorNext.nextSteps.every((step) => step.action === "resume_branch"));
+  assert.equal(stoppedMonitorNext.summary.resumable, 2);
+  assert.equal(stoppedMonitorNext.summary.warnings, 0);
+  assert.ok(stoppedMonitorNext.nextSteps.every((step) => (
+    step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.resultCommit === null
+    && step.warning === null
+    && step.resumable
+    && step.commands.resumeBranch !== null
+  )));
   assert.ok(stoppedMonitorNext.nextSteps.some((step) => (
-    step.reason === "stopped_branch"
+    step.runId === stopMatchingRunA.run.id
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${stopMatchingRunA.run.id}`
+    && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${stopMatchingRunA.run.id}`
   )));
   const stoppedMatchingBranches = await cliJson<{
     agents: Array<{

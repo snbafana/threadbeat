@@ -1964,7 +1964,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const params = new URLSearchParams();
         if (statusList) params.set("status", statusList.join(","));
         const listed = await requestJson("GET", withQuery(`/api/agents/${encodeURIComponent(agentId)}/runs`, params)) as {
-          runs: Array<{ id: string; status: string }>;
+          runs: Array<{
+            id: string;
+            objective: string;
+            input_ref: string;
+            run_branch: string;
+            status: string;
+            result_commit: string | null;
+          }>;
         };
         const visibleRuns = statusFilter ? listed.runs.filter((run) => statusFilter.has(run.status)) : listed.runs;
         const runs = await mapConcurrent(visibleRuns, 4, async (run) => {
@@ -1975,11 +1982,28 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             sandboxes: Array<{ state: string }>;
             messages: Array<{ type: string; text: string }>;
           };
+          const warning = status.run.status === "completed" && run.result_commit === null
+            ? "completed_without_result_commit"
+            : null;
+          const resumable = status.run.status === "stopped" && run.result_commit === null;
           return {
             id: status.run.id,
             status: status.run.status,
-            resumable: status.run.status === "stopped",
+            objective: run.objective,
+            baseRef: run.input_ref,
+            branchName: run.run_branch,
+            resultCommit: run.result_commit,
+            warning,
+            resumable,
             workerId: status.run.worker_id,
+            commands: {
+              claimRun: ["npm", "run", "cli", "--", "runs", "claim", run.id],
+              watchRun: ["npm", "run", "cli", "--", "runs", "watch", run.id],
+              inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+              resumeBranch: resumable
+                ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+                : null,
+            },
             sandboxes: status.sandboxes.map((sandbox) => sandbox.state),
             messages: status.messages.map((message) => ({
               type: message.type,
@@ -1990,33 +2014,44 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         agents.push({ agentId, runs });
       }
       if (options.next === "1") {
-        const nextSteps = agents.flatMap((agent) => agent.runs.map((run) => ({
-          action: run.status === "planned"
+        const nextSteps = agents.flatMap((agent) => agent.runs.map((run) => {
+          const action = run.status === "planned"
             ? "claim_run"
             : run.status === "running"
               ? "watch_run"
-              : run.status === "stopped"
+              : run.resumable
                 ? "resume_branch"
-                : "inspect_run",
-          reason: run.status === "planned"
-            ? "queued_run"
-            : run.status === "running"
-              ? "active_run"
-              : run.status === "stopped"
-                ? "stopped_branch"
-                : "terminal_run",
-          agentId: agent.agentId,
-          runId: run.id,
-          status: run.status,
-          workerId: run.workerId,
-          command: run.status === "planned"
-            ? ["npm", "run", "cli", "--", "runs", "claim", run.id]
-            : run.status === "running"
-              ? ["npm", "run", "cli", "--", "runs", "watch", run.id]
-              : run.status === "stopped"
-                ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
-                : ["npm", "run", "cli", "--", "runs", "inspect", run.id],
-        })));
+                : "inspect_run";
+          const command = action === "claim_run"
+            ? run.commands.claimRun
+            : action === "watch_run"
+              ? run.commands.watchRun
+              : action === "resume_branch" && run.commands.resumeBranch
+                ? run.commands.resumeBranch
+                : run.commands.inspectRun;
+          return {
+            action,
+            reason: run.status === "planned"
+              ? "queued_run"
+              : run.status === "running"
+                ? "active_run"
+                : run.resumable
+                  ? "stopped_branch_without_result_commit"
+                  : run.warning ?? (run.resultCommit ? "result_commit_available" : "terminal_run"),
+            agentId: agent.agentId,
+            runId: run.id,
+            status: run.status,
+            objective: run.objective,
+            baseRef: run.baseRef,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+            warning: run.warning,
+            resumable: run.resumable,
+            workerId: run.workerId,
+            command,
+            commands: run.commands,
+          };
+        }));
         const statuses: Record<string, number> = {};
         for (const agent of agents) {
           for (const run of agent.runs) {
@@ -2029,6 +2064,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             agents: agents.length,
             runs: nextSteps.length,
             statuses,
+            resumable: nextSteps.filter((step) => step.resumable).length,
+            warnings: nextSteps.filter((step) => step.warning !== null).length,
           },
           nextSteps,
         }));

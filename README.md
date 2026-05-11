@@ -146,8 +146,8 @@ npm run cli -- preflight
 npm run cli -- agents init --name research --repo-id research-agent --live
 ```
 
-Then use the `runs queue`, `runs work`, `runs monitor`, `runs branches`, and
-`runs checkout` commands below against the live server.
+Then use `runs dispatch`, the returned worker/watch commands, `runs monitor`,
+`runs branches`, and `runs checkout` below against the live server.
 
 For a branch-native multi-agent local run:
 
@@ -487,13 +487,15 @@ Use `runs resume-branch <run>` to requeue one of those stopped branch runs back 
 `runs workers` groups running runs by the `worker_id` that claimed them.
 `runs stop-matching --status planned` cancels queued runs for one or more
 agents; include `running` in the status list to stop active run sandboxes too.
-`runs monitor` snapshots all runs for one or more agents, including
-sandbox states, recent message types/text, and a `resumable` marker on stopped
-branch runs. Use `--status planned,running,stopped` to focus the snapshot on
-queued, active, or resumable work. Add `--next` to emit only the compact command
-queue for the visible rows: claim planned runs, watch active runs, resume stopped
-branches, or inspect terminal runs. `runs step` executes one explicit shell
-command and can optionally finalize the run branch.
+`runs monitor` snapshots all runs for one or more agents, including branch names,
+result commits, sandbox states, recent message types/text, and a `resumable`
+marker only for stopped branches without a result commit. Use `--status
+planned,running,stopped` to focus the snapshot on queued, active, or resumable
+work. Add `--next` to emit the compact command queue for visible rows with
+objective, branch, result, warning, and per-row command fields: claim planned
+runs, watch active runs, resume stopped branches without result commits, or
+inspect terminal/result rows. `runs step` executes one explicit shell command and
+can optionally finalize the run branch.
 
 ## Phases
 
