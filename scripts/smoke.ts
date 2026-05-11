@@ -1263,6 +1263,30 @@ try {
   }>(baseUrl, ["runs", "sessions", "--session", detachedWorkerSessionName]);
   assert.equal(listedWorkerSessions.sessions.length, 1);
   assert.equal(listedWorkerSessions.sessions[0].workers[0].alive, true);
+  const detachedWorkerActions = await cliJson<{
+    session: { session: string; workers: number; command: string[] };
+    actions: {
+      sessionStatus: string[];
+      sessionWatch: string[];
+      sessionReview: string[];
+      branchQueue: string[];
+      results: string[];
+      checkoutSession: string[];
+      sessionLogs: string[];
+      stopSession: string[];
+    };
+  }>(baseUrl, ["runs", "session-actions", detachedWorkerSessionName]);
+  assert.equal(detachedWorkerActions.session.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerActions.session.workers, 1);
+  assert.equal(detachedWorkerActions.session.command[0], "runs");
+  assert.equal(detachedWorkerActions.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${detachedWorkerSessionName} --recoverable --include-stopped`);
+  assert.equal(detachedWorkerActions.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${detachedWorkerSessionName} --recoverable --include-stopped --next`);
+  assert.equal(detachedWorkerActions.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${detachedWorkerSessionName} --include-stopped`);
+  assert.equal(detachedWorkerActions.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${detachedWorkerSessionName} --next`);
+  assert.equal(detachedWorkerActions.actions.results.join(" "), `npm run cli -- runs results --session ${detachedWorkerSessionName}`);
+  assert.equal(detachedWorkerActions.actions.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${detachedWorkerSessionName} --dir ./checkouts/${detachedWorkerSessionName}`);
+  assert.equal(detachedWorkerActions.actions.sessionLogs.join(" "), `npm run cli -- runs session-logs ${detachedWorkerSessionName}`);
+  assert.equal(detachedWorkerActions.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${detachedWorkerSessionName} --recover`);
   const detachedWorkerStatus = await cliJson<{
     session: {
       session: string;
@@ -1984,6 +2008,7 @@ try {
       branchQueue: string[];
       results: string[];
       checkoutSession: string[];
+      sessionLogs: string[];
       stopSession: string[];
     };
     after: Array<{ agentId: string }>;
@@ -2017,6 +2042,7 @@ try {
   assert.equal(supervised.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${superviseSessionName} --next`);
   assert.equal(supervised.actions.results.join(" "), `npm run cli -- runs results --session ${superviseSessionName}`);
   assert.equal(supervised.actions.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${superviseSessionName} --dir ./checkouts/${superviseSessionName}`);
+  assert.equal(supervised.actions.sessionLogs.join(" "), `npm run cli -- runs session-logs ${superviseSessionName}`);
   assert.equal(supervised.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${superviseSessionName} --recover`);
   assert.ok(supervised.before.some((agent) => (
     agent.agentId === superviseAgentBody.agent.id && agent.statuses.planned === superviseQueue.queued.length
@@ -2072,7 +2098,7 @@ try {
     dryRun: boolean;
     planned: Array<{ agentId: string; objective: string }>;
     session: { session: string; workerCount: number; command: string[] };
-    actions: { sessionWatch: string[]; sessionReview: string[]; results: string[]; stopSession: string[] };
+    actions: { sessionWatch: string[]; sessionReview: string[]; results: string[]; sessionLogs: string[]; stopSession: string[] };
   }>(baseUrl, [
     "runs",
     "dispatch",
@@ -2109,6 +2135,7 @@ try {
   assert.equal(dispatchPreview.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${dispatchSessionName} --recoverable --include-stopped --next`);
   assert.equal(dispatchPreview.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${dispatchSessionName} --include-stopped`);
   assert.equal(dispatchPreview.actions.results.join(" "), `npm run cli -- runs results --session ${dispatchSessionName}`);
+  assert.equal(dispatchPreview.actions.sessionLogs.join(" "), `npm run cli -- runs session-logs ${dispatchSessionName}`);
   assert.equal(dispatchPreview.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${dispatchSessionName} --recover`);
   const inlineDispatchPreview = await cliJson<{
     assignment: string;
@@ -2150,6 +2177,7 @@ try {
       branchQueue: string[];
       results: string[];
       checkoutSession: string[];
+      sessionLogs: string[];
       stopSession: string[];
     };
     backlog: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
@@ -2192,6 +2220,7 @@ try {
   assert.equal(dispatched.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${dispatchSessionName} --next`);
   assert.equal(dispatched.actions.results.join(" "), `npm run cli -- runs results --session ${dispatchSessionName}`);
   assert.equal(dispatched.actions.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${dispatchSessionName} --dir ./checkouts/${dispatchSessionName}`);
+  assert.equal(dispatched.actions.sessionLogs.join(" "), `npm run cli -- runs session-logs ${dispatchSessionName}`);
   assert.equal(dispatched.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${dispatchSessionName} --recover`);
   assert.ok(dispatched.recovered.some((run) => (
     run.runId === dispatchRecoveredPlan.run.id

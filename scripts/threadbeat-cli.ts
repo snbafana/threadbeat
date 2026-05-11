@@ -947,6 +947,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
       checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
+      sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", sessionName],
       stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
     };
     const session = await startDetachedWorkerSession(
@@ -989,6 +990,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
       checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
+      sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", sessionName],
       stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
     };
     if (options["dry-run"] === "1") {
@@ -1042,6 +1044,31 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "sessions") {
     const options = parseOptions(args);
     await printJson({ sessions: await listWorkerSessions(options.session) });
+    return;
+  }
+  if (subcommandName === "session-actions") {
+    const sessionName = required(args[0], "runs session-actions <session>");
+    const session = await readWorkerSession(sessionName);
+    await printJson({
+      session: {
+        session: session.session,
+        command: session.command,
+        startedAt: session.startedAt,
+        stoppedAt: session.stoppedAt ?? null,
+        restartedAt: session.restartedAt ?? null,
+        workers: session.workers.length,
+      },
+      actions: {
+        sessionStatus: ["npm", "run", "cli", "--", "runs", "session-status", sessionName, "--recoverable", "--include-stopped"],
+        sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
+        sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
+        branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
+        results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
+        checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
+        sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", sessionName],
+        stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
+      },
+    });
     return;
   }
   if (subcommandName === "session-status") {
@@ -3153,6 +3180,7 @@ Commands:
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
+  runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
   runs session-review <name> [--include-stopped] [--next] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]

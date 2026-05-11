@@ -217,6 +217,7 @@ npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overn
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
+npm run cli -- runs session-actions overnight
 npm run cli -- runs session-status overnight
 npm run cli -- runs session-summary overnight
 npm run cli -- runs session-review overnight --include-stopped --lines 40
@@ -391,6 +392,8 @@ while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, and `runs stop-session <name>` to terminate the recorded process
 group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed
 by that session's workers when those runs do not have a running sandbox.
+Use `runs session-actions <name>` when returning to an existing session and you
+only need the exact status/watch/review/results/checkout/logs/stop commands.
 Add `--recoverable` to `runs session-status` or `runs session-watch` to include
 a dry-run recovery preview in the live session snapshot; combine it with
 `--include-stopped` to surface unfinished stopped branches too. `session-status`
