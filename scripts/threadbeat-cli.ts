@@ -994,10 +994,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
     };
     if (options["dry-run"] === "1") {
+      const recoveryPreview = options.recover === "1"
+        ? await recoverStaleRuns(
+          agentIds,
+          undefined,
+          parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
+          undefined,
+          options["include-stopped"] === "1",
+          true,
+        )
+        : [];
       await printJson({
         assignment,
         dryRun: true,
         planned: queueItems,
+        ...(options.recover === "1" ? {
+          recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),
+        } : {}),
         session: {
           session: sessionName,
           workerCount,

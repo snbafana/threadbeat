@@ -74,6 +74,7 @@ try {
     assignment: string;
     dryRun: boolean;
     planned: Array<{ agentId: string; objective: string }>;
+    recoveryPreview: Array<{ runId: string; branchName: string; currentStatus?: string; dryRun?: boolean }>;
     session: { session: string; workerCount: number; workerPrefix: string; command: string[] };
     actions: { sessionWatch: string[]; sessionReview: string[]; branchQueue: string[]; results: string[]; stopSession: string[] };
   }>(baseUrl, [
@@ -105,6 +106,12 @@ try {
   assert.equal(preview.dryRun, true);
   assert.deepEqual(preview.planned.map((item) => item.agentId), [agentA.agent.id, agentB.agent.id]);
   assert.deepEqual(preview.planned.map((item) => item.objective), ["write research report a", "write research report b"]);
+  assert.ok(preview.recoveryPreview.some((run) => (
+    run.runId === recoverableStopped.run.id
+    && run.branchName === recoverableStopped.plan.branchName
+    && run.currentStatus === "stopped"
+    && run.dryRun === true
+  )));
   assert.equal(preview.session.session, sessionName);
   assert.equal(preview.session.workerCount, 2);
   assert.equal(preview.session.workerPrefix, "multi-agent-worker");
