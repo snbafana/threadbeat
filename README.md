@@ -149,6 +149,12 @@ npm run cli -- agents init --name research --repo-id research-agent --live
 Then use `runs dispatch`, the returned worker/watch commands, `runs monitor`,
 `runs branches`, and `runs checkout` below against the live server.
 
+For the focused detached-worker control-plane smoke:
+
+```bash
+npm run smoke:detached-session
+```
+
 For a branch-native multi-agent local run:
 
 ```bash
