@@ -392,10 +392,11 @@ branches with checkout/inspect commands, resumable branch list with concrete
 checkout/resume commands, dry-run recovery candidates, ordered `nextSteps`, and
 recent worker logs in one payload. Add `--next` to return only the compact
 summary, ordered session-level next-step commands, and the per-branch
-review/resume queue. The full snapshot also includes an `actions` block with
-the exact restart, recover, resume, branch-queue, and changed-results commands
-to run next. Result rows include `commands.reviewRun` for compact branch-native
-inspection of one completed run. Add
+review/resume queue with checkout, inspect, review, and resume commands on each
+row. The full snapshot also includes an `actions` block with the exact restart,
+recover, resume, branch-queue, and changed-results commands to run next. Result
+rows include `commands.reviewRun` for compact branch-native inspection of one
+completed run. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
@@ -411,7 +412,7 @@ worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
 `runs branches --session <name>` is the no-checkout branch ledger for a session:
 each row includes branch/result state, GitHub branch/result links, and exact
 checkout/review/inspect/resume commands. Add `--next` to return only the ordered
-branch review/resume queue.
+branch review/resume queue while preserving the same per-run command set.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, top-level result/resumable/changed counts,

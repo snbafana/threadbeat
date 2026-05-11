@@ -1386,6 +1386,7 @@ try {
       reason: string;
       runId: string;
       command: string[];
+      commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[]; resumeBranch: string[] | null };
     }>;
   }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName, "--next"]);
   assert.match(detachedWorkerBranchesNext.observedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -1397,6 +1398,10 @@ try {
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-branches/${detachedStoppedPlan.run.id}`
+    && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedStoppedPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-branches/${detachedStoppedPlan.run.id}`
+    && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedStoppedPlan.run.id}`
+    && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
   )));
   const detachedWorkerResumableBranches = await cliJson<{
     agents: Array<{
@@ -1510,7 +1515,20 @@ try {
       changedResults: string[];
     };
     nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
-    branchNextSteps: Array<{ action: string; reason: string; runId: string; status: string; location: string; command: string[] }>;
+    branchNextSteps: Array<{
+      action: string;
+      reason: string;
+      runId: string;
+      status: string;
+      location: string;
+      command: string[];
+      commands: {
+        checkoutBranch: string[];
+        reviewRun?: string[];
+        inspectRun?: string[];
+        resumeBranch?: string[];
+      };
+    }>;
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--lines", "5"]);
   assert.match(detachedWorkerReview.observedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -1572,6 +1590,8 @@ try {
     && step.status === "stopped"
     && step.location === "unassigned"
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
+    && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
   )));
   assert.ok(detachedWorkerReview.branchNextSteps.some((step) => (
     step.action === "review_branch"
@@ -1580,12 +1600,14 @@ try {
     && step.status === "completed"
     && step.location === "session_worker"
     && step.command.join(" ") === `npm run cli -- runs review ${detachedResultPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedResultPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
+    && step.commands.inspectRun?.join(" ") === `npm run cli -- runs inspect ${detachedResultPlan.run.id}`
   )));
   const detachedNextOnly = await cliJson<{
     session: { session: string };
     summary: { agents: number; resultBranches: number; resumableBranches: number; recoveryCandidates: number; branchNextSteps: number };
     nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
-    branchNextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+    branchNextSteps: Array<{ action: string; reason: string; runId: string; command: string[]; commands: { checkoutBranch: string[] } }>;
     agents?: unknown;
     logs?: unknown;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next"]);
@@ -1594,6 +1616,10 @@ try {
   assert.equal(detachedNextOnly.summary.branchNextSteps, detachedWorkerReview.summary.branchNextSteps);
   assert.deepEqual(detachedNextOnly.nextSteps.map((step) => step.action), detachedWorkerReview.nextSteps.map((step) => step.action));
   assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.runId), detachedWorkerReview.branchNextSteps.map((step) => step.runId));
+  assert.deepEqual(
+    detachedNextOnly.branchNextSteps.map((step) => step.commands.checkoutBranch.join(" ")),
+    detachedWorkerReview.branchNextSteps.map((step) => step.commands.checkoutBranch.join(" ")),
+  );
   assert.equal(detachedNextOnly.agents, undefined);
   assert.equal(detachedNextOnly.logs, undefined);
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (

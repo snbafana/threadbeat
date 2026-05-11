@@ -594,6 +594,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           command: run.state === "resumable" && run.commands.resumeBranch
             ? run.commands.resumeBranch
             : run.commands.reviewRun,
+          commands: run.commands,
         })),
       });
       return;
@@ -1324,6 +1325,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         branchName: run.branchName,
         resultCommit: run.resultCommit,
         command: run.commands.resumeBranch,
+        commands: run.commands,
       })),
       ...resultBranches.map((run) => ({
         action: "review_branch",
@@ -1335,6 +1337,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         branchName: run.branchName,
         resultCommit: run.resultCommit,
         command: run.commands.reviewRun,
+        commands: run.commands,
       })),
     ];
     const statuses: Record<string, number> = {};
