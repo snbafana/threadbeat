@@ -303,6 +303,56 @@ try {
   ]);
   assert.ok(stopped.stopped.every((worker) => worker.stopped && !worker.alive));
   sessionStarted = false;
+
+  const sessionStopped = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentA.agent.id,
+    "--objective",
+    "inspect stopped branch from session watch",
+  ]);
+  runIds.push(sessionStopped.run.id);
+  await cliJson(baseUrl, ["runs", "stop", sessionStopped.run.id]);
+  const sessionWatch = await cliJson<{
+    checkoutDir: string;
+    branchNextSteps: Array<{
+      runId: string;
+      branchName: string;
+      command: string[];
+      commands: { checkoutBranch: string[]; inspectRun: string[]; reviewRun: string[]; watchRun: string[]; resumeBranch: string[] };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    sessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--max-polls",
+    "1",
+    "--checkout-dir",
+    "./checkouts/session-watch",
+  ]);
+  const watchedBranch = sessionWatch.branchNextSteps.find((step) => step.runId === sessionStopped.run.id);
+  assert.ok(watchedBranch);
+  assert.equal(sessionWatch.checkoutDir, "./checkouts/session-watch");
+  assert.equal(watchedBranch.branchName, sessionStopped.plan.branchName);
+  assert.equal(watchedBranch.command.join(" "), `npm run cli -- runs resume-branch ${sessionStopped.run.id}`);
+  assert.equal(
+    watchedBranch.commands.checkoutBranch.join(" "),
+    `npm run cli -- runs checkout ${sessionStopped.run.id} --dir ./checkouts/session-watch/${sessionStopped.run.id}`,
+  );
+  assert.equal(watchedBranch.commands.inspectRun.join(" "), `npm run cli -- runs inspect ${sessionStopped.run.id}`);
+  assert.equal(
+    watchedBranch.commands.reviewRun.join(" "),
+    `npm run cli -- runs review ${sessionStopped.run.id} --checkout-dir ./checkouts/session-watch/${sessionStopped.run.id}`,
+  );
+  assert.equal(
+    watchedBranch.commands.watchRun.join(" "),
+    `npm run cli -- runs watch ${sessionStopped.run.id} --checkout-dir ./checkouts/session-watch/${sessionStopped.run.id}`,
+  );
+  assert.equal(watchedBranch.commands.resumeBranch.join(" "), `npm run cli -- runs resume-branch ${sessionStopped.run.id}`);
 } finally {
   if (baseUrl !== null) {
     const cleanupBaseUrl = baseUrl;

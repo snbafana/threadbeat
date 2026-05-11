@@ -261,6 +261,7 @@ npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
+npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --checkout-dir ./checkouts/overnight-watch
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs recover-session overnight --dry-run
 npm run cli -- runs resume-session overnight --worker-id worker-a --dry-run
@@ -444,7 +445,9 @@ recoverable preview is enabled. Add `--next` to `runs session-watch` to stream
 only the compact restart/recover/resume command
 queue for each poll instead of the full session snapshot. The compact watch
 payload also includes `branchNextSteps` for stopped branch rows, with objective,
-worker ownership, checkout/resume commands, and recoverability when available.
+worker ownership, checkout/review/inspect/watch/resume commands, and
+recoverability when available. Pass `--checkout-dir` to choose where those branch
+commands materialize local checkouts.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents.
 `runs session-review <name> --include-stopped` is the read-only operator summary

@@ -1673,6 +1673,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
+    const branchCheckoutDir = options["checkout-dir"] ?? `./checkouts/${requiredSessionName}-resumable`;
     let polls = 0;
     while (true) {
       const status = await workerSessionStatus(requiredSessionName, statusFilter);
@@ -1718,7 +1719,6 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const recoverStoppedCommand = recoverableStopped > 0
           ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"]
           : null;
-        const resumableCheckoutDir = `./checkouts/${status.session.session}-resumable`;
         const branchNextSteps = resumableBranches.map((run) => ({
           action: "resume_branch",
           reason: "stopped_branch_without_result_commit",
@@ -1733,7 +1733,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           recoverable: recoverableStoppedRunIds.has(run.runId),
           command: ["npm", "run", "cli", "--", "runs", "resume-branch", run.runId],
           commands: {
-            checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.runId, "--dir", `${resumableCheckoutDir}/${run.runId}`],
+            checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.runId, "--dir", `${branchCheckoutDir}/${run.runId}`],
+            inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.runId],
+            reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.runId, "--checkout-dir", `${branchCheckoutDir}/${run.runId}`],
+            watchRun: ["npm", "run", "cli", "--", "runs", "watch", run.runId, "--checkout-dir", `${branchCheckoutDir}/${run.runId}`],
             resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.runId],
             recoverStopped: recoverableStoppedRunIds.has(run.runId) ? recoverStoppedCommand : null,
           },
@@ -1762,6 +1765,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             recoveryCandidates: recoverableActive + recoverableStopped,
             branchNextSteps: branchNextSteps.length,
           },
+          checkoutDir: branchCheckoutDir,
           nextSteps: [
             ...(deadWorkerCount > 0 && resumableBranches.length > 0 ? [{
               action: "restart_session_with_stopped",
@@ -3337,7 +3341,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
   runs session-review <name> [--include-stopped] [--next] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--interval-ms 2000] [--max-polls 10]
+  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
