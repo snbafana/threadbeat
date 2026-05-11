@@ -52,6 +52,46 @@ try {
     "detached session smoke branch",
   ]);
   assert.match(planned.plan.branchName, /^threadbeat\/runs\//);
+  const stalePlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session stale running branch",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    stalePlan.run.id,
+    "--worker-id",
+    "detached-smoke-worker-1",
+  ]);
+  const stoppedPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session unassigned stopped branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", stoppedPlan.run.id]);
+  const workerStoppedPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session worker stopped branch",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    workerStoppedPlan.run.id,
+    "--worker-id",
+    "detached-smoke-worker-1",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", workerStoppedPlan.run.id]);
 
   const session = await cliJson<{
     session: {
@@ -91,6 +131,48 @@ try {
   assert.equal(status.session.session, sessionName);
   assert.equal(status.session.workers[0].workerId, "detached-smoke-worker-1");
   assert.equal(status.session.workers[0].alive, true);
+  const recoverableStatus = await cliJson<{
+    recoveryPreview: Array<{
+      runId: string;
+      currentStatus?: string;
+      dryRun?: boolean;
+      resultCommit?: string | null;
+      workerId?: string | null;
+    }>;
+    branchNextSteps: Array<{
+      runId: string;
+      action: string;
+      reason: string;
+      location: string;
+      recoverable: boolean;
+      workerId: string | null;
+      command: string[];
+      commands: { resumeBranch: string[]; recoverStopped: string[] | null };
+    }>;
+  }>(baseUrl, ["runs", "session-status", sessionName, "--recoverable", "--include-stopped"]);
+  assert.ok(recoverableStatus.recoveryPreview.some((run) => (
+    run.runId === stalePlan.run.id
+    && run.currentStatus === "running"
+    && run.dryRun === true
+  )));
+  assert.ok(recoverableStatus.recoveryPreview.some((run) => (
+    run.runId === stoppedPlan.run.id
+    && run.currentStatus === "stopped"
+    && run.dryRun === true
+    && run.resultCommit === null
+    && run.workerId === null
+  )));
+  assert.ok(recoverableStatus.branchNextSteps.some((step) => (
+    step.runId === stoppedPlan.run.id
+    && step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.location === "unassigned"
+    && step.recoverable === true
+    && step.workerId === null
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
+    && step.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
+    && step.commands.recoverStopped?.join(" ") === `npm run cli -- runs recover-session ${sessionName} --include-stopped`
+  )));
 
   const actions = await cliJson<{
     actions: { sessionStatus: string[]; sessionWatch: string[]; stopSession: string[] };
@@ -98,6 +180,49 @@ try {
   assert.equal(actions.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${sessionName} --recoverable --include-stopped`);
   assert.equal(actions.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
   assert.equal(actions.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${sessionName} --recover`);
+
+  const recoveredPreview = await cliJson<{
+    session: string;
+    recovered: Array<{ runId: string; currentStatus?: string; dryRun?: boolean }>;
+  }>(baseUrl, ["runs", "recover-session", sessionName, "--dry-run"]);
+  assert.equal(recoveredPreview.session, sessionName);
+  assert.ok(recoveredPreview.recovered.some((run) => (
+    run.runId === stalePlan.run.id
+    && run.currentStatus === "running"
+    && run.dryRun === true
+  )));
+  const recovered = await cliJson<{
+    session: string;
+    recovered: Array<{ runId: string; status?: string; workerId: string | null }>;
+    status: { session: { session: string } };
+  }>(baseUrl, ["runs", "recover-session", sessionName]);
+  assert.equal(recovered.session, sessionName);
+  assert.equal(recovered.status.session.session, sessionName);
+  assert.ok(recovered.recovered.some((run) => (
+    run.runId === stalePlan.run.id
+    && run.status === "planned"
+    && run.workerId === null
+  )));
+  const resumePreview = await cliJson<{
+    session: string;
+    resumed: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; branchName: string; workerId: string | null }>;
+  }>(baseUrl, ["runs", "resume-session", sessionName, "--worker-id", "detached-smoke-worker-1", "--dry-run"]);
+  assert.equal(resumePreview.session, sessionName);
+  assert.deepEqual(resumePreview.resumed.map((run) => run.runId), [workerStoppedPlan.run.id]);
+  assert.equal(resumePreview.resumed[0].branchName, workerStoppedPlan.plan.branchName);
+  assert.equal(resumePreview.resumed[0].workerId, "detached-smoke-worker-1");
+  assert.equal(resumePreview.resumed[0].currentStatus, "stopped");
+  assert.equal(resumePreview.resumed[0].dryRun, true);
+  const resumed = await cliJson<{
+    session: string;
+    resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+    status: { session: { session: string } };
+  }>(baseUrl, ["runs", "resume-session", sessionName, "--worker-id", "detached-smoke-worker-1"]);
+  assert.equal(resumed.session, sessionName);
+  assert.equal(resumed.status.session.session, sessionName);
+  assert.deepEqual(resumed.resumed.map((run) => run.runId), [workerStoppedPlan.run.id]);
+  assert.equal(resumed.resumed[0].status, "planned");
+  assert.equal(resumed.resumed[0].workerId, null);
 
   const logs = await cliJson<{
     workers: Array<{ workerId: string; alive: boolean; stdout: { path: string }; stderr: { path: string } }>;
