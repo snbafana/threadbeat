@@ -2603,7 +2603,7 @@ try {
       succeeded: number;
       failed: number;
       pending: number;
-      actions: { resumeApply: string[]; inspectResults: string[] | null };
+      actions: { resumeApply: string[]; inspectResults: string[] | null; reviewReadyResults: string[] | null };
       pendingCommands: Array<{ runId?: string }>;
       failedCommands: Array<{ runId?: string }>;
       affectedRuns: Array<{
@@ -2636,6 +2636,7 @@ try {
     sessionApplyInspection.summary.actions.inspectResults?.join(" "),
     `npm run cli -- runs results --session ${detachedWorkerSessionName} --run ${sessionApplyPlan.run.id} --next`,
   );
+  assert.equal(sessionApplyInspection.summary.actions.reviewReadyResults, null);
   assert.equal(sessionApplyInspection.summary.affectedRuns[0].commands.inspectRun.join(" "), `npm run cli -- runs inspect ${sessionApplyPlan.run.id}`);
   assert.equal(
     sessionApplyInspection.summary.affectedRuns[0].commands.inspectResults.join(" "),
@@ -2670,7 +2671,7 @@ try {
   const sessionApplyList = await cliJson<{
     session: string;
     count: number;
-    applies: Array<{ applyId: string; pending: number; actions: { resumeApply: string[]; inspectResults: string[] | null }; affectedRuns: Array<{ runId: string; currentRun: { status: string } | null }> }>;
+    applies: Array<{ applyId: string; pending: number; actions: { resumeApply: string[]; inspectResults: string[] | null; reviewReadyResults: string[] | null }; affectedRuns: Array<{ runId: string; currentRun: { status: string } | null }> }>;
   }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName]);
   assert.equal(sessionApplyList.session, detachedWorkerSessionName);
   assert.ok(sessionApplyList.count >= 1);
@@ -4423,6 +4424,59 @@ try {
   assert.equal(sessionResultSummary.totals.statuses.completed, 1);
   assert.equal(sessionResultSummary.totals.resultCommits, 1);
   assert.equal(sessionResultSummary.totals.resumableStopped, 0);
+  const resultApplyId = "smoke-result-apply-review";
+  const resultApplyDir = path.join(".threadbeat", "worker-sessions", "apply", resultSummarySessionName);
+  const resultApplyPath = path.join(resultApplyDir, `${resultApplyId}.json`);
+  await fs.mkdir(resultApplyDir, { recursive: true });
+  await fs.writeFile(resultApplyPath, `${JSON.stringify({
+    observedAt: "2026-01-01T00:00:00.000Z",
+    session: resultSummarySessionName,
+    source: "status",
+    applyId: resultApplyId,
+    applyPath: resultApplyPath,
+    dryRun: false,
+    resume: false,
+    filter: { branchAction: ["resume_branch"] },
+    selected: 1,
+    skippedCompleted: 0,
+    commands: [{
+      scope: "branch",
+      action: "resume_branch",
+      reason: "applied branch resume",
+      runId: cliWorkFinalizePlan.run.id,
+      command: ["npm", "run", "cli", "--", "runs", "resume-branch", cliWorkFinalizePlan.run.id],
+    }],
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:01.000Z",
+    executions: [{
+      scope: "branch",
+      action: "resume_branch",
+      reason: "applied branch resume",
+      runId: cliWorkFinalizePlan.run.id,
+      command: ["npm", "run", "cli", "--", "runs", "resume-branch", cliWorkFinalizePlan.run.id],
+      exitCode: 0,
+      stdout: "{}",
+      stderr: "",
+      output: {},
+    }],
+  }, null, 2)}\n`);
+  const readyResultApply = await cliJson<{
+    summary: {
+      actions: { inspectResults: string[] | null; reviewReadyResults: string[] | null };
+      affectedRuns: Array<{ runId: string; currentRun: { status: string; resultCommit: string | null; nextAction: string } | null }>;
+    };
+  }>(baseUrl, ["runs", "session-applies", resultSummarySessionName, "--apply-id", resultApplyId]);
+  assert.equal(
+    readyResultApply.summary.actions.inspectResults?.join(" "),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next`,
+  );
+  assert.equal(
+    readyResultApply.summary.actions.reviewReadyResults?.join(" "),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`,
+  );
+  assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.status, "completed");
+  assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.resultCommit, cliWorkFinalized.processed[0].finalized.result.commitSha);
+  assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.nextAction, "review_branch");
   assert.ok(sessionResultSummary.resultCommits.some((commit) => (
     commit.agentId === cliWorkFinalizeAgent.agent.id
     && commit.runId === cliWorkFinalizePlan.run.id

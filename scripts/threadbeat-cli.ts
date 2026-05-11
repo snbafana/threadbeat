@@ -4642,6 +4642,7 @@ type SessionApplySummary = {
     retryFailed: string[];
     resumePending: string[];
     inspectResults: string[] | null;
+    reviewReadyResults: string[] | null;
   };
   pendingCommands: SessionApplyCommand[];
   failedCommands: SessionApplyCommand[];
@@ -4884,6 +4885,9 @@ function summarizeSessionApplyRecord(
   const pendingCommands = record.commands.filter((command) => !commandStates.has(commandKey(command.command)));
   const affectedRuns = sessionApplyAffectedRuns(record, commandStates, runStatusIndex);
   const affectedRunIds = affectedRuns.map((run) => run.runId);
+  const readyResultRunIds = affectedRuns
+    .filter((run) => run.currentRun?.resultCommit)
+    .map((run) => run.runId);
   return {
     applyId: record.applyId,
     applyPath: record.applyPath,
@@ -4902,6 +4906,9 @@ function summarizeSessionApplyRecord(
       resumePending: sessionApplyResumeCommand(record, ["pending"]),
       inspectResults: affectedRunIds.length > 0
         ? ["npm", "run", "cli", "--", "runs", "results", "--session", record.session, "--run", affectedRunIds.join(","), "--next"]
+        : null,
+      reviewReadyResults: readyResultRunIds.length > 0
+        ? ["npm", "run", "cli", "--", "runs", "results", "--session", record.session, "--run", readyResultRunIds.join(","), "--next", "--commands-only"]
         : null,
     },
     pendingCommands,
