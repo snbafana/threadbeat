@@ -1557,6 +1557,8 @@ try {
   const workerFleetSummarySnapshots = workerFleetSummaryPoll.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
     observedAt: string;
     totals: { sessions: number; resumableStopped: number };
+    nextActions: Record<string, number>;
+    actionQueue: Array<{ session: string; action: string; reason: string; command: string[] }>;
     resumableBranches: Array<{ runId: string; resultCommit: string | null }>;
     sessions: Array<{
       session: { session: string };
@@ -1568,6 +1570,13 @@ try {
     /^\d{4}-\d{2}-\d{2}T/.test(snapshot.observedAt)
     && snapshot.totals.sessions === 1
     && snapshot.totals.resumableStopped >= 1
+    && snapshot.nextActions.continue_watch === 1
+    && snapshot.actionQueue.some((item) => (
+      item.session === detachedWorkerSessionName
+      && item.action === "continue_watch"
+      && item.reason === "workers_still_alive"
+      && item.command.join(" ") === `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`
+    ))
     && snapshot.resumableBranches.some((run) => (
       run.runId === detachedStoppedPlan.run.id
       && run.resultCommit === null
@@ -1580,6 +1589,8 @@ try {
   const workerFleetNeedsAction = await cliJson<{
     filter: { needsAction: true; totalSessions: number };
     totals: { sessions: number; workers: { alive: number }; resumableStopped: number };
+    nextActions: Record<string, number>;
+    actionQueue: Array<{ session: string; action: string }>;
     resumableBranches: Array<{ runId: string }>;
     sessions: Array<{ session: { session: string }; nextStep?: { action: string } }>;
   }>(baseUrl, [
@@ -1596,6 +1607,8 @@ try {
   assert.equal(workerFleetNeedsAction.totals.sessions, 0);
   assert.equal(workerFleetNeedsAction.totals.workers.alive, 0);
   assert.equal(workerFleetNeedsAction.totals.resumableStopped, 0);
+  assert.deepEqual(workerFleetNeedsAction.nextActions, {});
+  assert.deepEqual(workerFleetNeedsAction.actionQueue, []);
   assert.equal(workerFleetNeedsAction.resumableBranches.length, 0);
   assert.equal(workerFleetNeedsAction.sessions.length, 0);
   const detachedWorkerBranches = await cliJson<{

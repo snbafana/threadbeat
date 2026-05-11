@@ -1533,10 +1533,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         }
         const resultCommits = visibleSessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
         const resumableBranches = visibleSessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
+        const actionQueue = visibleSessions
+          .filter((session) => "nextStep" in session && session.nextStep)
+          .map((session) => ({
+            session: session.session.session,
+            action: session.nextStep!.action,
+            reason: session.nextStep!.reason,
+            command: session.nextStep!.command,
+          }));
+        const nextActions = actionQueue.reduce((counts, item) => {
+          counts[item.action] = (counts[item.action] ?? 0) + 1;
+          return counts;
+        }, {} as Record<string, number>);
         return {
           observedAt: new Date().toISOString(),
           ...(options["needs-action"] === "1" ? { filter: { needsAction: true, totalSessions: sessions.length } } : {}),
           totals,
+          ...(options.next === "1" ? { nextActions, actionQueue } : {}),
           resumableBranches,
           resultCommits,
           sessions: visibleSessions,
