@@ -1285,6 +1285,132 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   }
   if (subcommandName === "sessions") {
     const options = parseOptions(args);
+    if (options.summary === "1" || options.next === "1") {
+      const sessionNames = options.session ? [options.session] : await listWorkerSessionNames();
+      const sessions = await mapConcurrent(sessionNames, 4, async (listedSessionName) => {
+        try {
+          const status = await workerSessionStatus(listedSessionName, new Set(["planned", "running", "stopped"]));
+          const agentIds = workerSessionAgentIds(status.session);
+          const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+            const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+              runs: Array<{ id: string; status: string; result_commit: string | null }>;
+            };
+            const statuses: Record<string, number> = {};
+            for (const run of listed.runs) {
+              statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+            }
+            return {
+              agentId,
+              total: listed.runs.length,
+              statuses,
+              resultCommits: listed.runs.filter((run) => run.result_commit).length,
+              resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+            };
+          });
+          const totals = {
+            runs: agents.reduce((sum, agent) => sum + agent.total, 0),
+            resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
+            resumableStopped: agents.reduce((sum, agent) => sum + agent.resumableStopped, 0),
+            statuses: {} as Record<string, number>,
+          };
+          for (const agent of agents) {
+            for (const [runStatus, count] of Object.entries(agent.statuses)) {
+              totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+            }
+          }
+          const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+          const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
+          const commands = {
+            sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", listedSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+            sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", listedSessionName, "--include-stopped"],
+            resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", listedSessionName, "--next"],
+            recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", listedSessionName],
+            restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", listedSessionName, "--recover"],
+            restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", listedSessionName, "--recover", "--resume-stopped"],
+            sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", listedSessionName],
+            stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", listedSessionName, "--recover"],
+          };
+          const nextStep = aliveWorkers > 0
+            ? {
+              action: "continue_watch",
+              reason: "workers_still_alive",
+              command: commands.sessionSummaryWatch,
+            }
+            : (totals.statuses.running ?? 0) > 0
+              ? {
+                action: "recover_session",
+                reason: "stale_running_claims",
+                command: commands.recoverSession,
+              }
+              : totals.resumableStopped > 0
+                ? {
+                  action: "restart_session_with_stopped",
+                  reason: "resumable_stopped_branches",
+                  command: commands.restartSessionWithStopped,
+                }
+                : (totals.statuses.planned ?? 0) > 0
+                  ? {
+                    action: "restart_session",
+                    reason: "planned_runs_waiting",
+                    command: commands.restartSession,
+                  }
+                  : totals.resultCommits > 0
+                    ? {
+                      action: "inspect_results",
+                      reason: "result_commits_available",
+                      command: commands.resultsNext,
+                    }
+                    : {
+                      action: "review_session",
+                      reason: "no_active_work",
+                      command: commands.sessionReview,
+                    };
+          return {
+            session: {
+              session: status.session.session,
+              command: status.session.command,
+              startedAt: status.session.startedAt,
+              stoppedAt: status.session.stoppedAt ?? null,
+              restartedAt: status.session.restartedAt ?? null,
+              workers: {
+                total: sessionWorkers.length,
+                alive: aliveWorkers,
+                dead: sessionWorkers.length - aliveWorkers,
+              },
+            },
+            totals,
+            agents,
+            ...(options.next === "1" ? { commands, nextStep } : {}),
+          };
+        } catch (error) {
+          return {
+            session: { session: listedSessionName },
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      });
+      const totals = {
+        sessions: sessions.length,
+        unavailable: sessions.filter((session) => "error" in session).length,
+        workers: {
+          total: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.total : 0), 0),
+          alive: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.alive : 0), 0),
+          dead: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.dead : 0), 0),
+        },
+        runs: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.runs : 0), 0),
+        resultCommits: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resultCommits : 0), 0),
+        resumableStopped: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resumableStopped : 0), 0),
+        statuses: {} as Record<string, number>,
+      };
+      for (const session of sessions) {
+        if (!("totals" in session)) continue;
+        for (const [runStatus, count] of Object.entries(session.totals.statuses)) {
+          totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+        }
+      }
+      await printJson({ observedAt: new Date().toISOString(), totals, sessions });
+      return;
+    }
     await printJson({ sessions: await listWorkerSessions(options.session) });
     return;
   }
@@ -3093,7 +3219,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty" || key === "wait") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -3867,7 +3993,7 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>]
+  runs sessions [--session <name>] [--summary] [--next]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]

@@ -441,7 +441,8 @@ CLI exits; Threadbeat records worker PIDs and stdout/stderr log paths under
 sessions, `runs session-status <name>` to see worker liveness plus matching
 queued/claimed run branches, `runs session-watch <name>` to stream those snapshots
 while the session runs, `runs session-logs <name>` to read recent worker
-stdout/stderr, and `runs stop-session <name>` to terminate the recorded process
+stdout/stderr, `runs sessions --summary --next` to see the next action for every
+recorded session in one fleet snapshot, and `runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add
 `--recover` to `runs stop-session` to requeue unfinished runs claimed by that
 session's workers when those runs do not have a running sandbox. Add

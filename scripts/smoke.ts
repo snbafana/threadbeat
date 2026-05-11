@@ -1430,6 +1430,28 @@ try {
     && agent.total >= workerGroupQueue.queued.length
     && agent.resumableStopped >= 1
   )));
+  const workerFleetSummary = await cliJson<{
+    totals: { sessions: number; unavailable: number; workers: { alive: number }; resumableStopped: number };
+    sessions: Array<{
+      session: { session: string; workers?: { alive: number } };
+      totals?: { resumableStopped: number };
+      nextStep?: { action: string; reason: string; command: string[] };
+      commands?: { sessionSummaryWatch: string[] };
+      error?: string;
+    }>;
+  }>(baseUrl, ["runs", "sessions", "--summary", "--next"]);
+  assert.ok(workerFleetSummary.totals.sessions >= 1);
+  assert.ok(workerFleetSummary.totals.workers.alive >= 1);
+  assert.ok(workerFleetSummary.totals.resumableStopped >= 1);
+  const detachedFleetSession = workerFleetSummary.sessions.find((session) => session.session.session === detachedWorkerSessionName);
+  assert.ok(detachedFleetSession);
+  assert.equal(detachedFleetSession?.error, undefined);
+  assert.equal(detachedFleetSession?.session.workers?.alive, 1);
+  assert.ok((detachedFleetSession?.totals?.resumableStopped ?? 0) >= 1);
+  assert.equal(detachedFleetSession?.nextStep?.action, "continue_watch");
+  assert.equal(detachedFleetSession?.nextStep?.reason, "workers_still_alive");
+  assert.equal(detachedFleetSession?.nextStep?.command.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
+  assert.equal(detachedFleetSession?.commands?.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
   const detachedWorkerBranches = await cliJson<{
     observedAt: string;
     session: string;
