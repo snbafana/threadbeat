@@ -1067,6 +1067,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               : "other_worker",
           commands: {
             checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resultCheckoutDir}/${run.id}`],
+            reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resultCheckoutDir}/${run.id}`],
             inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
           },
         }));
@@ -1108,6 +1109,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           changedFiles: checkout.review.changedFiles,
           commits: checkout.review.commits,
           error: checkout.review.error ?? null,
+          commands: {
+            reviewRun: ["npm", "run", "cli", "--", "runs", "review", checkout.run.id, "--checkout-dir", checkout.checkout.dir],
+          },
         })))
       : null;
     const deadWorkerCount = sessionWorkers.filter((worker) => !worker.alive).length;

@@ -1428,7 +1428,7 @@ try {
       resultCommit: string;
       workerId: string | null;
       location: string;
-      commands: { checkoutBranch: string[]; inspectRun: string[] };
+      commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[] };
     }>;
     recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; skipped?: string }>;
     actions: {
@@ -1528,6 +1528,7 @@ try {
     && run.workerId === "smoke-detached-worker-1"
     && run.location === "session_worker"
     && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedResultPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
+    && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedResultPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
     && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedResultPlan.run.id}`
   )));
   assert.equal(detachedWorkerReview.logs[0].workerId, "smoke-detached-worker-1");
@@ -2661,6 +2662,7 @@ try {
       changedFiles: Array<{ status: string; path: string }>;
       commits: Array<{ sha: string; subject: string }>;
       error: string | null;
+      commands: { reviewRun: string[] };
     }>;
     resultCheckouts: Array<{
       agentId: string;
@@ -2712,6 +2714,7 @@ try {
     && run.resultCommit === null
     && run.checkoutDir === path.join(sessionReviewCheckoutDir, checkoutPlan.run.id)
     && run.error === null
+    && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${checkoutPlan.run.id} --checkout-dir ${path.join(sessionReviewCheckoutDir, checkoutPlan.run.id)}`
     && run.changedFiles.some((file) => file.status === "A" && file.path === "report.md")
   )));
   assert.equal(await fs.readFile(path.join(sessionReviewCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");

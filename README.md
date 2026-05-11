@@ -385,7 +385,8 @@ checkout/resume commands, dry-run recovery candidates, ordered `nextSteps`, and
 recent worker logs in one payload. Add `--next` to return only the compact
 summary and ordered next-step commands. The full snapshot also includes an
 `actions` block with the exact restart, recover, resume, and changed-results
-commands to run next. Add
+commands to run next. Result rows include `commands.reviewRun` for compact
+branch-native inspection of one completed run. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
