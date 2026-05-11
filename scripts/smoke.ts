@@ -2529,6 +2529,26 @@ try {
   assert.ok(changedOnlyAgent?.runs.some((run) => run.id === checkoutPlan.run.id));
   assert.equal(changedOnlyAgent?.runs.some((run) => run.id === unchangedCheckoutPlan.run.id), false);
   assert.ok(changedOnlyAgent?.runs.every((run) => (run.review?.changedFiles.length ?? 0) > 0));
+  const changedPathResults = await cliJson<{
+    summary: { total: number; changedFiles: number | null };
+    changedFiles: Array<{ runId: string; path: string }>;
+    agents: Array<{ runs: Array<{ id: string; review?: { changedFiles: Array<{ path: string }> } }> }>;
+  }>(baseUrl, [
+    "runs",
+    "results",
+    "--agent",
+    checkoutAgent.agent.id,
+    "--status",
+    "stopped",
+    "--checkout-dir",
+    changedOnlyResultsDir,
+    "--changed-path",
+    "report.md",
+  ]);
+  assert.equal(changedPathResults.summary.total, 1);
+  assert.equal(changedPathResults.summary.changedFiles, 1);
+  assert.deepEqual(changedPathResults.changedFiles.map((file) => [file.runId, file.path]), [[checkoutPlan.run.id, "report.md"]]);
+  assert.deepEqual(changedPathResults.agents.flatMap((agent) => agent.runs).map((run) => run.id), [checkoutPlan.run.id]);
   const sessionReviewCheckoutDir = path.join(tempRoot, "session-review-checkouts");
   const checkedOutSessionReview = await cliJson<{
     checkoutDir: string;

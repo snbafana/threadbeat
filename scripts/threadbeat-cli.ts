@@ -527,8 +527,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const checkoutConcurrency = options["checkout-concurrency"]
       ? parsePositiveInteger(options["checkout-concurrency"], "--checkout-concurrency")
       : 2;
+    const changedPathFilter = options["changed-path"] ? new Set(parseList(options["changed-path"])) : null;
     if (options["changed-only"] === "1" && !checkoutRootDir) {
       throw new Error("runs results --changed-only requires --checkout-dir");
+    }
+    if (changedPathFilter && !checkoutRootDir) {
+      throw new Error("runs results --changed-path requires --checkout-dir");
     }
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
@@ -626,6 +630,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             })
             .filter((run) => options["changed-only"] !== "1"
               || (run.review && (run.review.changedFiles.length > 0 || run.review.commits.length > 0 || run.review.error)))
+            .filter((run) => !changedPathFilter
+              || (run.review?.changedFiles ?? []).some((file) => changedPathFilter.has(file.path)))
           : runs;
         return {
           agentId,
@@ -2541,7 +2547,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]
