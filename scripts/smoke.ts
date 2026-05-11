@@ -1385,6 +1385,9 @@ try {
       action: string;
       reason: string;
       runId: string;
+      objective: string;
+      workerId: string | null;
+      location: string | null;
       command: string[];
       commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[]; resumeBranch: string[] | null };
     }>;
@@ -1397,6 +1400,9 @@ try {
     step.action === "resume_branch"
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
+    && step.objective === "detached stopped branch"
+    && step.workerId === null
+    && step.location === "unassigned"
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
     && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-branches/${detachedStoppedPlan.run.id}`
     && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedStoppedPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-branches/${detachedStoppedPlan.run.id}`
@@ -1520,6 +1526,8 @@ try {
       reason: string;
       runId: string;
       status: string;
+      objective: string;
+      workerId: string | null;
       location: string;
       command: string[];
       commands: {
@@ -1588,6 +1596,8 @@ try {
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
     && step.status === "stopped"
+    && step.objective === "detached stopped branch"
+    && step.workerId === null
     && step.location === "unassigned"
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
     && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
@@ -1598,6 +1608,8 @@ try {
     && step.reason === "result_commit_available"
     && step.runId === detachedResultPlan.run.id
     && step.status === "completed"
+    && step.objective === "detached result branch"
+    && step.workerId === "smoke-detached-worker-1"
     && step.location === "session_worker"
     && step.command.join(" ") === `npm run cli -- runs review ${detachedResultPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
     && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedResultPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
@@ -1607,7 +1619,7 @@ try {
     session: { session: string };
     summary: { agents: number; resultBranches: number; resumableBranches: number; recoveryCandidates: number; branchNextSteps: number };
     nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
-    branchNextSteps: Array<{ action: string; reason: string; runId: string; command: string[]; commands: { checkoutBranch: string[] } }>;
+    branchNextSteps: Array<{ action: string; reason: string; runId: string; objective: string; workerId: string | null; command: string[]; commands: { checkoutBranch: string[] } }>;
     agents?: unknown;
     logs?: unknown;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next"]);
@@ -1616,6 +1628,8 @@ try {
   assert.equal(detachedNextOnly.summary.branchNextSteps, detachedWorkerReview.summary.branchNextSteps);
   assert.deepEqual(detachedNextOnly.nextSteps.map((step) => step.action), detachedWorkerReview.nextSteps.map((step) => step.action));
   assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.runId), detachedWorkerReview.branchNextSteps.map((step) => step.runId));
+  assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.objective), detachedWorkerReview.branchNextSteps.map((step) => step.objective));
+  assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.workerId), detachedWorkerReview.branchNextSteps.map((step) => step.workerId));
   assert.deepEqual(
     detachedNextOnly.branchNextSteps.map((step) => step.commands.checkoutBranch.join(" ")),
     detachedWorkerReview.branchNextSteps.map((step) => step.commands.checkoutBranch.join(" ")),
