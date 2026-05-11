@@ -2386,10 +2386,15 @@ try {
     "detached session apply resume branch",
   ]);
   await cliJson(baseUrl, ["runs", "stop", sessionApplyPlan.run.id]);
+  const sessionApplyId = "smoke-session-apply-resume";
   const sessionApplyResumed = await cliJson<{
     session: string;
+    applyId: string;
+    applyPath: string;
     dryRun: boolean;
+    resume: boolean;
     selected: number;
+    skippedCompleted: number;
     commands: Array<{ action: string; runId?: string }>;
     executions: Array<{
       action: string;
@@ -2397,10 +2402,14 @@ try {
       exitCode: number | null;
       output: { resumed?: { runId: string; branchName: string; status: string; workerId: string | null }; run?: { status: string; worker_id: string | null } };
     }>;
-  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1"]);
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1", "--apply-id", sessionApplyId]);
   assert.equal(sessionApplyResumed.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyResumed.applyId, sessionApplyId);
+  assert.match(sessionApplyResumed.applyPath, new RegExp(`\\.threadbeat/worker-sessions/apply/${detachedWorkerSessionName}/${sessionApplyId}\\.json$`));
   assert.equal(sessionApplyResumed.dryRun, false);
+  assert.equal(sessionApplyResumed.resume, false);
   assert.equal(sessionApplyResumed.selected, 1);
+  assert.equal(sessionApplyResumed.skippedCompleted, 0);
   assert.equal(sessionApplyResumed.commands[0].action, "resume_branch");
   assert.equal(sessionApplyResumed.commands[0].runId, sessionApplyPlan.run.id);
   assert.equal(sessionApplyResumed.executions[0].action, "resume_branch");
@@ -2418,6 +2427,32 @@ try {
   ]);
   assert.equal(sessionApplyRun.run.status, "planned");
   assert.equal(sessionApplyRun.run.worker_id, null);
+  const sessionApplyRecord = JSON.parse(await fs.readFile(sessionApplyResumed.applyPath, "utf8")) as {
+    session: string;
+    applyId: string;
+    commands: Array<{ runId?: string }>;
+    executions: Array<{ runId: string | null; exitCode: number | null }>;
+  };
+  assert.equal(sessionApplyRecord.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyRecord.applyId, sessionApplyId);
+  assert.deepEqual(sessionApplyRecord.commands.map((command) => command.runId), [sessionApplyPlan.run.id]);
+  assert.equal(sessionApplyRecord.executions[0].runId, sessionApplyPlan.run.id);
+  assert.equal(sessionApplyRecord.executions[0].exitCode, 0);
+  const sessionApplyResume = await cliJson<{
+    session: string;
+    applyId: string;
+    resume: boolean;
+    selected: number;
+    skippedCompleted: number;
+    executions: Array<{ runId: string | null; exitCode: number | null }>;
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1", "--apply-id", sessionApplyId, "--resume"]);
+  assert.equal(sessionApplyResume.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyResume.applyId, sessionApplyId);
+  assert.equal(sessionApplyResume.resume, true);
+  assert.equal(sessionApplyResume.selected, 1);
+  assert.equal(sessionApplyResume.skippedCompleted, 1);
+  assert.deepEqual(sessionApplyResume.executions.map((execution) => execution.runId), [sessionApplyPlan.run.id]);
+  assert.deepEqual(sessionApplyResume.executions.map((execution) => execution.exitCode), [0]);
 
   const superviseAgentResponse = await app.inject({
     method: "POST",

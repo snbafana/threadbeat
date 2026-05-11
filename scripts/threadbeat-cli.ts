@@ -2743,6 +2743,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (!options.action && !options["branch-action"]) {
       throw new Error("runs session-apply requires --action or --branch-action");
     }
+    const applyId = options["apply-id"] ?? new Date().toISOString().replace(/[:.]/g, "-");
+    assertSafeSessionName(applyId);
+    const applyPath = workerSessionApplyPath(requiredSessionName, applyId);
+    const existingApply = options.resume === "1"
+      ? await readSessionApplyRecord(requiredSessionName, applyId)
+      : null;
+    if (options.resume !== "1" && options["apply-id"] && await pathExists(applyPath)) {
+      throw new Error(`session apply ${applyId} already exists for ${requiredSessionName}; use --resume`);
+    }
     const reviewArgs = [
       "runs",
       "session-review",
@@ -2774,27 +2783,44 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     };
     const runFilter = options.run ? new Set(parseList(options.run)) : null;
     const limit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
-    const selectedCommands = (runFilter
+    const selectedFromQueue = (runFilter
       ? queue.commands.filter((item) => item.runId && runFilter.has(item.runId))
       : queue.commands).slice(0, limit ?? undefined);
+    const selectedCommands = existingApply?.commands ?? selectedFromQueue;
+    const completedCommandKeys = new Set((existingApply?.executions ?? [])
+      .filter((execution) => execution.exitCode === 0)
+      .map((execution) => commandKey(execution.command)));
+    const pendingCommands = options.resume === "1"
+      ? selectedCommands.filter((item) => !completedCommandKeys.has(commandKey(item.command)))
+      : selectedCommands;
     const responseBase = {
       observedAt: queue.observedAt,
       session: requiredSessionName,
+      applyId,
+      applyPath,
       dryRun: options["dry-run"] === "1",
+      resume: options.resume === "1",
       filter: {
         ...(queue.filter ?? {}),
         ...(runFilter ? { run: [...runFilter] } : {}),
         ...(limit ? { limit } : {}),
       },
       selected: selectedCommands.length,
+      skippedCompleted: selectedCommands.length - pendingCommands.length,
       commands: selectedCommands,
     };
     if (options["dry-run"] === "1") {
       await printJson(responseBase);
       return;
     }
+    await writeSessionApplyRecord({
+      ...responseBase,
+      startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      executions: existingApply?.executions ?? [],
+    });
     const executions = await mapConcurrent(
-      selectedCommands,
+      pendingCommands,
       parsePositiveInteger(options.concurrency ?? "1", "--concurrency"),
       async (item) => {
         const execution = await runCliWorker(cliCommandArgs(item.command));
@@ -2811,8 +2837,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         };
       },
     );
+    const allExecutions = [...(existingApply?.executions ?? []), ...executions];
+    const record = {
+      ...responseBase,
+      startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      executions: allExecutions,
+    };
+    await writeSessionApplyRecord(record);
     if (executions.some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
-    await printJson({ ...responseBase, executions });
+    await printJson({ ...record, executions: allExecutions });
     return;
   }
   if (subcommandName === "session-watch") {
@@ -3877,7 +3911,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -3905,6 +3939,10 @@ function cliCommandArgs(command: string[]): string[] {
     throw new Error(`expected npm run cli command, got: ${command.join(" ")}`);
   }
   return command.slice(prefix.length);
+}
+
+function commandKey(command: string[]): string {
+  return JSON.stringify(command);
 }
 
 function parseJsonMaybe(value: string): unknown {
@@ -4244,6 +4282,42 @@ type WorkerSession = {
   restartedAt?: string;
 };
 
+type SessionApplyCommand = {
+  scope: string;
+  action: string;
+  reason: string;
+  runId?: string;
+  command: string[];
+};
+
+type SessionApplyExecution = {
+  scope: string;
+  action: string;
+  reason: string;
+  runId: string | null;
+  command: string[];
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  output: unknown;
+};
+
+type SessionApplyRecord = {
+  observedAt: string;
+  session: string;
+  applyId: string;
+  applyPath: string;
+  dryRun: boolean;
+  resume: boolean;
+  filter: Record<string, unknown>;
+  selected: number;
+  skippedCompleted: number;
+  commands: SessionApplyCommand[];
+  startedAt: string;
+  updatedAt: string;
+  executions: SessionApplyExecution[];
+};
+
 type SessionVisibleRun = {
   id: string;
   status: string;
@@ -4429,6 +4503,23 @@ async function writeWorkerSession(session: WorkerSession): Promise<void> {
   await fs.writeFile(workerSessionPath(session.session), `${JSON.stringify(session, null, 2)}\n`);
 }
 
+async function readSessionApplyRecord(sessionName: string, applyId: string): Promise<SessionApplyRecord | null> {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(applyId);
+  try {
+    const text = await fs.readFile(workerSessionApplyPath(sessionName, applyId), "utf8");
+    return JSON.parse(text) as SessionApplyRecord;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function writeSessionApplyRecord(record: SessionApplyRecord): Promise<void> {
+  await fs.mkdir(path.dirname(record.applyPath), { recursive: true });
+  await fs.writeFile(record.applyPath, `${JSON.stringify(record, null, 2)}\n`);
+}
+
 async function tailFileLines(filePath: string, lineCount: number): Promise<string[]> {
   try {
     const text = await fs.readFile(filePath, "utf8");
@@ -4449,6 +4540,12 @@ function workerSessionPath(sessionName: string): string {
 function workerSessionLogDir(sessionName: string): string {
   assertSafeSessionName(sessionName);
   return path.join(workerSessionDir, sessionName);
+}
+
+function workerSessionApplyPath(sessionName: string, applyId: string): string {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(applyId);
+  return path.join(workerSessionDir, "apply", sessionName, `${applyId}.json`);
 }
 
 function assertSafeSessionName(value: string): void {
@@ -4695,7 +4792,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--concurrency 1]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
