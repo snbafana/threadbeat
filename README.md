@@ -171,6 +171,7 @@ npm run cli -- agents init --name research-b --repo-id research-b --live
 printf "write one research note\nwrite one implementation note\n" > tasks.txt
 npm run cli -- runs dispatch --agents <research-a>,<research-b> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 2 --boot --recover --include-stopped --dry-run
 npm run cli -- runs dispatch --agents <research-a>,<research-b> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 2 --boot --recover --include-stopped
+npm run cli -- runs supervise --agents <research-a>,<research-b> --session overnight --workers 2 --boot --recover --include-stopped --until-empty --wait
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 30 --interval-ms 10000
 npm run cli -- runs session-actions overnight
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
@@ -407,7 +408,9 @@ without changing their state. Add `--include-stopped` to also requeue stopped
 branch runs that have no result commit before restarting a worker fleet. `runs supervise`
 snapshots backlog, optionally recovers orphaned claims or stopped unfinished
 branches with `--recover --include-stopped`, and starts a named detached worker
-session for one or more agents. `runs dispatch` uses the same recovery flags
+session for one or more agents. Add `--until-empty --wait` for a bounded
+foreground supervise call that waits for the worker session to exit and returns a
+final status summary plus branch review/result commands. `runs dispatch` uses the same recovery flags
 after queueing its objective file and before starting workers. `runs work` drains
 already planned runs for one or more agents. Use `--until-empty` to keep
 claiming batches until the queue is idle, or `--loop` to poll for longer CLI

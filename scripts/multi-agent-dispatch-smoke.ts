@@ -12,6 +12,7 @@ import { buildServer } from "../src/server.js";
 const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-multi-agent-dispatch-smoke-"));
 const sessionName = `multi-agent-smoke-${Date.now().toString(36)}`;
+const superviseSessionName = `${sessionName}-supervise`;
 const runIds: string[] = [];
 
 const settings: Settings = {
@@ -28,6 +29,7 @@ const settings: Settings = {
 const { app } = await buildServer(settings);
 let baseUrl: string | null = null;
 let sessionStarted = false;
+let superviseStarted = false;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
@@ -119,6 +121,59 @@ try {
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`
     && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`
   )));
+
+  const supervisedRun = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agentB.agent.id,
+    "--objective",
+    "run bounded supervise wait",
+  ]);
+  runIds.push(supervisedRun.run.id);
+  superviseStarted = true;
+  const supervised = await cliJson<{
+    session: { session: string; workers: Array<{ workerId: string }> };
+    wait: {
+      completed: boolean;
+      timedOut: boolean;
+      summary: { workers: { total: number; alive: number; dead: number }; runs: number; statuses: Record<string, number> };
+      commands: { sessionReview: string[]; branchQueue: string[]; results: string[]; checkoutSession: string[] };
+    };
+  }>(baseUrl, [
+    "runs",
+    "supervise",
+    "--agents",
+    agentB.agent.id,
+    "--session",
+    superviseSessionName,
+    "--workers",
+    "1",
+    "--worker-prefix",
+    "supervise-worker",
+    "--until-empty",
+    "--wait",
+    "--interval-ms",
+    "100",
+    "--idle-exit-after",
+    "1",
+    "--max-polls",
+    "20",
+  ]);
+  assert.equal(supervised.session.session, superviseSessionName);
+  assert.deepEqual(supervised.session.workers.map((worker) => worker.workerId), ["supervise-worker-1"]);
+  assert.equal(supervised.wait.completed, true);
+  assert.equal(supervised.wait.timedOut, false);
+  assert.equal(supervised.wait.summary.workers.total, 1);
+  assert.equal(supervised.wait.summary.workers.alive, 0);
+  assert.equal(supervised.wait.summary.workers.dead, 1);
+  assert.ok(supervised.wait.summary.runs >= 1);
+  assert.ok(Object.values(supervised.wait.summary.statuses).reduce((sum, count) => sum + count, 0) >= 1);
+  assert.equal(supervised.wait.commands.sessionReview.join(" "), `npm run cli -- runs session-review ${superviseSessionName} --include-stopped`);
+  assert.equal(supervised.wait.commands.branchQueue.join(" "), `npm run cli -- runs branches --session ${superviseSessionName} --next`);
+  assert.equal(supervised.wait.commands.results.join(" "), `npm run cli -- runs results --session ${superviseSessionName}`);
+  assert.equal(supervised.wait.commands.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${superviseSessionName} --dir ./checkouts/${superviseSessionName}`);
+  superviseStarted = false;
 
   const preview = await cliJson<{
     assignment: string;
@@ -363,6 +418,13 @@ try {
         // Best-effort cleanup for failed assertions before the explicit stop.
       }
     }
+    if (superviseStarted) {
+      try {
+        await cliJson(cleanupBaseUrl, ["runs", "stop-session", superviseSessionName, "--recover"]);
+      } catch {
+        // The supervise smoke may have failed before the session file existed.
+      }
+    }
     await Promise.all(runIds.map(async (runId) => {
       try {
         await cliJson(cleanupBaseUrl, ["sandboxes", "stop-running", "--run", runId]);
@@ -372,6 +434,7 @@ try {
     }));
   }
   await cleanupSession(sessionName);
+  await cleanupSession(superviseSessionName);
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
 }

@@ -982,6 +982,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const workerPrefix = options["worker-prefix"] ?? "worker";
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
     const sessionName = required(options.session, "--session");
+    if (options.wait === "1" && options["until-empty"] !== "1") {
+      throw new Error("runs supervise --wait requires --until-empty so the worker session can finish");
+    }
     const before = await agentBacklog(agentIds);
     const recovered = options.recover === "1"
       ? await recoverStaleRuns(
@@ -1016,13 +1019,66 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       workerPrefix,
       workerArgs,
     );
-    await printJson({
+    const response: {
+      before: Awaited<ReturnType<typeof agentBacklog>>;
+      recovered: Omit<RecoverStaleRunResult, "run">[];
+      session: WorkerSession;
+      actions: typeof superviseActions;
+      after: Awaited<ReturnType<typeof agentBacklog>>;
+      wait?: unknown;
+    } = {
       before,
       recovered: recovered.map(({ run: _run, ...item }) => item),
       session,
       actions: superviseActions,
       after: await agentBacklog(agentIds),
-    });
+    };
+    if (options.wait === "1") {
+      const waitIntervalMs = parsePositiveInteger(options["wait-interval-ms"] ?? options["interval-ms"] ?? "2000", "--wait-interval-ms");
+      const maxPolls = parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls");
+      let polls = 0;
+      let finalStatus = await workerSessionStatus(sessionName, new Set(["planned", "running", "stopped", "completed", "failed"]));
+      while (polls < maxPolls) {
+        finalStatus = await workerSessionStatus(sessionName, new Set(["planned", "running", "stopped", "completed", "failed"]));
+        polls += 1;
+        const workers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+        if (workers.every((worker) => !worker.alive)) break;
+        await sleep(waitIntervalMs);
+      }
+      const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+      const aliveWorkers = finalWorkers.filter((worker) => worker.alive).length;
+      const statuses: Record<string, number> = {};
+      for (const agent of finalStatus.agents) {
+        for (const [status, count] of Object.entries(agent.statuses)) {
+          statuses[status] = (statuses[status] ?? 0) + count;
+        }
+      }
+      response.wait = {
+        completed: aliveWorkers === 0,
+        timedOut: aliveWorkers > 0,
+        polls,
+        intervalMs: waitIntervalMs,
+        summary: {
+          workers: {
+            total: finalWorkers.length,
+            alive: aliveWorkers,
+            dead: finalWorkers.length - aliveWorkers,
+          },
+          agents: finalStatus.agents.length,
+          runs: finalStatus.agents.reduce((sum, agent) => sum + agent.total, 0),
+          statuses,
+        },
+        status: finalStatus,
+        commands: {
+          sessionReview: superviseActions.sessionReview,
+          branchQueue: superviseActions.branchQueue,
+          results: superviseActions.results,
+          checkoutSession: superviseActions.checkoutSession,
+        },
+      };
+      response.after = await agentBacklog(agentIds);
+    }
+    await printJson(response);
     return;
   }
   if (subcommandName === "dispatch") {
@@ -2562,7 +2618,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -3349,7 +3405,7 @@ Commands:
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--next] [--limit 3] [--interval-ms 2000] [--max-polls 1]
-  runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty]
+  runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty] [--wait] [--max-polls 60]
   runs dispatch --agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") [--assignment fanout|round-robin] [--dry-run] [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
