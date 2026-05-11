@@ -1043,6 +1043,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         polls += 1;
         const workers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
         if (workers.every((worker) => !worker.alive)) break;
+        if (polls >= maxPolls) break;
         await sleep(waitIntervalMs);
       }
       const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
@@ -1203,6 +1204,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         polls += 1;
         const workers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
         if (workers.every((worker) => !worker.alive)) break;
+        if (polls >= maxPolls) break;
         await sleep(waitIntervalMs);
       }
       const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
