@@ -1389,6 +1389,21 @@ try {
   const detachedWorkerReview = await cliJson<{
     observedAt: string;
     session: { session: string; workers: { total: number; alive: number; dead: number } };
+    summary: {
+      agents: number;
+      resultBranches: number;
+      resumableBranches: number;
+      recoveryCandidates: number;
+      changedResults: number | null;
+      changedFiles: number | null;
+      agentSummaries: Array<{
+        agentId: string;
+        resultBranches: number;
+        resumableBranches: number;
+        recoveryCandidates: number;
+        changedResults: number | null;
+      }>;
+    };
     resumableBranches: Array<{
       agentId: string;
       runId: string;
@@ -1431,6 +1446,19 @@ try {
   assert.equal(detachedWorkerReview.session.workers.total, 1);
   assert.equal(detachedWorkerReview.session.workers.alive, 1);
   assert.equal(detachedWorkerReview.session.workers.dead, 0);
+  assert.ok(detachedWorkerReview.summary.agents >= 1);
+  assert.ok(detachedWorkerReview.summary.resultBranches >= 1);
+  assert.ok(detachedWorkerReview.summary.resumableBranches >= 1);
+  assert.ok(detachedWorkerReview.summary.recoveryCandidates >= 1);
+  assert.equal(detachedWorkerReview.summary.changedResults, null);
+  assert.equal(detachedWorkerReview.summary.changedFiles, null);
+  assert.ok(detachedWorkerReview.summary.agentSummaries.some((agent) => (
+    agent.agentId === workerGroupAgentBody.agent.id
+    && agent.resultBranches >= 1
+    && agent.resumableBranches >= 1
+    && agent.recoveryCandidates >= 1
+    && agent.changedResults === null
+  )));
   assert.equal(detachedWorkerReview.actions.restartSession, null);
   assert.equal(detachedWorkerReview.actions.restartSessionWithStopped, null);
   assert.equal(
@@ -2552,6 +2580,15 @@ try {
   const sessionReviewCheckoutDir = path.join(tempRoot, "session-review-checkouts");
   const checkedOutSessionReview = await cliJson<{
     checkoutDir: string;
+    summary: {
+      changedResults: number | null;
+      changedFiles: number | null;
+      agentSummaries: Array<{
+        agentId: string;
+        changedResults: number | null;
+        changedFiles: number | null;
+      }>;
+    };
     recoveryPreview: Array<{ runId: string; currentStatus?: string; dryRun?: boolean }>;
     changedResults: Array<{
       agentId: string;
@@ -2585,6 +2622,13 @@ try {
     .find((agent) => agent.agentId === checkoutAgent.agent.id)
     ?.checkouts.find((item) => item.run.id === checkoutPlan.run.id);
   assert.equal(checkedOutSessionReview.checkoutDir, sessionReviewCheckoutDir);
+  assert.ok((checkedOutSessionReview.summary.changedResults ?? 0) >= 1);
+  assert.ok((checkedOutSessionReview.summary.changedFiles ?? 0) >= 1);
+  assert.ok(checkedOutSessionReview.summary.agentSummaries.some((agent) => (
+    agent.agentId === checkoutAgent.agent.id
+    && (agent.changedResults ?? 0) >= 1
+    && (agent.changedFiles ?? 0) >= 1
+  )));
   assert.ok(checkedOutSessionReview.recoveryPreview.some((run) => (
     run.runId === checkoutPlan.run.id && run.currentStatus === "stopped" && run.dryRun === true
   )));
@@ -2605,6 +2649,7 @@ try {
   )));
   assert.equal(await fs.readFile(path.join(sessionReviewCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
   const changedPathSessionReview = await cliJson<{
+    summary: { changedResults: number | null; changedFiles: number | null };
     changedResults: Array<{ runId: string; changedFiles: Array<{ path: string }> }>;
     resultCheckouts: Array<{ checkouts: Array<{ run: { id: string } }> }>;
   }>(baseUrl, [
@@ -2621,6 +2666,8 @@ try {
     changedPathSessionReview.resultCheckouts.flatMap((agent) => agent.checkouts.map((checkout) => checkout.run.id)),
     [checkoutPlan.run.id],
   );
+  assert.equal(changedPathSessionReview.summary.changedResults, 1);
+  assert.equal(changedPathSessionReview.summary.changedFiles, 1);
   assert.deepEqual(changedPathSessionReview.changedResults.map((run) => run.runId), [checkoutPlan.run.id]);
   assert.equal(changedPathSessionReview.changedResults[0].changedFiles[0].path, "report.md");
 

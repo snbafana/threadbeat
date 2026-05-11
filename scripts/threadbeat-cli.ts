@@ -1092,6 +1092,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const canResumeSession = resumableBranches.some((run) => run.location !== "other_worker");
     const hasRecoverableActiveRun = recoveryPreview.some((item) => item.currentStatus !== "stopped");
     const hasRecoverableStoppedRun = recoveryPreview.some((item) => item.currentStatus === "stopped");
+    const statuses: Record<string, number> = {};
+    for (const agent of status.agents) {
+      for (const [runStatus, count] of Object.entries(agent.statuses)) {
+        statuses[runStatus] = (statuses[runStatus] ?? 0) + count;
+      }
+    }
+    const agentSummaries = status.agents.map((agent) => {
+      const agentChangedResults = changedResults?.filter((run) => run.agentId === agent.agentId) ?? null;
+      return {
+        agentId: agent.agentId,
+        total: agent.total,
+        statuses: agent.statuses,
+        resultBranches: resultBranches.filter((run) => run.agentId === agent.agentId).length,
+        resumableBranches: resumableBranches.filter((run) => run.agentId === agent.agentId).length,
+        recoveryCandidates: recoveryPreview.filter((run) => run.agentId === agent.agentId && !run.skipped).length,
+        changedResults: agentChangedResults?.length ?? null,
+        changedFiles: agentChangedResults
+          ? agentChangedResults.reduce((sum, run) => sum + run.changedFiles.length, 0)
+          : null,
+      };
+    });
     await printJson({
       observedAt: new Date().toISOString(),
       session: {
@@ -1105,6 +1126,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           alive: sessionWorkers.length - deadWorkerCount,
           dead: deadWorkerCount,
         },
+      },
+      summary: {
+        agents: status.agents.length,
+        runs: status.agents.reduce((sum, agent) => sum + agent.total, 0),
+        statuses,
+        resultBranches: resultBranches.length,
+        resumableBranches: resumableBranches.length,
+        recoveryCandidates: recoveryPreview.filter((run) => !run.skipped).length,
+        recoverableActive: recoveryPreview.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length,
+        recoverableStopped: recoveryPreview.filter((run) => run.currentStatus === "stopped" && !run.skipped).length,
+        changedResults: changedResults?.length ?? null,
+        changedFiles: changedResults
+          ? changedResults.reduce((sum, run) => sum + run.changedFiles.length, 0)
+          : null,
+        agentSummaries,
       },
       agents: status.agents,
       actions: {
