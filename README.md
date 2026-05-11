@@ -149,6 +149,29 @@ npm run cli -- agents init --name research --repo-id research-agent --live
 Then use the `runs queue`, `runs work`, `runs monitor`, `runs branches`, and
 `runs checkout` commands below against the live server.
 
+For a branch-native multi-agent local run:
+
+```bash
+npm run dev
+npm run cli -- preflight
+npm run cli -- agents init --name research-a --repo-id research-a --live
+npm run cli -- agents init --name research-b --repo-id research-b --live
+printf "write one research note\nwrite one implementation note\n" > tasks.txt
+npm run cli -- runs dispatch --agents <research-a>,<research-b> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 2 --boot --recover --include-stopped --dry-run
+npm run cli -- runs dispatch --agents <research-a>,<research-b> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 2 --boot --recover --include-stopped
+npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 30 --interval-ms 10000
+npm run cli -- runs session-actions overnight
+npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
+npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
+npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
+npm run cli -- runs stop-session overnight --recover
+```
+
+Each run stays on its own durable Git branch. Use `session-review`,
+`runs results`, or the returned `actions` block to inspect result commits,
+changed files, resumable stopped branches, and recovery commands; no PR is
+created unless a separate PR path is added later.
+
 Hosted Git uses GitHub. The default owner and owner-type detection live in
 `src/config.ts`; live private repo creation uses `gh auth token` from the local
 GitHub CLI session.
