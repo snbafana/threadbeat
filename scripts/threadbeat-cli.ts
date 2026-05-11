@@ -2849,6 +2849,50 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ ...record, executions: allExecutions });
     return;
   }
+  if (subcommandName === "session-applies") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-applies <session>");
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("--format must be json or shell");
+    }
+    if (options["apply-id"]) {
+      const applyId = options["apply-id"];
+      const record = await readSessionApplyRecord(requiredSessionName, applyId);
+      if (!record) throw new Error(`session apply ${applyId} does not exist for ${requiredSessionName}`);
+      const summary = summarizeSessionApplyRecord(record);
+      if (outputFormat === "shell") {
+        console.log(summary.actions.resumeApply.map(shellArg).join(" "));
+        return;
+      }
+      await printJson({
+        session: requiredSessionName,
+        applyId,
+        applyPath: workerSessionApplyPath(requiredSessionName, applyId),
+        summary,
+        pendingCommands: summary.pendingCommands,
+        failedExecutions: record.executions.filter((execution) => execution.exitCode !== 0),
+        record,
+      });
+      return;
+    }
+    const records = await listSessionApplyRecords(requiredSessionName);
+    const applies = records.map(summarizeSessionApplyRecord);
+    if (outputFormat === "shell") {
+      for (const apply of applies) {
+        console.log(apply.actions.resumeApply.map(shellArg).join(" "));
+      }
+      return;
+    }
+    await printJson({
+      session: requiredSessionName,
+      applyDir: workerSessionApplyDir(requiredSessionName),
+      count: applies.length,
+      applies,
+    });
+    return;
+  }
   if (subcommandName === "session-watch") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -4515,9 +4559,91 @@ async function readSessionApplyRecord(sessionName: string, applyId: string): Pro
   }
 }
 
+async function listSessionApplyRecords(sessionName: string): Promise<SessionApplyRecord[]> {
+  assertSafeSessionName(sessionName);
+  const applyDir = workerSessionApplyDir(sessionName);
+  try {
+    const entries = await fs.readdir(applyDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(applyDir, entry.name), "utf8");
+        return JSON.parse(text) as SessionApplyRecord;
+      }));
+    return records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 async function writeSessionApplyRecord(record: SessionApplyRecord): Promise<void> {
   await fs.mkdir(path.dirname(record.applyPath), { recursive: true });
   await fs.writeFile(record.applyPath, `${JSON.stringify(record, null, 2)}\n`);
+}
+
+function summarizeSessionApplyRecord(record: SessionApplyRecord): {
+  applyId: string;
+  applyPath: string;
+  observedAt: string;
+  startedAt: string;
+  updatedAt: string;
+  selected: number;
+  skippedCompleted: number;
+  executions: number;
+  succeeded: number;
+  failed: number;
+  pending: number;
+  actions: {
+    resumeApply: string[];
+  };
+  pendingCommands: SessionApplyCommand[];
+} {
+  const completedCommandKeys = new Set(record.executions
+    .filter((execution) => execution.exitCode === 0)
+    .map((execution) => commandKey(execution.command)));
+  const pendingCommands = record.commands.filter((command) => !completedCommandKeys.has(commandKey(command.command)));
+  return {
+    applyId: record.applyId,
+    applyPath: record.applyPath,
+    observedAt: record.observedAt,
+    startedAt: record.startedAt,
+    updatedAt: record.updatedAt,
+    selected: record.selected,
+    skippedCompleted: record.skippedCompleted,
+    executions: record.executions.length,
+    succeeded: record.executions.filter((execution) => execution.exitCode === 0).length,
+    failed: record.executions.filter((execution) => execution.exitCode !== 0).length,
+    pending: pendingCommands.length,
+    actions: {
+      resumeApply: sessionApplyResumeCommand(record),
+    },
+    pendingCommands,
+  };
+}
+
+function sessionApplyResumeCommand(record: SessionApplyRecord): string[] {
+  const command = ["npm", "run", "cli", "--", "runs", "session-apply", record.session];
+  const branchAction = stringListFromUnknown(record.filter.branchAction);
+  const action = stringListFromUnknown(record.filter.action);
+  const fallbackActions = [...new Set(record.commands.map((item) => item.action))];
+  const hasBranchCommands = record.commands.some((item) => item.scope === "branch");
+  if (branchAction.length > 0) {
+    command.push("--branch-action", branchAction.join(","));
+  } else if (action.length > 0) {
+    command.push("--action", action.join(","));
+  } else if (hasBranchCommands && fallbackActions.length > 0) {
+    command.push("--branch-action", fallbackActions.join(","));
+  } else if (fallbackActions.length > 0) {
+    command.push("--action", fallbackActions.join(","));
+  }
+  command.push("--apply-id", record.applyId, "--resume");
+  return command;
+}
+
+function stringListFromUnknown(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+  return typeof value === "string" ? [value] : [];
 }
 
 async function tailFileLines(filePath: string, lineCount: number): Promise<string[]> {
@@ -4542,10 +4668,15 @@ function workerSessionLogDir(sessionName: string): string {
   return path.join(workerSessionDir, sessionName);
 }
 
+function workerSessionApplyDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, "apply", sessionName);
+}
+
 function workerSessionApplyPath(sessionName: string, applyId: string): string {
   assertSafeSessionName(sessionName);
   assertSafeSessionName(applyId);
-  return path.join(workerSessionDir, "apply", sessionName, `${applyId}.json`);
+  return path.join(workerSessionApplyDir(sessionName), `${applyId}.json`);
 }
 
 function assertSafeSessionName(value: string): void {
@@ -4793,6 +4924,7 @@ Commands:
   runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--concurrency 1]
+  runs session-applies <name> [--apply-id id] [--format json|shell]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

@@ -2453,6 +2453,62 @@ try {
   assert.equal(sessionApplyResume.skippedCompleted, 1);
   assert.deepEqual(sessionApplyResume.executions.map((execution) => execution.runId), [sessionApplyPlan.run.id]);
   assert.deepEqual(sessionApplyResume.executions.map((execution) => execution.exitCode), [0]);
+  const sessionApplyInspection = await cliJson<{
+    session: string;
+    applyId: string;
+    summary: {
+      applyId: string;
+      selected: number;
+      succeeded: number;
+      failed: number;
+      pending: number;
+      actions: { resumeApply: string[] };
+      pendingCommands: Array<{ runId?: string }>;
+    };
+    failedExecutions: Array<{ runId: string | null }>;
+    record: { applyId: string; executions: Array<{ runId: string | null; exitCode: number | null }> };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", sessionApplyId]);
+  assert.equal(sessionApplyInspection.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyInspection.applyId, sessionApplyId);
+  assert.equal(sessionApplyInspection.summary.applyId, sessionApplyId);
+  assert.equal(sessionApplyInspection.summary.selected, 1);
+  assert.equal(sessionApplyInspection.summary.succeeded, 1);
+  assert.equal(sessionApplyInspection.summary.failed, 0);
+  assert.equal(sessionApplyInspection.summary.pending, 0);
+  assert.deepEqual(sessionApplyInspection.summary.pendingCommands, []);
+  assert.deepEqual(sessionApplyInspection.failedExecutions, []);
+  assert.deepEqual(sessionApplyInspection.summary.actions.resumeApply, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--branch-action",
+    "resume_branch",
+    "--apply-id",
+    sessionApplyId,
+    "--resume",
+  ]);
+  assert.deepEqual(sessionApplyInspection.record.executions.map((execution) => execution.runId), [sessionApplyPlan.run.id]);
+  const sessionApplyList = await cliJson<{
+    session: string;
+    count: number;
+    applies: Array<{ applyId: string; pending: number; actions: { resumeApply: string[] } }>;
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName]);
+  assert.equal(sessionApplyList.session, detachedWorkerSessionName);
+  assert.ok(sessionApplyList.count >= 1);
+  assert.ok(sessionApplyList.applies.some((apply) => (
+    apply.applyId === sessionApplyId
+    && apply.pending === 0
+    && apply.actions.resumeApply.join(" ") === sessionApplyInspection.summary.actions.resumeApply.join(" ")
+  )));
+  const sessionApplyShell = await cliRaw(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", sessionApplyId, "--format", "shell"]);
+  assert.equal(
+    sessionApplyShell.stdout.trim(),
+    `npm run cli -- runs session-apply ${detachedWorkerSessionName} --branch-action resume_branch --apply-id ${sessionApplyId} --resume`,
+  );
 
   const superviseAgentResponse = await app.inject({
     method: "POST",
