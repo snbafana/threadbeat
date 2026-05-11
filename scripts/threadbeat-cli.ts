@@ -688,8 +688,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   }
   if (subcommandName === "results") {
     const options = parseOptions(args);
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs results --format must be json or shell");
+    }
     if (options.session && (options.agent || options.agents)) {
       throw new Error("runs results accepts either --session or --agent/--agents");
+    }
+    if (options["commands-only"] === "1" && options.next !== "1") {
+      throw new Error("runs results --commands-only requires --next");
+    }
+    if (options.format && options.next !== "1") {
+      throw new Error("runs results --format requires --next");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs results --format shell requires --commands-only");
     }
     const session = options.session ? await readWorkerSession(options.session) : null;
     const sessionWorkerIds = session ? new Set(session.workers.map((worker) => worker.workerId)) : null;
@@ -701,6 +714,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const statusFilter = new Set(statusList);
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+    if (outputFormat === "shell" && maxPolls !== 1) {
+      throw new Error("runs results --format shell supports one poll");
+    }
     const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
     const checkoutCommandRootDir = options["checkout-dir"]
       ?? (options.session ? `./checkouts/${options.session}-results` : "./checkouts/results");
@@ -939,17 +955,35 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           commands: run.commands,
         };
       }));
+      const nextCommandQueue = nextSteps.map((step) => ({
+        action: step.action,
+        reason: step.reason,
+        agentId: step.agentId,
+        runId: step.runId,
+        status: step.status,
+        state: step.state,
+        workerId: step.workerId,
+        location: step.location,
+        branchName: step.branchName,
+        resultCommit: step.resultCommit,
+        changedFiles: step.changedFiles,
+        commits: step.commits,
+        command: step.command,
+      }));
       const output = options.next === "1"
         ? {
           observedAt: snapshot.observedAt,
           ...(options.session ? { session: options.session } : {}),
           ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
           summary: snapshot.summary,
-          resultCommits,
-          nextSteps,
+          ...(options["commands-only"] === "1"
+            ? { commands: nextCommandQueue }
+            : { resultCommits, nextSteps }),
         }
         : snapshot;
-      if (maxPolls === 1) {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(nextCommandQueue);
+      } else if (maxPolls === 1) {
         await printJson(output);
       } else {
         console.log(JSON.stringify(output));
@@ -1678,7 +1712,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       for (let poll = 0; poll < maxPolls; poll += 1) {
         const output = await collectFleetSummary();
         if (outputFormat === "shell") {
-          printFleetCommandsShell((output as FleetCommandQueueOutput).commands);
+          printCommandQueueShell((output as CommandQueueOutput).commands);
         } else if (maxPolls === 1) {
           await printJson(output);
         } else {
@@ -3684,11 +3718,11 @@ function parseList(value: string): string[] {
   return values;
 }
 
-type FleetCommandQueueOutput = {
+type CommandQueueOutput = {
   commands: Array<{ command: string[] }>;
 };
 
-function printFleetCommandsShell(commands: FleetCommandQueueOutput["commands"]): void {
+function printCommandQueueShell(commands: CommandQueueOutput["commands"]): void {
   for (const item of commands) {
     console.log(item.command.map(shellArg).join(" "));
   }
@@ -4458,7 +4492,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]

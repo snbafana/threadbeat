@@ -3879,6 +3879,25 @@ try {
     sessionResultSummary.commands.changedResults.join(" "),
     `npm run cli -- runs results --session ${resultSummarySessionName} --checkout-dir ./checkouts/${resultSummarySessionName}-results --changed-only --next`,
   );
+  const resultCommandsOnly = await cliJson<{
+    summary: { resultCommits: number };
+    commands: Array<{ action: string; runId: string; resultCommit: string | null; command: string[] }>;
+    nextSteps?: unknown;
+    resultCommits?: unknown;
+  }>(baseUrl, ["runs", "results", "--session", resultSummarySessionName, "--next", "--commands-only"]);
+  assert.equal(resultCommandsOnly.summary.resultCommits, 1);
+  assert.equal(resultCommandsOnly.nextSteps, undefined);
+  assert.equal(resultCommandsOnly.resultCommits, undefined);
+  assert.ok(resultCommandsOnly.commands.some((item) => (
+    item.action === "review_result"
+    && item.runId === cliWorkFinalizePlan.run.id
+    && item.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+    && item.command.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
+  )));
+  const resultCommandsShell = await cliRaw(baseUrl, ["runs", "results", "--session", resultSummarySessionName, "--next", "--commands-only", "--format", "shell"]);
+  assert.ok(resultCommandsShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`,
+  ));
   const sessionResultSummaryPoll = await cliRaw(baseUrl, [
     "runs",
     "session-summary",
