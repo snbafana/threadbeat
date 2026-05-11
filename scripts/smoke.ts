@@ -2682,6 +2682,13 @@ try {
   ))));
   const resultSummary = await cliJson<{
     observedAt: string;
+    resultCommits: Array<{
+      agentId: string;
+      runId: string;
+      resultCommit: string;
+      commands: { inspectRun: string[]; checkoutBranch: string[]; reviewRun: string[] };
+      links: { resultCommitUrl: string | null; resultCompareUrl: string | null };
+    }>;
     agents: Array<{
       agentId: string;
       summary: { total: number; resultCommits: number; resumable: number; warnings: number };
@@ -2705,6 +2712,16 @@ try {
     }>;
   }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id]);
   assert.match(resultSummary.observedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.ok(resultSummary.resultCommits.some((commit) => (
+    commit.agentId === agentBody.agent.id
+    && commit.runId === cliRunPlan.run.id
+    && commit.resultCommit === cliRunFinalize.result.commitSha
+    && commit.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${cliRunPlan.run.id}`
+    && commit.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${cliRunPlan.run.id} --dir ./checkouts/results/${cliRunPlan.run.id}`
+    && commit.commands.reviewRun.join(" ") === `npm run cli -- runs review ${cliRunPlan.run.id} --checkout-dir ./checkouts/results/${cliRunPlan.run.id}`
+    && new RegExp(`github\\.com/example/agent/commit/${cliRunFinalize.result.commitSha}`).test(commit.links.resultCommitUrl ?? "")
+    && new RegExp(`github\\.com/example/agent/compare/main\\.\\.\\.${cliRunFinalize.result.commitSha}`).test(commit.links.resultCompareUrl ?? "")
+  )));
   assert.ok(resultSummary.agents.some((agent) => (
     agent.agentId === agentBody.agent.id
     && agent.summary.resultCommits >= 1
@@ -2739,6 +2756,7 @@ try {
   ]);
   const resultSnapshots = watchedResults.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
     observedAt: string;
+    resultCommits: Array<{ runId: string; resultCommit: string | null }>;
     agents: Array<{ runs: Array<{ id: string; resultCommit: string | null }> }>;
   });
   assert.equal(resultSnapshots.length, 2);
@@ -2747,6 +2765,9 @@ try {
     && snapshot.agents.some((agent) => agent.runs.some((run) => (
       run.id === cliRunPlan.run.id && run.resultCommit === cliRunFinalize.result.commitSha
     )))
+    && snapshot.resultCommits.some((commit) => (
+      commit.runId === cliRunPlan.run.id && commit.resultCommit === cliRunFinalize.result.commitSha
+    ))
   )));
 
   const checkoutRemote = path.join(tempRoot, "run-checkout-remote.git");

@@ -353,7 +353,10 @@ Run planning is intentionally server-side and Pi-free for now:
   a worker session with GitHub branch/result links and warnings for completed
   runs that do not have a recorded result commit. Session results include
   whether each visible run is still unassigned, claimed by a session worker, or
-  claimed by another worker. Add `--checkout-dir <path>` to clone or refresh
+  claimed by another worker. The payload also includes a top-level
+  `resultCommits` index with run id, branch name, result commit URLs, and
+  checkout/review/inspect commands so durable result commits can be scanned
+  without walking nested agent rows. Add `--checkout-dir <path>` to clone or refresh
   each listed run branch under `<path>/<run-id>` and include changed
   files/commits in the result payload. Add `--changed-only` with `--checkout-dir`
   to show only branches whose checkout has changed files, commits, or a review

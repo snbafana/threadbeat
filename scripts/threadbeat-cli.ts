@@ -862,6 +862,29 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           }));
         }))
         : null;
+      const resultCommits = agents.flatMap((agent) => agent.runs
+        .filter((run) => run.resultCommit)
+        .map((run) => ({
+          agentId: agent.agentId,
+          runId: run.id,
+          status: run.status,
+          state: run.state,
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location ?? null,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          links: {
+            resultCommitUrl: run.links.resultCommitUrl,
+            resultTreeUrl: run.links.resultTreeUrl,
+            resultCompareUrl: run.links.resultCompareUrl,
+          },
+          commands: {
+            inspectRun: run.commands.inspectRun,
+            checkoutBranch: run.commands.checkoutBranch,
+            reviewRun: run.commands.reviewRun,
+          },
+        })));
       const snapshot = {
         observedAt: new Date().toISOString(),
         ...(options.session ? { session: options.session } : {}),
@@ -869,13 +892,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         summary: {
           agents: agents.length,
           total: visibleRuns.length,
-          resultCommits: visibleRuns.filter((run) => run.resultCommit).length,
+          resultCommits: resultCommits.length,
           resumable: visibleRuns.filter((run) => run.state === "resumable").length,
           warnings: visibleRuns.filter((run) => run.warning).length,
           changed: changedCount,
           changedFiles: changedFiles?.length ?? null,
         },
         ...(changedFiles ? { changedFiles } : {}),
+        resultCommits,
         agents,
       };
       const nextSteps = agents.flatMap((agent) => agent.runs.map((run) => {
@@ -921,6 +945,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...(options.session ? { session: options.session } : {}),
           ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
           summary: snapshot.summary,
+          resultCommits,
           nextSteps,
         }
         : snapshot;
