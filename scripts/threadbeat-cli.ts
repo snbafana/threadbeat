@@ -816,11 +816,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           agentId: agent.agentId,
           runId: run.id,
           status: run.status,
+          state: run.state,
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location ?? null,
           branchName: run.branchName,
           resultCommit: run.resultCommit,
           changedFiles: review?.changedFiles.length ?? null,
           commits: review?.commits.length ?? null,
           command: run.commands.reviewRun,
+          commands: run.commands,
         };
       }));
       const output = options.next === "1"

@@ -2803,9 +2803,17 @@ try {
       reason: string;
       agentId: string;
       runId: string;
+      status: string;
+      state: string;
+      objective: string;
+      workerId: string | null;
+      location: string | null;
+      branchName: string;
+      resultCommit: string | null;
       changedFiles: number | null;
       commits: number | null;
       command: string[];
+      commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[] };
     }>;
     agents?: unknown;
   }>(baseUrl, [
@@ -2830,9 +2838,18 @@ try {
     && step.reason === "changed_result_branch"
     && step.agentId === checkoutAgent.agent.id
     && step.runId === checkoutPlan.run.id
+    && step.status === "stopped"
+    && step.state === "resumable"
+    && step.objective === "checkout branch"
+    && step.workerId === null
+    && step.location === null
+    && step.branchName === checkoutPlan.plan.branchName
+    && step.resultCommit === null
     && step.changedFiles === 1
     && step.commits === 1
     && step.command.join(" ") === `npm run cli -- runs review ${checkoutPlan.run.id} --checkout-dir ${changedOnlyResultsDir}/${checkoutPlan.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${checkoutPlan.run.id} --dir ${changedOnlyResultsDir}/${checkoutPlan.run.id}`
+    && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${checkoutPlan.run.id}`
   )));
   assert.equal(changedOnlyResults.summary.changedFiles, changedOnlyFileCount);
   assert.ok(changedOnlyResults.changedFiles.every((file) => file.path.length > 0));

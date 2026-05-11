@@ -397,7 +397,9 @@ row. Each branch queue row includes objective, worker ownership, and session
 location so the next action is self-contained. The full snapshot also includes
 an `actions` block with the exact restart, recover, resume, branch-queue, and
 changed-results commands to run next. Result rows include `commands.reviewRun`
-for compact branch-native inspection of one completed run. Add
+for compact branch-native inspection of one completed run. `runs results --next`
+keeps objective, worker ownership, branch state, and checkout/review/inspect
+commands on each queue row so changed-result review can stay branch-native. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
