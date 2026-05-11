@@ -745,6 +745,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
     const statusList = parseList(options.status ?? "completed,stopped");
     const statusFilter = new Set(statusList);
+    const runFilter = options.run ? new Set(parseList(options.run)) : null;
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
     if (outputFormat === "shell" && maxPolls !== 1) {
@@ -787,6 +788,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const runs = listed.runs
           .filter((run) => statusFilter.has(run.status))
           .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
+          .filter((run) => runFilter === null || runFilter.has(run.id))
           .map((run) => {
             const branchLinks = deriveGitHubLinks(repository.repository.repoUrl, {
               compareBaseRef: run.input_ref,
@@ -937,6 +939,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const snapshot = {
         observedAt: new Date().toISOString(),
         ...(options.session ? { session: options.session } : {}),
+        ...(runFilter ? { runFilter: Array.from(runFilter) } : {}),
         ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
         summary: {
           agents: agents.length,
@@ -1007,6 +1010,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ? {
           observedAt: snapshot.observedAt,
           ...(options.session ? { session: options.session } : {}),
+          ...(runFilter ? { runFilter: Array.from(runFilter) } : {}),
           ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
           summary: snapshot.summary,
           ...(options["commands-only"] === "1"
@@ -5323,7 +5327,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]

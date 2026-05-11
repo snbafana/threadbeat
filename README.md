@@ -249,6 +249,7 @@ npm run cli -- runs branches --session overnight --next --commands-only --format
 npm run cli -- runs branches --agents <agent>,<agent> --worker-id worker-a
 npm run cli -- runs results --session overnight
 npm run cli -- runs results --session overnight --worker-id worker-a
+npm run cli -- runs results --session overnight --run <run-id> --next
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
@@ -379,7 +380,8 @@ Run planning is intentionally server-side and Pi-free for now:
   `commands.reviewRun`, `commands.inspectRun`, and resumable
   `commands.resumeBranch` commands for branch-native inspection. Add `--next`
   to return the compact ordered review/resume commands for the visible result
-  rows. Add
+  rows. Add `--run <run-id[,run-id]>` to narrow a result snapshot or command
+  queue to specific branch runs from a session/apply queue. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
   long session runs.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to

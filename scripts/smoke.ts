@@ -3476,6 +3476,32 @@ try {
       && new RegExp(`github\\.com/example/agent/compare/main\\.\\.\\.${cliRunFinalize.result.commitSha}`).test(run.links.resultCompareUrl ?? "")
     ))
   )));
+  const runFilteredResults = await cliJson<{
+    runFilter: string[];
+    summary: { total: number; resultCommits: number };
+    resultCommits: Array<{ runId: string; resultCommit: string | null }>;
+    agents: Array<{ runs: Array<{ id: string; resultCommit: string | null }> }>;
+  }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id, "--run", cliRunPlan.run.id]);
+  assert.deepEqual(runFilteredResults.runFilter, [cliRunPlan.run.id]);
+  assert.equal(runFilteredResults.summary.total, 1);
+  assert.equal(runFilteredResults.summary.resultCommits, 1);
+  assert.deepEqual(runFilteredResults.agents.flatMap((agent) => agent.runs).map((run) => run.id), [cliRunPlan.run.id]);
+  assert.deepEqual(runFilteredResults.resultCommits.map((commit) => [commit.runId, commit.resultCommit]), [[cliRunPlan.run.id, cliRunFinalize.result.commitSha]]);
+  const runFilteredCommands = await cliJson<{
+    runFilter: string[];
+    summary: { total: number; resultCommits: number };
+    commands: Array<{ runId: string; resultCommit: string | null; command: string[] }>;
+    agents?: unknown;
+  }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id, "--run", cliRunPlan.run.id, "--next", "--commands-only"]);
+  assert.deepEqual(runFilteredCommands.runFilter, [cliRunPlan.run.id]);
+  assert.equal(runFilteredCommands.summary.total, 1);
+  assert.equal(runFilteredCommands.summary.resultCommits, 1);
+  assert.equal(runFilteredCommands.agents, undefined);
+  assert.deepEqual(runFilteredCommands.commands.map((command) => [command.runId, command.resultCommit]), [[cliRunPlan.run.id, cliRunFinalize.result.commitSha]]);
+  assert.equal(
+    runFilteredCommands.commands[0]?.command.join(" "),
+    `npm run cli -- runs review ${cliRunPlan.run.id} --checkout-dir ./checkouts/results/${cliRunPlan.run.id}`,
+  );
   const watchedResults = await cliRaw(baseUrl, [
     "runs",
     "results",
