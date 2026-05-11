@@ -1507,118 +1507,128 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const requiredSessionName = required(sessionName, "runs session-summary <session>");
-    const status = await workerSessionStatus(requiredSessionName, new Set(["planned", "running", "stopped"]));
-    const agentIds = workerSessionAgentIds(status.session);
-    const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
-      const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-        runs: Array<{ id: string; status: string; result_commit: string | null }>;
+    const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+    for (let poll = 0; poll < maxPolls; poll += 1) {
+      const status = await workerSessionStatus(requiredSessionName, new Set(["planned", "running", "stopped"]));
+      const agentIds = workerSessionAgentIds(status.session);
+      const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+        const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+          runs: Array<{ id: string; status: string; result_commit: string | null }>;
+        };
+        const statuses: Record<string, number> = {};
+        for (const run of listed.runs) {
+          statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+        }
+        return {
+          agentId,
+          total: listed.runs.length,
+          statuses,
+          resultCommits: listed.runs.filter((run) => run.result_commit).length,
+          resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+        };
+      });
+      const totals = {
+        runs: agents.reduce((sum, agent) => sum + agent.total, 0),
+        resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
+        resumableStopped: agents.reduce((sum, agent) => sum + agent.resumableStopped, 0),
+        statuses: {} as Record<string, number>,
       };
-      const statuses: Record<string, number> = {};
-      for (const run of listed.runs) {
-        statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+      for (const agent of agents) {
+        for (const [runStatus, count] of Object.entries(agent.statuses)) {
+          totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+        }
       }
-      return {
-        agentId,
-        total: listed.runs.length,
-        statuses,
-        resultCommits: listed.runs.filter((run) => run.result_commit).length,
-        resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+      const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+      const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
+      const commands = options.next === "1"
+        ? {
+          sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
+          sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
+          results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
+          resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName, "--next"],
+          changedResults: [
+            "npm",
+            "run",
+            "cli",
+            "--",
+            "runs",
+            "results",
+            "--session",
+            requiredSessionName,
+            "--checkout-dir",
+            `./checkouts/${requiredSessionName}-results`,
+            "--changed-only",
+            "--next",
+          ],
+          checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", requiredSessionName, "--dir", `./checkouts/${requiredSessionName}`],
+          recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", requiredSessionName],
+          restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover"],
+          restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover", "--resume-stopped"],
+        }
+        : null;
+      const nextStep = commands
+        ? aliveWorkers > 0
+          ? {
+            action: "continue_watch",
+            reason: "workers_still_alive",
+            command: commands.sessionWatch,
+          }
+          : (totals.statuses.running ?? 0) > 0
+            ? {
+              action: "recover_session",
+              reason: "stale_running_claims",
+              command: commands.recoverSession,
+            }
+            : totals.resumableStopped > 0
+              ? {
+                action: "restart_session_with_stopped",
+                reason: "resumable_stopped_branches",
+                command: commands.restartSessionWithStopped,
+              }
+              : (totals.statuses.planned ?? 0) > 0
+                ? {
+                  action: "restart_session",
+                  reason: "planned_runs_waiting",
+                  command: commands.restartSession,
+                }
+                : totals.resultCommits > 0
+                  ? {
+                    action: "inspect_results",
+                    reason: "result_commits_available",
+                    command: commands.resultsNext,
+                  }
+                  : {
+                    action: "review_session",
+                    reason: "no_active_work",
+                    command: commands.sessionReview,
+                  }
+        : null;
+      const output = {
+        observedAt: new Date().toISOString(),
+        session: {
+          session: status.session.session,
+          command: status.session.command,
+          startedAt: status.session.startedAt,
+          stoppedAt: status.session.stoppedAt ?? null,
+          restartedAt: status.session.restartedAt ?? null,
+          workers: {
+            total: sessionWorkers.length,
+            alive: aliveWorkers,
+            dead: sessionWorkers.length - aliveWorkers,
+          },
+        },
+        totals,
+        agents,
+        ...(commands ? { commands, nextStep } : {}),
       };
-    });
-    const totals = {
-      runs: agents.reduce((sum, agent) => sum + agent.total, 0),
-      resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
-      resumableStopped: agents.reduce((sum, agent) => sum + agent.resumableStopped, 0),
-      statuses: {} as Record<string, number>,
-    };
-    for (const agent of agents) {
-      for (const [runStatus, count] of Object.entries(agent.statuses)) {
-        totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+      if (maxPolls === 1) {
+        await printJson(output);
+      } else {
+        console.log(JSON.stringify(output));
+        if (poll + 1 < maxPolls) await sleep(intervalMs);
       }
     }
-    const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
-    const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
-    const commands = options.next === "1"
-      ? {
-        sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
-        sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
-        results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
-        resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName, "--next"],
-        changedResults: [
-          "npm",
-          "run",
-          "cli",
-          "--",
-          "runs",
-          "results",
-          "--session",
-          requiredSessionName,
-          "--checkout-dir",
-          `./checkouts/${requiredSessionName}-results`,
-          "--changed-only",
-          "--next",
-        ],
-        checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", requiredSessionName, "--dir", `./checkouts/${requiredSessionName}`],
-        recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", requiredSessionName],
-        restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover"],
-        restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover", "--resume-stopped"],
-      }
-      : null;
-    const nextStep = commands
-      ? aliveWorkers > 0
-        ? {
-          action: "continue_watch",
-          reason: "workers_still_alive",
-          command: commands.sessionWatch,
-        }
-        : (totals.statuses.running ?? 0) > 0
-          ? {
-            action: "recover_session",
-            reason: "stale_running_claims",
-            command: commands.recoverSession,
-          }
-          : totals.resumableStopped > 0
-            ? {
-              action: "restart_session_with_stopped",
-              reason: "resumable_stopped_branches",
-              command: commands.restartSessionWithStopped,
-            }
-            : (totals.statuses.planned ?? 0) > 0
-              ? {
-                action: "restart_session",
-                reason: "planned_runs_waiting",
-                command: commands.restartSession,
-              }
-              : totals.resultCommits > 0
-                ? {
-                  action: "inspect_results",
-                  reason: "result_commits_available",
-                  command: commands.resultsNext,
-                }
-                : {
-                  action: "review_session",
-                  reason: "no_active_work",
-                  command: commands.sessionReview,
-                }
-      : null;
-    await printJson({
-      observedAt: new Date().toISOString(),
-      session: {
-        session: status.session.session,
-        command: status.session.command,
-        startedAt: status.session.startedAt,
-        stoppedAt: status.session.stoppedAt ?? null,
-        restartedAt: status.session.restartedAt ?? null,
-        workers: {
-          total: sessionWorkers.length,
-          alive: aliveWorkers,
-          dead: sessionWorkers.length - aliveWorkers,
-        },
-      },
-      totals,
-      agents,
-      ...(commands ? { commands, nextStep } : {}),
-    });
     return;
   }
   if (subcommandName === "session-review") {
@@ -3845,7 +3855,7 @@ Commands:
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
-  runs session-summary <name> [--next]
+  runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]

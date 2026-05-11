@@ -260,6 +260,7 @@ npm run cli -- runs session-wait overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs session-wait overnight --recoverable --include-stopped --max-polls 1
 npm run cli -- runs session-status overnight
 npm run cli -- runs session-summary overnight
+npm run cli -- runs session-summary overnight --next --max-polls 30 --interval-ms 10000
 npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
@@ -466,7 +467,9 @@ worker ownership, checkout/review/inspect/watch/resume commands, and
 recoverability when available. Pass `--checkout-dir` to choose where those branch
 commands materialize local checkouts.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
-result commits, and resumable stopped branches for that session's agents.
+result commits, and resumable stopped branches for that session's agents. Add
+`--max-polls` and `--interval-ms` for a compact newline-delimited status feed
+while a long worker session is running.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete

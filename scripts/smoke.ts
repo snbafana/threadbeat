@@ -3579,6 +3579,29 @@ try {
     sessionResultSummary.commands.changedResults.join(" "),
     `npm run cli -- runs results --session ${resultSummarySessionName} --checkout-dir ./checkouts/${resultSummarySessionName}-results --changed-only --next`,
   );
+  const sessionResultSummaryPoll = await cliRaw(baseUrl, [
+    "runs",
+    "session-summary",
+    resultSummarySessionName,
+    "--next",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const sessionResultSummarySnapshots = sessionResultSummaryPoll.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    observedAt: string;
+    session: { session: string };
+    totals: { resultCommits: number };
+    nextStep: { action: string };
+  });
+  assert.equal(sessionResultSummarySnapshots.length, 2);
+  assert.ok(sessionResultSummarySnapshots.every((snapshot) => (
+    /^\d{4}-\d{2}-\d{2}T/.test(snapshot.observedAt)
+    && snapshot.session.session === resultSummarySessionName
+    && snapshot.totals.resultCommits === 1
+    && snapshot.nextStep.action === "inspect_results"
+  )));
 
   const cliStep = await cliJson<{
     result: { stdout: string };
