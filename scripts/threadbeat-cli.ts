@@ -2289,12 +2289,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["commands-only"] === "1" && options.next !== "1") {
       throw new Error("runs session-review --commands-only requires --next");
     }
+    if (options.action && options.next !== "1") {
+      throw new Error("runs session-review --action requires --next");
+    }
+    if (options["branch-action"] && options.next !== "1") {
+      throw new Error("runs session-review --branch-action requires --next");
+    }
     if (options.format && options.next !== "1") {
       throw new Error("runs session-review --format requires --next");
     }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-review --format shell requires --commands-only");
     }
+    const actionFilter = options.action ? new Set(parseList(options.action)) : null;
+    const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
     const requiredSessionName = required(sessionName, "runs session-review <session>");
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const status = await workerSessionStatus(requiredSessionName, statusFilter);
@@ -2589,15 +2597,29 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         commands: run.commands,
       })),
     ];
+    const filteredNextSteps = actionFilter
+      ? nextSteps.filter((step) => actionFilter.has(step.action))
+      : nextSteps;
+    const filteredBranchNextSteps = branchActionFilter
+      ? branchNextSteps.filter((step) => branchActionFilter.has(step.action))
+      : branchNextSteps;
+    const filter = {
+      ...(actionFilter ? { action: [...actionFilter] } : {}),
+      ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+      ...(actionFilter || branchActionFilter ? {
+        totalNextSteps: nextSteps.length,
+        totalBranchNextSteps: branchNextSteps.length,
+      } : {}),
+    };
     const commandQueue = [
-      ...nextSteps.map((step) => ({
+      ...filteredNextSteps.map((step) => ({
         scope: "session",
         action: step.action,
         reason: step.reason,
         count: step.count,
         command: step.command,
       })),
-      ...branchNextSteps.map((step) => ({
+      ...filteredBranchNextSteps.map((step) => ({
         scope: "branch",
         action: step.action,
         reason: step.reason,
@@ -2704,11 +2726,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(options.next === "1"
       ? {
         observedAt: sessionReview.observedAt,
+        ...(Object.keys(filter).length > 0 ? { filter } : {}),
         session: sessionReview.session,
         summary,
         ...(options["commands-only"] === "1"
           ? { commands: commandQueue }
-          : { nextSteps, branchNextSteps }),
+          : { nextSteps: filteredNextSteps, branchNextSteps: filteredBranchNextSteps }),
       }
       : sessionReview);
     return;
@@ -4575,7 +4598,7 @@ Commands:
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
-  runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
+  runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

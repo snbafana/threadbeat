@@ -269,6 +269,7 @@ npm run cli -- runs session-summary overnight --next --max-polls 30 --interval-m
 npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --format shell
+npm run cli -- runs session-review overnight --include-stopped --next --commands-only --branch-action resume_branch --format shell
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
@@ -524,7 +525,10 @@ for compact branch-native inspection of one completed run. `runs results --next`
 keeps objective, worker ownership, branch state, and checkout/review/inspect
 commands on each queue row so changed-result review can stay branch-native.
 Add `--commands-only` with `--next` to reduce that snapshot to runnable
-commands, or `--format shell` to print one copyable command per line. Add
+commands, or `--format shell` to print one copyable command per line. Use
+`--action <name>` or `--branch-action resume_branch|review_branch` with
+`--next` to narrow a session-review queue to one class of recovery, result
+inspection, or branch resume commands without touching the branch state. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

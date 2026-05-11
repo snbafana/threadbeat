@@ -2000,6 +2000,31 @@ try {
   )));
   const detachedReviewCommandsShell = await cliRaw(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--commands-only", "--format", "shell"]);
   assert.ok(detachedReviewCommandsShell.stdout.trim().split("\n").includes(`npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`));
+  const detachedReviewResumeCommands = await cliJson<{
+    filter: { branchAction: string[]; totalBranchNextSteps: number };
+    commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--commands-only", "--branch-action", "resume_branch"]);
+  assert.deepEqual(detachedReviewResumeCommands.filter.branchAction, ["resume_branch"]);
+  assert.equal(detachedReviewResumeCommands.filter.totalBranchNextSteps, detachedWorkerReview.branchNextSteps.length);
+  assert.ok(detachedReviewResumeCommands.commands.some((step) => (
+    step.scope === "branch"
+    && step.action === "resume_branch"
+    && step.runId === detachedStoppedPlan.run.id
+  )));
+  assert.ok(detachedReviewResumeCommands.commands.every((step) => step.scope !== "branch" || step.action === "resume_branch"));
+  const detachedReviewResumeShell = await cliRaw(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--commands-only", "--branch-action", "resume_branch", "--format", "shell"]);
+  const detachedReviewResumeShellLines = detachedReviewResumeShell.stdout.trim().split("\n");
+  assert.ok(detachedReviewResumeShellLines.includes(`npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`));
+  assert.ok(!detachedReviewResumeShellLines.includes(`npm run cli -- runs review ${detachedResultPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`));
+  const detachedReviewChangedResultsOnly = await cliJson<{
+    filter: { action: string[]; totalNextSteps: number };
+    nextSteps: Array<{ action: string }>;
+    branchNextSteps: Array<{ action: string }>;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--action", "review_changed_results"]);
+  assert.deepEqual(detachedReviewChangedResultsOnly.filter.action, ["review_changed_results"]);
+  assert.equal(detachedReviewChangedResultsOnly.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
+  assert.ok(detachedReviewChangedResultsOnly.nextSteps.every((step) => step.action === "review_changed_results"));
+  assert.equal(detachedReviewChangedResultsOnly.branchNextSteps.length, detachedWorkerReview.branchNextSteps.length);
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"
