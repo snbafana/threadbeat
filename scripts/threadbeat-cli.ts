@@ -1323,6 +1323,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["branch-action"] && options.next !== "1") {
       throw new Error("runs sessions --branch-action requires --next");
     }
+    if (options["commands-only"] === "1" && options.next !== "1") {
+      throw new Error("runs sessions --commands-only requires --next");
+    }
     if (options.summary === "1" || options.next === "1") {
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
@@ -1615,6 +1618,40 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               : {}
           ),
         };
+        const commandQueue = [
+          ...actionQueue.map((item) => ({
+            scope: "session",
+            session: item.session,
+            action: item.action,
+            reason: item.reason,
+            command: item.command,
+          })),
+          ...branchActionQueue.map((item) => ({
+            scope: "branch",
+            session: item.session,
+            action: item.action,
+            reason: item.reason,
+            agentId: item.agentId,
+            runId: item.runId,
+            status: item.status,
+            objective: item.objective,
+            workerId: item.workerId,
+            location: item.location,
+            branchName: item.branchName,
+            resultCommit: item.resultCommit,
+            command: item.command,
+          })),
+        ];
+        if (options["commands-only"] === "1") {
+          return {
+            observedAt: new Date().toISOString(),
+            ...(Object.keys(filter).length > 0 ? { filter } : {}),
+            totals,
+            nextActions,
+            branchActions,
+            commands: commandQueue,
+          };
+        }
         return {
           observedAt: new Date().toISOString(),
           ...(Object.keys(filter).length > 0 ? { filter } : {}),
@@ -3614,7 +3651,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -4393,7 +4430,7 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
+  runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>

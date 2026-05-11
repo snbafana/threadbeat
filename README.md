@@ -459,7 +459,9 @@ worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
 next action is only `continue_watch`, `--action <name>` to show only matching
 session next-actions, or `--branch-action resume_branch|review_branch` to narrow
 the branch command queue without mutating any run branch, leaving restart,
-recover, result-inspection, and archive rows in the fleet queue. Use `runs archive-sessions --dry-run`
+recover, result-inspection, and archive rows in the fleet queue. Add
+`--commands-only` with `--next` to emit only the runnable session and branch
+commands for shell-friendly triage. Use `runs archive-sessions --dry-run`
 to preview archiving dead local session records without touching run records or Git branches, and
 `runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add

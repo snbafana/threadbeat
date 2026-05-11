@@ -3973,6 +3973,45 @@ try {
   )));
   assert.ok(resultFleetReviewBranchOnly.resultCommits.some((commit) => commit.runId === cliWorkFinalizePlan.run.id));
   assert.equal(resultFleetReviewBranchOnly.resumableBranches.length, 0);
+  const resultFleetCommandsOnly = await cliJson<{
+    totals: { sessions: number; resultCommits: number };
+    nextActions: Record<string, number>;
+    branchActions: Record<string, number>;
+    commands: Array<{
+      scope: string;
+      session: string;
+      action: string;
+      reason: string;
+      runId?: string;
+      resultCommit?: string | null;
+      command: string[];
+    }>;
+    sessions?: unknown;
+    resultCommits?: unknown;
+    resumableBranches?: unknown;
+  }>(baseUrl, ["runs", "sessions", "--session", resultSummarySessionName, "--next", "--commands-only"]);
+  assert.equal(resultFleetCommandsOnly.totals.sessions, 1);
+  assert.equal(resultFleetCommandsOnly.totals.resultCommits, 1);
+  assert.equal(resultFleetCommandsOnly.nextActions.inspect_results, 1);
+  assert.equal(resultFleetCommandsOnly.branchActions.review_branch, 1);
+  assert.equal(resultFleetCommandsOnly.sessions, undefined);
+  assert.equal(resultFleetCommandsOnly.resultCommits, undefined);
+  assert.equal(resultFleetCommandsOnly.resumableBranches, undefined);
+  assert.ok(resultFleetCommandsOnly.commands.some((item) => (
+    item.scope === "session"
+    && item.session === resultSummarySessionName
+    && item.action === "inspect_results"
+    && item.reason === "result_commits_available"
+    && item.command.join(" ") === `npm run cli -- runs results --session ${resultSummarySessionName} --next`
+  )));
+  assert.ok(resultFleetCommandsOnly.commands.some((item) => (
+    item.scope === "branch"
+    && item.session === resultSummarySessionName
+    && item.action === "review_branch"
+    && item.runId === cliWorkFinalizePlan.run.id
+    && item.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+    && item.command.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
+  )));
   assert.ok(resultFleetSummary.resultCommits.some((commit) => (
     commit.session === resultSummarySessionName
     && commit.agentId === cliWorkFinalizeAgent.agent.id
