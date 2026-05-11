@@ -1489,6 +1489,18 @@ try {
     && step.reason === "result_branches_available"
     && step.count >= 1
   )));
+  const detachedNextOnly = await cliJson<{
+    session: { session: string };
+    summary: { agents: number; resultBranches: number; resumableBranches: number; recoveryCandidates: number };
+    nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
+    agents?: unknown;
+    logs?: unknown;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next"]);
+  assert.equal(detachedNextOnly.session.session, detachedWorkerSessionName);
+  assert.equal(detachedNextOnly.summary.agents, detachedWorkerReview.summary.agents);
+  assert.deepEqual(detachedNextOnly.nextSteps.map((step) => step.action), detachedWorkerReview.nextSteps.map((step) => step.action));
+  assert.equal(detachedNextOnly.agents, undefined);
+  assert.equal(detachedNextOnly.logs, undefined);
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"

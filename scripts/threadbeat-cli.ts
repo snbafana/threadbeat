@@ -1184,7 +1184,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           : null,
       };
     });
-    await printJson({
+    const summary = {
+      agents: status.agents.length,
+      runs: status.agents.reduce((sum, agent) => sum + agent.total, 0),
+      statuses,
+      resultBranches: resultBranches.length,
+      resumableBranches: resumableBranches.length,
+      recoveryCandidates: recoveryPreview.filter((run) => !run.skipped).length,
+      recoverableActive: recoveryPreview.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length,
+      recoverableStopped: recoveryPreview.filter((run) => run.currentStatus === "stopped" && !run.skipped).length,
+      changedResults: changedResults?.length ?? null,
+      changedFiles: changedResults
+        ? changedResults.reduce((sum, run) => sum + run.changedFiles.length, 0)
+        : null,
+      agentSummaries,
+    };
+    const sessionReview = {
       observedAt: new Date().toISOString(),
       session: {
         session: status.session.session,
@@ -1198,21 +1213,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           dead: deadWorkerCount,
         },
       },
-      summary: {
-        agents: status.agents.length,
-        runs: status.agents.reduce((sum, agent) => sum + agent.total, 0),
-        statuses,
-        resultBranches: resultBranches.length,
-        resumableBranches: resumableBranches.length,
-        recoveryCandidates: recoveryPreview.filter((run) => !run.skipped).length,
-        recoverableActive: recoveryPreview.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length,
-        recoverableStopped: recoveryPreview.filter((run) => run.currentStatus === "stopped" && !run.skipped).length,
-        changedResults: changedResults?.length ?? null,
-        changedFiles: changedResults
-          ? changedResults.reduce((sum, run) => sum + run.changedFiles.length, 0)
-          : null,
-        agentSummaries,
-      },
+      summary,
       agents: status.agents,
       actions: {
         restartSession: restartSessionCommand,
@@ -1240,7 +1241,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           lines: await tailFileLines(worker.stderrPath, lines),
         },
       }))),
-    });
+    };
+    await printJson(options.next === "1"
+      ? {
+        observedAt: sessionReview.observedAt,
+        session: sessionReview.session,
+        summary,
+        nextSteps,
+      }
+      : sessionReview);
     return;
   }
   if (subcommandName === "session-watch") {
@@ -1924,7 +1933,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "until-empty") {
       options[key] = "1";
       continue;
     }
@@ -2667,7 +2676,7 @@ Commands:
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
-  runs session-review <name> [--include-stopped] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
+  runs session-review <name> [--include-stopped] [--next] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]

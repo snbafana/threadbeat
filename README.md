@@ -217,6 +217,7 @@ npm run cli -- runs sessions
 npm run cli -- runs session-status overnight
 npm run cli -- runs session-summary overnight
 npm run cli -- runs session-review overnight --include-stopped --lines 40
+npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-logs overnight --lines 40
@@ -377,9 +378,10 @@ result commits, and resumable stopped branches for that session's agents.
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete
 checkout/resume commands, dry-run recovery candidates, ordered `nextSteps`, and
-recent worker logs in one payload. It also includes a compact `summary` block
-and an `actions` block with the exact restart, recover, resume, and
-changed-results commands to run next. Add
+recent worker logs in one payload. Add `--next` to return only the compact
+summary and ordered next-step commands. The full snapshot also includes an
+`actions` block with the exact restart, recover, resume, and changed-results
+commands to run next. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
