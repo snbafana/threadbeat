@@ -2872,7 +2872,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const applyId = options["apply-id"];
       const record = await readSessionApplyRecord(requiredSessionName, applyId);
       if (!record) throw new Error(`session apply ${applyId} does not exist for ${requiredSessionName}`);
-      const summary = summarizeSessionApplyRecord(record);
+      const runStatusIndex = outputFormat === "json"
+        ? await sessionApplyRunStatusIndex(requiredSessionName)
+        : null;
+      const summary = summarizeSessionApplyRecord(record, runStatusIndex);
       if (outputFormat === "shell") {
         console.log(summary.actions.resumeApply.map(shellArg).join(" "));
         return;
@@ -2889,13 +2892,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       return;
     }
     const records = await listSessionApplyRecords(requiredSessionName);
-    const applies = records.map(summarizeSessionApplyRecord);
     if (outputFormat === "shell") {
-      for (const apply of applies) {
+      for (const apply of records.map((record) => summarizeSessionApplyRecord(record))) {
         console.log(apply.actions.resumeApply.map(shellArg).join(" "));
       }
       return;
     }
+    const runStatusIndex = await sessionApplyRunStatusIndex(requiredSessionName);
+    const applies = records.map((record) => summarizeSessionApplyRecord(record, runStatusIndex));
     await printJson({
       session: requiredSessionName,
       applyDir: workerSessionApplyDir(requiredSessionName),
@@ -4384,6 +4388,53 @@ type SessionVisibleRun = {
   resultCommit: string | null;
 };
 
+type SessionApplyRunStatus = {
+  agentId: string;
+  runId: string;
+  status: string;
+  objective: string;
+  branchName: string;
+  resultCommit: string | null;
+  workerId: string | null;
+  location: "session_worker" | "unassigned" | "other_worker";
+  resumable: boolean;
+  reviewable: boolean;
+  nextAction: "resume_branch" | "review_branch" | "wait_for_worker" | "dispatch_worker";
+};
+
+type SessionApplySummary = {
+  applyId: string;
+  applyPath: string;
+  observedAt: string;
+  startedAt: string;
+  updatedAt: string;
+  selected: number;
+  skippedCompleted: number;
+  executions: number;
+  succeeded: number;
+  failed: number;
+  pending: number;
+  actions: {
+    resumeApply: string[];
+    retryFailed: string[];
+    resumePending: string[];
+  };
+  pendingCommands: SessionApplyCommand[];
+  failedCommands: SessionApplyCommand[];
+  affectedRuns: Array<{
+    runId: string;
+    action: string;
+    reason: string;
+    state: "succeeded" | "failed" | "pending";
+    commands: {
+      inspectRun: string[];
+      checkoutBranch: string[];
+      reviewRun: string[];
+    };
+    currentRun: SessionApplyRunStatus | null;
+  }>;
+};
+
 async function startDetachedWorkerSession(
   sessionName: string,
   workerCount: number,
@@ -4596,44 +4647,17 @@ async function writeSessionApplyRecord(record: SessionApplyRecord): Promise<void
   await fs.writeFile(record.applyPath, `${JSON.stringify(record, null, 2)}\n`);
 }
 
-function summarizeSessionApplyRecord(record: SessionApplyRecord): {
-  applyId: string;
-  applyPath: string;
-  observedAt: string;
-  startedAt: string;
-  updatedAt: string;
-  selected: number;
-  skippedCompleted: number;
-  executions: number;
-  succeeded: number;
-  failed: number;
-  pending: number;
-  actions: {
-    resumeApply: string[];
-    retryFailed: string[];
-    resumePending: string[];
-  };
-  pendingCommands: SessionApplyCommand[];
-  failedCommands: SessionApplyCommand[];
-  affectedRuns: Array<{
-    runId: string;
-    action: string;
-    reason: string;
-    state: "succeeded" | "failed" | "pending";
-    commands: {
-      inspectRun: string[];
-      checkoutBranch: string[];
-      reviewRun: string[];
-    };
-  }>;
-} {
+function summarizeSessionApplyRecord(
+  record: SessionApplyRecord,
+  runStatusIndex: Map<string, SessionApplyRunStatus> | null = null,
+): SessionApplySummary {
   const commandStates = sessionApplyCommandStates(record);
   const failedCommands = record.commands.filter((command) => {
     const state = commandStates.get(commandKey(command.command));
     return state?.failed === true && state.succeeded !== true;
   });
   const pendingCommands = record.commands.filter((command) => !commandStates.has(commandKey(command.command)));
-  const affectedRuns = sessionApplyAffectedRuns(record, commandStates);
+  const affectedRuns = sessionApplyAffectedRuns(record, commandStates, runStatusIndex);
   return {
     applyId: record.applyId,
     applyPath: record.applyPath,
@@ -4672,6 +4696,7 @@ function sessionApplyCommandStates(record: SessionApplyRecord | null): Map<strin
 function sessionApplyAffectedRuns(
   record: SessionApplyRecord,
   commandStates: Map<string, { succeeded: boolean; failed: boolean }>,
+  runStatusIndex: Map<string, SessionApplyRunStatus> | null,
 ): Array<{
     runId: string;
     action: string;
@@ -4682,6 +4707,7 @@ function sessionApplyAffectedRuns(
       checkoutBranch: string[];
       reviewRun: string[];
     };
+    currentRun: SessionApplyRunStatus | null;
   }> {
   const seenRunIds = new Set<string>();
   const checkoutRoot = `./checkouts/${record.session}-applies/${record.applyId}`;
@@ -4705,8 +4731,69 @@ function sessionApplyAffectedRuns(
           checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", command.runId, "--dir", runCheckoutDir],
           reviewRun: ["npm", "run", "cli", "--", "runs", "review", command.runId, "--checkout-dir", runCheckoutDir],
         },
+        currentRun: runStatusIndex?.get(command.runId) ?? null,
       };
     });
+}
+
+async function sessionApplyRunStatusIndex(sessionName: string): Promise<Map<string, SessionApplyRunStatus> | null> {
+  try {
+    const status = await workerSessionStatus(sessionName, new Set(["planned", "running", "stopped", "completed", "failed"]));
+    const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & {
+      runs: Array<SessionVisibleRun & { agentId: string }>;
+    }>;
+    const rows: SessionApplyRunStatus[] = [
+      ...sessionWorkers.flatMap((worker) => worker.runs.map((run) => sessionApplyRunStatusRow(run, {
+        agentId: run.agentId,
+        workerId: worker.workerId,
+        location: "session_worker",
+      }))),
+      ...status.agents.flatMap((agent) => [
+        ...agent.unassigned.map((run) => sessionApplyRunStatusRow(run, {
+          agentId: agent.agentId,
+          workerId: null,
+          location: "unassigned",
+        })),
+        ...agent.otherWorkers.map((run) => sessionApplyRunStatusRow(run, {
+          agentId: agent.agentId,
+          workerId: run.workerId,
+          location: "other_worker",
+        })),
+      ]),
+    ];
+    return new Map(rows.map((row) => [row.runId, row]));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function sessionApplyRunStatusRow(
+  run: SessionVisibleRun,
+  context: { agentId: string; workerId: string | null; location: "session_worker" | "unassigned" | "other_worker" },
+): SessionApplyRunStatus {
+  const resumable = run.status === "stopped" && run.resultCommit === null;
+  const reviewable = run.resultCommit !== null;
+  const nextAction = resumable
+    ? "resume_branch"
+    : reviewable
+      ? "review_branch"
+      : context.location === "unassigned"
+        ? "dispatch_worker"
+        : "wait_for_worker";
+  return {
+    agentId: context.agentId,
+    runId: run.id,
+    status: run.status,
+    objective: run.objective,
+    branchName: run.branchName,
+    resultCommit: run.resultCommit,
+    workerId: context.workerId,
+    location: context.location,
+    resumable,
+    reviewable,
+    nextAction,
+  };
 }
 
 function parseSessionApplyResumeFilter(value: string): Set<"failed" | "pending"> {

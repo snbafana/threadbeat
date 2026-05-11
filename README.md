@@ -543,7 +543,9 @@ or `failed,pending` to retry only the failed commands, only commands that never
 started, or both. Use `runs session-applies <name>` to list those apply records,
 or `--apply-id <id>` to inspect the failed executions, pending commands,
 affected runs, exact resume commands, and branch-native inspect/checkout/review
-commands for one recorded apply. Add
+commands for one recorded apply. JSON apply summaries also include each affected
+run's current status, result commit, worker location, and next branch action
+when the worker session is still available. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
