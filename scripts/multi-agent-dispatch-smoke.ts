@@ -69,6 +69,26 @@ try {
   runIds.push(recoverableStopped.run.id);
   assert.match(recoverableStopped.plan.branchName, /^threadbeat\/runs\//);
   await cliJson(baseUrl, ["runs", "stop", recoverableStopped.run.id]);
+  const resumableResults = await cliJson<{
+    summary: { resumable: number };
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      runId: string;
+      state: string;
+      command: string[];
+      commands: { resumeBranch: string[] | null };
+    }>;
+  }>(baseUrl, ["runs", "results", "--agent", agentA.agent.id, "--status", "stopped", "--next"]);
+  assert.equal(resumableResults.summary.resumable, 1);
+  assert.ok(resumableResults.nextSteps.some((step) => (
+    step.runId === recoverableStopped.run.id
+    && step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.state === "resumable"
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`
+    && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`
+  )));
 
   const preview = await cliJson<{
     assignment: string;

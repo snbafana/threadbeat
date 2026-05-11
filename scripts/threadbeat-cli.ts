@@ -738,6 +738,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                   `${checkoutCommandRootDir}/${run.id}`,
                 ],
                 inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                resumeBranch: run.status === "stopped" && !run.result_commit
+                  ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+                  : null,
               },
               ...(sessionWorkerIds ? {
                 location: run.worker_id === null
@@ -832,12 +835,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ? review.changedFiles.length > 0 || review.commits.length > 0 || Boolean(review.error)
           : false;
         return {
-          action: hasReviewChange ? "review_changed_result" : "review_result",
+          action: run.state === "resumable"
+            ? "resume_branch"
+            : hasReviewChange
+              ? "review_changed_result"
+              : "review_result",
           reason: hasReviewChange
             ? "changed_result_branch"
-            : run.resultCommit
-              ? "result_branch_available"
-              : "branch_available",
+            : run.state === "resumable"
+              ? "stopped_branch_without_result_commit"
+              : run.resultCommit
+                ? "result_branch_available"
+                : "branch_available",
           agentId: agent.agentId,
           runId: run.id,
           status: run.status,
@@ -849,7 +858,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           resultCommit: run.resultCommit,
           changedFiles: review?.changedFiles.length ?? null,
           commits: review?.commits.length ?? null,
-          command: run.commands.reviewRun,
+          command: run.state === "resumable" && run.commands.resumeBranch
+            ? run.commands.resumeBranch
+            : run.commands.reviewRun,
           commands: run.commands,
         };
       }));
