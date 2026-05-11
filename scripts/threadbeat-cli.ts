@@ -2282,6 +2282,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-review") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-review --format must be json or shell");
+    }
+    if (options["commands-only"] === "1" && options.next !== "1") {
+      throw new Error("runs session-review --commands-only requires --next");
+    }
+    if (options.format && options.next !== "1") {
+      throw new Error("runs session-review --format requires --next");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-review --format shell requires --commands-only");
+    }
     const requiredSessionName = required(sessionName, "runs session-review <session>");
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const status = await workerSessionStatus(requiredSessionName, statusFilter);
@@ -2576,6 +2589,30 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         commands: run.commands,
       })),
     ];
+    const commandQueue = [
+      ...nextSteps.map((step) => ({
+        scope: "session",
+        action: step.action,
+        reason: step.reason,
+        count: step.count,
+        command: step.command,
+      })),
+      ...branchNextSteps.map((step) => ({
+        scope: "branch",
+        action: step.action,
+        reason: step.reason,
+        agentId: step.agentId,
+        runId: step.runId,
+        status: step.status,
+        objective: step.objective,
+        workerId: step.workerId,
+        location: step.location,
+        branchName: step.branchName,
+        resultCommit: step.resultCommit,
+        recoverable: "recoverable" in step ? step.recoverable : null,
+        command: step.command,
+      })),
+    ];
     const statuses: Record<string, number> = {};
     for (const agent of status.agents) {
       for (const [runStatus, count] of Object.entries(agent.statuses)) {
@@ -2660,13 +2697,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         },
       }))),
     };
+    if (options.next === "1" && outputFormat === "shell") {
+      printCommandQueueShell(commandQueue);
+      return;
+    }
     await printJson(options.next === "1"
       ? {
         observedAt: sessionReview.observedAt,
         session: sessionReview.session,
         summary,
-        nextSteps,
-        branchNextSteps,
+        ...(options["commands-only"] === "1"
+          ? { commands: commandQueue }
+          : { nextSteps, branchNextSteps }),
       }
       : sessionReview);
     return;
@@ -4533,7 +4575,7 @@ Commands:
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
-  runs session-review <name> [--include-stopped] [--next] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
+  runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

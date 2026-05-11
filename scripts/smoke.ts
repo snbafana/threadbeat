@@ -1981,6 +1981,25 @@ try {
   );
   assert.equal(detachedNextOnly.agents, undefined);
   assert.equal(detachedNextOnly.logs, undefined);
+  const detachedReviewCommands = await cliJson<{
+    session: { session: string };
+    summary: { branchNextSteps: number };
+    commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
+    nextSteps?: unknown;
+    branchNextSteps?: unknown;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--commands-only"]);
+  assert.equal(detachedReviewCommands.session.session, detachedWorkerSessionName);
+  assert.equal(detachedReviewCommands.summary.branchNextSteps, detachedWorkerReview.summary.branchNextSteps);
+  assert.equal(detachedReviewCommands.nextSteps, undefined);
+  assert.equal(detachedReviewCommands.branchNextSteps, undefined);
+  assert.ok(detachedReviewCommands.commands.some((step) => (
+    step.scope === "branch"
+    && step.action === "resume_branch"
+    && step.runId === detachedStoppedPlan.run.id
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+  )));
+  const detachedReviewCommandsShell = await cliRaw(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--commands-only", "--format", "shell"]);
+  assert.ok(detachedReviewCommandsShell.stdout.trim().split("\n").includes(`npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`));
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"
