@@ -1795,6 +1795,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         { workerId: session.session },
         parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
         workerIds,
+        options["include-stopped"] === "1",
+        false,
+        options["include-stopped"] === "1",
       )
       : [];
     await printJson({
@@ -3276,7 +3279,7 @@ Commands:
   runs session-review <name> [--include-stopped] [--next] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
-  runs stop-session <name> [--recover] [--concurrency 4]
+  runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
   runs resume-session <name> [--worker-id worker-a] [--dry-run] [--concurrency 4]
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--concurrency 4]

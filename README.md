@@ -428,7 +428,9 @@ while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, and `runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add
 `--recover` to `runs stop-session` to requeue unfinished runs claimed by that
-session's workers when those runs do not have a running sandbox.
+session's workers when those runs do not have a running sandbox. Add
+`--include-stopped` to also requeue unfinished stopped branches in the same
+stop/recover step.
 Use `runs session-actions <name>` when returning to an existing session and you
 only need the exact status/watch/review/results/checkout/logs/stop commands.
 Add `--recoverable` to `runs session-status` or `runs session-watch` to include

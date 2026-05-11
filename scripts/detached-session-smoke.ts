@@ -235,11 +235,17 @@ try {
   const stopped = await cliJson<{
     session: string;
     stopped: Array<{ workerId: string; pid: number | null; stopped: boolean; alive: boolean }>;
-  }>(baseUrl, ["runs", "stop-session", sessionName]);
+    recovered: Array<{ runId: string; status?: string; workerId: string | null }>;
+  }>(baseUrl, ["runs", "stop-session", sessionName, "--recover", "--include-stopped"]);
   assert.equal(stopped.session, sessionName);
   assert.equal(stopped.stopped[0].workerId, "detached-smoke-worker-1");
   assert.equal(stopped.stopped[0].stopped, true);
   assert.equal(stopped.stopped[0].alive, false);
+  assert.ok(stopped.recovered.some((run) => (
+    run.runId === stoppedPlan.run.id
+    && run.status === "planned"
+    && run.workerId === null
+  )));
 
   const stoppedSessions = await cliJson<{
     sessions: Array<{ session: string; workers: Array<{ alive: boolean }> }>;
