@@ -4479,6 +4479,25 @@ try {
     readyResultApplyShell.stdout.trim(),
     `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`,
   );
+  const readyResultChangedShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    resultSummarySessionName,
+    "--apply-id",
+    resultApplyId,
+    "--ready-results",
+    "--format",
+    "shell",
+    "--checkout-dir",
+    "./checkouts/smoke-ready-results",
+    "--changed-only",
+    "--changed-path",
+    "report.md",
+  ]);
+  assert.equal(
+    readyResultChangedShell.stdout.trim(),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only --checkout-dir ./checkouts/smoke-ready-results --changed-only --changed-path report.md`,
+  );
   const readyResultAppliesShell = await cliRaw(baseUrl, ["runs", "session-applies", resultSummarySessionName, "--ready-results", "--format", "shell"]);
   assert.equal(
     readyResultAppliesShell.stdout.trim(),

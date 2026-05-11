@@ -3093,6 +3093,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["ready-results"] === "1" && outputFormat !== "shell") {
       throw new Error("runs session-applies --ready-results requires --format shell");
     }
+    if (options["changed-only"] === "1" && !options["checkout-dir"]) {
+      throw new Error("runs session-applies --changed-only requires --checkout-dir");
+    }
+    if (options["changed-path"] && !options["checkout-dir"]) {
+      throw new Error("runs session-applies --changed-path requires --checkout-dir");
+    }
     if (options["apply-id"]) {
       const applyId = options["apply-id"];
       const record = await readSessionApplyRecord(requiredSessionName, applyId);
@@ -3103,7 +3109,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const summary = summarizeSessionApplyRecord(record, runStatusIndex);
       if (outputFormat === "shell") {
         const command = options["ready-results"] === "1"
-          ? summary.actions.reviewReadyResults
+          ? sessionApplyReadyResultsCommand(summary, options)
           : summary.actions.resumeApply;
         if (command) console.log(command.map(shellArg).join(" "));
         return;
@@ -3126,7 +3132,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         : null;
       for (const apply of records.map((record) => summarizeSessionApplyRecord(record, runStatusIndex))) {
         const command = options["ready-results"] === "1"
-          ? apply.actions.reviewReadyResults
+          ? sessionApplyReadyResultsCommand(apply, options)
           : apply.actions.resumeApply;
         if (command) console.log(command.map(shellArg).join(" "));
       }
@@ -4929,6 +4935,19 @@ function summarizeSessionApplyRecord(
   };
 }
 
+function sessionApplyReadyResultsCommand(
+  summary: SessionApplySummary,
+  options: Record<string, string>,
+): string[] | null {
+  if (!summary.actions.reviewReadyResults) return null;
+  return [
+    ...summary.actions.reviewReadyResults,
+    ...(options["checkout-dir"] ? ["--checkout-dir", options["checkout-dir"]] : []),
+    ...(options["changed-only"] === "1" ? ["--changed-only"] : []),
+    ...(options["changed-path"] ? ["--changed-path", options["changed-path"]] : []),
+  ];
+}
+
 function sessionApplyCommandStates(record: SessionApplyRecord | null): Map<string, { succeeded: boolean; failed: boolean }> {
   const states = new Map<string, { succeeded: boolean; failed: boolean }>();
   for (const execution of record?.executions ?? []) {
@@ -5364,7 +5383,7 @@ Commands:
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
-  runs session-applies <name> [--apply-id id] [--ready-results] [--format json|shell]
+  runs session-applies <name> [--apply-id id] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

@@ -278,6 +278,7 @@ npm run cli -- runs session-apply overnight --include-stopped --branch-action re
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume --resume-filter failed
 npm run cli -- runs session-applies overnight --apply-id overnight-resume-1
 npm run cli -- runs session-applies overnight --ready-results --format shell
+npm run cli -- runs session-applies overnight --ready-results --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
@@ -562,9 +563,11 @@ commands for one recorded apply. Apply summaries also include run-filtered
 can continue from the exact affected branches. When any affected run now has a
 result commit, apply summaries add a `reviewReadyResults` command for the
 run-filtered result review queue. Add `--ready-results --format shell` to print
-only those review-ready result commands across recorded applies. JSON apply
-summaries also include each affected run's current status, result commit, worker
-location, and next branch action when the worker session is still available. Add
+only those review-ready result commands across recorded applies, and pass
+`--checkout-dir`, `--changed-only`, or `--changed-path` through to the generated
+result-review commands. JSON apply summaries also include each affected run's
+current status, result commit, worker location, and next branch action when the
+worker session is still available. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
