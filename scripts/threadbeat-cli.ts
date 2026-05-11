@@ -479,44 +479,84 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : parseList(options.agents ?? required(options.agent, "--agent, --agents, or --session"));
     const statusList = parseList(options.status ?? (options.resumable === "1" ? "stopped" : "completed,stopped"));
     const statusFilter = new Set(statusList);
+    const checkoutCommandRootDir = options["checkout-dir"]
+      ?? (options.session ? `./checkouts/${options.session}-branches` : "./checkouts/branches");
     const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
-      const listed = await requestJson("GET", withQuery(
-        `/api/agents/${encodeURIComponent(agentId)}/runs`,
-        new URLSearchParams({ status: statusList.join(",") }),
-      )) as {
-        runs: Array<{
-          id: string;
-          objective: string;
-          input_ref: string;
-          run_branch: string;
-          result_commit: string | null;
-          status: string;
-          worker_id: string | null;
-        }>;
-      };
+      const [listed, repository] = await Promise.all([
+        requestJson("GET", withQuery(
+          `/api/agents/${encodeURIComponent(agentId)}/runs`,
+          new URLSearchParams({ status: statusList.join(",") }),
+        )) as Promise<{
+          runs: Array<{
+            id: string;
+            objective: string;
+            input_ref: string;
+            run_branch: string;
+            result_commit: string | null;
+            status: string;
+            worker_id: string | null;
+          }>;
+        }>,
+        requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/repository`) as Promise<{
+          repository: { repoUrl: string; repoWebUrl: string | null };
+        }>,
+      ]);
       const runs = listed.runs
         .filter((run) => statusFilter.has(run.status))
         .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
         .filter((run) => options.resumable !== "1" || (run.status === "stopped" && !run.result_commit))
-        .map((run) => ({
-          id: run.id,
-          status: run.status,
-          state: run.result_commit ? "result" : run.status === "stopped" ? "resumable" : run.status,
-          objective: run.objective,
-          baseRef: run.input_ref,
-          branchName: run.run_branch,
-          resultCommit: run.result_commit,
-          workerId: run.worker_id,
-          ...(sessionWorkerIds ? {
-            location: run.worker_id === null
-              ? "unassigned"
-              : sessionWorkerIds.has(run.worker_id)
-                ? "session_worker"
-                : "other_worker",
-          } : {}),
-        }));
+        .map((run) => {
+          const branchLinks = deriveGitHubLinks(repository.repository.repoUrl, {
+            compareBaseRef: run.input_ref,
+            compareHeadRef: run.run_branch,
+            treeRef: run.run_branch,
+          });
+          const resultLinks = deriveGitHubLinks(repository.repository.repoUrl, {
+            commitRef: run.result_commit,
+            compareBaseRef: run.input_ref,
+            compareHeadRef: run.result_commit,
+            treeRef: run.result_commit,
+          });
+          const state = run.result_commit ? "result" : run.status === "stopped" ? "resumable" : run.status;
+          return {
+            id: run.id,
+            status: run.status,
+            state,
+            objective: run.objective,
+            baseRef: run.input_ref,
+            branchName: run.run_branch,
+            resultCommit: run.result_commit,
+            workerId: run.worker_id,
+            commands: {
+              checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${checkoutCommandRootDir}/${run.id}`],
+              reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${checkoutCommandRootDir}/${run.id}`],
+              inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+              resumeBranch: state === "resumable"
+                ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+                : null,
+            },
+            links: {
+              repoUrl: branchLinks.repoUrl,
+              branchTreeUrl: branchLinks.treeUrl,
+              branchCompareUrl: branchLinks.compareUrl,
+              resultTreeUrl: resultLinks.treeUrl,
+              resultCommitUrl: resultLinks.commitUrl,
+              resultCompareUrl: resultLinks.compareUrl,
+            },
+            ...(sessionWorkerIds ? {
+              location: run.worker_id === null
+                ? "unassigned"
+                : sessionWorkerIds.has(run.worker_id)
+                  ? "session_worker"
+                  : "other_worker",
+            } : {}),
+          };
+        });
       return {
         agentId,
+        repository: {
+          repoWebUrl: repository.repository.repoWebUrl,
+        },
         summary: {
           total: runs.length,
           resultCommits: runs.filter((run) => run.resultCommit).length,
@@ -525,7 +565,46 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         runs,
       };
     });
-    await printJson({ agents });
+    const visibleRuns = agents.flatMap((agent) => agent.runs.map((run) => ({ agentId: agent.agentId, run })));
+    const observedAt = new Date().toISOString();
+    const summary = {
+      agents: agents.length,
+      total: visibleRuns.length,
+      resultCommits: visibleRuns.filter(({ run }) => run.resultCommit).length,
+      resumable: visibleRuns.filter(({ run }) => run.state === "resumable").length,
+    };
+    if (options.next === "1") {
+      await printJson({
+        observedAt,
+        ...(options.session ? { session: options.session } : {}),
+        checkoutDir: checkoutCommandRootDir,
+        summary,
+        nextSteps: visibleRuns.map(({ agentId, run }) => ({
+          action: run.state === "resumable" ? "resume_branch" : "review_branch",
+          reason: run.state === "resumable"
+            ? "stopped_branch_without_result_commit"
+            : run.resultCommit
+              ? "result_commit_available"
+              : "branch_available",
+          agentId,
+          runId: run.id,
+          status: run.status,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          command: run.state === "resumable" && run.commands.resumeBranch
+            ? run.commands.resumeBranch
+            : run.commands.reviewRun,
+        })),
+      });
+      return;
+    }
+    await printJson({
+      observedAt,
+      ...(options.session ? { session: options.session } : {}),
+      checkoutDir: checkoutCommandRootDir,
+      summary,
+      agents,
+    });
     return;
   }
   if (subcommandName === "results") {
@@ -2861,7 +2940,7 @@ Commands:
   runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--dry-run] [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
-  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a]
+  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]

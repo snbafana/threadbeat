@@ -194,6 +194,7 @@ npm run cli -- runs inspect <run>
 npm run cli -- runs inspect <run> --checkout --checkout-dir ./checkouts/<run>
 npm run cli -- runs checkout <run> --dir ./checkouts/<run>
 npm run cli -- runs review <run> --checkout-dir ./checkouts/<run>
+npm run cli -- runs branches --session overnight --next
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight-resume --resumable --worker-id worker-a
 npm run cli -- runs claim <run> --worker-id worker-a
@@ -406,6 +407,10 @@ unfinished stopped branch runs for that session's agents.
 worker session: it requeues stopped runs with no result commit while leaving
 completed result branches alone. Add `--worker-id <id>` to target only that
 worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
+`runs branches --session <name>` is the no-checkout branch ledger for a session:
+each row includes branch/result state, GitHub branch/result links, and exact
+checkout/review/inspect/resume commands. Add `--next` to return only the ordered
+branch review/resume queue.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, top-level result/resumable/changed counts,

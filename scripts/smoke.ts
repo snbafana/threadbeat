@@ -1337,12 +1337,28 @@ try {
     && agent.resumableStopped >= 1
   )));
   const detachedWorkerBranches = await cliJson<{
+    observedAt: string;
+    session: string;
+    checkoutDir: string;
+    summary: { total: number; resultCommits: number; resumable: number };
     agents: Array<{
       agentId: string;
       summary: { total: number; resultCommits: number; resumable: number };
-      runs: Array<{ id: string; status: string; state: string; resultCommit: string | null; location: string }>;
+      runs: Array<{
+        id: string;
+        status: string;
+        state: string;
+        resultCommit: string | null;
+        location: string;
+        commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[]; resumeBranch: string[] | null };
+        links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
+      }>;
     }>;
   }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName]);
+  assert.match(detachedWorkerBranches.observedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(detachedWorkerBranches.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerBranches.checkoutDir, `./checkouts/${detachedWorkerSessionName}-branches`);
+  assert.ok(detachedWorkerBranches.summary.resumable >= 1);
   assert.ok(detachedWorkerBranches.agents.some((agent) => (
     agent.agentId === workerGroupAgentBody.agent.id
     && agent.summary.resumable >= 1
@@ -1352,7 +1368,35 @@ try {
       && run.state === "resumable"
       && run.resultCommit === null
       && run.location === "unassigned"
+      && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-branches/${detachedStoppedPlan.run.id}`
+      && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedStoppedPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-branches/${detachedStoppedPlan.run.id}`
+      && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedStoppedPlan.run.id}`
+      && run.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+      && run.links.branchTreeUrl !== null
+      && run.links.resultCommitUrl === null
     ))
+  )));
+  const detachedWorkerBranchesNext = await cliJson<{
+    observedAt: string;
+    session: string;
+    checkoutDir: string;
+    summary: { total: number; resultCommits: number; resumable: number };
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      runId: string;
+      command: string[];
+    }>;
+  }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName, "--next"]);
+  assert.match(detachedWorkerBranchesNext.observedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(detachedWorkerBranchesNext.session, detachedWorkerSessionName);
+  assert.equal(detachedWorkerBranchesNext.checkoutDir, `./checkouts/${detachedWorkerSessionName}-branches`);
+  assert.equal(detachedWorkerBranchesNext.summary.total, detachedWorkerBranches.summary.total);
+  assert.ok(detachedWorkerBranchesNext.nextSteps.some((step) => (
+    step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.runId === detachedStoppedPlan.run.id
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
   )));
   const detachedWorkerResumableBranches = await cliJson<{
     agents: Array<{
