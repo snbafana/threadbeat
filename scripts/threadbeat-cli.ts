@@ -2129,6 +2129,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       command: item.command,
     }));
     const output = {
+      observedAt: new Date().toISOString(),
       ...status,
       ...(Object.keys(filter).length > 0 ? { filter } : {}),
       ...(recoveryPreview ? { recoveryPreview } : {}),
@@ -2930,8 +2931,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const requiredSessionName = required(sessionName, "runs session-apply <session>");
+    const queueSource = options.source ?? "review";
+    if (queueSource !== "review" && queueSource !== "status") {
+      throw new Error("runs session-apply --source must be review or status");
+    }
     if (!options.action && !options["branch-action"]) {
       throw new Error("runs session-apply requires --action or --branch-action");
+    }
+    if (queueSource === "status") {
+      if (options.action) throw new Error("runs session-apply --source status supports --branch-action resume_branch only");
+      const branchActions = new Set(parseList(required(options["branch-action"], "--branch-action")));
+      if (branchActions.size !== 1 || !branchActions.has("resume_branch")) {
+        throw new Error("runs session-apply --source status supports --branch-action resume_branch only");
+      }
+      if (options["checkout-dir"] || options["changed-only"] === "1" || options["changed-path"] || options["result-status"]) {
+        throw new Error("runs session-apply --source status does not support result checkout filters");
+      }
     }
     const applyId = options["apply-id"] ?? new Date().toISOString().replace(/[:.]/g, "-");
     assertSafeSessionName(applyId);
@@ -2942,25 +2957,37 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.resume !== "1" && options["apply-id"] && await pathExists(applyPath)) {
       throw new Error(`session apply ${applyId} already exists for ${requiredSessionName}; use --resume`);
     }
-    const reviewArgs = [
-      "runs",
-      "session-review",
-      requiredSessionName,
-      "--next",
-      "--commands-only",
-      ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
-      ...(options.action ? ["--action", options.action] : []),
-      ...(options["branch-action"] ? ["--branch-action", options["branch-action"]] : []),
-      ...(options["checkout-dir"] ? ["--checkout-dir", options["checkout-dir"]] : []),
-      ...(options["changed-only"] === "1" ? ["--changed-only"] : []),
-      ...(options["changed-path"] ? ["--changed-path", options["changed-path"]] : []),
-      ...(options["result-status"] ? ["--result-status", options["result-status"]] : []),
-    ];
-    const review = await runCliWorker(reviewArgs);
-    if (review.exitCode !== 0) {
-      throw new Error(review.stderr || review.stdout || "runs session-apply failed to build session-review queue");
+    const queueArgs = queueSource === "status"
+      ? [
+        "runs",
+        "session-status",
+        requiredSessionName,
+        "--recoverable",
+        "--next",
+        "--commands-only",
+        ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
+        ...(options.status ? ["--status", options.status] : []),
+        ...(options["branch-action"] ? ["--branch-action", options["branch-action"]] : []),
+      ]
+      : [
+        "runs",
+        "session-review",
+        requiredSessionName,
+        "--next",
+        "--commands-only",
+        ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
+        ...(options.action ? ["--action", options.action] : []),
+        ...(options["branch-action"] ? ["--branch-action", options["branch-action"]] : []),
+        ...(options["checkout-dir"] ? ["--checkout-dir", options["checkout-dir"]] : []),
+        ...(options["changed-only"] === "1" ? ["--changed-only"] : []),
+        ...(options["changed-path"] ? ["--changed-path", options["changed-path"]] : []),
+        ...(options["result-status"] ? ["--result-status", options["result-status"]] : []),
+      ];
+    const queueResult = await runCliWorker(queueArgs);
+    if (queueResult.exitCode !== 0) {
+      throw new Error(queueResult.stderr || queueResult.stdout || `runs session-apply failed to build ${queueSource} queue`);
     }
-    const queue = JSON.parse(review.stdout) as {
+    const queue = JSON.parse(queueResult.stdout) as {
       observedAt: string;
       filter?: Record<string, unknown>;
       commands: Array<{
@@ -2994,6 +3021,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const responseBase = {
       observedAt: queue.observedAt,
       session: requiredSessionName,
+      source: queueSource,
       applyId,
       applyPath,
       dryRun: options["dry-run"] === "1",
@@ -4554,6 +4582,7 @@ type SessionApplyExecution = {
 type SessionApplyRecord = {
   observedAt: string;
   session: string;
+  source?: string;
   applyId: string;
   applyPath: string;
   dryRun: boolean;
@@ -4998,6 +5027,9 @@ function parseSessionApplyResumeFilter(value: string): Set<"failed" | "pending">
 
 function sessionApplyResumeCommand(record: SessionApplyRecord, resumeFilter?: Array<"failed" | "pending">): string[] {
   const command = ["npm", "run", "cli", "--", "runs", "session-apply", record.session];
+  if (record.source && record.source !== "review") {
+    command.push("--source", record.source);
+  }
   const branchAction = stringListFromUnknown(record.filter.branchAction);
   const action = stringListFromUnknown(record.filter.action);
   const fallbackActions = [...new Set(record.commands.map((item) => item.action))];
@@ -5300,7 +5332,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--format json|shell]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]

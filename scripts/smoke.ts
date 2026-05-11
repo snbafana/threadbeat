@@ -2120,12 +2120,14 @@ try {
   assert.equal(detachedReviewChangedResultsOnly.branchNextSteps.length, detachedWorkerReview.branchNextSteps.length);
   const detachedApplyResumePreview = await cliJson<{
     session: string;
+    source: string;
     dryRun: boolean;
     selected: number;
     filter: { branchAction: string[]; run: string[]; limit: number };
     commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
   }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", detachedStoppedPlan.run.id, "--limit", "1", "--dry-run"]);
   assert.equal(detachedApplyResumePreview.session, detachedWorkerSessionName);
+  assert.equal(detachedApplyResumePreview.source, "review");
   assert.equal(detachedApplyResumePreview.dryRun, true);
   assert.equal(detachedApplyResumePreview.selected, 1);
   assert.deepEqual(detachedApplyResumePreview.filter.branchAction, ["resume_branch"]);
@@ -2135,6 +2137,40 @@ try {
   assert.equal(detachedApplyResumePreview.commands[0].action, "resume_branch");
   assert.equal(detachedApplyResumePreview.commands[0].runId, detachedStoppedPlan.run.id);
   assert.equal(detachedApplyResumePreview.commands[0].command.join(" "), `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`);
+  const detachedApplyStatusResumePreview = await cliJson<{
+    session: string;
+    source: string;
+    dryRun: boolean;
+    selected: number;
+    filter: { branchAction: string[]; run: string[]; limit: number; totalBranchNextSteps: number };
+    commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "status",
+    "--include-stopped",
+    "--branch-action",
+    "resume_branch",
+    "--run",
+    detachedStoppedPlan.run.id,
+    "--limit",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(detachedApplyStatusResumePreview.session, detachedWorkerSessionName);
+  assert.equal(detachedApplyStatusResumePreview.source, "status");
+  assert.equal(detachedApplyStatusResumePreview.dryRun, true);
+  assert.equal(detachedApplyStatusResumePreview.selected, 1);
+  assert.deepEqual(detachedApplyStatusResumePreview.filter.branchAction, ["resume_branch"]);
+  assert.deepEqual(detachedApplyStatusResumePreview.filter.run, [detachedStoppedPlan.run.id]);
+  assert.equal(detachedApplyStatusResumePreview.filter.limit, 1);
+  assert.ok(detachedApplyStatusResumePreview.filter.totalBranchNextSteps >= 1);
+  assert.equal(detachedApplyStatusResumePreview.commands[0].scope, "branch");
+  assert.equal(detachedApplyStatusResumePreview.commands[0].action, "resume_branch");
+  assert.equal(detachedApplyStatusResumePreview.commands[0].runId, detachedStoppedPlan.run.id);
+  assert.equal(detachedApplyStatusResumePreview.commands[0].command.join(" "), `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`);
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"
@@ -2482,6 +2518,7 @@ try {
   const sessionApplyId = "smoke-session-apply-resume";
   const sessionApplyResumed = await cliJson<{
     session: string;
+    source: string;
     applyId: string;
     applyPath: string;
     dryRun: boolean;
@@ -2495,8 +2532,9 @@ try {
       exitCode: number | null;
       output: { resumed?: { runId: string; branchName: string; status: string; workerId: string | null }; run?: { status: string; worker_id: string | null } };
     }>;
-  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1", "--apply-id", sessionApplyId]);
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--source", "status", "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1", "--apply-id", sessionApplyId]);
   assert.equal(sessionApplyResumed.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyResumed.source, "status");
   assert.equal(sessionApplyResumed.applyId, sessionApplyId);
   assert.match(sessionApplyResumed.applyPath, new RegExp(`\\.threadbeat/worker-sessions/apply/${detachedWorkerSessionName}/${sessionApplyId}\\.json$`));
   assert.equal(sessionApplyResumed.dryRun, false);
@@ -2522,17 +2560,20 @@ try {
   assert.equal(sessionApplyRun.run.worker_id, null);
   const sessionApplyRecord = JSON.parse(await fs.readFile(sessionApplyResumed.applyPath, "utf8")) as {
     session: string;
+    source: string;
     applyId: string;
     commands: Array<{ runId?: string }>;
     executions: Array<{ runId: string | null; exitCode: number | null }>;
   };
   assert.equal(sessionApplyRecord.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyRecord.source, "status");
   assert.equal(sessionApplyRecord.applyId, sessionApplyId);
   assert.deepEqual(sessionApplyRecord.commands.map((command) => command.runId), [sessionApplyPlan.run.id]);
   assert.equal(sessionApplyRecord.executions[0].runId, sessionApplyPlan.run.id);
   assert.equal(sessionApplyRecord.executions[0].exitCode, 0);
   const sessionApplyResume = await cliJson<{
     session: string;
+    source: string;
     applyId: string;
     resume: boolean;
     resumeFilter: string[];
@@ -2541,8 +2582,9 @@ try {
     skippedByResumeFilter: number;
     commandsToRun: Array<{ runId?: string }>;
     executions: Array<{ runId: string | null; exitCode: number | null }>;
-  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1", "--apply-id", sessionApplyId, "--resume"]);
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--source", "status", "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1", "--apply-id", sessionApplyId, "--resume"]);
   assert.equal(sessionApplyResume.session, detachedWorkerSessionName);
+  assert.equal(sessionApplyResume.source, "status");
   assert.equal(sessionApplyResume.applyId, sessionApplyId);
   assert.equal(sessionApplyResume.resume, true);
   assert.deepEqual(sessionApplyResume.resumeFilter, ["failed", "pending"]);
@@ -2608,6 +2650,8 @@ try {
     "runs",
     "session-apply",
     detachedWorkerSessionName,
+    "--source",
+    "status",
     "--branch-action",
     "resume_branch",
     "--apply-id",
@@ -2631,7 +2675,7 @@ try {
   const sessionApplyShell = await cliRaw(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", sessionApplyId, "--format", "shell"]);
   assert.equal(
     sessionApplyShell.stdout.trim(),
-    `npm run cli -- runs session-apply ${detachedWorkerSessionName} --branch-action resume_branch --apply-id ${sessionApplyId} --resume`,
+    `npm run cli -- runs session-apply ${detachedWorkerSessionName} --source status --branch-action resume_branch --apply-id ${sessionApplyId} --resume`,
   );
   const retryApplyId = "smoke-session-apply-retry-filter";
   const retryApplyPath = path.join(path.dirname(sessionApplyResumed.applyPath), `${retryApplyId}.json`);
