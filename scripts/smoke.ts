@@ -1439,6 +1439,7 @@ try {
       resumeSession: string[] | null;
       changedResults: string[];
     };
+    nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--lines", "5"]);
   assert.match(detachedWorkerReview.observedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -1473,6 +1474,21 @@ try {
     detachedWorkerReview.actions.changedResults.join(" "),
     `npm run cli -- runs results --session ${detachedWorkerSessionName} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results --changed-only`,
   );
+  const detachedNextStepActions = detachedWorkerReview.nextSteps.map((step) => step.action);
+  assert.ok(detachedNextStepActions.indexOf("recover_stopped") >= 0);
+  assert.ok(detachedNextStepActions.indexOf("resume_session") > detachedNextStepActions.indexOf("recover_stopped"));
+  assert.ok(detachedNextStepActions.indexOf("review_changed_results") > detachedNextStepActions.indexOf("resume_session"));
+  assert.ok(detachedWorkerReview.nextSteps.some((step) => (
+    step.action === "recover_stopped"
+    && step.reason === "unfinished_stopped_branches"
+    && step.count >= 1
+    && step.command.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`
+  )));
+  assert.ok(detachedWorkerReview.nextSteps.some((step) => (
+    step.action === "review_changed_results"
+    && step.reason === "result_branches_available"
+    && step.count >= 1
+  )));
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (
     run.runId === detachedStoppedPlan.run.id
     && run.currentStatus === "stopped"
@@ -2610,6 +2626,7 @@ try {
         review: { changedFiles: Array<{ status: string; path: string }> };
       }>;
     }>;
+    nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
   }>(baseUrl, [
     "runs",
     "session-review",
@@ -2628,6 +2645,11 @@ try {
     agent.agentId === checkoutAgent.agent.id
     && (agent.changedResults ?? 0) >= 1
     && (agent.changedFiles ?? 0) >= 1
+  )));
+  assert.ok(checkedOutSessionReview.nextSteps.some((step) => (
+    step.action === "review_changed_results"
+    && step.reason === "changed_results_found"
+    && step.count >= 1
   )));
   assert.ok(checkedOutSessionReview.recoveryPreview.some((run) => (
     run.runId === checkoutPlan.run.id && run.currentStatus === "stopped" && run.dryRun === true

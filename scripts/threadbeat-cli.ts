@@ -1092,6 +1092,77 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const canResumeSession = resumableBranches.some((run) => run.location !== "other_worker");
     const hasRecoverableActiveRun = recoveryPreview.some((item) => item.currentStatus !== "stopped");
     const hasRecoverableStoppedRun = recoveryPreview.some((item) => item.currentStatus === "stopped");
+    const restartSessionCommand = deadWorkerCount > 0
+      ? ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover"]
+      : null;
+    const restartSessionWithStoppedCommand = deadWorkerCount > 0 && canResumeSession
+      ? ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover", "--resume-stopped"]
+      : null;
+    const recoverSessionCommand = hasRecoverableActiveRun
+      ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session]
+      : null;
+    const recoverStoppedCommand = hasRecoverableStoppedRun
+      ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"]
+      : null;
+    const resumeSessionCommand = canResumeSession
+      ? ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session]
+      : null;
+    const changedResultsCommand = [
+      "npm",
+      "run",
+      "cli",
+      "--",
+      "runs",
+      "results",
+      "--session",
+      status.session.session,
+      "--checkout-dir",
+      resultCheckoutDir,
+      "--changed-only",
+    ];
+    const shouldReviewChangedResults = changedResults === null
+      ? resultBranches.length > 0
+      : changedResults.length > 0;
+    const nextSteps = [
+      ...(restartSessionWithStoppedCommand ? [{
+        action: "restart_session_with_stopped",
+        reason: "dead_workers_and_resumable_branches",
+        count: deadWorkerCount,
+        command: restartSessionWithStoppedCommand,
+      }] : []),
+      ...(!restartSessionWithStoppedCommand && restartSessionCommand ? [{
+        action: "restart_session",
+        reason: "dead_workers",
+        count: deadWorkerCount,
+        command: restartSessionCommand,
+      }] : []),
+      ...(recoverSessionCommand ? [{
+        action: "recover_session",
+        reason: "stale_running_claims",
+        count: recoveryPreview.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length,
+        command: recoverSessionCommand,
+      }] : []),
+      ...(recoverStoppedCommand ? [{
+        action: "recover_stopped",
+        reason: "unfinished_stopped_branches",
+        count: recoveryPreview.filter((run) => run.currentStatus === "stopped" && !run.skipped).length,
+        command: recoverStoppedCommand,
+      }] : []),
+      ...(resumeSessionCommand ? [{
+        action: "resume_session",
+        reason: "resumable_branch_runs",
+        count: resumableBranches.filter((run) => run.location !== "other_worker").length,
+        command: resumeSessionCommand,
+      }] : []),
+      ...(shouldReviewChangedResults ? [{
+        action: "review_changed_results",
+        reason: changedResults === null
+          ? "result_branches_available"
+          : "changed_results_found",
+        count: changedResults?.length ?? resultBranches.length,
+        command: changedResultsCommand,
+      }] : []),
+    ];
     const statuses: Record<string, number> = {};
     for (const agent of status.agents) {
       for (const [runStatus, count] of Object.entries(agent.statuses)) {
@@ -1144,35 +1215,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       },
       agents: status.agents,
       actions: {
-        restartSession: deadWorkerCount > 0
-          ? ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover"]
-          : null,
-        restartSessionWithStopped: deadWorkerCount > 0 && canResumeSession
-          ? ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover", "--resume-stopped"]
-          : null,
-        recoverSession: hasRecoverableActiveRun
-          ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session]
-          : null,
-        recoverStopped: hasRecoverableStoppedRun
-          ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"]
-          : null,
-        resumeSession: canResumeSession
-          ? ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session]
-          : null,
-        changedResults: [
-          "npm",
-          "run",
-          "cli",
-          "--",
-          "runs",
-          "results",
-          "--session",
-          status.session.session,
-          "--checkout-dir",
-          resultCheckoutDir,
-          "--changed-only",
-        ],
+        restartSession: restartSessionCommand,
+        restartSessionWithStopped: restartSessionWithStoppedCommand,
+        recoverSession: recoverSessionCommand,
+        recoverStopped: recoverStoppedCommand,
+        resumeSession: resumeSessionCommand,
+        changedResults: changedResultsCommand,
       },
+      nextSteps,
       resumableBranches,
       resultBranches,
       recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),

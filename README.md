@@ -376,9 +376,10 @@ result commits, and resumable stopped branches for that session's agents.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete
-checkout/resume commands, dry-run recovery candidates, and recent worker logs in
-one payload. It also includes a compact `summary` block and an `actions` block
-with the exact restart, recover, resume, and changed-results commands to run next. Add
+checkout/resume commands, dry-run recovery candidates, ordered `nextSteps`, and
+recent worker logs in one payload. It also includes a compact `summary` block
+and an `actions` block with the exact restart, recover, resume, and
+changed-results commands to run next. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
