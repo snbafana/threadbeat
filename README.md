@@ -386,7 +386,9 @@ Add `--recoverable` to `runs session-status` or `runs session-watch` to include
 a dry-run recovery preview in the live session snapshot; combine it with
 `--include-stopped` to surface unfinished stopped branches too. Add `--next` to
 `runs session-watch` to stream only the compact restart/recover/resume command
-queue for each poll instead of the full session snapshot.
+queue for each poll instead of the full session snapshot. The compact watch
+payload also includes `branchNextSteps` for stopped branch rows, with objective,
+worker ownership, checkout/resume commands, and recoverability when available.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents.
 `runs session-review <name> --include-stopped` is the read-only operator summary

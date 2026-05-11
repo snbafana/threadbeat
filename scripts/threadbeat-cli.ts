@@ -1501,13 +1501,55 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const resumableBranches = [
           ...sessionWorkers.flatMap((worker) => worker.runs
             .filter((run) => run.status === "stopped" && run.resultCommit === null)
-            .map((run) => ({ runId: run.id, workerId: worker.workerId }))),
+            .map((run) => ({
+              agentId: run.agentId,
+              runId: run.id,
+              objective: run.objective,
+              branchName: run.branchName,
+              resultCommit: run.resultCommit,
+              workerId: worker.workerId,
+              location: "session_worker",
+            }))),
           ...status.agents.flatMap((agent) => agent.unassigned
             .filter((run) => run.status === "stopped" && run.resultCommit === null)
-            .map((run) => ({ runId: run.id, workerId: null }))),
+            .map((run) => ({
+              agentId: agent.agentId,
+              runId: run.id,
+              objective: run.objective,
+              branchName: run.branchName,
+              resultCommit: run.resultCommit,
+              workerId: null,
+              location: "unassigned",
+            }))),
         ];
         const recoverableActive = recoveryPreview?.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length ?? 0;
         const recoverableStopped = recoveryPreview?.filter((run) => run.currentStatus === "stopped" && !run.skipped).length ?? 0;
+        const recoverableStoppedRunIds = new Set((recoveryPreview ?? [])
+          .filter((run) => run.currentStatus === "stopped" && !run.skipped)
+          .map((run) => run.runId));
+        const recoverStoppedCommand = recoverableStopped > 0
+          ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"]
+          : null;
+        const resumableCheckoutDir = `./checkouts/${status.session.session}-resumable`;
+        const branchNextSteps = resumableBranches.map((run) => ({
+          action: "resume_branch",
+          reason: "stopped_branch_without_result_commit",
+          agentId: run.agentId,
+          runId: run.runId,
+          status: "stopped",
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          recoverable: recoverableStoppedRunIds.has(run.runId),
+          command: ["npm", "run", "cli", "--", "runs", "resume-branch", run.runId],
+          commands: {
+            checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.runId, "--dir", `${resumableCheckoutDir}/${run.runId}`],
+            resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.runId],
+            recoverStopped: recoverableStoppedRunIds.has(run.runId) ? recoverStoppedCommand : null,
+          },
+        }));
         const statuses: Record<string, number> = {};
         for (const agent of status.agents) {
           for (const [runStatus, count] of Object.entries(agent.statuses)) {
@@ -1530,6 +1572,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             statuses,
             resumableBranches: resumableBranches.length,
             recoveryCandidates: recoverableActive + recoverableStopped,
+            branchNextSteps: branchNextSteps.length,
           },
           nextSteps: [
             ...(deadWorkerCount > 0 && resumableBranches.length > 0 ? [{
@@ -1554,7 +1597,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               action: "recover_stopped",
               reason: "unfinished_stopped_branches",
               count: recoverableStopped,
-              command: ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"],
+              command: recoverStoppedCommand,
             }] : []),
             ...(resumableBranches.length > 0 ? [{
               action: "resume_session",
@@ -1563,6 +1606,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               command: ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session],
             }] : []),
           ],
+          branchNextSteps,
         }));
       } else {
         console.log(JSON.stringify({

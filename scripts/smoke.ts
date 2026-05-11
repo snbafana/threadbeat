@@ -1721,8 +1721,19 @@ try {
   const watchedWorkerNext = await cliJson<{
     observedAt: string;
     session: { session: string; workers: { total: number; alive: number; dead: number } };
-    summary: { recoveryCandidates: number; resumableBranches: number };
+    summary: { recoveryCandidates: number; resumableBranches: number; branchNextSteps: number };
     nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
+    branchNextSteps: Array<{
+      action: string;
+      reason: string;
+      runId: string;
+      objective: string;
+      workerId: string | null;
+      location: string;
+      recoverable: boolean;
+      command: string[];
+      commands: { checkoutBranch: string[]; resumeBranch: string[]; recoverStopped: string[] | null };
+    }>;
     agents?: unknown;
     recoveryPreview?: unknown;
   }>(baseUrl, [
@@ -1745,6 +1756,7 @@ try {
   assert.equal(watchedWorkerNext.recoveryPreview, undefined);
   assert.ok(watchedWorkerNext.summary.recoveryCandidates >= 1);
   assert.ok(watchedWorkerNext.summary.resumableBranches >= 1);
+  assert.equal(watchedWorkerNext.summary.branchNextSteps, watchedWorkerNext.branchNextSteps.length);
   assert.ok(watchedWorkerNext.nextSteps.some((step) => (
     step.action === "recover_session"
     && step.reason === "stale_running_claims"
@@ -1759,6 +1771,19 @@ try {
     step.action === "resume_session"
     && step.reason === "resumable_branch_runs"
     && step.command.join(" ") === `npm run cli -- runs resume-session ${detachedWorkerSessionName}`
+  )));
+  assert.ok(watchedWorkerNext.branchNextSteps.some((step) => (
+    step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.runId === detachedStoppedPlan.run.id
+    && step.objective === "detached stopped branch"
+    && step.workerId === null
+    && step.location === "unassigned"
+    && step.recoverable === true
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
+    && step.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && step.commands.recoverStopped?.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`
   )));
   const detachedWorkerLogs = await cliJson<{
     session: string;
