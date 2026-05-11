@@ -350,21 +350,41 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const workerIdFilter = options["worker-id"] ?? null;
     const concurrency = options.concurrency ? parsePositiveInteger(options.concurrency, "--concurrency") : 2;
     const agentIds = workerSessionAgentIds(session);
+    const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
     const runs = (await mapConcurrent(agentIds, 4, async (agentId) => {
       const listed = await requestJson("GET", withQuery(
         `/api/agents/${encodeURIComponent(agentId)}/runs`,
         new URLSearchParams({ status: statusList.join(",") }),
       )) as {
-        runs: Array<{ id: string; status: string; result_commit: string | null; worker_id: string | null }>;
+        runs: Array<{ id: string; objective: string; status: string; result_commit: string | null; worker_id: string | null }>;
       };
       return listed.runs
         .filter((run) => statusFilter.has(run.status))
         .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
-        .filter((run) => options.resumable !== "1" || (run.status === "stopped" && !run.result_commit));
+        .filter((run) => options.resumable !== "1" || (run.status === "stopped" && !run.result_commit))
+        .map((run) => ({
+          ...run,
+          agentId,
+          location: run.worker_id === null
+            ? "unassigned"
+            : sessionWorkerIds.has(run.worker_id)
+              ? "session_worker"
+              : "other_worker",
+        }));
     })).flat();
-    const checkouts = await mapConcurrent(runs, concurrency, async (run) => (
-      await checkoutRunBranch(run.id, path.join(rootDir, run.id))
-    ));
+    const checkouts = await mapConcurrent(runs, concurrency, async (run) => {
+      const checkout = await checkoutRunBranch(run.id, path.join(rootDir, run.id));
+      return {
+        ...checkout,
+        run: {
+          ...checkout.run,
+          agentId: run.agentId,
+          objective: run.objective,
+          workerId: run.worker_id,
+          location: run.location,
+        },
+      };
+    });
     await printJson({
       session: session.session,
       dir: rootDir,

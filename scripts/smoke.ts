@@ -2621,7 +2621,16 @@ try {
     dir: string;
     total: number;
     checkouts: Array<{
-      run: { id: string; status: string; branchName: string; resultCommit: string | null };
+      run: {
+        id: string;
+        agentId: string;
+        status: string;
+        objective: string;
+        branchName: string;
+        resultCommit: string | null;
+        workerId: string | null;
+        location: string;
+      };
       checkout: { dir: string; headCommit: string; matchesResultCommit: boolean | null };
       review: { changedFiles: Array<{ status: string; path: string }> };
     }>;
@@ -2636,8 +2645,12 @@ try {
   assert.equal(checkedOutSession.dir, sessionCheckoutDir);
   assert.equal(checkedOutSession.total, 1);
   assert.equal(checkedOutSession.checkouts[0].run.id, checkoutPlan.run.id);
+  assert.equal(checkedOutSession.checkouts[0].run.agentId, checkoutAgent.agent.id);
   assert.equal(checkedOutSession.checkouts[0].run.status, "stopped");
+  assert.equal(checkedOutSession.checkouts[0].run.objective, "checkout branch");
   assert.equal(checkedOutSession.checkouts[0].run.branchName, checkoutPlan.plan.branchName);
+  assert.equal(checkedOutSession.checkouts[0].run.workerId, null);
+  assert.equal(checkedOutSession.checkouts[0].run.location, "unassigned");
   assert.equal(checkedOutSession.checkouts[0].checkout.dir, path.join(sessionCheckoutDir, checkoutPlan.run.id));
   assert.equal(checkedOutSession.checkouts[0].checkout.headCommit, expectedCheckoutHead);
   assert.equal(checkedOutSession.checkouts[0].checkout.matchesResultCommit, null);
@@ -2670,7 +2683,7 @@ try {
   const checkedOutWorkerSession = await cliJson<{
     total: number;
     checkouts: Array<{
-      run: { id: string; branchName: string; resultCommit: string | null };
+      run: { id: string; objective: string; branchName: string; resultCommit: string | null; workerId: string | null; location: string };
       checkout: { dir: string; headCommit: string };
       review: { changedFiles: Array<{ status: string; path: string }> };
     }>;
@@ -2686,8 +2699,11 @@ try {
   ]);
   assert.equal(checkedOutWorkerSession.total, 1);
   assert.equal(checkedOutWorkerSession.checkouts[0].run.id, workerCheckoutPlan.run.id);
+  assert.equal(checkedOutWorkerSession.checkouts[0].run.objective, "checkout one worker branch");
   assert.equal(checkedOutWorkerSession.checkouts[0].run.branchName, workerCheckoutPlan.plan.branchName);
   assert.equal(checkedOutWorkerSession.checkouts[0].run.resultCommit, null);
+  assert.equal(checkedOutWorkerSession.checkouts[0].run.workerId, "smoke-checkout-worker");
+  assert.equal(checkedOutWorkerSession.checkouts[0].run.location, "other_worker");
   assert.equal(checkedOutWorkerSession.checkouts[0].checkout.dir, path.join(workerSessionCheckoutDir, workerCheckoutPlan.run.id));
   assert.equal(checkedOutWorkerSession.checkouts[0].checkout.headCommit, expectedWorkerCheckoutHead);
   assert.deepEqual(checkedOutWorkerSession.checkouts[0].review.changedFiles, [{ status: "A", path: "worker-report.md" }]);

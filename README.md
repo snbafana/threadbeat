@@ -287,7 +287,9 @@ Run planning is intentionally server-side and Pi-free for now:
 - `runs checkout-session <name> --dir <path>` checks out every completed or
   stopped branch run from a detached worker session under `<path>/<run-id>`.
   Add `--resumable` to pull only stopped branches without result commits, or
-  `--worker-id <id>` to pull only branches claimed by one worker.
+  `--worker-id <id>` to pull only branches claimed by one worker. Each checkout
+  row preserves the run objective, worker claim, and session location so local
+  branch review still has ownership context.
 - `runs branches --session <name>` adds ownership context to each listed branch
   run so an operator can see its objective, worker claim, and whether it is
   unassigned, owned by that session, or claimed by another worker.
