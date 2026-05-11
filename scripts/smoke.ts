@@ -2604,6 +2604,25 @@ try {
     && run.changedFiles.some((file) => file.status === "A" && file.path === "report.md")
   )));
   assert.equal(await fs.readFile(path.join(sessionReviewCheckoutDir, checkoutPlan.run.id, "report.md"), "utf8"), "branch report\n");
+  const changedPathSessionReview = await cliJson<{
+    changedResults: Array<{ runId: string; changedFiles: Array<{ path: string }> }>;
+    resultCheckouts: Array<{ checkouts: Array<{ run: { id: string } }> }>;
+  }>(baseUrl, [
+    "runs",
+    "session-review",
+    checkoutSessionName,
+    "--include-stopped",
+    "--checkout-dir",
+    sessionReviewCheckoutDir,
+    "--changed-path",
+    "report.md",
+  ]);
+  assert.deepEqual(
+    changedPathSessionReview.resultCheckouts.flatMap((agent) => agent.checkouts.map((checkout) => checkout.run.id)),
+    [checkoutPlan.run.id],
+  );
+  assert.deepEqual(changedPathSessionReview.changedResults.map((run) => run.runId), [checkoutPlan.run.id]);
+  assert.equal(changedPathSessionReview.changedResults[0].changedFiles[0].path, "report.md");
 
   const cliStopPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",

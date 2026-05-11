@@ -380,7 +380,9 @@ checkout/resume commands, dry-run recovery candidates, and recent worker logs in
 one payload. It also includes an `actions` block with the exact restart,
 recover, resume, and changed-results commands to run next. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
-branches plus a top-level `changedResults` list in the same snapshot.
+branches plus a top-level `changedResults` list in the same snapshot. Add
+`--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
+make the review snapshot show only branches with local changes that matter.
 `runs recover-session <name>` requeues stale runs claimed by that session's
 workers without stopping or restarting the worker group; add `--dry-run` to
 preview the affected runs first. Add `--include-stopped` to also requeue

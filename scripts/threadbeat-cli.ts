@@ -1004,6 +1004,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     );
     const lines = parsePositiveInteger(options.lines ?? "20", "--lines");
     const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
+    const changedPathFilter = options["changed-path"] ? new Set(parseList(options["changed-path"])) : null;
+    if (options["changed-only"] === "1" && !checkoutRootDir) {
+      throw new Error("runs session-review --changed-only requires --checkout-dir");
+    }
+    if (changedPathFilter && !checkoutRootDir) {
+      throw new Error("runs session-review --changed-path requires --checkout-dir");
+    }
     const resultStatusList = parseList(options["result-status"] ?? "completed,stopped");
     const resultStatusFilter = new Set(resultStatusList);
     const resultCheckoutDir = options["checkout-dir"] ?? `./checkouts/${status.session.session}-results`;
@@ -1056,7 +1063,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           parsePositiveInteger(options["checkout-concurrency"] ?? "2", "--checkout-concurrency"),
           async (run) => await checkoutRunBranch(run.id, path.join(checkoutRootDir, run.id)),
         );
-        return { agentId, total: checkouts.length, checkouts };
+        const visibleCheckouts = checkouts
+          .filter((checkout) => options["changed-only"] !== "1"
+            || checkout.review.changedFiles.length > 0
+            || checkout.review.commits.length > 0
+            || checkout.review.error)
+          .filter((checkout) => !changedPathFilter
+            || checkout.review.changedFiles.some((file) => changedPathFilter.has(file.path)));
+        return { agentId, total: visibleCheckouts.length, checkouts: visibleCheckouts };
       })
       : null;
     const changedResults = resultCheckouts
@@ -2567,7 +2581,7 @@ Commands:
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
-  runs session-review <name> [--include-stopped] [--checkout-dir ./checkouts] [--lines 20] [--status planned,running,stopped]
+  runs session-review <name> [--include-stopped] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
