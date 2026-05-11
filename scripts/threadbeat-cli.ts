@@ -2802,6 +2802,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const statusFilter = statusList ? new Set(statusList) : null;
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+    const checkoutDir = options["checkout-dir"] ?? "./checkouts/monitor";
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const agents = [];
       for (const agentId of agentIds) {
@@ -2844,6 +2845,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               claimRun: ["npm", "run", "cli", "--", "runs", "claim", run.id],
               watchRun: ["npm", "run", "cli", "--", "runs", "watch", run.id],
               inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+              checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${checkoutDir}/${run.id}`],
+              reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${checkoutDir}/${run.id}`],
               resumeBranch: resumable
                 ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
                 : null,
@@ -2911,6 +2914,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             resumable: nextSteps.filter((step) => step.resumable).length,
             warnings: nextSteps.filter((step) => step.warning !== null).length,
           },
+          checkoutDir,
           nextSteps,
         }));
       } else {

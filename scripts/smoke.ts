@@ -878,6 +878,7 @@ try {
   assert.ok(plannedMonitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id)));
   const plannedMonitorNext = await cliJson<{
     summary: { runs: number; statuses: Record<string, number>; resumable: number; warnings: number };
+    checkoutDir: string;
     nextSteps: Array<{
       action: string;
       reason: string;
@@ -892,6 +893,8 @@ try {
         claimRun: string[];
         watchRun: string[];
         inspectRun: string[];
+        checkoutBranch: string[];
+        reviewRun: string[];
         resumeBranch: string[] | null;
       };
     }>;
@@ -904,8 +907,11 @@ try {
     "--status",
     "planned",
     "--next",
+    "--checkout-dir",
+    "./checkouts/monitor-next",
   ]);
   assert.equal(plannedMonitorNext.agents, undefined);
+  assert.equal(plannedMonitorNext.checkoutDir, "./checkouts/monitor-next");
   assert.ok(plannedMonitorNext.summary.runs >= 2);
   assert.ok(plannedMonitorNext.summary.statuses.planned >= 2);
   assert.equal(plannedMonitorNext.summary.resumable, 0);
@@ -922,6 +928,8 @@ try {
     && step.command.join(" ") === `npm run cli -- runs claim ${workerRunA.run.id}`
     && step.commands.claimRun.join(" ") === `npm run cli -- runs claim ${workerRunA.run.id}`
     && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${workerRunA.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${workerRunA.run.id} --dir ./checkouts/monitor-next/${workerRunA.run.id}`
+    && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${workerRunA.run.id} --checkout-dir ./checkouts/monitor-next/${workerRunA.run.id}`
     && step.commands.resumeBranch === null
   )));
 

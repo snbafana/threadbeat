@@ -550,8 +550,10 @@ planned,running,stopped` to focus the snapshot on queued, active, or resumable
 work. Add `--next` to emit the compact command queue for visible rows with
 objective, branch, result, warning, and per-row command fields: claim planned
 runs, watch active runs, resume stopped branches without result commits, or
-inspect terminal/result rows. `runs step` executes one explicit shell command and
-can optionally finalize the run branch.
+inspect terminal/result rows. Each row also includes checkout/review commands;
+pass `--checkout-dir <path>` to choose where those branch-native inspection
+commands materialize local checkouts. `runs step` executes one explicit shell
+command and can optionally finalize the run branch.
 
 ## Phases
 
