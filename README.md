@@ -446,8 +446,9 @@ sessions, `runs session-status <name>` to see worker liveness plus matching
 queued/claimed run branches, `runs session-watch <name>` to stream those snapshots
 while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, `runs sessions --summary --next` to see the next action for every
-recorded session in one fleet snapshot, `runs archive-sessions --dry-run` to
-preview archiving dead local session records without touching run records or Git
+recorded session in one fleet snapshot, including a top-level `resultCommits`
+queue for branch-native inspection across sessions, `runs archive-sessions --dry-run`
+to preview archiving dead local session records without touching run records or Git
 branches, and `runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add
 `--recover` to `runs stop-session` to requeue unfinished runs claimed by that

@@ -3699,6 +3699,41 @@ try {
     ))
     && snapshot.nextStep.action === "inspect_results"
   )));
+  const resultFleetSummary = await cliJson<{
+    totals: { resultCommits: number };
+    resultCommits: Array<{
+      session: string;
+      agentId: string;
+      runId: string;
+      resultCommit: string;
+      commands: { inspectRun: string[]; checkoutBranch: string[]; reviewRun: string[]; sessionResults: string[] };
+    }>;
+    sessions: Array<{
+      session: { session: string };
+      resultCommits: Array<{ runId: string; resultCommit: string }>;
+      nextStep?: { action: string; reason: string; command: string[] };
+    }>;
+  }>(baseUrl, ["runs", "sessions", "--session", resultSummarySessionName, "--summary", "--next"]);
+  assert.equal(resultFleetSummary.totals.resultCommits, 1);
+  assert.ok(resultFleetSummary.resultCommits.some((commit) => (
+    commit.session === resultSummarySessionName
+    && commit.agentId === cliWorkFinalizeAgent.agent.id
+    && commit.runId === cliWorkFinalizePlan.run.id
+    && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+    && commit.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${cliWorkFinalizePlan.run.id}`
+    && commit.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${cliWorkFinalizePlan.run.id} --dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
+    && commit.commands.reviewRun.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
+    && commit.commands.sessionResults.join(" ") === `npm run cli -- runs results --session ${resultSummarySessionName} --next`
+  )));
+  assert.ok(resultFleetSummary.sessions.some((session) => (
+    session.session.session === resultSummarySessionName
+    && session.nextStep?.action === "inspect_results"
+    && session.nextStep.reason === "result_commits_available"
+    && session.resultCommits.some((commit) => (
+      commit.runId === cliWorkFinalizePlan.run.id
+      && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+    ))
+  )));
 
   const liveSummarySessionName = `live-summary-${process.pid}`;
   await fs.mkdir(path.join(".threadbeat", "worker-sessions", liveSummarySessionName), { recursive: true });
