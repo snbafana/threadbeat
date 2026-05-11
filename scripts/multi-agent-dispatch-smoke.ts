@@ -69,6 +69,17 @@ try {
   runIds.push(recoverableStopped.run.id);
   assert.match(recoverableStopped.plan.branchName, /^threadbeat\/runs\//);
   await cliJson(baseUrl, ["runs", "stop", recoverableStopped.run.id]);
+  const inspectedStopped = await cliJson<{
+    run: { id: string; status: string; resultCommit: string | null };
+    commands: { reviewRun: string[]; resumeBranch: string[] | null };
+  }>(baseUrl, ["runs", "inspect", recoverableStopped.run.id]);
+  assert.equal(inspectedStopped.run.status, "stopped");
+  assert.equal(inspectedStopped.run.resultCommit, null);
+  assert.equal(
+    inspectedStopped.commands.reviewRun.join(" "),
+    `npm run cli -- runs review ${recoverableStopped.run.id} --checkout-dir ./checkouts/${recoverableStopped.run.id}`,
+  );
+  assert.equal(inspectedStopped.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`);
   const resumableResults = await cliJson<{
     summary: { resumable: number };
     nextSteps: Array<{

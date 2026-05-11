@@ -292,6 +292,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       },
       commands: {
         checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", status.run.id, "--dir", checkoutDir],
+        reviewRun: ["npm", "run", "cli", "--", "runs", "review", status.run.id, "--checkout-dir", checkoutDir],
         watchRun: ["npm", "run", "cli", "--", "runs", "watch", status.run.id],
         resumeBranch: status.run.status === "stopped" && status.run.result_commit === null
           ? ["npm", "run", "cli", "--", "runs", "resume-branch", status.run.id]
