@@ -2603,14 +2603,14 @@ try {
       succeeded: number;
       failed: number;
       pending: number;
-      actions: { resumeApply: string[] };
+      actions: { resumeApply: string[]; inspectResults: string[] | null };
       pendingCommands: Array<{ runId?: string }>;
       failedCommands: Array<{ runId?: string }>;
       affectedRuns: Array<{
         runId: string;
         state: string;
         currentRun: { status: string; resultCommit: string | null; nextAction: string; location: string } | null;
-        commands: { inspectRun: string[]; checkoutBranch: string[]; reviewRun: string[] };
+        commands: { inspectRun: string[]; inspectResults: string[]; checkoutBranch: string[]; reviewRun: string[] };
       }>;
     };
     failedExecutions: Array<{ runId: string | null }>;
@@ -2632,7 +2632,15 @@ try {
   assert.equal(sessionApplyInspection.summary.affectedRuns[0].currentRun?.resultCommit, null);
   assert.equal(sessionApplyInspection.summary.affectedRuns[0].currentRun?.location, "unassigned");
   assert.equal(sessionApplyInspection.summary.affectedRuns[0].currentRun?.nextAction, "dispatch_worker");
+  assert.equal(
+    sessionApplyInspection.summary.actions.inspectResults?.join(" "),
+    `npm run cli -- runs results --session ${detachedWorkerSessionName} --run ${sessionApplyPlan.run.id} --next`,
+  );
   assert.equal(sessionApplyInspection.summary.affectedRuns[0].commands.inspectRun.join(" "), `npm run cli -- runs inspect ${sessionApplyPlan.run.id}`);
+  assert.equal(
+    sessionApplyInspection.summary.affectedRuns[0].commands.inspectResults.join(" "),
+    `npm run cli -- runs results --session ${detachedWorkerSessionName} --run ${sessionApplyPlan.run.id} --next`,
+  );
   assert.equal(
     sessionApplyInspection.summary.affectedRuns[0].commands.checkoutBranch.join(" "),
     `npm run cli -- runs checkout ${sessionApplyPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-applies/${sessionApplyId}/${sessionApplyPlan.run.id}`,
@@ -2662,7 +2670,7 @@ try {
   const sessionApplyList = await cliJson<{
     session: string;
     count: number;
-    applies: Array<{ applyId: string; pending: number; actions: { resumeApply: string[] }; affectedRuns: Array<{ runId: string; currentRun: { status: string } | null }> }>;
+    applies: Array<{ applyId: string; pending: number; actions: { resumeApply: string[]; inspectResults: string[] | null }; affectedRuns: Array<{ runId: string; currentRun: { status: string } | null }> }>;
   }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName]);
   assert.equal(sessionApplyList.session, detachedWorkerSessionName);
   assert.ok(sessionApplyList.count >= 1);
@@ -2671,6 +2679,7 @@ try {
     && apply.pending === 0
     && apply.affectedRuns.some((run) => run.runId === sessionApplyPlan.run.id && run.currentRun?.status === "planned")
     && apply.actions.resumeApply.join(" ") === sessionApplyInspection.summary.actions.resumeApply.join(" ")
+    && apply.actions.inspectResults?.join(" ") === sessionApplyInspection.summary.actions.inspectResults?.join(" ")
   )));
   const sessionApplyShell = await cliRaw(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", sessionApplyId, "--format", "shell"]);
   assert.equal(

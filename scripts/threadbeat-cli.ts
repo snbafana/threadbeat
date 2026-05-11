@@ -4641,6 +4641,7 @@ type SessionApplySummary = {
     resumeApply: string[];
     retryFailed: string[];
     resumePending: string[];
+    inspectResults: string[] | null;
   };
   pendingCommands: SessionApplyCommand[];
   failedCommands: SessionApplyCommand[];
@@ -4651,6 +4652,7 @@ type SessionApplySummary = {
     state: "succeeded" | "failed" | "pending";
     commands: {
       inspectRun: string[];
+      inspectResults: string[];
       checkoutBranch: string[];
       reviewRun: string[];
     };
@@ -4881,6 +4883,7 @@ function summarizeSessionApplyRecord(
   });
   const pendingCommands = record.commands.filter((command) => !commandStates.has(commandKey(command.command)));
   const affectedRuns = sessionApplyAffectedRuns(record, commandStates, runStatusIndex);
+  const affectedRunIds = affectedRuns.map((run) => run.runId);
   return {
     applyId: record.applyId,
     applyPath: record.applyPath,
@@ -4897,6 +4900,9 @@ function summarizeSessionApplyRecord(
       resumeApply: sessionApplyResumeCommand(record),
       retryFailed: sessionApplyResumeCommand(record, ["failed"]),
       resumePending: sessionApplyResumeCommand(record, ["pending"]),
+      inspectResults: affectedRunIds.length > 0
+        ? ["npm", "run", "cli", "--", "runs", "results", "--session", record.session, "--run", affectedRunIds.join(","), "--next"]
+        : null,
     },
     pendingCommands,
     failedCommands,
@@ -4927,6 +4933,7 @@ function sessionApplyAffectedRuns(
     state: "succeeded" | "failed" | "pending";
     commands: {
       inspectRun: string[];
+      inspectResults: string[];
       checkoutBranch: string[];
       reviewRun: string[];
     };
@@ -4951,6 +4958,7 @@ function sessionApplyAffectedRuns(
         state: state?.succeeded ? "succeeded" : state?.failed ? "failed" : "pending",
         commands: {
           inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", command.runId],
+          inspectResults: ["npm", "run", "cli", "--", "runs", "results", "--session", record.session, "--run", command.runId, "--next"],
           checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", command.runId, "--dir", runCheckoutDir],
           reviewRun: ["npm", "run", "cli", "--", "runs", "review", command.runId, "--checkout-dir", runCheckoutDir],
         },
