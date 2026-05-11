@@ -459,8 +459,8 @@ session's workers when those runs do not have a running sandbox. Add
 `--include-stopped` to also requeue unfinished stopped branches in the same
 stop/recover step.
 Use `runs session-actions <name>` when returning to an existing session and you
-only need the exact status/wait/watch/summary/monitor/review/results/checkout/logs/stop
-commands.
+only need the exact status/wait/watch/summary/fleet-summary/monitor/review/results/
+changed-results/checkout/logs/stop/recover/resume/restart/archive commands.
 Use `runs session-wait <name>` to attach a foreground wait to an already running
 or recently finished detached session; it returns the same final/timeout summary
 and branch-native next action commands as `dispatch --wait` and
