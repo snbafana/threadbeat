@@ -3621,6 +3621,39 @@ try {
     && snapshot.nextStep.action === "inspect_results"
   )));
 
+  const liveSummarySessionName = `live-summary-${process.pid}`;
+  await fs.mkdir(path.join(".threadbeat", "worker-sessions", liveSummarySessionName), { recursive: true });
+  await fs.writeFile(path.join(".threadbeat", "worker-sessions", `${liveSummarySessionName}.json`), `${JSON.stringify({
+    session: liveSummarySessionName,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: ["runs", "work", "--agent", cliWorkFinalizeAgent.agent.id],
+    workers: [{
+      workerId: "smoke-live-summary-1",
+      pid: process.pid,
+      stdoutPath: path.join(".threadbeat", "worker-sessions", liveSummarySessionName, "worker.out.log"),
+      stderrPath: path.join(".threadbeat", "worker-sessions", liveSummarySessionName, "worker.err.log"),
+    }],
+  })}\n`);
+  const liveSessionWait = await cliJson<{
+    timedOut: boolean;
+    nextStep: { action: string; reason: string; command: string[] };
+  }>(baseUrl, ["runs", "session-wait", liveSummarySessionName, "--max-polls", "1", "--interval-ms", "1"]);
+  assert.equal(liveSessionWait.timedOut, true);
+  assert.equal(liveSessionWait.nextStep.action, "continue_watch");
+  assert.equal(liveSessionWait.nextStep.reason, "workers_still_alive");
+  assert.equal(liveSessionWait.nextStep.command.join(" "), `npm run cli -- runs session-summary ${liveSummarySessionName} --next --max-polls 30 --interval-ms 10000`);
+  const liveSessionSummary = await cliJson<{
+    session: { workers: { alive: number } };
+    commands: { sessionSummaryWatch: string[] };
+    nextStep: { action: string; reason: string; command: string[] };
+  }>(baseUrl, ["runs", "session-summary", liveSummarySessionName, "--next"]);
+  assert.equal(liveSessionSummary.session.workers.alive, 1);
+  assert.equal(liveSessionSummary.commands.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${liveSummarySessionName} --next --max-polls 30 --interval-ms 10000`);
+  assert.equal(liveSessionSummary.nextStep.action, "continue_watch");
+  assert.equal(liveSessionSummary.nextStep.reason, "workers_still_alive");
+  assert.equal(liveSessionSummary.nextStep.command.join(" "), `npm run cli -- runs session-summary ${liveSummarySessionName} --next --max-polls 30 --interval-ms 10000`);
+
   const cliStep = await cliJson<{
     result: { stdout: string };
     finalized: { commitSha: string };

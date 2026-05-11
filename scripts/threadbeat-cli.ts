@@ -1097,7 +1097,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ? {
             action: "continue_watch",
             reason: "workers_still_alive",
-            command: superviseActions.sessionWatch,
+            command: superviseActions.sessionSummaryWatch,
           }
           : {
             action: "review_session",
@@ -1270,7 +1270,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ? {
             action: "continue_watch",
             reason: "workers_still_alive",
-            command: dispatchActions.sessionWatch,
+            command: dispatchActions.sessionSummaryWatch,
           }
           : {
             action: "review_session",
@@ -1347,7 +1347,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       ? {
         action: "continue_watch",
         reason: "workers_still_alive",
-        command: actions.sessionWatch,
+        command: actions.sessionSummaryWatch,
       }
       : recoverableActive > 0
         ? {
@@ -1556,6 +1556,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const commands = options.next === "1"
         ? {
           sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
+          sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", requiredSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
           sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
           results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
           resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName, "--next"],
@@ -1584,7 +1585,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ? {
             action: "continue_watch",
             reason: "workers_still_alive",
-            command: commands.sessionWatch,
+            command: commands.sessionSummaryWatch,
           }
           : (totals.statuses.running ?? 0) > 0
             ? {
@@ -2497,6 +2498,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       const restartActions = {
         sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
+        sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", session.session, "--next", "--max-polls", "30", "--interval-ms", "10000"],
         sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
         branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", session.session, "--next"],
         results: ["npm", "run", "cli", "--", "runs", "results", "--session", session.session],
@@ -2529,7 +2531,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ? {
             action: "continue_watch",
             reason: "workers_still_alive",
-            command: restartActions.sessionWatch,
+            command: restartActions.sessionSummaryWatch,
           }
           : {
             action: "review_session",
