@@ -2006,6 +2006,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-status") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-status --format must be json or shell");
+    }
+    if (options.next === "1" && options.recoverable !== "1") {
+      throw new Error("runs session-status --next requires --recoverable");
+    }
+    if (options["commands-only"] === "1" && options.next !== "1") {
+      throw new Error("runs session-status --commands-only requires --next");
+    }
+    if (options["branch-action"] && options.next !== "1") {
+      throw new Error("runs session-status --branch-action requires --next");
+    }
+    if (options.format && options.next !== "1") {
+      throw new Error("runs session-status --format requires --next");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-status --format shell requires --commands-only");
+    }
+    const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const requiredSessionName = required(sessionName, "runs session-status <session>");
     const status = await workerSessionStatus(requiredSessionName, statusFilter);
@@ -2077,11 +2097,53 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         recoverStopped: recoverableStoppedRunIds.has(run.runId) ? recoverStoppedCommand : null,
       },
     })) : null;
-    await printJson({
+    const branchActionQueue = branchNextSteps
+      ? branchActionFilter
+        ? branchNextSteps.filter((item) => branchActionFilter.has(item.action))
+        : branchNextSteps
+      : [];
+    const branchActions = branchActionQueue.reduce((counts, item) => {
+      counts[item.action] = (counts[item.action] ?? 0) + 1;
+      return counts;
+    }, {} as Record<string, number>);
+    const visibleBranchNextSteps = branchActionFilter && !branchActionFilter.has("resume_branch")
+      ? []
+      : branchNextSteps;
+    const filter = {
+      ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+      ...(branchActionFilter ? { totalBranchNextSteps: branchNextSteps?.length ?? 0 } : {}),
+    };
+    const commandQueue = branchActionQueue.map((item) => ({
+      scope: "branch",
+      session: status.session.session,
+      action: item.action,
+      reason: item.reason,
+      agentId: item.agentId,
+      runId: item.runId,
+      status: item.status,
+      objective: item.objective,
+      workerId: item.workerId,
+      location: item.location,
+      branchName: item.branchName,
+      resultCommit: item.resultCommit,
+      command: item.command,
+    }));
+    const output = {
       ...status,
+      ...(Object.keys(filter).length > 0 ? { filter } : {}),
       ...(recoveryPreview ? { recoveryPreview } : {}),
-      ...(branchNextSteps ? { branchNextSteps } : {}),
-    });
+      ...(branchNextSteps && options["commands-only"] !== "1" ? { branchNextSteps: visibleBranchNextSteps } : {}),
+      ...(options.next === "1" ? {
+        branchActions,
+        branchActionQueue,
+      } : {}),
+      ...(options["commands-only"] === "1" ? { commands: commandQueue } : {}),
+    };
+    if (outputFormat === "shell") {
+      printCommandQueueShell(commandQueue);
+    } else {
+      await printJson(output);
+    }
     return;
   }
   if (subcommandName === "session-summary") {
@@ -5235,7 +5297,7 @@ Commands:
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
-  runs session-status <name> [--status planned,running,stopped]
+  runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]

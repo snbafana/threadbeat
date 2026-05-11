@@ -1451,6 +1451,55 @@ try {
     && step.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
     && step.commands.recoverStopped?.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`
   )));
+  const detachedWorkerRecoverableStatusCommands = await cliJson<{
+    filter: { branchAction: string[]; totalBranchNextSteps: number };
+    branchActions: Record<string, number>;
+    commands: Array<{
+      scope: string;
+      action: string;
+      runId?: string;
+      resultCommit?: string | null;
+      command: string[];
+    }>;
+    branchNextSteps?: unknown;
+  }>(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--commands-only",
+    "--branch-action",
+    "resume_branch",
+  ]);
+  assert.deepEqual(detachedWorkerRecoverableStatusCommands.filter.branchAction, ["resume_branch"]);
+  assert.ok(detachedWorkerRecoverableStatusCommands.filter.totalBranchNextSteps >= 1);
+  assert.ok(detachedWorkerRecoverableStatusCommands.branchActions.resume_branch >= 1);
+  assert.equal(detachedWorkerRecoverableStatusCommands.branchNextSteps, undefined);
+  assert.ok(detachedWorkerRecoverableStatusCommands.commands.some((item) => (
+    item.scope === "branch"
+    && item.action === "resume_branch"
+    && item.runId === detachedStoppedPlan.run.id
+    && item.resultCommit === null
+    && item.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+  )));
+  const detachedWorkerRecoverableStatusShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--commands-only",
+    "--branch-action",
+    "resume_branch",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(detachedWorkerRecoverableStatusShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`,
+  ));
   const detachedWorkerSummary = await cliJson<{
     session: { session: string; workers: { total: number; alive: number; dead: number } };
     totals: { runs: number; statuses: Record<string, number>; resultCommits: number; resumableStopped: number };
