@@ -307,6 +307,38 @@ try {
     "--worker-id",
     "detached-smoke-worker-1",
   ]);
+  const deadWorkerWait = await cliJson<{
+    session: string;
+    completed: boolean;
+    timedOut: boolean;
+    summary: { workers: { alive: number }; recoveryCandidates: number; recoverableActive: number };
+    recoveryPreview: Array<{ runId: string; currentStatus?: string }>;
+    nextStep: { action: string; reason: string; count: number; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-wait",
+    sessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--interval-ms",
+    "100",
+    "--max-polls",
+    "1",
+  ]);
+  assert.equal(deadWorkerWait.session, sessionName);
+  assert.equal(deadWorkerWait.completed, true);
+  assert.equal(deadWorkerWait.timedOut, false);
+  assert.equal(deadWorkerWait.summary.workers.alive, 0);
+  assert.ok(deadWorkerWait.summary.recoveryCandidates >= 1);
+  assert.ok(deadWorkerWait.summary.recoverableActive >= 1);
+  assert.ok(deadWorkerWait.recoveryPreview.some((run) => (
+    run.runId === deadWorkerPlan.run.id
+    && run.currentStatus === "running"
+  )));
+  assert.equal(deadWorkerWait.nextStep.action, "recover_session");
+  assert.equal(deadWorkerWait.nextStep.reason, "stale_running_claims");
+  assert.equal(deadWorkerWait.nextStep.command.join(" "), `npm run cli -- runs recover-session ${sessionName}`);
+
   const deadWorkerRecovery = await cliJson<{
     session: string;
     recovered: Array<{ runId: string; status?: string; workerId: string | null }>;

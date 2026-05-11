@@ -1294,6 +1294,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", requiredSessionName],
       stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", requiredSessionName, "--recover"],
       recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", requiredSessionName],
+      recoverStopped: ["npm", "run", "cli", "--", "runs", "recover-session", requiredSessionName, "--include-stopped"],
       resumeSession: ["npm", "run", "cli", "--", "runs", "resume-session", requiredSessionName],
       restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover"],
       restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover", "--resume-stopped"],
@@ -1308,14 +1309,60 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (polls >= maxPolls) break;
       await sleep(waitIntervalMs);
     }
-    const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+    const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & {
+      alive: boolean;
+      runs: Array<SessionVisibleRun & { agentId: string }>;
+    }>;
     const aliveWorkers = finalWorkers.filter((worker) => worker.alive).length;
+    const recoveryPreview = options.recoverable === "1"
+      ? await recoverableSessionRuns(finalStatus, options)
+      : null;
+    const recoverableActive = recoveryPreview?.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length ?? 0;
+    const recoverableStopped = recoveryPreview?.filter((run) => run.currentStatus === "stopped" && !run.skipped).length ?? 0;
+    const resumableBranches = [
+      ...finalWorkers.flatMap((worker) => worker.runs
+        .filter((run) => run.status === "stopped" && run.resultCommit === null)),
+      ...finalStatus.agents.flatMap((agent) => agent.unassigned
+        .filter((run) => run.status === "stopped" && run.resultCommit === null)),
+    ];
     const statuses: Record<string, number> = {};
     for (const agent of finalStatus.agents) {
       for (const [status, count] of Object.entries(agent.statuses)) {
         statuses[status] = (statuses[status] ?? 0) + count;
       }
     }
+    const nextStep = aliveWorkers > 0
+      ? {
+        action: "continue_watch",
+        reason: "workers_still_alive",
+        command: actions.sessionWatch,
+      }
+      : recoverableActive > 0
+        ? {
+          action: "recover_session",
+          reason: "stale_running_claims",
+          count: recoverableActive,
+          command: actions.recoverSession,
+        }
+        : resumableBranches.length > 0
+          ? {
+            action: "restart_session_with_stopped",
+            reason: "dead_workers_and_resumable_branches",
+            count: resumableBranches.length,
+            command: actions.restartSessionWithStopped,
+          }
+          : recoverableStopped > 0
+            ? {
+              action: "recover_stopped",
+              reason: "unfinished_stopped_branches",
+              count: recoverableStopped,
+              command: actions.recoverStopped,
+            }
+            : {
+              action: "review_session",
+              reason: "bounded_session_finished",
+              command: actions.sessionReview,
+            };
     await printJson({
       session: requiredSessionName,
       completed: aliveWorkers === 0,
@@ -1331,20 +1378,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         agents: finalStatus.agents.length,
         runs: finalStatus.agents.reduce((sum, agent) => sum + agent.total, 0),
         statuses,
+        resumableBranches: resumableBranches.length,
+        recoveryCandidates: (recoveryPreview ?? []).filter((run) => !run.skipped).length,
+        recoverableActive,
+        recoverableStopped,
       },
       status: finalStatus,
+      ...(recoveryPreview ? { recoveryPreview } : {}),
       commands: actions,
-      nextStep: aliveWorkers > 0
-        ? {
-          action: "continue_watch",
-          reason: "workers_still_alive",
-          command: actions.sessionWatch,
-        }
-        : {
-          action: "review_session",
-          reason: "bounded_session_finished",
-          command: actions.sessionReview,
-        },
+      nextStep,
     });
     return;
   }
@@ -3731,7 +3773,7 @@ Commands:
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
-  runs session-wait <name> [--max-polls 60] [--interval-ms 2000]
+  runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
