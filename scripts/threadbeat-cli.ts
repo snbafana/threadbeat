@@ -921,6 +921,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const workerCount = parsePositiveInteger(options.workers ?? "1", "--workers");
     const workerPrefix = options["worker-prefix"] ?? "worker";
     const concurrency = parsePositiveInteger(options.concurrency ?? "4", "--concurrency");
+    const sessionName = required(options.session, "--session");
     const before = await agentBacklog(agentIds);
     const recovered = options.recover === "1"
       ? await recoverStaleRuns(
@@ -939,8 +940,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (options[flag] === "1") workerArgs.push(`--${flag}`);
     }
     if (options.loop === "1" || options["until-empty"] !== "1") workerArgs.push("--loop");
+    const superviseActions = {
+      sessionStatus: ["npm", "run", "cli", "--", "runs", "session-status", sessionName, "--recoverable", "--include-stopped"],
+      sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
+      sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
+      branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
+      results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
+      checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
+      stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
+    };
     const session = await startDetachedWorkerSession(
-      required(options.session, "--session"),
+      sessionName,
       workerCount,
       workerPrefix,
       workerArgs,
@@ -949,6 +959,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       before,
       recovered: recovered.map(({ run: _run, ...item }) => item),
       session,
+      actions: superviseActions,
       after: await agentBacklog(agentIds),
     });
     return;

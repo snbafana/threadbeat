@@ -265,6 +265,8 @@ session, and returns an `actions` block with the exact `session-status`,
 stop/recover commands for that session. The dry-run form returns the same action
 commands without queuing runs or starting workers, so the local control-plane
 flow can be reviewed before launching a multi-agent batch.
+`runs supervise` returns the same action commands when it starts detached
+workers for already queued runs.
 
 Agent template generation is Pi-native but does not run Pi:
 

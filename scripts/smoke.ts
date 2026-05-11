@@ -1977,6 +1977,15 @@ try {
     before: Array<{ agentId: string; statuses: Record<string, number> }>;
     recovered: Array<{ runId: string; status?: string; branchName: string }>;
     session: { session: string; workers: Array<{ workerId: string; pid: number | null }> };
+    actions: {
+      sessionStatus: string[];
+      sessionWatch: string[];
+      sessionReview: string[];
+      branchQueue: string[];
+      results: string[];
+      checkoutSession: string[];
+      stopSession: string[];
+    };
     after: Array<{ agentId: string }>;
   }>(baseUrl, [
     "runs",
@@ -2002,6 +2011,13 @@ try {
   assert.equal(supervised.session.session, superviseSessionName);
   assert.equal(supervised.session.workers[0].workerId, "smoke-supervisor-1");
   assert.equal(typeof supervised.session.workers[0].pid, "number");
+  assert.equal(supervised.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${superviseSessionName} --recoverable --include-stopped`);
+  assert.equal(supervised.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${superviseSessionName} --recoverable --include-stopped --next`);
+  assert.equal(supervised.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${superviseSessionName} --include-stopped`);
+  assert.equal(supervised.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${superviseSessionName} --next`);
+  assert.equal(supervised.actions.results.join(" "), `npm run cli -- runs results --session ${superviseSessionName}`);
+  assert.equal(supervised.actions.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${superviseSessionName} --dir ./checkouts/${superviseSessionName}`);
+  assert.equal(supervised.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${superviseSessionName} --recover`);
   assert.ok(supervised.before.some((agent) => (
     agent.agentId === superviseAgentBody.agent.id && agent.statuses.planned === superviseQueue.queued.length
   )));
