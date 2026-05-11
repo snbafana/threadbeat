@@ -447,9 +447,10 @@ queued/claimed run branches, `runs session-watch <name>` to stream those snapsho
 while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, `runs sessions --summary --next` to see the next action for every
 recorded session in one fleet snapshot, including a top-level `resultCommits`
-queue for branch-native inspection across sessions, `runs archive-sessions --dry-run`
-to preview archiving dead local session records without touching run records or Git
-branches, and `runs stop-session <name>` to terminate the recorded process
+queue and a top-level `resumableBranches` queue for branch-native inspection
+across sessions, `runs archive-sessions --dry-run` to preview archiving dead
+local session records without touching run records or Git branches, and
+`runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add
 `--recover` to `runs stop-session` to requeue unfinished runs claimed by that
 session's workers when those runs do not have a running sandbox. Add
@@ -483,7 +484,9 @@ no run records point at `runs archive-sessions --session <name> --dry-run` so
 local metadata cleanup remains explicit and branch-preserving. The summary
 payload includes a top-level `resultCommits` list with run ids, branch names,
 commit SHAs, worker ownership, and checkout/review/inspect commands for
-branch-native result inspection.
+branch-native result inspection, plus a top-level `resumableBranches` list with
+checkout/review/inspect/resume commands for stopped branches that do not have a
+result commit yet.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete

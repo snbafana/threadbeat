@@ -1426,6 +1426,14 @@ try {
   const detachedWorkerSummary = await cliJson<{
     session: { session: string; workers: { total: number; alive: number; dead: number } };
     totals: { runs: number; statuses: Record<string, number>; resultCommits: number; resumableStopped: number };
+    resumableBranches: Array<{
+      agentId: string;
+      runId: string;
+      status: string;
+      resultCommit: string | null;
+      location: string;
+      commands: { inspectRun: string[]; checkoutBranch: string[]; reviewRun: string[]; resumeBranch: string[] };
+    }>;
     agents: Array<{ agentId: string; total: number; resultCommits: number; resumableStopped: number }>;
   }>(baseUrl, ["runs", "session-summary", detachedWorkerSessionName]);
   assert.equal(detachedWorkerSummary.session.session, detachedWorkerSessionName);
@@ -1440,11 +1448,38 @@ try {
     && agent.total >= workerGroupQueue.queued.length
     && agent.resumableStopped >= 1
   )));
+  assert.ok(detachedWorkerSummary.resumableBranches.some((run) => (
+    run.agentId === workerGroupAgentBody.agent.id
+    && run.runId === detachedStoppedPlan.run.id
+    && run.status === "stopped"
+    && run.resultCommit === null
+    && run.location === "unassigned"
+    && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedStoppedPlan.run.id}`
+    && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
+    && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedStoppedPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
+    && run.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+  )));
   const workerFleetSummary = await cliJson<{
     totals: { sessions: number; unavailable: number; workers: { alive: number }; resumableStopped: number };
+    resumableBranches: Array<{
+      session: string;
+      agentId: string;
+      runId: string;
+      status: string;
+      resultCommit: string | null;
+      location: string;
+      commands: {
+        inspectRun: string[];
+        checkoutBranch: string[];
+        reviewRun: string[];
+        resumeBranch: string[];
+        sessionBranches: string[];
+      };
+    }>;
     sessions: Array<{
       session: { session: string; workers?: { alive: number } };
       totals?: { resumableStopped: number };
+      resumableBranches?: Array<{ runId: string; resultCommit: string | null }>;
       nextStep?: { action: string; reason: string; command: string[] };
       commands?: { sessionSummaryWatch: string[] };
       error?: string;
@@ -1453,11 +1488,28 @@ try {
   assert.ok(workerFleetSummary.totals.sessions >= 1);
   assert.ok(workerFleetSummary.totals.workers.alive >= 1);
   assert.ok(workerFleetSummary.totals.resumableStopped >= 1);
+  assert.ok(workerFleetSummary.resumableBranches.some((run) => (
+    run.session === detachedWorkerSessionName
+    && run.agentId === workerGroupAgentBody.agent.id
+    && run.runId === detachedStoppedPlan.run.id
+    && run.status === "stopped"
+    && run.resultCommit === null
+    && run.location === "unassigned"
+    && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedStoppedPlan.run.id}`
+    && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
+    && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedStoppedPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
+    && run.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && run.commands.sessionBranches.join(" ") === `npm run cli -- runs branches --session ${detachedWorkerSessionName} --next`
+  )));
   const detachedFleetSession = workerFleetSummary.sessions.find((session) => session.session.session === detachedWorkerSessionName);
   assert.ok(detachedFleetSession);
   assert.equal(detachedFleetSession?.error, undefined);
   assert.equal(detachedFleetSession?.session.workers?.alive, 1);
   assert.ok((detachedFleetSession?.totals?.resumableStopped ?? 0) >= 1);
+  assert.ok(detachedFleetSession?.resumableBranches?.some((run) => (
+    run.runId === detachedStoppedPlan.run.id
+    && run.resultCommit === null
+  )));
   assert.equal(detachedFleetSession?.nextStep?.action, "continue_watch");
   assert.equal(detachedFleetSession?.nextStep?.reason, "workers_still_alive");
   assert.equal(detachedFleetSession?.nextStep?.command.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);

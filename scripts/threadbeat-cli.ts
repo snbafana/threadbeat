@@ -1321,6 +1321,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           const status = await workerSessionStatus(listedSessionName, new Set(["planned", "running", "stopped"]));
           const sessionWorkerIds = new Set(status.session.workers.map((worker) => worker.workerId));
           const resultCheckoutDir = `./checkouts/${listedSessionName}-results`;
+          const resumableCheckoutDir = `./checkouts/${listedSessionName}-resumable`;
           const agentIds = workerSessionAgentIds(status.session);
           const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
             const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
@@ -1343,6 +1344,30 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               statuses,
               resultCommits: listed.runs.filter((run) => run.result_commit).length,
               resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+              resumableBranchRows: listed.runs
+                .filter((run) => run.status === "stopped" && !run.result_commit)
+                .map((run) => ({
+                  session: listedSessionName,
+                  agentId,
+                  runId: run.id,
+                  status: run.status,
+                  objective: run.objective,
+                  workerId: run.worker_id,
+                  location: run.worker_id === null
+                    ? "unassigned"
+                    : sessionWorkerIds.has(run.worker_id)
+                      ? "session_worker"
+                      : "other_worker",
+                  branchName: run.run_branch,
+                  resultCommit: run.result_commit,
+                  commands: {
+                    inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                    checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resumableCheckoutDir}/${run.id}`],
+                    reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resumableCheckoutDir}/${run.id}`],
+                    resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.id],
+                    sessionBranches: ["npm", "run", "cli", "--", "runs", "branches", "--session", listedSessionName, "--next"],
+                  },
+                })),
               resultCommitRows: listed.runs
                 .filter((run) => run.result_commit)
                 .map((run) => ({
@@ -1368,8 +1393,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                 })),
             };
           });
+          const resumableBranches = agents.flatMap((agent) => agent.resumableBranchRows);
           const resultCommits = agents.flatMap((agent) => agent.resultCommitRows);
-          const summaryAgents = agents.map(({ resultCommitRows: _resultCommitRows, ...agent }) => agent);
+          const summaryAgents = agents.map(({ resumableBranchRows: _resumableBranchRows, resultCommitRows: _resultCommitRows, ...agent }) => agent);
           const totals = {
             runs: agents.reduce((sum, agent) => sum + agent.total, 0),
             resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
@@ -1450,6 +1476,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               },
             },
             totals,
+            resumableBranches,
             resultCommits,
             agents: summaryAgents,
             ...(options.next === "1" ? { commands, nextStep } : {}),
@@ -1493,7 +1520,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         }
       }
       const resultCommits = sessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
-      await printJson({ observedAt: new Date().toISOString(), totals, resultCommits, sessions });
+      const resumableBranches = sessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
+      await printJson({ observedAt: new Date().toISOString(), totals, resumableBranches, resultCommits, sessions });
       return;
     }
     await printJson({ sessions: await listWorkerSessions(options.session) });
@@ -1812,6 +1840,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const status = await workerSessionStatus(requiredSessionName, new Set(["planned", "running", "stopped"]));
       const sessionWorkerIds = new Set(status.session.workers.map((worker) => worker.workerId));
       const resultCheckoutDir = `./checkouts/${requiredSessionName}-results`;
+      const resumableCheckoutDir = `./checkouts/${requiredSessionName}-resumable`;
       const agentIds = workerSessionAgentIds(status.session);
       const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
@@ -1834,6 +1863,28 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           statuses,
           resultCommits: listed.runs.filter((run) => run.result_commit).length,
           resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+          resumableBranchRows: listed.runs
+            .filter((run) => run.status === "stopped" && !run.result_commit)
+            .map((run) => ({
+              agentId,
+              runId: run.id,
+              status: run.status,
+              objective: run.objective,
+              workerId: run.worker_id,
+              location: run.worker_id === null
+                ? "unassigned"
+                : sessionWorkerIds.has(run.worker_id)
+                  ? "session_worker"
+                  : "other_worker",
+              branchName: run.run_branch,
+              resultCommit: run.result_commit,
+              commands: {
+                inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resumableCheckoutDir}/${run.id}`],
+                reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resumableCheckoutDir}/${run.id}`],
+                resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.id],
+              },
+            })),
           resultCommitRows: listed.runs
             .filter((run) => run.result_commit)
             .map((run) => ({
@@ -1857,8 +1908,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             })),
         };
       });
+      const resumableBranches = agents.flatMap((agent) => agent.resumableBranchRows);
       const resultCommits = agents.flatMap((agent) => agent.resultCommitRows);
-      const summaryAgents = agents.map(({ resultCommitRows: _resultCommitRows, ...agent }) => agent);
+      const summaryAgents = agents.map(({ resumableBranchRows: _resumableBranchRows, resultCommitRows: _resultCommitRows, ...agent }) => agent);
       const totals = {
         runs: agents.reduce((sum, agent) => sum + agent.total, 0),
         resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
@@ -1959,6 +2011,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           },
         },
         totals,
+        resumableBranches,
         resultCommits,
         agents: summaryAgents,
         ...(commands ? { commands, nextStep } : {}),
