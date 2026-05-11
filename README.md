@@ -259,6 +259,13 @@ npm run cli -- messages list --sandbox <sandbox>
 npm run cli -- messages listen --sandbox <sandbox>
 ```
 
+`runs dispatch` queues the requested objectives, starts the detached worker
+session, and returns an `actions` block with the exact `session-status`,
+`session-watch`, `session-review`, branch queue, results, checkout, and
+stop/recover commands for that session. The dry-run form returns the same action
+commands without queuing runs or starting workers, so the local control-plane
+flow can be reviewed before launching a multi-agent batch.
+
 Agent template generation is Pi-native but does not run Pi:
 
 - `POST /api/agent-template` returns a file manifest for a git-backed agent repo.

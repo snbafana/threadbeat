@@ -2056,6 +2056,7 @@ try {
     dryRun: boolean;
     planned: Array<{ agentId: string; objective: string }>;
     session: { session: string; workerCount: number; command: string[] };
+    actions: { sessionWatch: string[]; sessionReview: string[]; results: string[]; stopSession: string[] };
   }>(baseUrl, [
     "runs",
     "dispatch",
@@ -2089,6 +2090,10 @@ try {
   assert.equal(dispatchPreview.session.session, dispatchSessionName);
   assert.equal(dispatchPreview.session.workerCount, 1);
   assert.ok(dispatchPreview.session.command.includes("--loop"));
+  assert.equal(dispatchPreview.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${dispatchSessionName} --recoverable --include-stopped --next`);
+  assert.equal(dispatchPreview.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${dispatchSessionName} --include-stopped`);
+  assert.equal(dispatchPreview.actions.results.join(" "), `npm run cli -- runs results --session ${dispatchSessionName}`);
+  assert.equal(dispatchPreview.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${dispatchSessionName} --recover`);
   const inlineDispatchPreview = await cliJson<{
     assignment: string;
     dryRun: boolean;
@@ -2122,6 +2127,15 @@ try {
     queued: Array<{ agentId: string; objective: string; run: { id: string; status: string } }>;
     recovered: Array<{ runId: string; status?: string; branchName: string }>;
     session: { session: string; workers: Array<{ workerId: string; pid: number | null }> };
+    actions: {
+      sessionStatus: string[];
+      sessionWatch: string[];
+      sessionReview: string[];
+      branchQueue: string[];
+      results: string[];
+      checkoutSession: string[];
+      stopSession: string[];
+    };
     backlog: Array<{ agentId: string; total: number; statuses: Record<string, number> }>;
   }>(baseUrl, [
     "runs",
@@ -2156,6 +2170,13 @@ try {
   assert.equal(dispatched.session.session, dispatchSessionName);
   assert.equal(dispatched.session.workers[0].workerId, "smoke-dispatcher-1");
   assert.equal(typeof dispatched.session.workers[0].pid, "number");
+  assert.equal(dispatched.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${dispatchSessionName} --recoverable --include-stopped`);
+  assert.equal(dispatched.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${dispatchSessionName} --recoverable --include-stopped --next`);
+  assert.equal(dispatched.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${dispatchSessionName} --include-stopped`);
+  assert.equal(dispatched.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${dispatchSessionName} --next`);
+  assert.equal(dispatched.actions.results.join(" "), `npm run cli -- runs results --session ${dispatchSessionName}`);
+  assert.equal(dispatched.actions.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${dispatchSessionName} --dir ./checkouts/${dispatchSessionName}`);
+  assert.equal(dispatched.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${dispatchSessionName} --recover`);
   assert.ok(dispatched.recovered.some((run) => (
     run.runId === dispatchRecoveredPlan.run.id
     && run.branchName === dispatchRecoveredPlan.plan.branchName

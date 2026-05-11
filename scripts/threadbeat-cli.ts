@@ -971,6 +971,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (options.loop === "1" || options["until-empty"] !== "1") workerArgs.push("--loop");
     const sessionName = required(options.session, "--session");
+    const dispatchActions = {
+      sessionStatus: ["npm", "run", "cli", "--", "runs", "session-status", sessionName, "--recoverable", "--include-stopped"],
+      sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
+      sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
+      branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
+      results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
+      checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
+      stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
+    };
     if (options["dry-run"] === "1") {
       await printJson({
         assignment,
@@ -982,6 +991,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           workerPrefix,
           command: ["runs", "work", ...workerArgs],
         },
+        actions: dispatchActions,
       });
       return;
     }
@@ -1013,6 +1023,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       queued,
       ...(options.recover === "1" ? { recovered: recovered.map(({ run: _run, ...item }) => item) } : {}),
       session,
+      actions: dispatchActions,
       backlog: await agentBacklog(agentIds),
     });
     return;
