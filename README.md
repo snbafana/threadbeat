@@ -452,9 +452,11 @@ recorded session in one fleet snapshot, including a top-level `resultCommits`
 queue and a top-level `resumableBranches` queue for branch-native inspection
 across sessions. With `--next`, fleet snapshots also include top-level
 `nextActions` counts and an `actionQueue` of runnable per-session next-action
-commands. Add `--max-polls` and `--interval-ms` to stream newline-delimited fleet
-snapshots while long worker sessions run. Add `--needs-action` with `--next` to
-hide sessions whose next action is only `continue_watch`, leaving restart,
+commands, plus `branchActions` counts and a `branchActionQueue` of runnable
+resume/review commands for durable run branches across sessions. Add `--max-polls`
+and `--interval-ms` to stream newline-delimited fleet snapshots while long
+worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
+next action is only `continue_watch`, leaving restart,
 recover, result-inspection, and archive rows in the fleet queue. Use `runs archive-sessions --dry-run`
 to preview archiving dead local session records without touching run records or Git branches, and
 `runs stop-session <name>` to terminate the recorded process

@@ -1489,6 +1489,16 @@ try {
   )));
   const workerFleetSummary = await cliJson<{
     totals: { sessions: number; unavailable: number; workers: { alive: number }; resumableStopped: number };
+    branchActions: Record<string, number>;
+    branchActionQueue: Array<{
+      session: string;
+      action: string;
+      reason: string;
+      agentId: string;
+      runId: string;
+      resultCommit: string | null;
+      command: string[];
+    }>;
     resumableBranches: Array<{
       session: string;
       agentId: string;
@@ -1516,6 +1526,16 @@ try {
   assert.ok(workerFleetSummary.totals.sessions >= 1);
   assert.ok(workerFleetSummary.totals.workers.alive >= 1);
   assert.ok(workerFleetSummary.totals.resumableStopped >= 1);
+  assert.ok(workerFleetSummary.branchActions.resume_branch >= 1);
+  assert.ok(workerFleetSummary.branchActionQueue.some((run) => (
+    run.session === detachedWorkerSessionName
+    && run.action === "resume_branch"
+    && run.reason === "stopped_branch_without_result_commit"
+    && run.agentId === workerGroupAgentBody.agent.id
+    && run.runId === detachedStoppedPlan.run.id
+    && run.resultCommit === null
+    && run.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+  )));
   assert.ok(workerFleetSummary.resumableBranches.some((run) => (
     run.session === detachedWorkerSessionName
     && run.agentId === workerGroupAgentBody.agent.id
@@ -1559,6 +1579,8 @@ try {
     totals: { sessions: number; resumableStopped: number };
     nextActions: Record<string, number>;
     actionQueue: Array<{ session: string; action: string; reason: string; command: string[] }>;
+    branchActions: Record<string, number>;
+    branchActionQueue: Array<{ session: string; action: string; runId: string; resultCommit: string | null; command: string[] }>;
     resumableBranches: Array<{ runId: string; resultCommit: string | null }>;
     sessions: Array<{
       session: { session: string };
@@ -1577,6 +1599,14 @@ try {
       && item.reason === "workers_still_alive"
       && item.command.join(" ") === `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`
     ))
+    && snapshot.branchActions.resume_branch >= 1
+    && snapshot.branchActionQueue.some((run) => (
+      run.session === detachedWorkerSessionName
+      && run.action === "resume_branch"
+      && run.runId === detachedStoppedPlan.run.id
+      && run.resultCommit === null
+      && run.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    ))
     && snapshot.resumableBranches.some((run) => (
       run.runId === detachedStoppedPlan.run.id
       && run.resultCommit === null
@@ -1591,6 +1621,8 @@ try {
     totals: { sessions: number; workers: { alive: number }; resumableStopped: number };
     nextActions: Record<string, number>;
     actionQueue: Array<{ session: string; action: string }>;
+    branchActions: Record<string, number>;
+    branchActionQueue: Array<{ session: string; action: string }>;
     resumableBranches: Array<{ runId: string }>;
     sessions: Array<{ session: { session: string }; nextStep?: { action: string } }>;
   }>(baseUrl, [
@@ -1609,6 +1641,8 @@ try {
   assert.equal(workerFleetNeedsAction.totals.resumableStopped, 0);
   assert.deepEqual(workerFleetNeedsAction.nextActions, {});
   assert.deepEqual(workerFleetNeedsAction.actionQueue, []);
+  assert.deepEqual(workerFleetNeedsAction.branchActions, {});
+  assert.deepEqual(workerFleetNeedsAction.branchActionQueue, []);
   assert.equal(workerFleetNeedsAction.resumableBranches.length, 0);
   assert.equal(workerFleetNeedsAction.sessions.length, 0);
   const detachedWorkerBranches = await cliJson<{
@@ -3850,6 +3884,16 @@ try {
   )));
   const resultFleetSummary = await cliJson<{
     totals: { resultCommits: number };
+    branchActions: Record<string, number>;
+    branchActionQueue: Array<{
+      session: string;
+      action: string;
+      reason: string;
+      agentId: string;
+      runId: string;
+      resultCommit: string;
+      command: string[];
+    }>;
     resultCommits: Array<{
       session: string;
       agentId: string;
@@ -3864,6 +3908,16 @@ try {
     }>;
   }>(baseUrl, ["runs", "sessions", "--session", resultSummarySessionName, "--summary", "--next"]);
   assert.equal(resultFleetSummary.totals.resultCommits, 1);
+  assert.equal(resultFleetSummary.branchActions.review_branch, 1);
+  assert.ok(resultFleetSummary.branchActionQueue.some((commit) => (
+    commit.session === resultSummarySessionName
+    && commit.action === "review_branch"
+    && commit.reason === "result_commit_available"
+    && commit.agentId === cliWorkFinalizeAgent.agent.id
+    && commit.runId === cliWorkFinalizePlan.run.id
+    && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+    && commit.command.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
+  )));
   assert.ok(resultFleetSummary.resultCommits.some((commit) => (
     commit.session === resultSummarySessionName
     && commit.agentId === cliWorkFinalizeAgent.agent.id

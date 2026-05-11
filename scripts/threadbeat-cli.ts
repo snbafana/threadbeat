@@ -1533,6 +1533,42 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         }
         const resultCommits = visibleSessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
         const resumableBranches = visibleSessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
+        const branchActionQueue = [
+          ...resumableBranches.map((run) => ({
+            session: run.session,
+            action: "resume_branch",
+            reason: "stopped_branch_without_result_commit",
+            agentId: run.agentId,
+            runId: run.runId,
+            status: run.status,
+            objective: run.objective,
+            workerId: run.workerId,
+            location: run.location,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+            command: run.commands.resumeBranch,
+            commands: run.commands,
+          })),
+          ...resultCommits.map((run) => ({
+            session: run.session,
+            action: "review_branch",
+            reason: "result_commit_available",
+            agentId: run.agentId,
+            runId: run.runId,
+            status: run.status,
+            objective: run.objective,
+            workerId: run.workerId,
+            location: run.location,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+            command: run.commands.reviewRun,
+            commands: run.commands,
+          })),
+        ];
+        const branchActions = branchActionQueue.reduce((counts, item) => {
+          counts[item.action] = (counts[item.action] ?? 0) + 1;
+          return counts;
+        }, {} as Record<string, number>);
         const actionQueue = visibleSessions
           .filter((session) => "nextStep" in session && session.nextStep)
           .map((session) => ({
@@ -1549,7 +1585,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           observedAt: new Date().toISOString(),
           ...(options["needs-action"] === "1" ? { filter: { needsAction: true, totalSessions: sessions.length } } : {}),
           totals,
-          ...(options.next === "1" ? { nextActions, actionQueue } : {}),
+          ...(options.next === "1" ? { nextActions, actionQueue, branchActions, branchActionQueue } : {}),
           resumableBranches,
           resultCommits,
           sessions: visibleSessions,
