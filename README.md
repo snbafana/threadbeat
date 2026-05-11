@@ -277,6 +277,7 @@ npm run cli -- runs session-apply overnight --source status --include-stopped --
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume --resume-filter failed
 npm run cli -- runs session-applies overnight --apply-id overnight-resume-1
+npm run cli -- runs session-applies overnight --summary
 npm run cli -- runs session-applies overnight --ready-results --format shell
 npm run cli -- runs session-applies overnight --ready-results --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
@@ -558,7 +559,8 @@ or `failed,pending` to retry only the failed commands, only commands that never
 started, or both. Use `runs session-applies <name>` to list those apply records,
 or `--apply-id <id>` to inspect the failed executions, pending commands,
 affected runs, exact resume commands, and branch-native inspect/checkout/review
-commands for one recorded apply. Apply summaries also include run-filtered
+commands for one recorded apply. Add `--summary` to group recorded applies into
+resume-needed, ready-to-review, and waiting buckets. Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a
 result commit, apply summaries add a `reviewReadyResults` command for the

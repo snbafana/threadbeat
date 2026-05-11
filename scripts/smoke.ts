@@ -2682,6 +2682,22 @@ try {
     && apply.actions.resumeApply.join(" ") === sessionApplyInspection.summary.actions.resumeApply.join(" ")
     && apply.actions.inspectResults?.join(" ") === sessionApplyInspection.summary.actions.inspectResults?.join(" ")
   )));
+  const sessionApplySummary = await cliJson<{
+    session: string;
+    summary: {
+      counts: { total: number; resumeNeeded: number; readyToReview: number; waiting: number; failed: number; pending: number };
+      groups: {
+        resumeNeeded: Array<{ applyId: string; command: string[] }>;
+        readyToReview: Array<{ applyId: string; resultRuns: string[]; command: string[] }>;
+        waiting: Array<{ applyId: string }>;
+      };
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--summary"]);
+  assert.equal(sessionApplySummary.session, detachedWorkerSessionName);
+  assert.equal(sessionApplySummary.summary.counts.total, sessionApplyList.count);
+  assert.equal(sessionApplySummary.summary.counts.readyToReview, 0);
+  assert.ok(sessionApplySummary.summary.counts.waiting >= 1);
+  assert.ok(sessionApplySummary.summary.groups.waiting.some((apply) => apply.applyId === sessionApplyId));
   const sessionApplyShell = await cliRaw(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", sessionApplyId, "--format", "shell"]);
   assert.equal(
     sessionApplyShell.stdout.trim(),
@@ -4503,6 +4519,19 @@ try {
     readyResultAppliesShell.stdout.trim(),
     `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`,
   );
+  const readyResultApplySummary = await cliJson<{
+    summary: {
+      counts: { readyToReview: number; resumeNeeded: number; waiting: number };
+      groups: { readyToReview: Array<{ applyId: string; resultRuns: string[]; command: string[] }> };
+    };
+  }>(baseUrl, ["runs", "session-applies", resultSummarySessionName, "--summary"]);
+  assert.ok(readyResultApplySummary.summary.counts.readyToReview >= 1);
+  assert.equal(readyResultApplySummary.summary.counts.resumeNeeded, 0);
+  assert.ok(readyResultApplySummary.summary.groups.readyToReview.some((apply) => (
+    apply.applyId === resultApplyId
+    && apply.resultRuns.join(",") === cliWorkFinalizePlan.run.id
+    && apply.command.join(" ") === `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`
+  )));
   assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.status, "completed");
   assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.resultCommit, cliWorkFinalized.processed[0].finalized.result.commitSha);
   assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.nextAction, "review_branch");
