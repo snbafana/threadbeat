@@ -1278,6 +1278,76 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ sessions: await listWorkerSessions(options.session) });
     return;
   }
+  if (subcommandName === "session-wait") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-wait <session>");
+    const waitIntervalMs = parsePositiveInteger(options["wait-interval-ms"] ?? options["interval-ms"] ?? "2000", "--wait-interval-ms");
+    const maxPolls = parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls");
+    const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped,completed,failed"));
+    const actions = {
+      sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
+      sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
+      branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", requiredSessionName, "--next"],
+      results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
+      checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", requiredSessionName, "--dir", `./checkouts/${requiredSessionName}`],
+      sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", requiredSessionName],
+      stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", requiredSessionName, "--recover"],
+      recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", requiredSessionName],
+      resumeSession: ["npm", "run", "cli", "--", "runs", "resume-session", requiredSessionName],
+      restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover"],
+      restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover", "--resume-stopped"],
+    };
+    let polls = 0;
+    let finalStatus = await workerSessionStatus(requiredSessionName, statusFilter);
+    while (polls < maxPolls) {
+      finalStatus = await workerSessionStatus(requiredSessionName, statusFilter);
+      polls += 1;
+      const workers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+      if (workers.every((worker) => !worker.alive)) break;
+      if (polls >= maxPolls) break;
+      await sleep(waitIntervalMs);
+    }
+    const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+    const aliveWorkers = finalWorkers.filter((worker) => worker.alive).length;
+    const statuses: Record<string, number> = {};
+    for (const agent of finalStatus.agents) {
+      for (const [status, count] of Object.entries(agent.statuses)) {
+        statuses[status] = (statuses[status] ?? 0) + count;
+      }
+    }
+    await printJson({
+      session: requiredSessionName,
+      completed: aliveWorkers === 0,
+      timedOut: aliveWorkers > 0,
+      polls,
+      intervalMs: waitIntervalMs,
+      summary: {
+        workers: {
+          total: finalWorkers.length,
+          alive: aliveWorkers,
+          dead: finalWorkers.length - aliveWorkers,
+        },
+        agents: finalStatus.agents.length,
+        runs: finalStatus.agents.reduce((sum, agent) => sum + agent.total, 0),
+        statuses,
+      },
+      status: finalStatus,
+      commands: actions,
+      nextStep: aliveWorkers > 0
+        ? {
+          action: "continue_watch",
+          reason: "workers_still_alive",
+          command: actions.sessionWatch,
+        }
+        : {
+          action: "review_session",
+          reason: "bounded_session_finished",
+          command: actions.sessionReview,
+        },
+    });
+    return;
+  }
   if (subcommandName === "session-actions") {
     const sessionName = required(args[0], "runs session-actions <session>");
     const session = await readWorkerSession(sessionName);
@@ -1292,6 +1362,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       },
       actions: {
         sessionStatus: ["npm", "run", "cli", "--", "runs", "session-status", sessionName, "--recoverable", "--include-stopped"],
+        sessionWait: ["npm", "run", "cli", "--", "runs", "session-wait", sessionName],
         sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
         sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
         branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
@@ -3572,6 +3643,7 @@ Commands:
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
+  runs session-wait <name> [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>

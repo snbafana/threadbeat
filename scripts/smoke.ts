@@ -1307,6 +1307,7 @@ try {
     session: { session: string; workers: number; command: string[] };
     actions: {
       sessionStatus: string[];
+      sessionWait: string[];
       sessionWatch: string[];
       sessionReview: string[];
       branchQueue: string[];
@@ -1320,6 +1321,7 @@ try {
   assert.equal(detachedWorkerActions.session.workers, 1);
   assert.equal(detachedWorkerActions.session.command[0], "runs");
   assert.equal(detachedWorkerActions.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${detachedWorkerSessionName} --recoverable --include-stopped`);
+  assert.equal(detachedWorkerActions.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
   assert.equal(detachedWorkerActions.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${detachedWorkerSessionName} --recoverable --include-stopped --next`);
   assert.equal(detachedWorkerActions.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${detachedWorkerSessionName} --include-stopped`);
   assert.equal(detachedWorkerActions.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${detachedWorkerSessionName} --next`);

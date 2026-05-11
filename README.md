@@ -256,6 +256,7 @@ npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 100
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs session-actions overnight
+npm run cli -- runs session-wait overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs session-status overnight
 npm run cli -- runs session-summary overnight
 npm run cli -- runs session-review overnight --include-stopped --lines 40
@@ -445,7 +446,11 @@ session's workers when those runs do not have a running sandbox. Add
 `--include-stopped` to also requeue unfinished stopped branches in the same
 stop/recover step.
 Use `runs session-actions <name>` when returning to an existing session and you
-only need the exact status/watch/review/results/checkout/logs/stop commands.
+only need the exact status/wait/watch/review/results/checkout/logs/stop commands.
+Use `runs session-wait <name>` to attach a foreground wait to an already running
+or recently finished detached session; it returns the same final/timeout summary
+and branch-native next action commands as `dispatch --wait` and
+`supervise --wait`.
 Add `--recoverable` to `runs session-status` or `runs session-watch` to include
 a dry-run recovery preview in the live session snapshot; combine it with
 `--include-stopped` to surface unfinished stopped branches too. `session-status`
