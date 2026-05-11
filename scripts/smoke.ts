@@ -4474,6 +4474,16 @@ try {
     readyResultApply.summary.actions.reviewReadyResults?.join(" "),
     `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`,
   );
+  const readyResultApplyShell = await cliRaw(baseUrl, ["runs", "session-applies", resultSummarySessionName, "--apply-id", resultApplyId, "--ready-results", "--format", "shell"]);
+  assert.equal(
+    readyResultApplyShell.stdout.trim(),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`,
+  );
+  const readyResultAppliesShell = await cliRaw(baseUrl, ["runs", "session-applies", resultSummarySessionName, "--ready-results", "--format", "shell"]);
+  assert.equal(
+    readyResultAppliesShell.stdout.trim(),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`,
+  );
   assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.status, "completed");
   assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.resultCommit, cliWorkFinalized.processed[0].finalized.result.commitSha);
   assert.equal(readyResultApply.summary.affectedRuns[0].currentRun?.nextAction, "review_branch");

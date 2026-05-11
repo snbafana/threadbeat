@@ -3090,16 +3090,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat !== "json" && outputFormat !== "shell") {
       throw new Error("--format must be json or shell");
     }
+    if (options["ready-results"] === "1" && outputFormat !== "shell") {
+      throw new Error("runs session-applies --ready-results requires --format shell");
+    }
     if (options["apply-id"]) {
       const applyId = options["apply-id"];
       const record = await readSessionApplyRecord(requiredSessionName, applyId);
       if (!record) throw new Error(`session apply ${applyId} does not exist for ${requiredSessionName}`);
-      const runStatusIndex = outputFormat === "json"
+      const runStatusIndex = outputFormat === "json" || options["ready-results"] === "1"
         ? await sessionApplyRunStatusIndex(requiredSessionName)
         : null;
       const summary = summarizeSessionApplyRecord(record, runStatusIndex);
       if (outputFormat === "shell") {
-        console.log(summary.actions.resumeApply.map(shellArg).join(" "));
+        const command = options["ready-results"] === "1"
+          ? summary.actions.reviewReadyResults
+          : summary.actions.resumeApply;
+        if (command) console.log(command.map(shellArg).join(" "));
         return;
       }
       await printJson({
@@ -3115,8 +3121,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const records = await listSessionApplyRecords(requiredSessionName);
     if (outputFormat === "shell") {
-      for (const apply of records.map((record) => summarizeSessionApplyRecord(record))) {
-        console.log(apply.actions.resumeApply.map(shellArg).join(" "));
+      const runStatusIndex = options["ready-results"] === "1"
+        ? await sessionApplyRunStatusIndex(requiredSessionName)
+        : null;
+      for (const apply of records.map((record) => summarizeSessionApplyRecord(record, runStatusIndex))) {
+        const command = options["ready-results"] === "1"
+          ? apply.actions.reviewReadyResults
+          : apply.actions.resumeApply;
+        if (command) console.log(command.map(shellArg).join(" "));
       }
       return;
     }
@@ -4192,7 +4204,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -5352,7 +5364,7 @@ Commands:
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
-  runs session-applies <name> [--apply-id id] [--format json|shell]
+  runs session-applies <name> [--apply-id id] [--ready-results] [--format json|shell]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
