@@ -1321,6 +1321,8 @@ try {
       sessionSummaryWatch: string[];
       fleetSummary: string[];
       fleetSummaryWatch: string[];
+      fleetNeedsAction: string[];
+      fleetNeedsActionWatch: string[];
       monitor: string[];
       sessionReview: string[];
       branchQueue: string[];
@@ -1350,6 +1352,8 @@ try {
   assert.equal(detachedWorkerActions.actions.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(detachedWorkerActions.actions.fleetSummary.join(" "), `npm run cli -- runs sessions --session ${detachedWorkerSessionName} --summary --next`);
   assert.equal(detachedWorkerActions.actions.fleetSummaryWatch.join(" "), `npm run cli -- runs sessions --session ${detachedWorkerSessionName} --summary --next --max-polls 30 --interval-ms 10000`);
+  assert.equal(detachedWorkerActions.actions.fleetNeedsAction.join(" "), `npm run cli -- runs sessions --session ${detachedWorkerSessionName} --summary --next --needs-action`);
+  assert.equal(detachedWorkerActions.actions.fleetNeedsActionWatch.join(" "), `npm run cli -- runs sessions --session ${detachedWorkerSessionName} --summary --next --needs-action --max-polls 30 --interval-ms 10000`);
   assert.equal(detachedWorkerActions.actions.monitor.join(" "), `npm run cli -- runs monitor --agents ${workerGroupAgentBody.agent.id} --status planned,running,stopped --next --checkout-dir ./checkouts/${detachedWorkerSessionName}-monitor`);
   assert.equal(detachedWorkerActions.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${detachedWorkerSessionName} --include-stopped`);
   assert.equal(detachedWorkerActions.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${detachedWorkerSessionName} --next`);

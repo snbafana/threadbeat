@@ -1765,6 +1765,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
         fleetSummary: ["npm", "run", "cli", "--", "runs", "sessions", "--session", sessionName, "--summary", "--next"],
         fleetSummaryWatch: ["npm", "run", "cli", "--", "runs", "sessions", "--session", sessionName, "--summary", "--next", "--max-polls", "30", "--interval-ms", "10000"],
+        fleetNeedsAction: ["npm", "run", "cli", "--", "runs", "sessions", "--session", sessionName, "--summary", "--next", "--needs-action"],
+        fleetNeedsActionWatch: ["npm", "run", "cli", "--", "runs", "sessions", "--session", sessionName, "--summary", "--next", "--needs-action", "--max-polls", "30", "--interval-ms", "10000"],
         monitor: ["npm", "run", "cli", "--", "runs", "monitor", "--agents", agentIds.join(","), "--status", "planned,running,stopped", "--next", "--checkout-dir", `./checkouts/${sessionName}-monitor`],
         sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
         branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
