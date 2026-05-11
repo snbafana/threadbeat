@@ -486,12 +486,22 @@ try {
     session: { workers: { total: number; alive: number } };
     totals: { runs: number; statuses: Record<string, number> };
     agents: Array<{ agentId: string; total: number }>;
-  }>(baseUrl, ["runs", "session-summary", sessionName]);
+    commands: { sessionWatch: string[]; sessionReview: string[]; results: string[]; checkoutSession: string[]; restartSession: string[]; restartSessionWithStopped: string[] };
+    nextStep: { action: string; reason: string; command: string[] };
+  }>(baseUrl, ["runs", "session-summary", sessionName, "--next"]);
   assert.equal(summary.session.workers.total, 2);
   assert.ok(summary.session.workers.alive >= 1);
   assert.ok(summary.totals.runs >= 3);
   assert.ok((summary.totals.statuses.planned ?? 0) + (summary.totals.statuses.running ?? 0) + (summary.totals.statuses.stopped ?? 0) >= 1);
   assert.deepEqual(summary.agents.map((agent) => agent.agentId).sort(), [agentA.agent.id, agentB.agent.id].sort());
+  assert.equal(summary.nextStep.action, "continue_watch");
+  assert.equal(summary.nextStep.reason, "workers_still_alive");
+  assert.equal(summary.nextStep.command.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
+  assert.equal(summary.commands.sessionReview.join(" "), `npm run cli -- runs session-review ${sessionName} --include-stopped`);
+  assert.equal(summary.commands.results.join(" "), `npm run cli -- runs results --session ${sessionName}`);
+  assert.equal(summary.commands.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${sessionName} --dir ./checkouts/${sessionName}`);
+  assert.equal(summary.commands.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
+  assert.equal(summary.commands.restartSessionWithStopped.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover --resume-stopped`);
 
   const results = await cliJson<{
     session: string;
