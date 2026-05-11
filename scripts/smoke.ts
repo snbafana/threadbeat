@@ -1514,6 +1514,41 @@ try {
   assert.equal(detachedFleetSession?.nextStep?.reason, "workers_still_alive");
   assert.equal(detachedFleetSession?.nextStep?.command.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(detachedFleetSession?.commands?.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
+  const workerFleetSummaryPoll = await cliRaw(baseUrl, [
+    "runs",
+    "sessions",
+    "--session",
+    detachedWorkerSessionName,
+    "--summary",
+    "--next",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const workerFleetSummarySnapshots = workerFleetSummaryPoll.stdout.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    observedAt: string;
+    totals: { sessions: number; resumableStopped: number };
+    resumableBranches: Array<{ runId: string; resultCommit: string | null }>;
+    sessions: Array<{
+      session: { session: string };
+      nextStep?: { action: string };
+    }>;
+  });
+  assert.equal(workerFleetSummarySnapshots.length, 2);
+  assert.ok(workerFleetSummarySnapshots.every((snapshot) => (
+    /^\d{4}-\d{2}-\d{2}T/.test(snapshot.observedAt)
+    && snapshot.totals.sessions === 1
+    && snapshot.totals.resumableStopped >= 1
+    && snapshot.resumableBranches.some((run) => (
+      run.runId === detachedStoppedPlan.run.id
+      && run.resultCommit === null
+    ))
+    && snapshot.sessions.some((session) => (
+      session.session.session === detachedWorkerSessionName
+      && session.nextStep?.action === "continue_watch"
+    ))
+  )));
   const detachedWorkerBranches = await cliJson<{
     observedAt: string;
     session: string;

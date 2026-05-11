@@ -1315,213 +1315,226 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "sessions") {
     const options = parseOptions(args);
     if (options.summary === "1" || options.next === "1") {
-      const sessionNames = options.session ? [options.session] : await listWorkerSessionNames();
-      const sessions = await mapConcurrent(sessionNames, 4, async (listedSessionName) => {
-        try {
-          const status = await workerSessionStatus(listedSessionName, new Set(["planned", "running", "stopped"]));
-          const sessionWorkerIds = new Set(status.session.workers.map((worker) => worker.workerId));
-          const resultCheckoutDir = `./checkouts/${listedSessionName}-results`;
-          const resumableCheckoutDir = `./checkouts/${listedSessionName}-resumable`;
-          const agentIds = workerSessionAgentIds(status.session);
-          const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
-            const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-              runs: Array<{
-                id: string;
-                objective: string;
-                run_branch: string;
-                result_commit: string | null;
-                status: string;
-                worker_id: string | null;
-              }>;
-            };
-            const statuses: Record<string, number> = {};
-            for (const run of listed.runs) {
-              statuses[run.status] = (statuses[run.status] ?? 0) + 1;
-            }
-            return {
-              agentId,
-              total: listed.runs.length,
-              statuses,
-              resultCommits: listed.runs.filter((run) => run.result_commit).length,
-              resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
-              resumableBranchRows: listed.runs
-                .filter((run) => run.status === "stopped" && !run.result_commit)
-                .map((run) => ({
-                  session: listedSessionName,
-                  agentId,
-                  runId: run.id,
-                  status: run.status,
-                  objective: run.objective,
-                  workerId: run.worker_id,
-                  location: run.worker_id === null
-                    ? "unassigned"
-                    : sessionWorkerIds.has(run.worker_id)
-                      ? "session_worker"
-                      : "other_worker",
-                  branchName: run.run_branch,
-                  resultCommit: run.result_commit,
-                  commands: {
-                    inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
-                    checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resumableCheckoutDir}/${run.id}`],
-                    reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resumableCheckoutDir}/${run.id}`],
-                    resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.id],
-                    sessionBranches: ["npm", "run", "cli", "--", "runs", "branches", "--session", listedSessionName, "--next"],
-                  },
-                })),
-              resultCommitRows: listed.runs
-                .filter((run) => run.result_commit)
-                .map((run) => ({
-                  session: listedSessionName,
-                  agentId,
-                  runId: run.id,
-                  status: run.status,
-                  objective: run.objective,
-                  workerId: run.worker_id,
-                  location: run.worker_id === null
-                    ? "unassigned"
-                    : sessionWorkerIds.has(run.worker_id)
-                      ? "session_worker"
-                      : "other_worker",
-                  branchName: run.run_branch,
-                  resultCommit: run.result_commit,
-                  commands: {
-                    inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
-                    checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resultCheckoutDir}/${run.id}`],
-                    reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resultCheckoutDir}/${run.id}`],
-                    sessionResults: ["npm", "run", "cli", "--", "runs", "results", "--session", listedSessionName, "--next"],
-                  },
-                })),
-            };
-          });
-          const resumableBranches = agents.flatMap((agent) => agent.resumableBranchRows);
-          const resultCommits = agents.flatMap((agent) => agent.resultCommitRows);
-          const summaryAgents = agents.map(({ resumableBranchRows: _resumableBranchRows, resultCommitRows: _resultCommitRows, ...agent }) => agent);
-          const totals = {
-            runs: agents.reduce((sum, agent) => sum + agent.total, 0),
-            resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
-            resumableStopped: agents.reduce((sum, agent) => sum + agent.resumableStopped, 0),
-            statuses: {} as Record<string, number>,
-          };
-          for (const agent of agents) {
-            for (const [runStatus, count] of Object.entries(agent.statuses)) {
-              totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
-            }
-          }
-          const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
-          const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
-          const commands = {
-            sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", listedSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
-            sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", listedSessionName, "--include-stopped"],
-            resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", listedSessionName, "--next"],
-            recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", listedSessionName],
-            restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", listedSessionName, "--recover"],
-            restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", listedSessionName, "--recover", "--resume-stopped"],
-            sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", listedSessionName],
-            stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", listedSessionName, "--recover"],
-            archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName, "--dry-run"],
-            archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName],
-          };
-          const nextStep = aliveWorkers > 0
-            ? {
-              action: "continue_watch",
-              reason: "workers_still_alive",
-              command: commands.sessionSummaryWatch,
-            }
-            : (totals.statuses.running ?? 0) > 0
-              ? {
-                action: "recover_session",
-                reason: "stale_running_claims",
-                command: commands.recoverSession,
+      const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+      const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+      const collectFleetSummary = async () => {
+        const sessionNames = options.session ? [options.session] : await listWorkerSessionNames();
+        const sessions = await mapConcurrent(sessionNames, 4, async (listedSessionName) => {
+          try {
+            const status = await workerSessionStatus(listedSessionName, new Set(["planned", "running", "stopped"]));
+            const sessionWorkerIds = new Set(status.session.workers.map((worker) => worker.workerId));
+            const resultCheckoutDir = `./checkouts/${listedSessionName}-results`;
+            const resumableCheckoutDir = `./checkouts/${listedSessionName}-resumable`;
+            const agentIds = workerSessionAgentIds(status.session);
+            const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
+              const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
+                runs: Array<{
+                  id: string;
+                  objective: string;
+                  run_branch: string;
+                  result_commit: string | null;
+                  status: string;
+                  worker_id: string | null;
+                }>;
+              };
+              const statuses: Record<string, number> = {};
+              for (const run of listed.runs) {
+                statuses[run.status] = (statuses[run.status] ?? 0) + 1;
               }
-              : totals.resumableStopped > 0
+              return {
+                agentId,
+                total: listed.runs.length,
+                statuses,
+                resultCommits: listed.runs.filter((run) => run.result_commit).length,
+                resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+                resumableBranchRows: listed.runs
+                  .filter((run) => run.status === "stopped" && !run.result_commit)
+                  .map((run) => ({
+                    session: listedSessionName,
+                    agentId,
+                    runId: run.id,
+                    status: run.status,
+                    objective: run.objective,
+                    workerId: run.worker_id,
+                    location: run.worker_id === null
+                      ? "unassigned"
+                      : sessionWorkerIds.has(run.worker_id)
+                        ? "session_worker"
+                        : "other_worker",
+                    branchName: run.run_branch,
+                    resultCommit: run.result_commit,
+                    commands: {
+                      inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                      checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resumableCheckoutDir}/${run.id}`],
+                      reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resumableCheckoutDir}/${run.id}`],
+                      resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.id],
+                      sessionBranches: ["npm", "run", "cli", "--", "runs", "branches", "--session", listedSessionName, "--next"],
+                    },
+                  })),
+                resultCommitRows: listed.runs
+                  .filter((run) => run.result_commit)
+                  .map((run) => ({
+                    session: listedSessionName,
+                    agentId,
+                    runId: run.id,
+                    status: run.status,
+                    objective: run.objective,
+                    workerId: run.worker_id,
+                    location: run.worker_id === null
+                      ? "unassigned"
+                      : sessionWorkerIds.has(run.worker_id)
+                        ? "session_worker"
+                        : "other_worker",
+                    branchName: run.run_branch,
+                    resultCommit: run.result_commit,
+                    commands: {
+                      inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                      checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resultCheckoutDir}/${run.id}`],
+                      reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resultCheckoutDir}/${run.id}`],
+                      sessionResults: ["npm", "run", "cli", "--", "runs", "results", "--session", listedSessionName, "--next"],
+                    },
+                  })),
+              };
+            });
+            const resumableBranches = agents.flatMap((agent) => agent.resumableBranchRows);
+            const resultCommits = agents.flatMap((agent) => agent.resultCommitRows);
+            const summaryAgents = agents.map(({ resumableBranchRows: _resumableBranchRows, resultCommitRows: _resultCommitRows, ...agent }) => agent);
+            const totals = {
+              runs: agents.reduce((sum, agent) => sum + agent.total, 0),
+              resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
+              resumableStopped: agents.reduce((sum, agent) => sum + agent.resumableStopped, 0),
+              statuses: {} as Record<string, number>,
+            };
+            for (const agent of agents) {
+              for (const [runStatus, count] of Object.entries(agent.statuses)) {
+                totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+              }
+            }
+            const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+            const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
+            const commands = {
+              sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", listedSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+              sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", listedSessionName, "--include-stopped"],
+              resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", listedSessionName, "--next"],
+              recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", listedSessionName],
+              restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", listedSessionName, "--recover"],
+              restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", listedSessionName, "--recover", "--resume-stopped"],
+              sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", listedSessionName],
+              stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", listedSessionName, "--recover"],
+              archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName, "--dry-run"],
+              archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName],
+            };
+            const nextStep = aliveWorkers > 0
+              ? {
+                action: "continue_watch",
+                reason: "workers_still_alive",
+                command: commands.sessionSummaryWatch,
+              }
+              : (totals.statuses.running ?? 0) > 0
                 ? {
-                  action: "restart_session_with_stopped",
-                  reason: "resumable_stopped_branches",
-                  command: commands.restartSessionWithStopped,
+                  action: "recover_session",
+                  reason: "stale_running_claims",
+                  command: commands.recoverSession,
                 }
-                : (totals.statuses.planned ?? 0) > 0
+                : totals.resumableStopped > 0
                   ? {
-                    action: "restart_session",
-                    reason: "planned_runs_waiting",
-                    command: commands.restartSession,
+                    action: "restart_session_with_stopped",
+                    reason: "resumable_stopped_branches",
+                    command: commands.restartSessionWithStopped,
                   }
-                  : totals.resultCommits > 0
+                  : (totals.statuses.planned ?? 0) > 0
                     ? {
-                      action: "inspect_results",
-                      reason: "result_commits_available",
-                      command: commands.resultsNext,
+                      action: "restart_session",
+                      reason: "planned_runs_waiting",
+                      command: commands.restartSession,
                     }
-                    : totals.runs === 0
+                    : totals.resultCommits > 0
                       ? {
-                        action: "archive_session_preview",
-                        reason: "dead_session_without_runs",
-                        command: commands.archiveSessionPreview,
+                        action: "inspect_results",
+                        reason: "result_commits_available",
+                        command: commands.resultsNext,
                       }
-                      : {
-                      action: "review_session",
-                      reason: "no_active_work",
-                      command: commands.sessionReview,
-                    };
-          return {
-            session: {
-              session: status.session.session,
-              command: status.session.command,
-              startedAt: status.session.startedAt,
-              stoppedAt: status.session.stoppedAt ?? null,
-              restartedAt: status.session.restartedAt ?? null,
-              workers: {
-                total: sessionWorkers.length,
-                alive: aliveWorkers,
-                dead: sessionWorkers.length - aliveWorkers,
+                      : totals.runs === 0
+                        ? {
+                          action: "archive_session_preview",
+                          reason: "dead_session_without_runs",
+                          command: commands.archiveSessionPreview,
+                        }
+                        : {
+                          action: "review_session",
+                          reason: "no_active_work",
+                          command: commands.sessionReview,
+                        };
+            return {
+              session: {
+                session: status.session.session,
+                command: status.session.command,
+                startedAt: status.session.startedAt,
+                stoppedAt: status.session.stoppedAt ?? null,
+                restartedAt: status.session.restartedAt ?? null,
+                workers: {
+                  total: sessionWorkers.length,
+                  alive: aliveWorkers,
+                  dead: sessionWorkers.length - aliveWorkers,
+                },
               },
-            },
-            totals,
-            resumableBranches,
-            resultCommits,
-            agents: summaryAgents,
-            ...(options.next === "1" ? { commands, nextStep } : {}),
-          };
-        } catch (error) {
-          const commands = {
-            archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName, "--dry-run"],
-            archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName],
-          };
-          return {
-            session: { session: listedSessionName },
-            error: error instanceof Error ? error.message : String(error),
-            ...(options.next === "1" ? {
-              commands,
-              nextStep: {
-                action: "archive_session_preview",
-                reason: "unavailable_session_record",
-                command: commands.archiveSessionPreview,
-              },
-            } : {}),
-          };
+              totals,
+              resumableBranches,
+              resultCommits,
+              agents: summaryAgents,
+              ...(options.next === "1" ? { commands, nextStep } : {}),
+            };
+          } catch (error) {
+            const commands = {
+              archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName, "--dry-run"],
+              archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName],
+            };
+            return {
+              session: { session: listedSessionName },
+              error: error instanceof Error ? error.message : String(error),
+              ...(options.next === "1" ? {
+                commands,
+                nextStep: {
+                  action: "archive_session_preview",
+                  reason: "unavailable_session_record",
+                  command: commands.archiveSessionPreview,
+                },
+              } : {}),
+            };
+          }
+        });
+        const totals = {
+          sessions: sessions.length,
+          unavailable: sessions.filter((session) => "error" in session).length,
+          workers: {
+            total: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.total : 0), 0),
+            alive: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.alive : 0), 0),
+            dead: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.dead : 0), 0),
+          },
+          runs: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.runs : 0), 0),
+          resultCommits: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resultCommits : 0), 0),
+          resumableStopped: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resumableStopped : 0), 0),
+          statuses: {} as Record<string, number>,
+        };
+        for (const session of sessions) {
+          if (!("totals" in session)) continue;
+          for (const [runStatus, count] of Object.entries(session.totals.statuses)) {
+            totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+          }
         }
-      });
-      const totals = {
-        sessions: sessions.length,
-        unavailable: sessions.filter((session) => "error" in session).length,
-        workers: {
-          total: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.total : 0), 0),
-          alive: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.alive : 0), 0),
-          dead: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.dead : 0), 0),
-        },
-        runs: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.runs : 0), 0),
-        resultCommits: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resultCommits : 0), 0),
-        resumableStopped: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resumableStopped : 0), 0),
-        statuses: {} as Record<string, number>,
+        const resultCommits = sessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
+        const resumableBranches = sessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
+        return { observedAt: new Date().toISOString(), totals, resumableBranches, resultCommits, sessions };
       };
-      for (const session of sessions) {
-        if (!("totals" in session)) continue;
-        for (const [runStatus, count] of Object.entries(session.totals.statuses)) {
-          totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
+      for (let poll = 0; poll < maxPolls; poll += 1) {
+        const output = await collectFleetSummary();
+        if (maxPolls === 1) {
+          await printJson(output);
+        } else {
+          console.log(JSON.stringify(output));
+          if (poll + 1 < maxPolls) await sleep(intervalMs);
         }
       }
-      const resultCommits = sessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
-      const resumableBranches = sessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
-      await printJson({ observedAt: new Date().toISOString(), totals, resumableBranches, resultCommits, sessions });
       return;
     }
     await printJson({ sessions: await listWorkerSessions(options.session) });
@@ -4258,7 +4271,7 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next]
+  runs sessions [--session <name>] [--summary] [--next] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
