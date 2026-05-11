@@ -1398,7 +1398,7 @@ try {
     step.action === "resume_branch"
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
-    && step.objective === "detached stopped branch"
+    && step.objective === "detached session resumable stopped branch"
     && step.workerId === null
     && step.location === "unassigned"
     && step.recoverable === true
@@ -1494,7 +1494,7 @@ try {
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
     && step.warning === null
-    && step.objective === "detached stopped branch"
+    && step.objective === "detached session resumable stopped branch"
     && step.workerId === null
     && step.location === "unassigned"
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
@@ -1692,7 +1692,7 @@ try {
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
     && step.status === "stopped"
-    && step.objective === "detached stopped branch"
+    && step.objective === "detached session resumable stopped branch"
     && step.workerId === null
     && step.location === "unassigned"
     && step.recoverable === true
@@ -1864,7 +1864,7 @@ try {
     step.action === "resume_branch"
     && step.reason === "stopped_branch_without_result_commit"
     && step.runId === detachedStoppedPlan.run.id
-    && step.objective === "detached stopped branch"
+    && step.objective === "detached session resumable stopped branch"
     && step.workerId === null
     && step.location === "unassigned"
     && step.recoverable === true
