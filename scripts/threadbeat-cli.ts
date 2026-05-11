@@ -1031,9 +1031,75 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const recoveryPreview = options.recoverable === "1"
       ? await recoverableSessionRuns(status, options)
       : null;
+    const recoverableStoppedRunIds = new Set((recoveryPreview ?? [])
+      .filter((run) => run.currentStatus === "stopped" && !run.skipped)
+      .map((run) => run.runId));
+    const recoverStoppedCommand = recoverableStoppedRunIds.size > 0
+      ? ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"]
+      : null;
+    const resumableCheckoutDir = `./checkouts/${status.session.session}-resumable`;
+    const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & {
+      runs: Array<SessionVisibleRun & { agentId: string }>;
+    }>;
+    const branchNextSteps = recoveryPreview ? [
+      ...sessionWorkers.flatMap((worker) => worker.runs
+        .filter((run) => run.status === "stopped" && run.resultCommit === null)
+        .map((run) => ({
+          agentId: run.agentId,
+          runId: run.id,
+          objective: run.objective,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          workerId: worker.workerId,
+          location: "session_worker",
+        }))),
+      ...status.agents.flatMap((agent) => [
+        ...agent.unassigned
+          .filter((run) => run.status === "stopped" && run.resultCommit === null)
+          .map((run) => ({
+            agentId: agent.agentId,
+            runId: run.id,
+            objective: run.objective,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+            workerId: null,
+            location: "unassigned",
+          })),
+        ...agent.otherWorkers
+          .filter((run) => run.status === "stopped" && run.resultCommit === null)
+          .map((run) => ({
+            agentId: agent.agentId,
+            runId: run.id,
+            objective: run.objective,
+            branchName: run.branchName,
+            resultCommit: run.resultCommit,
+            workerId: run.workerId,
+            location: "other_worker",
+          })),
+      ]),
+    ].map((run) => ({
+      action: "resume_branch",
+      reason: "stopped_branch_without_result_commit",
+      agentId: run.agentId,
+      runId: run.runId,
+      status: "stopped",
+      objective: run.objective,
+      workerId: run.workerId,
+      location: run.location,
+      branchName: run.branchName,
+      resultCommit: run.resultCommit,
+      recoverable: recoverableStoppedRunIds.has(run.runId),
+      command: ["npm", "run", "cli", "--", "runs", "resume-branch", run.runId],
+      commands: {
+        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.runId, "--dir", `${resumableCheckoutDir}/${run.runId}`],
+        resumeBranch: ["npm", "run", "cli", "--", "runs", "resume-branch", run.runId],
+        recoverStopped: recoverableStoppedRunIds.has(run.runId) ? recoverStoppedCommand : null,
+      },
+    })) : null;
     await printJson({
       ...status,
       ...(recoveryPreview ? { recoveryPreview } : {}),
+      ...(branchNextSteps ? { branchNextSteps } : {}),
     });
     return;
   }

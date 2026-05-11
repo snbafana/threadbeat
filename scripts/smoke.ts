@@ -1305,6 +1305,17 @@ try {
       resultCommit?: string | null;
       workerId?: string | null;
     }>;
+    branchNextSteps: Array<{
+      action: string;
+      reason: string;
+      runId: string;
+      objective: string;
+      workerId: string | null;
+      location: string;
+      recoverable: boolean;
+      command: string[];
+      commands: { checkoutBranch: string[]; resumeBranch: string[]; recoverStopped: string[] | null };
+    }>;
   }>(baseUrl, ["runs", "session-status", detachedWorkerSessionName, "--recoverable", "--include-stopped"]);
   assert.equal(detachedWorkerRecoverableStatus.session.session, detachedWorkerSessionName);
   assert.ok(detachedWorkerRecoverableStatus.recoveryPreview.some((run) => (
@@ -1318,6 +1329,19 @@ try {
     && run.resultCommit === null
     && run.workerId === null
     && run.dryRun === true
+  )));
+  assert.ok(detachedWorkerRecoverableStatus.branchNextSteps.some((step) => (
+    step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.runId === detachedStoppedPlan.run.id
+    && step.objective === "detached stopped branch"
+    && step.workerId === null
+    && step.location === "unassigned"
+    && step.recoverable === true
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
+    && step.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && step.commands.recoverStopped?.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`
   )));
   const detachedWorkerSummary = await cliJson<{
     session: { session: string; workers: { total: number; alive: number; dead: number } };

@@ -384,8 +384,10 @@ group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed
 by that session's workers when those runs do not have a running sandbox.
 Add `--recoverable` to `runs session-status` or `runs session-watch` to include
 a dry-run recovery preview in the live session snapshot; combine it with
-`--include-stopped` to surface unfinished stopped branches too. Add `--next` to
-`runs session-watch` to stream only the compact restart/recover/resume command
+`--include-stopped` to surface unfinished stopped branches too. `session-status`
+also includes `branchNextSteps` with checkout/resume/recover commands when the
+recoverable preview is enabled. Add `--next` to `runs session-watch` to stream
+only the compact restart/recover/resume command
 queue for each poll instead of the full session snapshot. The compact watch
 payload also includes `branchNextSteps` for stopped branch rows, with objective,
 worker ownership, checkout/resume commands, and recoverability when available.
