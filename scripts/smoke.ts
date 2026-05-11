@@ -1708,7 +1708,7 @@ try {
     && step.reason === "result_commit_available"
     && step.runId === detachedResultPlan.run.id
     && step.status === "completed"
-    && step.objective === "detached result branch"
+    && step.objective === "detached session completed result branch"
     && step.workerId === "smoke-detached-worker-1"
     && step.location === "session_worker"
     && step.command.join(" ") === `npm run cli -- runs review ${detachedResultPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
@@ -1984,9 +1984,9 @@ try {
   assert.ok(sessionRecovered.recovered.some((run) => (
     run.runId === detachedSessionRecoverPlan.run.id && run.status === "planned"
   )));
-  assert.equal(sessionRecovered.nextStep.action, "wait_session");
-  assert.equal(sessionRecovered.nextStep.reason, "recovered_runs_for_live_workers");
-  assert.equal(sessionRecovered.nextStep.command.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
+  assert.equal(sessionRecovered.nextStep.action, "restart_session");
+  assert.equal(sessionRecovered.nextStep.reason, "recovered_runs_without_live_workers");
+  assert.equal(sessionRecovered.nextStep.command.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
   assert.equal(sessionRecovered.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
   assert.equal(sessionRecovered.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
   const sessionRecoveredRun = await cliJson<{ run: { status: string; worker_id: string | null } }>(baseUrl, [
@@ -2043,9 +2043,9 @@ try {
   assert.deepEqual(sessionResumed.resumed.map((run) => run.runId), [sessionResumePlan.run.id]);
   assert.equal(sessionResumed.resumed[0].status, "planned");
   assert.equal(sessionResumed.resumed[0].workerId, null);
-  assert.equal(sessionResumed.nextStep.action, "wait_session");
-  assert.equal(sessionResumed.nextStep.reason, "resumed_runs_for_live_workers");
-  assert.equal(sessionResumed.nextStep.command.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
+  assert.equal(sessionResumed.nextStep.action, "restart_session");
+  assert.equal(sessionResumed.nextStep.reason, "resumed_runs_without_live_workers");
+  assert.equal(sessionResumed.nextStep.command.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
   assert.equal(sessionResumed.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
   assert.equal(sessionResumed.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
 
@@ -2860,7 +2860,7 @@ try {
   assert.equal(checkedOutSession.checkouts[0].run.id, checkoutPlan.run.id);
   assert.equal(checkedOutSession.checkouts[0].run.agentId, checkoutAgent.agent.id);
   assert.equal(checkedOutSession.checkouts[0].run.status, "stopped");
-  assert.equal(checkedOutSession.checkouts[0].run.objective, "checkout branch");
+  assert.equal(checkedOutSession.checkouts[0].run.objective, "checkout run branch");
   assert.equal(checkedOutSession.checkouts[0].run.branchName, checkoutPlan.plan.branchName);
   assert.equal(checkedOutSession.checkouts[0].run.workerId, null);
   assert.equal(checkedOutSession.checkouts[0].run.location, "unassigned");
@@ -3069,7 +3069,7 @@ try {
     && step.runId === checkoutPlan.run.id
     && step.status === "stopped"
     && step.state === "resumable"
-    && step.objective === "checkout branch"
+    && step.objective === "checkout run branch"
     && step.workerId === null
     && step.location === null
     && step.branchName === checkoutPlan.plan.branchName
@@ -3548,6 +3548,37 @@ try {
   assert.equal(cliWorkFinalized.processed[0].status.run.status, "completed");
   assert.equal(cliWorkFinalized.processed[0].status.run.result_commit, cliWorkFinalized.processed[0].finalized.result.commitSha);
   await cliJson(baseUrl, ["sandboxes", "stop-running", "--run", cliWorkFinalizePlan.run.id]);
+
+  const resultSummarySessionName = `result-summary-${process.pid}`;
+  await fs.mkdir(path.join(".threadbeat", "worker-sessions"), { recursive: true });
+  await fs.writeFile(path.join(".threadbeat", "worker-sessions", `${resultSummarySessionName}.json`), `${JSON.stringify({
+    session: resultSummarySessionName,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: ["runs", "work", "--agent", cliWorkFinalizeAgent.agent.id],
+    workers: [],
+  })}\n`);
+  const sessionResultSummary = await cliJson<{
+    session: { session: string; workers: { total: number; alive: number; dead: number } };
+    totals: { statuses: Record<string, number>; resultCommits: number; resumableStopped: number };
+    commands: { resultsNext: string[]; changedResults: string[] };
+    nextStep: { action: string; reason: string; command: string[] };
+  }>(baseUrl, ["runs", "session-summary", resultSummarySessionName, "--next"]);
+  assert.equal(sessionResultSummary.session.session, resultSummarySessionName);
+  assert.equal(sessionResultSummary.session.workers.total, 0);
+  assert.equal(sessionResultSummary.session.workers.alive, 0);
+  assert.equal(sessionResultSummary.session.workers.dead, 0);
+  assert.equal(sessionResultSummary.totals.statuses.completed, 1);
+  assert.equal(sessionResultSummary.totals.resultCommits, 1);
+  assert.equal(sessionResultSummary.totals.resumableStopped, 0);
+  assert.equal(sessionResultSummary.nextStep.action, "inspect_results");
+  assert.equal(sessionResultSummary.nextStep.reason, "result_commits_available");
+  assert.equal(sessionResultSummary.nextStep.command.join(" "), `npm run cli -- runs results --session ${resultSummarySessionName} --next`);
+  assert.equal(sessionResultSummary.commands.resultsNext.join(" "), `npm run cli -- runs results --session ${resultSummarySessionName} --next`);
+  assert.equal(
+    sessionResultSummary.commands.changedResults.join(" "),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --checkout-dir ./checkouts/${resultSummarySessionName}-results --changed-only --next`,
+  );
 
   const cliStep = await cliJson<{
     result: { stdout: string };
