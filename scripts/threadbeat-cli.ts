@@ -4615,6 +4615,17 @@ function summarizeSessionApplyRecord(record: SessionApplyRecord): {
   };
   pendingCommands: SessionApplyCommand[];
   failedCommands: SessionApplyCommand[];
+  affectedRuns: Array<{
+    runId: string;
+    action: string;
+    reason: string;
+    state: "succeeded" | "failed" | "pending";
+    commands: {
+      inspectRun: string[];
+      checkoutBranch: string[];
+      reviewRun: string[];
+    };
+  }>;
 } {
   const commandStates = sessionApplyCommandStates(record);
   const failedCommands = record.commands.filter((command) => {
@@ -4622,6 +4633,7 @@ function summarizeSessionApplyRecord(record: SessionApplyRecord): {
     return state?.failed === true && state.succeeded !== true;
   });
   const pendingCommands = record.commands.filter((command) => !commandStates.has(commandKey(command.command)));
+  const affectedRuns = sessionApplyAffectedRuns(record, commandStates);
   return {
     applyId: record.applyId,
     applyPath: record.applyPath,
@@ -4641,6 +4653,7 @@ function summarizeSessionApplyRecord(record: SessionApplyRecord): {
     },
     pendingCommands,
     failedCommands,
+    affectedRuns,
   };
 }
 
@@ -4654,6 +4667,46 @@ function sessionApplyCommandStates(record: SessionApplyRecord | null): Map<strin
     states.set(key, state);
   }
   return states;
+}
+
+function sessionApplyAffectedRuns(
+  record: SessionApplyRecord,
+  commandStates: Map<string, { succeeded: boolean; failed: boolean }>,
+): Array<{
+    runId: string;
+    action: string;
+    reason: string;
+    state: "succeeded" | "failed" | "pending";
+    commands: {
+      inspectRun: string[];
+      checkoutBranch: string[];
+      reviewRun: string[];
+    };
+  }> {
+  const seenRunIds = new Set<string>();
+  const checkoutRoot = `./checkouts/${record.session}-applies/${record.applyId}`;
+  return record.commands
+    .filter((command): command is SessionApplyCommand & { runId: string } => Boolean(command.runId))
+    .filter((command) => {
+      if (seenRunIds.has(command.runId)) return false;
+      seenRunIds.add(command.runId);
+      return true;
+    })
+    .map((command) => {
+      const state = commandStates.get(commandKey(command.command));
+      const runCheckoutDir = `${checkoutRoot}/${command.runId}`;
+      return {
+        runId: command.runId,
+        action: command.action,
+        reason: command.reason,
+        state: state?.succeeded ? "succeeded" : state?.failed ? "failed" : "pending",
+        commands: {
+          inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", command.runId],
+          checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", command.runId, "--dir", runCheckoutDir],
+          reviewRun: ["npm", "run", "cli", "--", "runs", "review", command.runId, "--checkout-dir", runCheckoutDir],
+        },
+      };
+    });
 }
 
 function parseSessionApplyResumeFilter(value: string): Set<"failed" | "pending"> {

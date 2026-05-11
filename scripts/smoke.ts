@@ -2471,6 +2471,11 @@ try {
       actions: { resumeApply: string[] };
       pendingCommands: Array<{ runId?: string }>;
       failedCommands: Array<{ runId?: string }>;
+      affectedRuns: Array<{
+        runId: string;
+        state: string;
+        commands: { inspectRun: string[]; checkoutBranch: string[]; reviewRun: string[] };
+      }>;
     };
     failedExecutions: Array<{ runId: string | null }>;
     record: { applyId: string; executions: Array<{ runId: string | null; exitCode: number | null }> };
@@ -2484,6 +2489,18 @@ try {
   assert.equal(sessionApplyInspection.summary.pending, 0);
   assert.deepEqual(sessionApplyInspection.summary.pendingCommands, []);
   assert.deepEqual(sessionApplyInspection.summary.failedCommands, []);
+  assert.deepEqual(sessionApplyInspection.summary.affectedRuns.map((run) => ({ runId: run.runId, state: run.state })), [
+    { runId: sessionApplyPlan.run.id, state: "succeeded" },
+  ]);
+  assert.equal(sessionApplyInspection.summary.affectedRuns[0].commands.inspectRun.join(" "), `npm run cli -- runs inspect ${sessionApplyPlan.run.id}`);
+  assert.equal(
+    sessionApplyInspection.summary.affectedRuns[0].commands.checkoutBranch.join(" "),
+    `npm run cli -- runs checkout ${sessionApplyPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-applies/${sessionApplyId}/${sessionApplyPlan.run.id}`,
+  );
+  assert.equal(
+    sessionApplyInspection.summary.affectedRuns[0].commands.reviewRun.join(" "),
+    `npm run cli -- runs review ${sessionApplyPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-applies/${sessionApplyId}/${sessionApplyPlan.run.id}`,
+  );
   assert.deepEqual(sessionApplyInspection.failedExecutions, []);
   assert.deepEqual(sessionApplyInspection.summary.actions.resumeApply, [
     "npm",
@@ -2503,13 +2520,14 @@ try {
   const sessionApplyList = await cliJson<{
     session: string;
     count: number;
-    applies: Array<{ applyId: string; pending: number; actions: { resumeApply: string[] } }>;
+    applies: Array<{ applyId: string; pending: number; actions: { resumeApply: string[] }; affectedRuns: Array<{ runId: string }> }>;
   }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName]);
   assert.equal(sessionApplyList.session, detachedWorkerSessionName);
   assert.ok(sessionApplyList.count >= 1);
   assert.ok(sessionApplyList.applies.some((apply) => (
     apply.applyId === sessionApplyId
     && apply.pending === 0
+    && apply.affectedRuns.some((run) => run.runId === sessionApplyPlan.run.id)
     && apply.actions.resumeApply.join(" ") === sessionApplyInspection.summary.actions.resumeApply.join(" ")
   )));
   const sessionApplyShell = await cliRaw(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", sessionApplyId, "--format", "shell"]);
@@ -2588,6 +2606,7 @@ try {
       actions: { retryFailed: string[]; resumePending: string[] };
       failedCommands: Array<{ runId?: string }>;
       pendingCommands: Array<{ runId?: string }>;
+      affectedRuns: Array<{ runId: string; state: string; commands: { inspectRun: string[] } }>;
     };
   }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", retryApplyId]);
   assert.equal(retryInspection.summary.succeeded, 1);
@@ -2595,6 +2614,15 @@ try {
   assert.equal(retryInspection.summary.pending, 1);
   assert.deepEqual(retryInspection.summary.failedCommands.map((command) => command.runId), ["run_failed_retry_filter"]);
   assert.deepEqual(retryInspection.summary.pendingCommands.map((command) => command.runId), ["run_pending_retry_filter"]);
+  assert.deepEqual(retryInspection.summary.affectedRuns.map((run) => ({ runId: run.runId, state: run.state })), [
+    { runId: "run_completed_retry_filter", state: "succeeded" },
+    { runId: "run_failed_retry_filter", state: "failed" },
+    { runId: "run_pending_retry_filter", state: "pending" },
+  ]);
+  assert.equal(
+    retryInspection.summary.affectedRuns.find((run) => run.runId === "run_failed_retry_filter")?.commands.inspectRun.join(" "),
+    "npm run cli -- runs inspect run_failed_retry_filter",
+  );
   assert.deepEqual(retryInspection.summary.actions.retryFailed, [
     "npm",
     "run",
