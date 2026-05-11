@@ -2442,15 +2442,21 @@ try {
     session: string;
     applyId: string;
     resume: boolean;
+    resumeFilter: string[];
     selected: number;
     skippedCompleted: number;
+    skippedByResumeFilter: number;
+    commandsToRun: Array<{ runId?: string }>;
     executions: Array<{ runId: string | null; exitCode: number | null }>;
   }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", sessionApplyPlan.run.id, "--limit", "1", "--apply-id", sessionApplyId, "--resume"]);
   assert.equal(sessionApplyResume.session, detachedWorkerSessionName);
   assert.equal(sessionApplyResume.applyId, sessionApplyId);
   assert.equal(sessionApplyResume.resume, true);
+  assert.deepEqual(sessionApplyResume.resumeFilter, ["failed", "pending"]);
   assert.equal(sessionApplyResume.selected, 1);
   assert.equal(sessionApplyResume.skippedCompleted, 1);
+  assert.equal(sessionApplyResume.skippedByResumeFilter, 0);
+  assert.deepEqual(sessionApplyResume.commandsToRun, []);
   assert.deepEqual(sessionApplyResume.executions.map((execution) => execution.runId), [sessionApplyPlan.run.id]);
   assert.deepEqual(sessionApplyResume.executions.map((execution) => execution.exitCode), [0]);
   const sessionApplyInspection = await cliJson<{
@@ -2464,6 +2470,7 @@ try {
       pending: number;
       actions: { resumeApply: string[] };
       pendingCommands: Array<{ runId?: string }>;
+      failedCommands: Array<{ runId?: string }>;
     };
     failedExecutions: Array<{ runId: string | null }>;
     record: { applyId: string; executions: Array<{ runId: string | null; exitCode: number | null }> };
@@ -2476,6 +2483,7 @@ try {
   assert.equal(sessionApplyInspection.summary.failed, 0);
   assert.equal(sessionApplyInspection.summary.pending, 0);
   assert.deepEqual(sessionApplyInspection.summary.pendingCommands, []);
+  assert.deepEqual(sessionApplyInspection.summary.failedCommands, []);
   assert.deepEqual(sessionApplyInspection.failedExecutions, []);
   assert.deepEqual(sessionApplyInspection.summary.actions.resumeApply, [
     "npm",
@@ -2509,6 +2517,140 @@ try {
     sessionApplyShell.stdout.trim(),
     `npm run cli -- runs session-apply ${detachedWorkerSessionName} --branch-action resume_branch --apply-id ${sessionApplyId} --resume`,
   );
+  const retryApplyId = "smoke-session-apply-retry-filter";
+  const retryApplyPath = path.join(path.dirname(sessionApplyResumed.applyPath), `${retryApplyId}.json`);
+  const retryCommands = [
+    {
+      scope: "branch",
+      action: "resume_branch",
+      reason: "already completed",
+      runId: "run_completed_retry_filter",
+      command: ["npm", "run", "cli", "--", "runs", "resume-branch", "run_completed_retry_filter"],
+    },
+    {
+      scope: "branch",
+      action: "resume_branch",
+      reason: "failed earlier",
+      runId: "run_failed_retry_filter",
+      command: ["npm", "run", "cli", "--", "runs", "resume-branch", "run_failed_retry_filter"],
+    },
+    {
+      scope: "branch",
+      action: "resume_branch",
+      reason: "never started",
+      runId: "run_pending_retry_filter",
+      command: ["npm", "run", "cli", "--", "runs", "resume-branch", "run_pending_retry_filter"],
+    },
+  ];
+  await fs.writeFile(retryApplyPath, `${JSON.stringify({
+    observedAt: "2026-01-01T00:00:00.000Z",
+    session: detachedWorkerSessionName,
+    applyId: retryApplyId,
+    applyPath: retryApplyPath,
+    dryRun: false,
+    resume: false,
+    filter: { branchAction: ["resume_branch"] },
+    selected: retryCommands.length,
+    skippedCompleted: 0,
+    commands: retryCommands,
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:01.000Z",
+    executions: [
+      {
+        scope: retryCommands[0].scope,
+        action: retryCommands[0].action,
+        reason: retryCommands[0].reason,
+        runId: retryCommands[0].runId,
+        command: retryCommands[0].command,
+        exitCode: 0,
+        stdout: "{}",
+        stderr: "",
+        output: {},
+      },
+      {
+        scope: retryCommands[1].scope,
+        action: retryCommands[1].action,
+        reason: retryCommands[1].reason,
+        runId: retryCommands[1].runId,
+        command: retryCommands[1].command,
+        exitCode: 1,
+        stdout: "",
+        stderr: "failed",
+        output: null,
+      },
+    ],
+  }, null, 2)}\n`);
+  const retryInspection = await cliJson<{
+    summary: {
+      succeeded: number;
+      failed: number;
+      pending: number;
+      actions: { retryFailed: string[]; resumePending: string[] };
+      failedCommands: Array<{ runId?: string }>;
+      pendingCommands: Array<{ runId?: string }>;
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--apply-id", retryApplyId]);
+  assert.equal(retryInspection.summary.succeeded, 1);
+  assert.equal(retryInspection.summary.failed, 1);
+  assert.equal(retryInspection.summary.pending, 1);
+  assert.deepEqual(retryInspection.summary.failedCommands.map((command) => command.runId), ["run_failed_retry_filter"]);
+  assert.deepEqual(retryInspection.summary.pendingCommands.map((command) => command.runId), ["run_pending_retry_filter"]);
+  assert.deepEqual(retryInspection.summary.actions.retryFailed, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--branch-action",
+    "resume_branch",
+    "--apply-id",
+    retryApplyId,
+    "--resume",
+    "--resume-filter",
+    "failed",
+  ]);
+  assert.deepEqual(retryInspection.summary.actions.resumePending, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--branch-action",
+    "resume_branch",
+    "--apply-id",
+    retryApplyId,
+    "--resume",
+    "--resume-filter",
+    "pending",
+  ]);
+  const retryFailedPreview = await cliJson<{
+    resumeFilter: string[];
+    selected: number;
+    skippedCompleted: number;
+    skippedByResumeFilter: number;
+    commandsToRun: Array<{ runId?: string }>;
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--branch-action", "resume_branch", "--apply-id", retryApplyId, "--resume", "--resume-filter", "failed", "--dry-run"]);
+  assert.deepEqual(retryFailedPreview.resumeFilter, ["failed"]);
+  assert.equal(retryFailedPreview.selected, 3);
+  assert.equal(retryFailedPreview.skippedCompleted, 1);
+  assert.equal(retryFailedPreview.skippedByResumeFilter, 1);
+  assert.deepEqual(retryFailedPreview.commandsToRun.map((command) => command.runId), ["run_failed_retry_filter"]);
+  const retryPendingPreview = await cliJson<{
+    resumeFilter: string[];
+    selected: number;
+    skippedCompleted: number;
+    skippedByResumeFilter: number;
+    commandsToRun: Array<{ runId?: string }>;
+  }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--branch-action", "resume_branch", "--apply-id", retryApplyId, "--resume", "--resume-filter", "pending", "--dry-run"]);
+  assert.deepEqual(retryPendingPreview.resumeFilter, ["pending"]);
+  assert.equal(retryPendingPreview.selected, 3);
+  assert.equal(retryPendingPreview.skippedCompleted, 1);
+  assert.equal(retryPendingPreview.skippedByResumeFilter, 1);
+  assert.deepEqual(retryPendingPreview.commandsToRun.map((command) => command.runId), ["run_pending_retry_filter"]);
 
   const superviseAgentResponse = await app.inject({
     method: "POST",

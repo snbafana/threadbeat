@@ -272,6 +272,7 @@ npm run cli -- runs session-review overnight --include-stopped --next --commands
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --branch-action resume_branch --format shell
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --run <run-id> --dry-run
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume
+npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume --resume-filter failed
 npm run cli -- runs session-applies overnight --apply-id overnight-resume-1
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
@@ -537,9 +538,11 @@ explicitly filtered queue; use `--dry-run`, `--run <id>`, `--limit`, and
 `--concurrency` to preview or bound that execution before changing run state.
 Each non-dry apply writes `.threadbeat/worker-sessions/apply/<session>/<apply-id>.json`;
 set `--apply-id <id>` and rerun with `--resume` to skip commands that already
-exited cleanly in that recorded apply. Use `runs session-applies <name>` to
-list those apply records, or `--apply-id <id>` to inspect the failed executions,
-pending commands, and exact resume command for one recorded apply. Add
+exited cleanly in that recorded apply. Add `--resume-filter failed`, `pending`,
+or `failed,pending` to retry only the failed commands, only commands that never
+started, or both. Use `runs session-applies <name>` to list those apply records,
+or `--apply-id <id>` to inspect the failed executions, pending commands, and
+exact resume commands for one recorded apply. Add
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

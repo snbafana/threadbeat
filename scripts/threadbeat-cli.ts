@@ -2787,12 +2787,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       ? queue.commands.filter((item) => item.runId && runFilter.has(item.runId))
       : queue.commands).slice(0, limit ?? undefined);
     const selectedCommands = existingApply?.commands ?? selectedFromQueue;
-    const completedCommandKeys = new Set((existingApply?.executions ?? [])
-      .filter((execution) => execution.exitCode === 0)
-      .map((execution) => commandKey(execution.command)));
+    const resumeFilter = parseSessionApplyResumeFilter(options["resume-filter"] ?? "failed,pending");
+    const commandStates = sessionApplyCommandStates(existingApply);
+    const skippedCompleted = selectedCommands.filter((item) => commandStates.get(commandKey(item.command))?.succeeded).length;
     const pendingCommands = options.resume === "1"
-      ? selectedCommands.filter((item) => !completedCommandKeys.has(commandKey(item.command)))
+      ? selectedCommands.filter((item) => {
+        const state = commandStates.get(commandKey(item.command));
+        if (state?.succeeded) return false;
+        if (state?.failed) return resumeFilter.has("failed");
+        return resumeFilter.has("pending");
+      })
       : selectedCommands;
+    const skippedByResumeFilter = options.resume === "1"
+      ? selectedCommands.length - skippedCompleted - pendingCommands.length
+      : 0;
     const responseBase = {
       observedAt: queue.observedAt,
       session: requiredSessionName,
@@ -2800,14 +2808,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       applyPath,
       dryRun: options["dry-run"] === "1",
       resume: options.resume === "1",
+      resumeFilter: options.resume === "1" ? [...resumeFilter] : [],
       filter: {
         ...(queue.filter ?? {}),
         ...(runFilter ? { run: [...runFilter] } : {}),
         ...(limit ? { limit } : {}),
       },
       selected: selectedCommands.length,
-      skippedCompleted: selectedCommands.length - pendingCommands.length,
+      skippedCompleted,
+      skippedByResumeFilter,
       commands: selectedCommands,
+      commandsToRun: pendingCommands,
     };
     if (options["dry-run"] === "1") {
       await printJson(responseBase);
@@ -4353,10 +4364,13 @@ type SessionApplyRecord = {
   applyPath: string;
   dryRun: boolean;
   resume: boolean;
+  resumeFilter?: string[];
   filter: Record<string, unknown>;
   selected: number;
   skippedCompleted: number;
+  skippedByResumeFilter?: number;
   commands: SessionApplyCommand[];
+  commandsToRun?: SessionApplyCommand[];
   startedAt: string;
   updatedAt: string;
   executions: SessionApplyExecution[];
@@ -4596,13 +4610,18 @@ function summarizeSessionApplyRecord(record: SessionApplyRecord): {
   pending: number;
   actions: {
     resumeApply: string[];
+    retryFailed: string[];
+    resumePending: string[];
   };
   pendingCommands: SessionApplyCommand[];
+  failedCommands: SessionApplyCommand[];
 } {
-  const completedCommandKeys = new Set(record.executions
-    .filter((execution) => execution.exitCode === 0)
-    .map((execution) => commandKey(execution.command)));
-  const pendingCommands = record.commands.filter((command) => !completedCommandKeys.has(commandKey(command.command)));
+  const commandStates = sessionApplyCommandStates(record);
+  const failedCommands = record.commands.filter((command) => {
+    const state = commandStates.get(commandKey(command.command));
+    return state?.failed === true && state.succeeded !== true;
+  });
+  const pendingCommands = record.commands.filter((command) => !commandStates.has(commandKey(command.command)));
   return {
     applyId: record.applyId,
     applyPath: record.applyPath,
@@ -4617,12 +4636,37 @@ function summarizeSessionApplyRecord(record: SessionApplyRecord): {
     pending: pendingCommands.length,
     actions: {
       resumeApply: sessionApplyResumeCommand(record),
+      retryFailed: sessionApplyResumeCommand(record, ["failed"]),
+      resumePending: sessionApplyResumeCommand(record, ["pending"]),
     },
     pendingCommands,
+    failedCommands,
   };
 }
 
-function sessionApplyResumeCommand(record: SessionApplyRecord): string[] {
+function sessionApplyCommandStates(record: SessionApplyRecord | null): Map<string, { succeeded: boolean; failed: boolean }> {
+  const states = new Map<string, { succeeded: boolean; failed: boolean }>();
+  for (const execution of record?.executions ?? []) {
+    const key = commandKey(execution.command);
+    const state = states.get(key) ?? { succeeded: false, failed: false };
+    if (execution.exitCode === 0) state.succeeded = true;
+    else state.failed = true;
+    states.set(key, state);
+  }
+  return states;
+}
+
+function parseSessionApplyResumeFilter(value: string): Set<"failed" | "pending"> {
+  const allowed = new Set(["failed", "pending"]);
+  const parsed = parseList(value);
+  if (parsed.length === 0) throw new Error("--resume-filter must include failed, pending, or failed,pending");
+  for (const item of parsed) {
+    if (!allowed.has(item)) throw new Error("--resume-filter must be failed, pending, or failed,pending");
+  }
+  return new Set(parsed as Array<"failed" | "pending">);
+}
+
+function sessionApplyResumeCommand(record: SessionApplyRecord, resumeFilter?: Array<"failed" | "pending">): string[] {
   const command = ["npm", "run", "cli", "--", "runs", "session-apply", record.session];
   const branchAction = stringListFromUnknown(record.filter.branchAction);
   const action = stringListFromUnknown(record.filter.action);
@@ -4638,6 +4682,9 @@ function sessionApplyResumeCommand(record: SessionApplyRecord): string[] {
     command.push("--action", fallbackActions.join(","));
   }
   command.push("--apply-id", record.applyId, "--resume");
+  if (resumeFilter && resumeFilter.join(",") !== "failed,pending") {
+    command.push("--resume-filter", resumeFilter.join(","));
+  }
   return command;
 }
 
@@ -4923,7 +4970,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--format json|shell]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
