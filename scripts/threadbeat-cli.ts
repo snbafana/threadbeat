@@ -617,6 +617,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                   "--dir",
                   `${checkoutCommandRootDir}/${run.id}`,
                 ],
+                reviewRun: [
+                  "npm",
+                  "run",
+                  "cli",
+                  "--",
+                  "runs",
+                  "review",
+                  run.id,
+                  "--checkout-dir",
+                  `${checkoutCommandRootDir}/${run.id}`,
+                ],
+                inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
               },
               ...(sessionWorkerIds ? {
                 location: run.worker_id === null

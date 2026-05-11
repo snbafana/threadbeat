@@ -296,8 +296,9 @@ Run planning is intentionally server-side and Pi-free for now:
   files/commits in the result payload. Add `--changed-only` with `--checkout-dir`
   to show only branches whose checkout has changed files, commits, or a review
   error, or `--changed-path <path[,path]>` to show only runs that changed
-  specific paths. Result rows also include a
-  `commands.checkoutBranch` command for local branch inspection. Add
+  specific paths. Result rows also include `commands.checkoutBranch`,
+  `commands.reviewRun`, and `commands.inspectRun` commands for branch-native
+  inspection. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
   long session runs.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
@@ -402,9 +403,9 @@ worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
 `runs results --session <name>` shows the branch-native output surface for those
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, top-level result/resumable/changed counts,
-and a `changedFiles` index when local checkouts are requested with
-`--checkout-dir`. Add `--worker-id <id>` to review only branches claimed by one
-worker.
+copyable checkout/review/inspect commands, and a `changedFiles` index when local
+checkouts are requested with `--checkout-dir`. Add `--worker-id <id>` to review
+only branches claimed by one worker.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
 Add `--resume-stopped` when the restarted workers should continue stopped branch

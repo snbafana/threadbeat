@@ -1365,7 +1365,7 @@ try {
         state: string;
         warning: string | null;
         resultCommit: string | null;
-        commands: { checkoutBranch: string[] };
+        commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[] };
         links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
       }>;
     }>;
@@ -1382,6 +1382,8 @@ try {
       && run.warning === null
       && run.resultCommit === null
       && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-results/${detachedStoppedPlan.run.id}`
+      && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedStoppedPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results/${detachedStoppedPlan.run.id}`
+      && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedStoppedPlan.run.id}`
       && run.links.branchTreeUrl !== null
       && run.links.resultCommitUrl === null
     ))
@@ -2248,7 +2250,7 @@ try {
         baseRef: string;
         branchName: string;
         resultCommit: string | null;
-        commands: { checkoutBranch: string[] };
+        commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[] };
         links: {
           branchTreeUrl: string | null;
           branchCompareUrl: string | null;
@@ -2273,6 +2275,8 @@ try {
       && run.branchName === cliRunPlan.plan.branchName
       && run.resultCommit === cliRunFinalize.result.commitSha
       && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${cliRunPlan.run.id} --dir ./checkouts/results/${cliRunPlan.run.id}`
+      && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${cliRunPlan.run.id} --checkout-dir ./checkouts/results/${cliRunPlan.run.id}`
+      && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${cliRunPlan.run.id}`
       && /github\.com\/example\/agent\/tree\/threadbeat\/runs\//.test(run.links.branchTreeUrl ?? "")
       && new RegExp(`github\\.com/example/agent/commit/${cliRunFinalize.result.commitSha}`).test(run.links.resultCommitUrl ?? "")
       && new RegExp(`github\\.com/example/agent/compare/main\\.\\.\\.${cliRunFinalize.result.commitSha}`).test(run.links.resultCompareUrl ?? "")
@@ -2537,7 +2541,7 @@ try {
       runs: Array<{
         id: string;
         status: string;
-        commands: { checkoutBranch: string[] };
+        commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[] };
         checkout?: { dir: string; headCommit: string; matchesResultCommit: boolean | null };
         review?: { changedFiles: Array<{ status: string; path: string }> };
       }>;
@@ -2577,6 +2581,8 @@ try {
   )));
   assert.equal(checkedOutResultRun?.status, "stopped");
   assert.equal(checkedOutResultRun?.commands.checkoutBranch.join(" "), `npm run cli -- runs checkout ${checkoutPlan.run.id} --dir ${resultsCheckoutDir}/${checkoutPlan.run.id}`);
+  assert.equal(checkedOutResultRun?.commands.reviewRun.join(" "), `npm run cli -- runs review ${checkoutPlan.run.id} --checkout-dir ${resultsCheckoutDir}/${checkoutPlan.run.id}`);
+  assert.equal(checkedOutResultRun?.commands.inspectRun.join(" "), `npm run cli -- runs inspect ${checkoutPlan.run.id}`);
   assert.equal(checkedOutResultRun?.checkout?.dir, path.join(resultsCheckoutDir, checkoutPlan.run.id));
   assert.equal(checkedOutResultRun?.checkout?.headCommit, expectedCheckoutHead);
   assert.equal(checkedOutResultRun?.checkout?.matchesResultCommit, null);
