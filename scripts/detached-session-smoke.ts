@@ -359,6 +359,59 @@ try {
   assert.equal(deadWorkerRecovery.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${sessionName}`);
   assert.equal(deadWorkerRecovery.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
 
+  const deadWorkerStoppedPlan = await cliJson<{
+    run: { id: string };
+    plan: { branchName: string };
+  }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session dead worker stopped branch",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "claim",
+    deadWorkerStoppedPlan.run.id,
+    "--worker-id",
+    "detached-smoke-worker-1",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", deadWorkerStoppedPlan.run.id]);
+  const deadWorkerStoppedWait = await cliJson<{
+    session: string;
+    completed: boolean;
+    timedOut: boolean;
+    summary: {
+      workers: { alive: number };
+      resumableBranches: number;
+      recoverableActive: number;
+    };
+    nextStep: { action: string; reason: string; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-wait",
+    sessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--interval-ms",
+    "100",
+    "--max-polls",
+    "1",
+  ]);
+  assert.equal(deadWorkerStoppedWait.session, sessionName);
+  assert.equal(deadWorkerStoppedWait.completed, true);
+  assert.equal(deadWorkerStoppedWait.timedOut, false);
+  assert.equal(deadWorkerStoppedWait.summary.workers.alive, 0);
+  assert.ok(deadWorkerStoppedWait.summary.resumableBranches >= 1);
+  assert.equal(deadWorkerStoppedWait.summary.recoverableActive, 0);
+  assert.equal(deadWorkerStoppedWait.nextStep.action, "restart_session_with_stopped");
+  assert.equal(deadWorkerStoppedWait.nextStep.reason, "dead_workers_and_resumable_branches");
+  assert.equal(
+    deadWorkerStoppedWait.nextStep.command.join(" "),
+    `npm run cli -- runs restart-session ${sessionName} --recover --resume-stopped`,
+  );
+
   const restarted = await cliJson<{
     session: string;
     restarted: Array<{ workerId: string; pid: number | null }>;
