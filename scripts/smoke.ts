@@ -4012,6 +4012,10 @@ try {
     && item.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
     && item.command.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
   )));
+  const resultFleetCommandsShell = await cliRaw(baseUrl, ["runs", "sessions", "--session", resultSummarySessionName, "--next", "--commands-only", "--format", "shell"]);
+  const resultFleetCommandLines = resultFleetCommandsShell.stdout.trim().split("\n");
+  assert.ok(resultFleetCommandLines.includes(`npm run cli -- runs results --session ${resultSummarySessionName} --next`));
+  assert.ok(resultFleetCommandLines.includes(`npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`));
   assert.ok(resultFleetSummary.resultCommits.some((commit) => (
     commit.session === resultSummarySessionName
     && commit.agentId === cliWorkFinalizeAgent.agent.id

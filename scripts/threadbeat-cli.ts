@@ -1314,6 +1314,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   }
   if (subcommandName === "sessions") {
     const options = parseOptions(args);
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs sessions --format must be json or shell");
+    }
     if (options["needs-action"] === "1" && options.next !== "1") {
       throw new Error("runs sessions --needs-action requires --next");
     }
@@ -1326,9 +1330,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["commands-only"] === "1" && options.next !== "1") {
       throw new Error("runs sessions --commands-only requires --next");
     }
+    if (options.format && options.next !== "1") {
+      throw new Error("runs sessions --format requires --next");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs sessions --format shell requires --commands-only");
+    }
     if (options.summary === "1" || options.next === "1") {
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+      if (outputFormat === "shell" && maxPolls !== 1) {
+        throw new Error("runs sessions --format shell supports one poll");
+      }
       const actionFilter = options.action ? new Set(parseList(options.action)) : null;
       const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
       const collectFleetSummary = async () => {
@@ -1664,7 +1677,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       };
       for (let poll = 0; poll < maxPolls; poll += 1) {
         const output = await collectFleetSummary();
-        if (maxPolls === 1) {
+        if (outputFormat === "shell") {
+          printFleetCommandsShell((output as FleetCommandQueueOutput).commands);
+        } else if (maxPolls === 1) {
           await printJson(output);
         } else {
           console.log(JSON.stringify(output));
@@ -3669,6 +3684,21 @@ function parseList(value: string): string[] {
   return values;
 }
 
+type FleetCommandQueueOutput = {
+  commands: Array<{ command: string[] }>;
+};
+
+function printFleetCommandsShell(commands: FleetCommandQueueOutput["commands"]): void {
+  for (const item of commands) {
+    console.log(item.command.map(shellArg).join(" "));
+  }
+}
+
+function shellArg(value: string): string {
+  if (value.length > 0 && /^[A-Za-z0-9_/:=.,@%+-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 function parsePositiveInteger(value: string, flag: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${flag} must be a positive integer`);
@@ -4430,7 +4460,7 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
+  runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>

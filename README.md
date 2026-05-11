@@ -461,7 +461,8 @@ session next-actions, or `--branch-action resume_branch|review_branch` to narrow
 the branch command queue without mutating any run branch, leaving restart,
 recover, result-inspection, and archive rows in the fleet queue. Add
 `--commands-only` with `--next` to emit only the runnable session and branch
-commands for shell-friendly triage. Use `runs archive-sessions --dry-run`
+commands for shell-friendly triage, or add `--format shell` to print one
+copyable command per line. Use `runs archive-sessions --dry-run`
 to preview archiving dead local session records without touching run records or Git branches, and
 `runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add
