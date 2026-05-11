@@ -80,6 +80,25 @@ try {
     `npm run cli -- runs review ${recoverableStopped.run.id} --checkout-dir ./checkouts/${recoverableStopped.run.id}`,
   );
   assert.equal(inspectedStopped.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`);
+  const watchedStopped = await cliJson<{
+    run: { id: string; status: string; result_commit: string | null };
+    branch: { branchName: string; resultCommit: string | null; state: string };
+    commands: { reviewRun: string[]; resumeBranch: string[] | null };
+    nextStep: { action: string; reason: string; command: string[] };
+  }>(baseUrl, ["runs", "watch", recoverableStopped.run.id, "--max-polls", "1"]);
+  assert.equal(watchedStopped.run.status, "stopped");
+  assert.equal(watchedStopped.run.result_commit, null);
+  assert.equal(watchedStopped.branch.branchName, recoverableStopped.plan.branchName);
+  assert.equal(watchedStopped.branch.resultCommit, null);
+  assert.equal(watchedStopped.branch.state, "resumable");
+  assert.equal(
+    watchedStopped.commands.reviewRun.join(" "),
+    `npm run cli -- runs review ${recoverableStopped.run.id} --checkout-dir ./checkouts/${recoverableStopped.run.id}`,
+  );
+  assert.equal(watchedStopped.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`);
+  assert.equal(watchedStopped.nextStep.action, "resume_branch");
+  assert.equal(watchedStopped.nextStep.reason, "stopped_branch_without_result_commit");
+  assert.equal(watchedStopped.nextStep.command.join(" "), `npm run cli -- runs resume-branch ${recoverableStopped.run.id}`);
   const resumableResults = await cliJson<{
     summary: { resumable: number };
     nextSteps: Array<{

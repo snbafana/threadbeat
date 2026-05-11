@@ -238,6 +238,7 @@ npm run cli -- runs resume-branch <stopped-run> --worker-id worker-a
 npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --dry-run
 npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --worker-id worker-a
 npm run cli -- runs watch <run>
+npm run cli -- runs watch <run> --checkout-dir ./checkouts/<run>
 npm run cli -- runs backlog --agents <agent>,<agent>
 npm run cli -- runs branches --agents <agent>,<agent>
 npm run cli -- runs branches --session overnight
@@ -493,7 +494,8 @@ Add `--resume-stopped` when the restarted workers should continue stopped branch
 runs from the same session; this updates the recorded worker command for later
 session inspection and restarts.
 `runs watch` polls one run's status and messages until it completes, fails, or
-stops. `runs backlog` reports run counts by status for one or more agents and
+stops, and each snapshot includes checkout, review, inspect, and resumable
+branch commands for the run. `runs backlog` reports run counts by status for one or more agents and
 includes `resumableStopped` for stopped branch runs that `--resume-stopped` can
 pick up. `runs branches` lists completed and stopped branch runs across agents,
 including base refs, branch names, result commits, and resumable stopped runs;

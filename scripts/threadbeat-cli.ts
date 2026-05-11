@@ -467,14 +467,62 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
+    const checkoutDir = options["checkout-dir"] ?? `./checkouts/${id}`;
     let polls = 0;
     while (true) {
       const params = new URLSearchParams();
       if (options.limit) params.set("limit", options.limit);
       const status = await requestJson("GET", withQuery(`/api/runs/${encodeURIComponent(id)}/status`, params)) as {
-        run: { status: string };
+        run: {
+          id: string;
+          input_ref: string;
+          result_commit: string | null;
+          run_branch: string;
+          status: string;
+          worker_id: string | null;
+        };
       };
-      console.log(JSON.stringify(status));
+      const commands = {
+        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", status.run.id, "--dir", checkoutDir],
+        reviewRun: ["npm", "run", "cli", "--", "runs", "review", status.run.id, "--checkout-dir", checkoutDir],
+        inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", status.run.id],
+        resumeBranch: status.run.status === "stopped" && status.run.result_commit === null
+          ? ["npm", "run", "cli", "--", "runs", "resume-branch", status.run.id]
+          : null,
+      };
+      const state = status.run.result_commit
+        ? "result"
+        : status.run.status === "stopped"
+          ? "resumable"
+          : status.run.status;
+      const warning = status.run.status === "completed" && status.run.result_commit === null
+        ? "completed_without_result_commit"
+        : null;
+      console.log(JSON.stringify({
+        ...status,
+        branch: {
+          baseRef: status.run.input_ref,
+          branchName: status.run.run_branch,
+          resultCommit: status.run.result_commit,
+          workerId: status.run.worker_id,
+          state,
+          warning,
+        },
+        commands,
+        nextStep: state === "resumable"
+          ? {
+              action: "resume_branch",
+              reason: "stopped_branch_without_result_commit",
+              command: commands.resumeBranch,
+            }
+          : ["completed", "failed", "stopped"].includes(status.run.status)
+            ? {
+                action: status.run.status === "failed" ? "inspect_run" : "review_branch",
+                reason: warning ?? (status.run.result_commit ? "result_commit_available" : "terminal_run"),
+                command: status.run.status === "failed" ? commands.inspectRun : commands.reviewRun,
+              }
+            : null,
+      }));
       polls += 1;
       if (["completed", "failed", "stopped"].includes(status.run.status)) return;
       if (maxPolls !== null && polls >= maxPolls) return;
