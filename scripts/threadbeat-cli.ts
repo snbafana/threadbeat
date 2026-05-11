@@ -1329,6 +1329,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", listedSessionName, "--recover", "--resume-stopped"],
             sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", listedSessionName],
             stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", listedSessionName, "--recover"],
+            archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName, "--dry-run"],
+            archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName],
           };
           const nextStep = aliveWorkers > 0
             ? {
@@ -1360,7 +1362,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                       reason: "result_commits_available",
                       command: commands.resultsNext,
                     }
-                    : {
+                    : totals.runs === 0
+                      ? {
+                        action: "archive_session_preview",
+                        reason: "dead_session_without_runs",
+                        command: commands.archiveSessionPreview,
+                      }
+                      : {
                       action: "review_session",
                       reason: "no_active_work",
                       command: commands.sessionReview,
@@ -1383,9 +1391,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             ...(options.next === "1" ? { commands, nextStep } : {}),
           };
         } catch (error) {
+          const commands = {
+            archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName, "--dry-run"],
+            archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName],
+          };
           return {
             session: { session: listedSessionName },
             error: error instanceof Error ? error.message : String(error),
+            ...(options.next === "1" ? {
+              commands,
+              nextStep: {
+                action: "archive_session_preview",
+                reason: "unavailable_session_record",
+                command: commands.archiveSessionPreview,
+              },
+            } : {}),
           };
         }
       });
@@ -1776,6 +1796,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", requiredSessionName],
           restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover"],
           restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", requiredSessionName, "--recover", "--resume-stopped"],
+          archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", requiredSessionName, "--dry-run"],
+          archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", requiredSessionName],
         }
         : null;
       const nextStep = commands
@@ -1809,7 +1831,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                     reason: "result_commits_available",
                     command: commands.resultsNext,
                   }
-                  : {
+                  : totals.runs === 0
+                    ? {
+                      action: "archive_session_preview",
+                      reason: "dead_session_without_runs",
+                      command: commands.archiveSessionPreview,
+                    }
+                    : {
                     action: "review_session",
                     reason: "no_active_work",
                     command: commands.sessionReview,

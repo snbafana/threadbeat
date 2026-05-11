@@ -3686,6 +3686,17 @@ try {
   assert.equal(skippedLiveArchive.skipped[0]?.workers.alive, 1);
   assert.equal(await fileExists(path.join(".threadbeat", "worker-sessions", `${liveSummarySessionName}.json`)), true);
 
+  const archiveAgentResponse = await app.inject({
+    method: "POST",
+    url: "/api/agents",
+    payload: {
+      name: "archive-session-agent",
+      repoUrl: "https://github.com/example/archive-session-agent.git",
+      currentRef: "main",
+    },
+  });
+  assert.equal(archiveAgentResponse.statusCode, 200);
+  const archiveAgentBody = JSON.parse(archiveAgentResponse.body) as { agent: { id: string } };
   const archiveSessionName = `archive-session-${process.pid}`;
   const archiveSessionPath = path.join(".threadbeat", "worker-sessions", `${archiveSessionName}.json`);
   const archiveSessionLogDir = path.join(".threadbeat", "worker-sessions", archiveSessionName);
@@ -3695,7 +3706,7 @@ try {
     session: archiveSessionName,
     baseUrl,
     startedAt: new Date().toISOString(),
-    command: ["runs", "work", "--agent", cliWorkFinalizeAgent.agent.id],
+    command: ["runs", "work", "--agent", archiveAgentBody.agent.id],
     workers: [{
       workerId: "smoke-archive-worker-1",
       pid: null,
@@ -3703,6 +3714,27 @@ try {
       stderrPath: path.join(archiveSessionLogDir, "worker.err.log"),
     }],
   })}\n`);
+  const archiveSessionSummary = await cliJson<{
+    commands: { archiveSessionPreview: string[]; archiveSession: string[] };
+    nextStep: { action: string; reason: string; command: string[] };
+  }>(baseUrl, ["runs", "session-summary", archiveSessionName, "--next"]);
+  assert.equal(archiveSessionSummary.nextStep.action, "archive_session_preview");
+  assert.equal(archiveSessionSummary.nextStep.reason, "dead_session_without_runs");
+  assert.equal(archiveSessionSummary.nextStep.command.join(" "), `npm run cli -- runs archive-sessions --session ${archiveSessionName} --dry-run`);
+  assert.equal(archiveSessionSummary.commands.archiveSessionPreview.join(" "), `npm run cli -- runs archive-sessions --session ${archiveSessionName} --dry-run`);
+  assert.equal(archiveSessionSummary.commands.archiveSession.join(" "), `npm run cli -- runs archive-sessions --session ${archiveSessionName}`);
+  const archiveFleetSummary = await cliJson<{
+    sessions: Array<{
+      session: { session: string };
+      commands?: { archiveSessionPreview: string[] };
+      nextStep?: { action: string; reason: string; command: string[] };
+    }>;
+  }>(baseUrl, ["runs", "sessions", "--session", archiveSessionName, "--summary", "--next"]);
+  assert.equal(archiveFleetSummary.sessions[0]?.session.session, archiveSessionName);
+  assert.equal(archiveFleetSummary.sessions[0]?.nextStep?.action, "archive_session_preview");
+  assert.equal(archiveFleetSummary.sessions[0]?.nextStep?.reason, "dead_session_without_runs");
+  assert.equal(archiveFleetSummary.sessions[0]?.nextStep?.command.join(" "), `npm run cli -- runs archive-sessions --session ${archiveSessionName} --dry-run`);
+  assert.equal(archiveFleetSummary.sessions[0]?.commands?.archiveSessionPreview.join(" "), `npm run cli -- runs archive-sessions --session ${archiveSessionName} --dry-run`);
   const archiveDryRun = await cliJson<{
     dryRun: boolean;
     archived: Array<{ session: string; reason: string; workers: { alive: number }; paths: { destinationFile: string; destinationLogDir: string } }>;

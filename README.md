@@ -474,7 +474,9 @@ commands materialize local checkouts.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents. Add
 `--max-polls` and `--interval-ms` for a compact newline-delimited status feed
-while a long worker session is running.
+while a long worker session is running. With `--next`, dead sessions that have
+no run records point at `runs archive-sessions --session <name> --dry-run` so
+local metadata cleanup remains explicit and branch-preserving.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete
