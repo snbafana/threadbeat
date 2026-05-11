@@ -2824,6 +2824,19 @@ try {
     "--resume-filter",
     "pending",
   ]);
+  const retrySummaryGroupShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--summary-group",
+    "resume-needed",
+    "--format",
+    "shell",
+  ]);
+  assert.equal(
+    retrySummaryGroupShell.stdout.trim(),
+    retryInspection.summary.actions.retryFailed.join(" "),
+  );
   const retryFailedPreview = await cliJson<{
     resumeFilter: string[];
     selected: number;
@@ -4518,6 +4531,24 @@ try {
   assert.equal(
     readyResultAppliesShell.stdout.trim(),
     `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only`,
+  );
+  const readyResultSummaryGroupShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    resultSummarySessionName,
+    "--summary-group",
+    "ready-to-review",
+    "--format",
+    "shell",
+    "--checkout-dir",
+    "./checkouts/smoke-ready-results",
+    "--changed-only",
+    "--changed-path",
+    "report.md",
+  ]);
+  assert.equal(
+    readyResultSummaryGroupShell.stdout.trim(),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only --checkout-dir ./checkouts/smoke-ready-results --changed-only --changed-path report.md`,
   );
   const readyResultApplySummary = await cliJson<{
     summary: {

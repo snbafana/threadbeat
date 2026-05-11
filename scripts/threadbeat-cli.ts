@@ -3096,6 +3096,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["ready-results"] === "1" && outputFormat !== "shell") {
       throw new Error("runs session-applies --ready-results requires --format shell");
     }
+    if (options["summary-group"] && outputFormat !== "shell") {
+      throw new Error("runs session-applies --summary-group requires --format shell");
+    }
+    if (
+      options["summary-group"]
+      && options["summary-group"] !== "resume-needed"
+      && options["summary-group"] !== "ready-to-review"
+    ) {
+      throw new Error("runs session-applies --summary-group must be resume-needed or ready-to-review");
+    }
+    if (options["summary-group"] && options["ready-results"] === "1") {
+      throw new Error("runs session-applies --summary-group cannot be combined with --ready-results");
+    }
     if (options["changed-only"] === "1" && !options["checkout-dir"]) {
       throw new Error("runs session-applies --changed-only requires --checkout-dir");
     }
@@ -3106,14 +3119,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const applyId = options["apply-id"];
       const record = await readSessionApplyRecord(requiredSessionName, applyId);
       if (!record) throw new Error(`session apply ${applyId} does not exist for ${requiredSessionName}`);
-      const runStatusIndex = outputFormat === "json" || options["ready-results"] === "1"
+      const runStatusIndex = (
+        outputFormat === "json"
+        || options["ready-results"] === "1"
+        || options["summary-group"] === "ready-to-review"
+      )
         ? await sessionApplyRunStatusIndex(requiredSessionName)
         : null;
       const summary = summarizeSessionApplyRecord(record, runStatusIndex);
       if (outputFormat === "shell") {
-        const command = options["ready-results"] === "1"
-          ? sessionApplyReadyResultsCommand(summary, options)
-          : summary.actions.resumeApply;
+        const command = sessionApplyShellCommand(summary, options);
         if (command) console.log(command.map(shellArg).join(" "));
         return;
       }
@@ -3130,13 +3145,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const records = await listSessionApplyRecords(requiredSessionName);
     if (outputFormat === "shell") {
-      const runStatusIndex = options["ready-results"] === "1"
+      const runStatusIndex = options["ready-results"] === "1" || options["summary-group"] === "ready-to-review"
         ? await sessionApplyRunStatusIndex(requiredSessionName)
         : null;
       for (const apply of records.map((record) => summarizeSessionApplyRecord(record, runStatusIndex))) {
-        const command = options["ready-results"] === "1"
-          ? sessionApplyReadyResultsCommand(apply, options)
-          : apply.actions.resumeApply;
+        const command = sessionApplyShellCommand(apply, options);
         if (command) console.log(command.map(shellArg).join(" "));
       }
       return;
@@ -4952,6 +4965,21 @@ function sessionApplyReadyResultsCommand(
   ];
 }
 
+function sessionApplyShellCommand(
+  summary: SessionApplySummary,
+  options: Record<string, string>,
+): string[] | null {
+  if (options["ready-results"] === "1" || options["summary-group"] === "ready-to-review") {
+    return sessionApplyReadyResultsCommand(summary, options);
+  }
+  if (options["summary-group"] === "resume-needed") {
+    if (summary.failed > 0) return summary.actions.retryFailed;
+    if (summary.pending > 0) return summary.actions.resumePending;
+    return null;
+  }
+  return summary.actions.resumeApply;
+}
+
 function summarizeSessionApplies(applies: SessionApplySummary[]): {
   counts: {
     total: number;
@@ -5441,7 +5469,7 @@ Commands:
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
-  runs session-applies <name> [--apply-id id] [--summary] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--apply-id id] [--summary] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
