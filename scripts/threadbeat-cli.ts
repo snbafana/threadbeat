@@ -1012,6 +1012,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
       sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", sessionName],
       stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
+      recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", sessionName],
+      resumeSession: ["npm", "run", "cli", "--", "runs", "resume-session", sessionName],
+      restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", sessionName, "--recover"],
+      restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", sessionName, "--recover", "--resume-stopped"],
     };
     const session = await startDetachedWorkerSession(
       sessionName,
@@ -1078,6 +1082,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           checkoutSession: superviseActions.checkoutSession,
           sessionLogs: superviseActions.sessionLogs,
           stopSession: superviseActions.stopSession,
+          recoverSession: superviseActions.recoverSession,
+          resumeSession: superviseActions.resumeSession,
+          restartSession: superviseActions.restartSession,
+          restartSessionWithStopped: superviseActions.restartSessionWithStopped,
         },
         nextStep: aliveWorkers > 0
           ? {
@@ -1126,6 +1134,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
       sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", sessionName],
       stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
+      recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", sessionName],
+      resumeSession: ["npm", "run", "cli", "--", "runs", "resume-session", sessionName],
+      restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", sessionName, "--recover"],
+      restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", sessionName, "--recover", "--resume-stopped"],
     };
     if (options["dry-run"] === "1") {
       const recoveryPreview = options.recover === "1"
@@ -1239,6 +1251,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           checkoutSession: dispatchActions.checkoutSession,
           sessionLogs: dispatchActions.sessionLogs,
           stopSession: dispatchActions.stopSession,
+          recoverSession: dispatchActions.recoverSession,
+          resumeSession: dispatchActions.resumeSession,
+          restartSession: dispatchActions.restartSession,
+          restartSessionWithStopped: dispatchActions.restartSessionWithStopped,
         },
         nextStep: aliveWorkers > 0
           ? {
@@ -1283,6 +1299,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", sessionName, "--dir", `./checkouts/${sessionName}`],
         sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", sessionName],
         stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", sessionName, "--recover"],
+        recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", sessionName],
+        resumeSession: ["npm", "run", "cli", "--", "runs", "resume-session", sessionName],
+        restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", sessionName, "--recover"],
+        restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", sessionName, "--recover", "--resume-stopped"],
       },
     });
     return;

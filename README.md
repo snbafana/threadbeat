@@ -302,10 +302,10 @@ npm run cli -- messages listen --sandbox <sandbox>
 `runs dispatch` queues the requested objectives, starts the detached worker
 session, and returns an `actions` block with the exact `session-status`,
 `session-watch`, `session-review`, branch queue, results, checkout, and
-stop/recover commands for that session. The dry-run form returns the same action
-commands and any recoverable branch preview without queuing runs, requeueing
-branches, or starting workers, so the local control-plane flow can be reviewed
-before launching a multi-agent batch.
+stop/recover/restart/resume commands for that session. The dry-run form returns
+the same action commands and any recoverable branch preview without queuing
+runs, requeueing branches, or starting workers, so the local control-plane flow
+can be reviewed before launching a multi-agent batch.
 `runs supervise` returns the same action commands when it starts detached
 workers for already queued runs.
 

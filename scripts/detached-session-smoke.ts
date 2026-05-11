@@ -175,11 +175,23 @@ try {
   )));
 
   const actions = await cliJson<{
-    actions: { sessionStatus: string[]; sessionWatch: string[]; stopSession: string[] };
+    actions: {
+      sessionStatus: string[];
+      sessionWatch: string[];
+      stopSession: string[];
+      recoverSession: string[];
+      resumeSession: string[];
+      restartSession: string[];
+      restartSessionWithStopped: string[];
+    };
   }>(baseUrl, ["runs", "session-actions", sessionName]);
   assert.equal(actions.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${sessionName} --recoverable --include-stopped`);
   assert.equal(actions.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
   assert.equal(actions.actions.stopSession.join(" "), `npm run cli -- runs stop-session ${sessionName} --recover`);
+  assert.equal(actions.actions.recoverSession.join(" "), `npm run cli -- runs recover-session ${sessionName}`);
+  assert.equal(actions.actions.resumeSession.join(" "), `npm run cli -- runs resume-session ${sessionName}`);
+  assert.equal(actions.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
+  assert.equal(actions.actions.restartSessionWithStopped.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover --resume-stopped`);
 
   const recoveredPreview = await cliJson<{
     session: string;
