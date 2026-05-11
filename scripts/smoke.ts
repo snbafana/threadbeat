@@ -1297,7 +1297,7 @@ try {
     detachedWorkerSessionName,
     "--loop",
     "--idle-exit-after",
-    "100",
+    "300",
     "--interval-ms",
     "100",
   ]);
@@ -1724,6 +1724,23 @@ try {
     && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${detachedStoppedPlan.run.id}`
     && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
   )));
+  const detachedWorkerBranchCommands = await cliJson<{
+    summary: { resumable: number };
+    commands: Array<{ action: string; runId: string; resultCommit: string | null; command: string[] }>;
+    nextSteps?: unknown;
+  }>(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName, "--next", "--commands-only"]);
+  assert.ok(detachedWorkerBranchCommands.summary.resumable >= 1);
+  assert.equal(detachedWorkerBranchCommands.nextSteps, undefined);
+  assert.ok(detachedWorkerBranchCommands.commands.some((item) => (
+    item.action === "resume_branch"
+    && item.runId === detachedStoppedPlan.run.id
+    && item.resultCommit === null
+    && item.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+  )));
+  const detachedWorkerBranchCommandsShell = await cliRaw(baseUrl, ["runs", "branches", "--session", detachedWorkerSessionName, "--next", "--commands-only", "--format", "shell"]);
+  assert.ok(detachedWorkerBranchCommandsShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`,
+  ));
   const detachedWorkerResumableBranches = await cliJson<{
     agents: Array<{
       agentId: string;

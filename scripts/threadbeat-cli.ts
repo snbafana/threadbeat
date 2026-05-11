@@ -537,8 +537,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   }
   if (subcommandName === "branches") {
     const options = parseOptions(args);
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs branches --format must be json or shell");
+    }
     if (options.session && (options.agent || options.agents)) {
       throw new Error("runs branches accepts either --session or --agent/--agents");
+    }
+    if (options["commands-only"] === "1" && options.next !== "1") {
+      throw new Error("runs branches --commands-only requires --next");
+    }
+    if (options.format && options.next !== "1") {
+      throw new Error("runs branches --format requires --next");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs branches --format shell requires --commands-only");
     }
     const session = options.session ? await readWorkerSession(options.session) : null;
     const sessionWorkerIds = session ? new Set(session.workers.map((worker) => worker.workerId)) : null;
@@ -649,32 +662,52 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       warnings: visibleRuns.filter(({ run }) => run.warning).length,
     };
     if (options.next === "1") {
-      await printJson({
+      const nextSteps = visibleRuns.map(({ agentId, run }) => ({
+        action: run.state === "resumable" ? "resume_branch" : "review_branch",
+        reason: run.state === "resumable"
+          ? "stopped_branch_without_result_commit"
+          : run.warning ?? (run.resultCommit ? "result_commit_available" : "branch_available"),
+        agentId,
+        runId: run.id,
+        status: run.status,
+        state: run.state,
+        warning: run.warning,
+        objective: run.objective,
+        workerId: run.workerId,
+        location: run.location ?? null,
+        branchName: run.branchName,
+        resultCommit: run.resultCommit,
+        command: run.state === "resumable" && run.commands.resumeBranch
+          ? run.commands.resumeBranch
+          : run.commands.reviewRun,
+        commands: run.commands,
+      }));
+      const commandQueue = nextSteps.map((step) => ({
+        action: step.action,
+        reason: step.reason,
+        agentId: step.agentId,
+        runId: step.runId,
+        status: step.status,
+        state: step.state,
+        warning: step.warning,
+        workerId: step.workerId,
+        location: step.location,
+        branchName: step.branchName,
+        resultCommit: step.resultCommit,
+        command: step.command,
+      }));
+      const output = {
         observedAt,
         ...(options.session ? { session: options.session } : {}),
         checkoutDir: checkoutCommandRootDir,
         summary,
-        nextSteps: visibleRuns.map(({ agentId, run }) => ({
-          action: run.state === "resumable" ? "resume_branch" : "review_branch",
-          reason: run.state === "resumable"
-            ? "stopped_branch_without_result_commit"
-            : run.warning ?? (run.resultCommit ? "result_commit_available" : "branch_available"),
-          agentId,
-          runId: run.id,
-          status: run.status,
-          state: run.state,
-          warning: run.warning,
-          objective: run.objective,
-          workerId: run.workerId,
-          location: run.location ?? null,
-          branchName: run.branchName,
-          resultCommit: run.resultCommit,
-          command: run.state === "resumable" && run.commands.resumeBranch
-            ? run.commands.resumeBranch
-            : run.commands.reviewRun,
-          commands: run.commands,
-        })),
-      });
+        ...(options["commands-only"] === "1" ? { commands: commandQueue } : { nextSteps }),
+      };
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commandQueue);
+      } else {
+        await printJson(output);
+      }
       return;
     }
     await printJson({
@@ -4491,7 +4524,7 @@ Commands:
   runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--dry-run] [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
-  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
+  runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
