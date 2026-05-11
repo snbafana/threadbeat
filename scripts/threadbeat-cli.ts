@@ -1090,6 +1090,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const workerPrefix = options["worker-prefix"] ?? "worker";
     const assignment = options.assignment ?? "fanout";
     const queueItems = assignObjectives(agentIds, objectives, assignment);
+    if (options.wait === "1" && options["until-empty"] !== "1") {
+      throw new Error("runs dispatch --wait requires --until-empty so the worker session can finish");
+    }
     const workerArgs = ["--agents", agentIds.join(",")];
     for (const flag of ["limit", "concurrency", "interval-ms", "idle-exit-after", "message", "prompt", "task"]) {
       if (options[flag]) workerArgs.push(`--${flag}`, options[flag]);
@@ -1160,14 +1163,68 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       workerPrefix,
       workerArgs,
     );
-    await printJson({
+    const response: {
+      assignment: string;
+      queued: Array<{ agentId: string; objective: string; plan: unknown; run: unknown }>;
+      recovered?: Omit<RecoverStaleRunResult, "run">[];
+      session: WorkerSession;
+      actions: typeof dispatchActions;
+      backlog: Awaited<ReturnType<typeof agentBacklog>>;
+      wait?: unknown;
+    } = {
       assignment,
       queued,
       ...(options.recover === "1" ? { recovered: recovered.map(({ run: _run, ...item }) => item) } : {}),
       session,
       actions: dispatchActions,
       backlog: await agentBacklog(agentIds),
-    });
+    };
+    if (options.wait === "1") {
+      const waitIntervalMs = parsePositiveInteger(options["wait-interval-ms"] ?? options["interval-ms"] ?? "2000", "--wait-interval-ms");
+      const maxPolls = parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls");
+      let polls = 0;
+      let finalStatus = await workerSessionStatus(sessionName, new Set(["planned", "running", "stopped", "completed", "failed"]));
+      while (polls < maxPolls) {
+        finalStatus = await workerSessionStatus(sessionName, new Set(["planned", "running", "stopped", "completed", "failed"]));
+        polls += 1;
+        const workers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+        if (workers.every((worker) => !worker.alive)) break;
+        await sleep(waitIntervalMs);
+      }
+      const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+      const aliveWorkers = finalWorkers.filter((worker) => worker.alive).length;
+      const statuses: Record<string, number> = {};
+      for (const agent of finalStatus.agents) {
+        for (const [status, count] of Object.entries(agent.statuses)) {
+          statuses[status] = (statuses[status] ?? 0) + count;
+        }
+      }
+      response.wait = {
+        completed: aliveWorkers === 0,
+        timedOut: aliveWorkers > 0,
+        polls,
+        intervalMs: waitIntervalMs,
+        summary: {
+          workers: {
+            total: finalWorkers.length,
+            alive: aliveWorkers,
+            dead: finalWorkers.length - aliveWorkers,
+          },
+          agents: finalStatus.agents.length,
+          runs: finalStatus.agents.reduce((sum, agent) => sum + agent.total, 0),
+          statuses,
+        },
+        status: finalStatus,
+        commands: {
+          sessionReview: dispatchActions.sessionReview,
+          branchQueue: dispatchActions.branchQueue,
+          results: dispatchActions.results,
+          checkoutSession: dispatchActions.checkoutSession,
+        },
+      };
+      response.backlog = await agentBacklog(agentIds);
+    }
+    await printJson(response);
     return;
   }
   if (subcommandName === "sessions") {
@@ -3406,7 +3463,7 @@ Commands:
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--next] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty] [--wait] [--max-polls 60]
-  runs dispatch --agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped]
+  runs dispatch --agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped] [--until-empty] [--wait] [--max-polls 60]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]
   runs queue --agent <agent>|--agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") [--assignment fanout|round-robin] [--dry-run] [--input-ref main] [--prefix threadbeat/runs] [--concurrency 4]
   runs launch --agents <agent,agent> --objective <objective> [--bootstrap] [--check-runtime] [--boot] [--concurrency 4]

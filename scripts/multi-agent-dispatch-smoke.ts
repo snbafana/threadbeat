@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-multi-agent-dispatch-smoke-"));
 const sessionName = `multi-agent-smoke-${Date.now().toString(36)}`;
 const superviseSessionName = `${sessionName}-supervise`;
+const dispatchWaitSessionName = `${sessionName}-dispatch-wait`;
 const runIds: string[] = [];
 
 const settings: Settings = {
@@ -30,6 +31,7 @@ const { app } = await buildServer(settings);
 let baseUrl: string | null = null;
 let sessionStarted = false;
 let superviseStarted = false;
+let dispatchWaitStarted = false;
 
 try {
   await app.listen({ host: settings.host, port: settings.port });
@@ -174,6 +176,60 @@ try {
   assert.equal(supervised.wait.commands.results.join(" "), `npm run cli -- runs results --session ${superviseSessionName}`);
   assert.equal(supervised.wait.commands.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${superviseSessionName} --dir ./checkouts/${superviseSessionName}`);
   superviseStarted = false;
+
+  dispatchWaitStarted = true;
+  const dispatchWait = await cliJson<{
+    assignment: string;
+    queued: Array<{ agentId: string; objective: string; run: { id: string } }>;
+    session: { session: string; workers: Array<{ workerId: string }> };
+    wait: {
+      completed: boolean;
+      timedOut: boolean;
+      summary: { workers: { total: number; alive: number; dead: number }; runs: number; statuses: Record<string, number> };
+      commands: { sessionReview: string[]; branchQueue: string[]; results: string[]; checkoutSession: string[] };
+    };
+  }>(baseUrl, [
+    "runs",
+    "dispatch",
+    "--agents",
+    agentB.agent.id,
+    "--objective",
+    "queue and wait for bounded dispatch",
+    "--session",
+    dispatchWaitSessionName,
+    "--workers",
+    "1",
+    "--worker-prefix",
+    "dispatch-wait-worker",
+    "--assignment",
+    "round-robin",
+    "--until-empty",
+    "--wait",
+    "--interval-ms",
+    "100",
+    "--idle-exit-after",
+    "1",
+    "--max-polls",
+    "20",
+  ]);
+  dispatchWaitStarted = false;
+  runIds.push(...dispatchWait.queued.map((item) => item.run.id));
+  assert.equal(dispatchWait.assignment, "round-robin");
+  assert.deepEqual(dispatchWait.queued.map((item) => item.agentId), [agentB.agent.id]);
+  assert.deepEqual(dispatchWait.queued.map((item) => item.objective), ["queue and wait for bounded dispatch"]);
+  assert.equal(dispatchWait.session.session, dispatchWaitSessionName);
+  assert.deepEqual(dispatchWait.session.workers.map((worker) => worker.workerId), ["dispatch-wait-worker-1"]);
+  assert.equal(dispatchWait.wait.completed, true);
+  assert.equal(dispatchWait.wait.timedOut, false);
+  assert.equal(dispatchWait.wait.summary.workers.total, 1);
+  assert.equal(dispatchWait.wait.summary.workers.alive, 0);
+  assert.equal(dispatchWait.wait.summary.workers.dead, 1);
+  assert.ok(dispatchWait.wait.summary.runs >= 1);
+  assert.ok(Object.values(dispatchWait.wait.summary.statuses).reduce((sum, count) => sum + count, 0) >= 1);
+  assert.equal(dispatchWait.wait.commands.sessionReview.join(" "), `npm run cli -- runs session-review ${dispatchWaitSessionName} --include-stopped`);
+  assert.equal(dispatchWait.wait.commands.branchQueue.join(" "), `npm run cli -- runs branches --session ${dispatchWaitSessionName} --next`);
+  assert.equal(dispatchWait.wait.commands.results.join(" "), `npm run cli -- runs results --session ${dispatchWaitSessionName}`);
+  assert.equal(dispatchWait.wait.commands.checkoutSession.join(" "), `npm run cli -- runs checkout-session ${dispatchWaitSessionName} --dir ./checkouts/${dispatchWaitSessionName}`);
 
   const preview = await cliJson<{
     assignment: string;
@@ -425,6 +481,13 @@ try {
         // The supervise smoke may have failed before the session file existed.
       }
     }
+    if (dispatchWaitStarted) {
+      try {
+        await cliJson(cleanupBaseUrl, ["runs", "stop-session", dispatchWaitSessionName, "--recover"]);
+      } catch {
+        // The dispatch wait smoke may have failed before the session file existed.
+      }
+    }
     await Promise.all(runIds.map(async (runId) => {
       try {
         await cliJson(cleanupBaseUrl, ["sandboxes", "stop-running", "--run", runId]);
@@ -435,6 +498,7 @@ try {
   }
   await cleanupSession(sessionName);
   await cleanupSession(superviseSessionName);
+  await cleanupSession(dispatchWaitSessionName);
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
