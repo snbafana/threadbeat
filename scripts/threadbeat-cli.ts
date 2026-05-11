@@ -1335,11 +1335,86 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const recoveryPreview = options.recoverable === "1"
         ? await recoverableSessionRuns(status, options)
         : null;
-      console.log(JSON.stringify({
-        observedAt: new Date().toISOString(),
-        ...status,
-        ...(recoveryPreview ? { recoveryPreview } : {}),
-      }));
+      const observedAt = new Date().toISOString();
+      if (options.next === "1") {
+        const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & {
+          alive: boolean;
+          runs: Array<SessionVisibleRun & { agentId: string }>;
+        }>;
+        const deadWorkerCount = sessionWorkers.filter((worker) => !worker.alive).length;
+        const resumableBranches = [
+          ...sessionWorkers.flatMap((worker) => worker.runs
+            .filter((run) => run.status === "stopped" && run.resultCommit === null)
+            .map((run) => ({ runId: run.id, workerId: worker.workerId }))),
+          ...status.agents.flatMap((agent) => agent.unassigned
+            .filter((run) => run.status === "stopped" && run.resultCommit === null)
+            .map((run) => ({ runId: run.id, workerId: null }))),
+        ];
+        const recoverableActive = recoveryPreview?.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length ?? 0;
+        const recoverableStopped = recoveryPreview?.filter((run) => run.currentStatus === "stopped" && !run.skipped).length ?? 0;
+        const statuses: Record<string, number> = {};
+        for (const agent of status.agents) {
+          for (const [runStatus, count] of Object.entries(agent.statuses)) {
+            statuses[runStatus] = (statuses[runStatus] ?? 0) + count;
+          }
+        }
+        console.log(JSON.stringify({
+          observedAt,
+          session: {
+            session: status.session.session,
+            workers: {
+              total: sessionWorkers.length,
+              alive: sessionWorkers.length - deadWorkerCount,
+              dead: deadWorkerCount,
+            },
+          },
+          summary: {
+            agents: status.agents.length,
+            runs: status.agents.reduce((sum, agent) => sum + agent.total, 0),
+            statuses,
+            resumableBranches: resumableBranches.length,
+            recoveryCandidates: recoverableActive + recoverableStopped,
+          },
+          nextSteps: [
+            ...(deadWorkerCount > 0 && resumableBranches.length > 0 ? [{
+              action: "restart_session_with_stopped",
+              reason: "dead_workers_and_resumable_branches",
+              count: deadWorkerCount,
+              command: ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover", "--resume-stopped"],
+            }] : []),
+            ...(deadWorkerCount > 0 && resumableBranches.length === 0 ? [{
+              action: "restart_session",
+              reason: "dead_workers",
+              count: deadWorkerCount,
+              command: ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover"],
+            }] : []),
+            ...(recoverableActive > 0 ? [{
+              action: "recover_session",
+              reason: "stale_running_claims",
+              count: recoverableActive,
+              command: ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session],
+            }] : []),
+            ...(recoverableStopped > 0 ? [{
+              action: "recover_stopped",
+              reason: "unfinished_stopped_branches",
+              count: recoverableStopped,
+              command: ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session, "--include-stopped"],
+            }] : []),
+            ...(resumableBranches.length > 0 ? [{
+              action: "resume_session",
+              reason: "resumable_branch_runs",
+              count: resumableBranches.length,
+              command: ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session],
+            }] : []),
+          ],
+        }));
+      } else {
+        console.log(JSON.stringify({
+          observedAt,
+          ...status,
+          ...(recoveryPreview ? { recoveryPreview } : {}),
+        }));
+      }
       polls += 1;
       if (maxPolls !== null && polls >= maxPolls) return;
       await sleep(intervalMs);
@@ -2793,7 +2868,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped]
   runs session-summary <name>
   runs session-review <name> [--include-stopped] [--next] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-watch <name> [--status planned,running,stopped] [--interval-ms 2000] [--max-polls 10]
+  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]

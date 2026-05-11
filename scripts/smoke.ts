@@ -1592,6 +1592,48 @@ try {
     && run.currentStatus === "running"
     && run.dryRun === true
   )));
+  const watchedWorkerNext = await cliJson<{
+    observedAt: string;
+    session: { session: string; workers: { total: number; alive: number; dead: number } };
+    summary: { recoveryCandidates: number; resumableBranches: number };
+    nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
+    agents?: unknown;
+    recoveryPreview?: unknown;
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.match(watchedWorkerNext.observedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(watchedWorkerNext.session.session, detachedWorkerSessionName);
+  assert.equal(watchedWorkerNext.session.workers.total, 1);
+  assert.equal(watchedWorkerNext.session.workers.alive, 1);
+  assert.equal(watchedWorkerNext.agents, undefined);
+  assert.equal(watchedWorkerNext.recoveryPreview, undefined);
+  assert.ok(watchedWorkerNext.summary.recoveryCandidates >= 1);
+  assert.ok(watchedWorkerNext.summary.resumableBranches >= 1);
+  assert.ok(watchedWorkerNext.nextSteps.some((step) => (
+    step.action === "recover_session"
+    && step.reason === "stale_running_claims"
+    && step.command.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName}`
+  )));
+  assert.ok(watchedWorkerNext.nextSteps.some((step) => (
+    step.action === "recover_stopped"
+    && step.reason === "unfinished_stopped_branches"
+    && step.command.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`
+  )));
+  assert.ok(watchedWorkerNext.nextSteps.some((step) => (
+    step.action === "resume_session"
+    && step.reason === "resumable_branch_runs"
+    && step.command.join(" ") === `npm run cli -- runs resume-session ${detachedWorkerSessionName}`
+  )));
   const detachedWorkerLogs = await cliJson<{
     session: string;
     workers: Array<{

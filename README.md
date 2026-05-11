@@ -222,6 +222,7 @@ npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-watch overnight --max-polls 5
+npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs recover-session overnight --dry-run
 npm run cli -- runs resume-session overnight --worker-id worker-a --dry-run
@@ -379,7 +380,9 @@ group. Add `--recover` to `runs stop-session` to requeue unfinished runs claimed
 by that session's workers when those runs do not have a running sandbox.
 Add `--recoverable` to `runs session-status` or `runs session-watch` to include
 a dry-run recovery preview in the live session snapshot; combine it with
-`--include-stopped` to surface unfinished stopped branches too.
+`--include-stopped` to surface unfinished stopped branches too. Add `--next` to
+`runs session-watch` to stream only the compact restart/recover/resume command
+queue for each poll instead of the full session snapshot.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents.
 `runs session-review <name> --include-stopped` is the read-only operator summary
