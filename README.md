@@ -278,6 +278,8 @@ npm run cli -- runs session-apply overnight --include-stopped --branch-action re
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume --resume-filter failed
 npm run cli -- runs session-applies overnight --apply-id overnight-resume-1
 npm run cli -- runs session-applies overnight --summary
+npm run cli -- runs session-applies overnight --action-queue --format shell
+npm run cli -- runs session-applies overnight --action-queue --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-applies overnight --summary-group resume-needed --format shell
 npm run cli -- runs session-applies overnight --summary-group ready-to-review --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-applies overnight --ready-results --format shell
@@ -563,6 +565,10 @@ or `--apply-id <id>` to inspect the failed executions, pending commands,
 affected runs, exact resume commands, and branch-native inspect/checkout/review
 commands for one recorded apply. Add `--summary` to group recorded applies into
 resume-needed, ready-to-review, and waiting buckets. Add
+`--action-queue --format shell` to print the next actionable command per apply
+record, prioritizing retry/resume commands before result-review commands; pass
+`--checkout-dir`, `--changed-only`, or `--changed-path` through when the queue
+includes result review. Add
 `--summary-group resume-needed --format shell` to print only retry/resume
 commands for apply records that still need execution, or
 `--summary-group ready-to-review --format shell` to print only review-ready

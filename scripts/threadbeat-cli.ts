@@ -3096,6 +3096,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["ready-results"] === "1" && outputFormat !== "shell") {
       throw new Error("runs session-applies --ready-results requires --format shell");
     }
+    if (options["action-queue"] === "1" && outputFormat !== "shell") {
+      throw new Error("runs session-applies --action-queue requires --format shell");
+    }
     if (options["summary-group"] && outputFormat !== "shell") {
       throw new Error("runs session-applies --summary-group requires --format shell");
     }
@@ -3108,6 +3111,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (options["summary-group"] && options["ready-results"] === "1") {
       throw new Error("runs session-applies --summary-group cannot be combined with --ready-results");
+    }
+    if (options["action-queue"] === "1" && (options["summary-group"] || options["ready-results"] === "1")) {
+      throw new Error("runs session-applies --action-queue cannot be combined with --summary-group or --ready-results");
     }
     if (options["changed-only"] === "1" && !options["checkout-dir"]) {
       throw new Error("runs session-applies --changed-only requires --checkout-dir");
@@ -3122,6 +3128,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const runStatusIndex = (
         outputFormat === "json"
         || options["ready-results"] === "1"
+        || options["action-queue"] === "1"
         || options["summary-group"] === "ready-to-review"
       )
         ? await sessionApplyRunStatusIndex(requiredSessionName)
@@ -3145,7 +3152,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const records = await listSessionApplyRecords(requiredSessionName);
     if (outputFormat === "shell") {
-      const runStatusIndex = options["ready-results"] === "1" || options["summary-group"] === "ready-to-review"
+      const runStatusIndex = (
+        options["ready-results"] === "1"
+        || options["action-queue"] === "1"
+        || options["summary-group"] === "ready-to-review"
+      )
         ? await sessionApplyRunStatusIndex(requiredSessionName)
         : null;
       for (const apply of records.map((record) => summarizeSessionApplyRecord(record, runStatusIndex))) {
@@ -4227,7 +4238,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -4969,6 +4980,11 @@ function sessionApplyShellCommand(
   summary: SessionApplySummary,
   options: Record<string, string>,
 ): string[] | null {
+  if (options["action-queue"] === "1") {
+    if (summary.failed > 0) return summary.actions.retryFailed;
+    if (summary.pending > 0) return summary.actions.resumePending;
+    return sessionApplyReadyResultsCommand(summary, options);
+  }
   if (options["ready-results"] === "1" || options["summary-group"] === "ready-to-review") {
     return sessionApplyReadyResultsCommand(summary, options);
   }
@@ -5469,7 +5485,7 @@ Commands:
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
-  runs session-applies <name> [--apply-id id] [--summary] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

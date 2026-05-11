@@ -2837,6 +2837,18 @@ try {
     retrySummaryGroupShell.stdout.trim(),
     retryInspection.summary.actions.retryFailed.join(" "),
   );
+  const retryActionQueueShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--action-queue",
+    "--format",
+    "shell",
+  ]);
+  assert.equal(
+    retryActionQueueShell.stdout.trim(),
+    retryInspection.summary.actions.retryFailed.join(" "),
+  );
   const retryFailedPreview = await cliJson<{
     resumeFilter: string[];
     selected: number;
@@ -4548,6 +4560,23 @@ try {
   ]);
   assert.equal(
     readyResultSummaryGroupShell.stdout.trim(),
+    `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only --checkout-dir ./checkouts/smoke-ready-results --changed-only --changed-path report.md`,
+  );
+  const readyResultActionQueueShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    resultSummarySessionName,
+    "--action-queue",
+    "--format",
+    "shell",
+    "--checkout-dir",
+    "./checkouts/smoke-ready-results",
+    "--changed-only",
+    "--changed-path",
+    "report.md",
+  ]);
+  assert.equal(
+    readyResultActionQueueShell.stdout.trim(),
     `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only --checkout-dir ./checkouts/smoke-ready-results --changed-only --changed-path report.md`,
   );
   const readyResultApplySummary = await cliJson<{
