@@ -862,6 +862,28 @@ try {
   assert.ok(plannedMonitored.agents.every((agent) => agent.runs.every((run) => run.status === "planned")));
   assert.ok(plannedMonitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunA.run.id)));
   assert.ok(plannedMonitored.agents.some((agent) => agent.runs.some((run) => run.id === workerRunB.run.id)));
+  const plannedMonitorNext = await cliJson<{
+    summary: { runs: number; statuses: Record<string, number> };
+    nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+    agents?: unknown;
+  }>(baseUrl, [
+    "runs",
+    "monitor",
+    "--agents",
+    `${workerAgentBody.agent.id},${launchAgentBody.agent.id}`,
+    "--status",
+    "planned",
+    "--next",
+  ]);
+  assert.equal(plannedMonitorNext.agents, undefined);
+  assert.ok(plannedMonitorNext.summary.runs >= 2);
+  assert.ok(plannedMonitorNext.summary.statuses.planned >= 2);
+  assert.ok(plannedMonitorNext.nextSteps.some((step) => (
+    step.action === "claim_run"
+    && step.reason === "queued_run"
+    && step.runId === workerRunA.run.id
+    && step.command.join(" ") === `npm run cli -- runs claim ${workerRunA.run.id}`
+  )));
 
   const cliWorker = await cliJson<{
     processed: Array<{
@@ -2881,6 +2903,24 @@ try {
   };
   assert.ok(stoppedMonitored.agents.some((agent) => (
     agent.runs.length === 2 && agent.runs.every((run) => run.status === "stopped" && run.resumable)
+  )));
+  const stoppedMonitorNext = await cliJson<{
+    summary: { statuses: Record<string, number> };
+    nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "monitor",
+    "--agent",
+    stopMatchingAgentBody.agent.id,
+    "--status",
+    "stopped",
+    "--next",
+  ]);
+  assert.equal(stoppedMonitorNext.summary.statuses.stopped, 2);
+  assert.ok(stoppedMonitorNext.nextSteps.every((step) => step.action === "resume_branch"));
+  assert.ok(stoppedMonitorNext.nextSteps.some((step) => (
+    step.reason === "stopped_branch"
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${stopMatchingRunA.run.id}`
   )));
   const stoppedMatchingBranches = await cliJson<{
     agents: Array<{

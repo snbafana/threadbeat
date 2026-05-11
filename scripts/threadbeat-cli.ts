@@ -1599,7 +1599,52 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         });
         agents.push({ agentId, runs });
       }
-      console.log(JSON.stringify({ agents }));
+      if (options.next === "1") {
+        const nextSteps = agents.flatMap((agent) => agent.runs.map((run) => ({
+          action: run.status === "planned"
+            ? "claim_run"
+            : run.status === "running"
+              ? "watch_run"
+              : run.status === "stopped"
+                ? "resume_branch"
+                : "inspect_run",
+          reason: run.status === "planned"
+            ? "queued_run"
+            : run.status === "running"
+              ? "active_run"
+              : run.status === "stopped"
+                ? "stopped_branch"
+                : "terminal_run",
+          agentId: agent.agentId,
+          runId: run.id,
+          status: run.status,
+          workerId: run.workerId,
+          command: run.status === "planned"
+            ? ["npm", "run", "cli", "--", "runs", "claim", run.id]
+            : run.status === "running"
+              ? ["npm", "run", "cli", "--", "runs", "watch", run.id]
+              : run.status === "stopped"
+                ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+                : ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+        })));
+        const statuses: Record<string, number> = {};
+        for (const agent of agents) {
+          for (const run of agent.runs) {
+            statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+          }
+        }
+        console.log(JSON.stringify({
+          observedAt: new Date().toISOString(),
+          summary: {
+            agents: agents.length,
+            runs: nextSteps.length,
+            statuses,
+          },
+          nextSteps,
+        }));
+      } else {
+        console.log(JSON.stringify({ agents }));
+      }
       if (poll + 1 < maxPolls) await sleep(intervalMs);
     }
     return;
@@ -2755,7 +2800,7 @@ Commands:
   runs resume-session <name> [--worker-id worker-a] [--dry-run] [--concurrency 4]
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
-  runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--limit 3] [--interval-ms 2000] [--max-polls 1]
+  runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--next] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty]
   runs dispatch --agents <agent,agent> (--objectives-file ./tasks.txt|--objective "task") --session <name> [--assignment fanout|round-robin] [--dry-run] [--workers 1] [--worker-prefix worker] [--bootstrap] [--boot] [--recover] [--include-stopped]
   runs plan --agent <agent> --objective <objective> [--input-ref main] [--prefix threadbeat/runs]

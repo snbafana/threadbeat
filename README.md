@@ -234,6 +234,7 @@ npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.
 npm run cli -- runs dispatch --agents <agent>,<agent> --objectives-file ./tasks.txt --assignment round-robin --session overnight --workers 3 --dry-run
 npm run cli -- runs stop-matching --agents <agent>,<agent> --status planned
 npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running
+npm run cli -- runs monitor --agents <agent>,<agent> --status planned,running,stopped --next
 npm run cli -- runs step --agent <agent> --objective "one bounded task" --bootstrap --finalize -- "pwd"
 npm run cli -- runs sandbox <run> [--bootstrap]
 npm run cli -- runs restart-sandbox <run> [--bootstrap]
@@ -430,7 +431,9 @@ agents; include `running` in the status list to stop active run sandboxes too.
 `runs monitor` snapshots all runs for one or more agents, including
 sandbox states, recent message types/text, and a `resumable` marker on stopped
 branch runs. Use `--status planned,running,stopped` to focus the snapshot on
-queued, active, or resumable work. `runs step` executes one explicit shell
+queued, active, or resumable work. Add `--next` to emit only the compact command
+queue for the visible rows: claim planned runs, watch active runs, resume stopped
+branches, or inspect terminal runs. `runs step` executes one explicit shell
 command and can optionally finalize the run branch.
 
 ## Phases
