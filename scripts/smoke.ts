@@ -3637,6 +3637,13 @@ try {
   const sessionResultSummary = await cliJson<{
     session: { session: string; workers: { total: number; alive: number; dead: number } };
     totals: { statuses: Record<string, number>; resultCommits: number; resumableStopped: number };
+    resultCommits: Array<{
+      agentId: string;
+      runId: string;
+      status: string;
+      resultCommit: string;
+      commands: { inspectRun: string[]; checkoutBranch: string[]; reviewRun: string[] };
+    }>;
     commands: { resultsNext: string[]; changedResults: string[] };
     nextStep: { action: string; reason: string; command: string[] };
   }>(baseUrl, ["runs", "session-summary", resultSummarySessionName, "--next"]);
@@ -3647,6 +3654,15 @@ try {
   assert.equal(sessionResultSummary.totals.statuses.completed, 1);
   assert.equal(sessionResultSummary.totals.resultCommits, 1);
   assert.equal(sessionResultSummary.totals.resumableStopped, 0);
+  assert.ok(sessionResultSummary.resultCommits.some((commit) => (
+    commit.agentId === cliWorkFinalizeAgent.agent.id
+    && commit.runId === cliWorkFinalizePlan.run.id
+    && commit.status === "completed"
+    && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+    && commit.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${cliWorkFinalizePlan.run.id}`
+    && commit.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${cliWorkFinalizePlan.run.id} --dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
+    && commit.commands.reviewRun.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
+  )));
   assert.equal(sessionResultSummary.nextStep.action, "inspect_results");
   assert.equal(sessionResultSummary.nextStep.reason, "result_commits_available");
   assert.equal(sessionResultSummary.nextStep.command.join(" "), `npm run cli -- runs results --session ${resultSummarySessionName} --next`);
@@ -3669,6 +3685,7 @@ try {
     observedAt: string;
     session: { session: string };
     totals: { resultCommits: number };
+    resultCommits: Array<{ runId: string; resultCommit: string }>;
     nextStep: { action: string };
   });
   assert.equal(sessionResultSummarySnapshots.length, 2);
@@ -3676,6 +3693,10 @@ try {
     /^\d{4}-\d{2}-\d{2}T/.test(snapshot.observedAt)
     && snapshot.session.session === resultSummarySessionName
     && snapshot.totals.resultCommits === 1
+    && snapshot.resultCommits.some((commit) => (
+      commit.runId === cliWorkFinalizePlan.run.id
+      && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+    ))
     && snapshot.nextStep.action === "inspect_results"
   )));
 

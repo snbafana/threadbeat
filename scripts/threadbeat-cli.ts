@@ -1774,10 +1774,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const status = await workerSessionStatus(requiredSessionName, new Set(["planned", "running", "stopped"]));
+      const sessionWorkerIds = new Set(status.session.workers.map((worker) => worker.workerId));
+      const resultCheckoutDir = `./checkouts/${requiredSessionName}-results`;
       const agentIds = workerSessionAgentIds(status.session);
       const agents = await mapConcurrent(agentIds, 4, async (agentId) => {
         const listed = await requestJson("GET", `/api/agents/${encodeURIComponent(agentId)}/runs`) as {
-          runs: Array<{ id: string; status: string; result_commit: string | null }>;
+          runs: Array<{
+            id: string;
+            objective: string;
+            run_branch: string;
+            result_commit: string | null;
+            status: string;
+            worker_id: string | null;
+          }>;
         };
         const statuses: Record<string, number> = {};
         for (const run of listed.runs) {
@@ -1789,8 +1798,31 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           statuses,
           resultCommits: listed.runs.filter((run) => run.result_commit).length,
           resumableStopped: listed.runs.filter((run) => run.status === "stopped" && !run.result_commit).length,
+          resultCommitRows: listed.runs
+            .filter((run) => run.result_commit)
+            .map((run) => ({
+              agentId,
+              runId: run.id,
+              status: run.status,
+              objective: run.objective,
+              workerId: run.worker_id,
+              location: run.worker_id === null
+                ? "unassigned"
+                : sessionWorkerIds.has(run.worker_id)
+                  ? "session_worker"
+                  : "other_worker",
+              branchName: run.run_branch,
+              resultCommit: run.result_commit,
+              commands: {
+                inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${resultCheckoutDir}/${run.id}`],
+                reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${resultCheckoutDir}/${run.id}`],
+              },
+            })),
         };
       });
+      const resultCommits = agents.flatMap((agent) => agent.resultCommitRows);
+      const summaryAgents = agents.map(({ resultCommitRows: _resultCommitRows, ...agent }) => agent);
       const totals = {
         runs: agents.reduce((sum, agent) => sum + agent.total, 0),
         resultCommits: agents.reduce((sum, agent) => sum + agent.resultCommits, 0),
@@ -1891,7 +1923,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           },
         },
         totals,
-        agents,
+        resultCommits,
+        agents: summaryAgents,
         ...(commands ? { commands, nextStep } : {}),
       };
       if (maxPolls === 1) {
