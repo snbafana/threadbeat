@@ -263,6 +263,44 @@ try {
     sessions: Array<{ session: string; workers: Array<{ alive: boolean }> }>;
   }>(baseUrl, ["runs", "sessions", "--session", sessionName]);
   assert.equal(stoppedSessions.sessions[0].workers[0].alive, false);
+
+  const restarted = await cliJson<{
+    session: string;
+    restarted: Array<{ workerId: string; pid: number | null }>;
+    wait: {
+      completed: boolean;
+      timedOut: boolean;
+      polls: number;
+      summary: { workers: { total: number; alive: number; dead: number } };
+      commands: { sessionWatch: string[]; stopSession: string[]; restartSession: string[] };
+      nextStep: { action: string; reason: string; command: string[] };
+    };
+  }>(baseUrl, [
+    "runs",
+    "restart-session",
+    sessionName,
+    "--recover",
+    "--wait",
+    "--interval-ms",
+    "100",
+    "--max-polls",
+    "1",
+  ]);
+  assert.equal(restarted.session, sessionName);
+  assert.deepEqual(restarted.restarted.map((worker) => worker.workerId), ["detached-smoke-worker-1"]);
+  assert.equal(typeof restarted.restarted[0].pid, "number");
+  assert.equal(restarted.wait.completed, false);
+  assert.equal(restarted.wait.timedOut, true);
+  assert.equal(restarted.wait.polls, 1);
+  assert.equal(restarted.wait.summary.workers.total, 1);
+  assert.equal(restarted.wait.summary.workers.alive, 1);
+  assert.equal(restarted.wait.summary.workers.dead, 0);
+  assert.equal(restarted.wait.nextStep.action, "continue_watch");
+  assert.equal(restarted.wait.nextStep.reason, "workers_still_alive");
+  assert.equal(restarted.wait.nextStep.command.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
+  assert.equal(restarted.wait.commands.sessionWatch.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
+  assert.equal(restarted.wait.commands.stopSession.join(" "), `npm run cli -- runs stop-session ${sessionName} --recover`);
+  assert.equal(restarted.wait.commands.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
 } finally {
   if (sessionStarted && baseUrl !== null) {
     try {

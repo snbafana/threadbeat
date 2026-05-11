@@ -502,9 +502,11 @@ review/resume commands for the visible result rows. Add `--worker-id <id>` to
 review only branches claimed by one worker.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
-Add `--resume-stopped` when the restarted workers should continue stopped branch
-runs from the same session; this updates the recorded worker command for later
-session inspection and restarts.
+Add `--wait` to poll the restarted session in the foreground and return the same
+final or timeout next actions as `dispatch --wait`. Add `--resume-stopped` when
+the restarted workers should continue stopped branch runs from the same session;
+this updates the recorded worker command for later session inspection and
+restarts.
 `runs watch` polls one run's status and messages until it completes, fails, or
 stops, and each snapshot includes checkout, review, inspect, and resumable
 branch commands for the run. `runs backlog` reports run counts by status for one or more agents and

@@ -2168,12 +2168,84 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     session.restartedAt = new Date().toISOString();
     session.command = ["runs", "work", ...commandArgs];
     await writeWorkerSession(session);
-    await printJson({
+    const response: {
+      session: string;
+      restarted: Array<{ workerId: string; pid: number | null }>;
+      recovered: Omit<RecoverStaleRunResult, "run">[];
+      status: Awaited<ReturnType<typeof workerSessionStatus>>;
+      wait?: unknown;
+    } = {
       session: session.session,
       restarted,
       recovered: recovered.map(({ run: _run, ...item }) => item),
       status: await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"])),
-    });
+    };
+    if (options.wait === "1") {
+      const waitIntervalMs = parsePositiveInteger(options["wait-interval-ms"] ?? options["interval-ms"] ?? "2000", "--wait-interval-ms");
+      const maxPolls = parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls");
+      let polls = 0;
+      let finalStatus = await workerSessionStatus(session.session, new Set(["planned", "running", "stopped", "completed", "failed"]));
+      while (polls < maxPolls) {
+        finalStatus = await workerSessionStatus(session.session, new Set(["planned", "running", "stopped", "completed", "failed"]));
+        polls += 1;
+        const workers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+        if (workers.every((worker) => !worker.alive)) break;
+        if (polls >= maxPolls) break;
+        await sleep(waitIntervalMs);
+      }
+      const finalWorkers = finalStatus.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
+      const aliveWorkers = finalWorkers.filter((worker) => worker.alive).length;
+      const statuses: Record<string, number> = {};
+      for (const agent of finalStatus.agents) {
+        for (const [status, count] of Object.entries(agent.statuses)) {
+          statuses[status] = (statuses[status] ?? 0) + count;
+        }
+      }
+      const restartActions = {
+        sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
+        sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
+        branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", session.session, "--next"],
+        results: ["npm", "run", "cli", "--", "runs", "results", "--session", session.session],
+        checkoutSession: ["npm", "run", "cli", "--", "runs", "checkout-session", session.session, "--dir", `./checkouts/${session.session}`],
+        sessionLogs: ["npm", "run", "cli", "--", "runs", "session-logs", session.session],
+        stopSession: ["npm", "run", "cli", "--", "runs", "stop-session", session.session, "--recover"],
+        recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", session.session],
+        resumeSession: ["npm", "run", "cli", "--", "runs", "resume-session", session.session],
+        restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover"],
+        restartSessionWithStopped: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover", "--resume-stopped"],
+      };
+      response.wait = {
+        completed: aliveWorkers === 0,
+        timedOut: aliveWorkers > 0,
+        polls,
+        intervalMs: waitIntervalMs,
+        summary: {
+          workers: {
+            total: finalWorkers.length,
+            alive: aliveWorkers,
+            dead: finalWorkers.length - aliveWorkers,
+          },
+          agents: finalStatus.agents.length,
+          runs: finalStatus.agents.reduce((sum, agent) => sum + agent.total, 0),
+          statuses,
+        },
+        status: finalStatus,
+        commands: restartActions,
+        nextStep: aliveWorkers > 0
+          ? {
+            action: "continue_watch",
+            reason: "workers_still_alive",
+            command: restartActions.sessionWatch,
+          }
+          : {
+            action: "review_session",
+            reason: "bounded_session_finished",
+            command: restartActions.sessionReview,
+          },
+      };
+      response.status = finalStatus;
+    }
+    await printJson(response);
     return;
   }
   if (subcommandName === "stop-matching") {
@@ -3509,7 +3581,7 @@ Commands:
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
   runs resume-session <name> [--worker-id worker-a] [--dry-run] [--concurrency 4]
-  runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--concurrency 4]
+  runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--wait] [--max-polls 60] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--next] [--limit 3] [--interval-ms 2000] [--max-polls 1]
   runs supervise --agent <agent>|--agents <agent,agent> --session <name> [--workers 1] [--worker-prefix worker] [--recover] [--include-stopped] [--resume-stopped] [--loop|--until-empty] [--wait] [--max-polls 60]
