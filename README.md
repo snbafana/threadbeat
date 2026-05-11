@@ -488,11 +488,15 @@ make the review snapshot show only branches with local changes that matter.
 `runs recover-session <name>` requeues stale runs claimed by that session's
 workers without stopping or restarting the worker group; add `--dry-run` to
 preview the affected runs first. Add `--include-stopped` to also requeue
-unfinished stopped branch runs for that session's agents.
+unfinished stopped branch runs for that session's agents. The response includes
+the next branch-native command: wait on live workers, restart dead workers, or
+review the session when nothing changed.
 `runs resume-session <name>` is the branch-only bulk resume path for a detached
 worker session: it requeues stopped runs with no result commit while leaving
 completed result branches alone. Add `--worker-id <id>` to target only that
 worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
+Like recovery, it returns the next wait/restart/review command to keep the
+operator flow attached to the durable branch session.
 `runs branches --session <name>` is the no-checkout branch ledger for a session:
 each row includes branch/result state, GitHub branch/result links, and exact
 checkout/review/inspect/resume commands. Add `--next` to return only the ordered

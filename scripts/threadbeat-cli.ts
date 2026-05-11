@@ -2119,11 +2119,55 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       options["dry-run"] === "1",
       options["include-stopped"] === "1",
     );
+    const recoverCommand = ["npm", "run", "cli", "--", "runs", "recover-session", session.session];
+    if (options["include-stopped"] === "1") recoverCommand.push("--include-stopped");
+    const recoverActions = {
+      sessionWait: ["npm", "run", "cli", "--", "runs", "session-wait", session.session],
+      sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
+      sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
+      restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover"],
+      recoverSession: recoverCommand,
+    };
+    const status = options["dry-run"] === "1"
+      ? null
+      : await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"]));
+    const aliveWorkers = status
+      ? (status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>).filter((worker) => worker.alive).length
+      : 0;
+    const changedRuns = recovered.filter((item) => !item.skipped).length;
     await printJson({
       session: session.session,
       recovered: recovered.map(({ run: _run, ...item }) => item),
+      actions: recoverActions,
+      nextStep: options["dry-run"] === "1"
+        ? {
+          action: "recover_session",
+          reason: "dry_run_preview",
+          count: changedRuns,
+          command: recoverActions.recoverSession,
+        }
+        : changedRuns > 0 && aliveWorkers > 0
+          ? {
+            action: "wait_session",
+            reason: "recovered_runs_for_live_workers",
+            count: changedRuns,
+            command: recoverActions.sessionWait,
+          }
+          : changedRuns > 0
+            ? {
+              action: "restart_session",
+              reason: "recovered_runs_without_live_workers",
+              count: changedRuns,
+              command: recoverActions.restartSession,
+            }
+            : {
+              action: "review_session",
+              reason: "no_runs_recovered",
+              count: 0,
+              command: recoverActions.sessionReview,
+            },
       ...(options["dry-run"] === "1" ? {} : {
-        status: await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"])),
+        status,
       }),
     });
     return;
@@ -2189,11 +2233,55 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         return { ...item, status: requeued.run.status, workerId: requeued.run.worker_id };
       },
     );
+    const resumeCommand = ["npm", "run", "cli", "--", "runs", "resume-session", session.session];
+    if (options["worker-id"]) resumeCommand.push("--worker-id", options["worker-id"]);
+    const resumeActions = {
+      sessionWait: ["npm", "run", "cli", "--", "runs", "session-wait", session.session],
+      sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
+      sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
+      restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover"],
+      resumeSession: resumeCommand,
+    };
+    const status = options["dry-run"] === "1"
+      ? null
+      : await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"]));
+    const aliveWorkers = status
+      ? (status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>).filter((worker) => worker.alive).length
+      : 0;
+    const changedRuns = resumed.filter((item) => !("skipped" in item)).length;
     await printJson({
       session: session.session,
       resumed,
+      actions: resumeActions,
+      nextStep: options["dry-run"] === "1"
+        ? {
+          action: "resume_session",
+          reason: "dry_run_preview",
+          count: changedRuns,
+          command: resumeActions.resumeSession,
+        }
+        : changedRuns > 0 && aliveWorkers > 0
+          ? {
+            action: "wait_session",
+            reason: "resumed_runs_for_live_workers",
+            count: changedRuns,
+            command: resumeActions.sessionWait,
+          }
+          : changedRuns > 0
+            ? {
+              action: "restart_session",
+              reason: "resumed_runs_without_live_workers",
+              count: changedRuns,
+              command: resumeActions.restartSession,
+            }
+            : {
+              action: "review_session",
+              reason: "no_runs_resumed",
+              count: 0,
+              command: resumeActions.sessionReview,
+            },
       ...(options["dry-run"] === "1" ? {} : {
-        status: await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"])),
+        status,
       }),
     });
     return;

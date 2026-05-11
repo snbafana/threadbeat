@@ -1935,6 +1935,8 @@ try {
   const sessionRecoverPreview = await cliJson<{
     session: string;
     recovered: Array<{ runId: string; currentStatus?: string; dryRun?: boolean }>;
+    actions: { recoverSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
   }>(baseUrl, ["runs", "recover-session", detachedWorkerSessionName, "--dry-run"]);
   assert.equal(sessionRecoverPreview.session, detachedWorkerSessionName);
   assert.ok(sessionRecoverPreview.recovered.some((run) => (
@@ -1942,6 +1944,10 @@ try {
     && run.currentStatus === "running"
     && run.dryRun === true
   )));
+  assert.equal(sessionRecoverPreview.nextStep.action, "recover_session");
+  assert.equal(sessionRecoverPreview.nextStep.reason, "dry_run_preview");
+  assert.equal(sessionRecoverPreview.nextStep.command.join(" "), `npm run cli -- runs recover-session ${detachedWorkerSessionName}`);
+  assert.equal(sessionRecoverPreview.actions.recoverSession.join(" "), `npm run cli -- runs recover-session ${detachedWorkerSessionName}`);
   const sessionStoppedRecoveryPreview = await cliJson<{
     session: string;
     recovered: Array<{
@@ -1951,6 +1957,8 @@ try {
       resultCommit?: string | null;
       workerId?: string | null;
     }>;
+    actions: { recoverSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
   }>(baseUrl, ["runs", "recover-session", detachedWorkerSessionName, "--include-stopped", "--dry-run"]);
   assert.equal(sessionStoppedRecoveryPreview.session, detachedWorkerSessionName);
   assert.ok(sessionStoppedRecoveryPreview.recovered.some((run) => (
@@ -1960,9 +1968,15 @@ try {
     && run.resultCommit === null
     && run.workerId === null
   )));
+  assert.equal(sessionStoppedRecoveryPreview.nextStep.action, "recover_session");
+  assert.equal(sessionStoppedRecoveryPreview.nextStep.reason, "dry_run_preview");
+  assert.equal(sessionStoppedRecoveryPreview.nextStep.command.join(" "), `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`);
+  assert.equal(sessionStoppedRecoveryPreview.actions.recoverSession.join(" "), `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`);
   const sessionRecovered = await cliJson<{
     session: string;
     recovered: Array<{ runId: string; status?: string }>;
+    actions: { sessionWait: string[]; restartSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
     status: { session: { session: string } };
   }>(baseUrl, ["runs", "recover-session", detachedWorkerSessionName]);
   assert.equal(sessionRecovered.session, detachedWorkerSessionName);
@@ -1970,6 +1984,11 @@ try {
   assert.ok(sessionRecovered.recovered.some((run) => (
     run.runId === detachedSessionRecoverPlan.run.id && run.status === "planned"
   )));
+  assert.equal(sessionRecovered.nextStep.action, "wait_session");
+  assert.equal(sessionRecovered.nextStep.reason, "recovered_runs_for_live_workers");
+  assert.equal(sessionRecovered.nextStep.command.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
+  assert.equal(sessionRecovered.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
+  assert.equal(sessionRecovered.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
   const sessionRecoveredRun = await cliJson<{ run: { status: string; worker_id: string | null } }>(baseUrl, [
     "runs",
     "get",
@@ -1999,6 +2018,8 @@ try {
   const sessionResumePreview = await cliJson<{
     session: string;
     resumed: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; branchName: string; workerId: string | null }>;
+    actions: { resumeSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
   }>(baseUrl, ["runs", "resume-session", detachedWorkerSessionName, "--worker-id", "smoke-detached-worker-1", "--dry-run"]);
   assert.equal(sessionResumePreview.session, detachedWorkerSessionName);
   assert.deepEqual(sessionResumePreview.resumed.map((run) => run.runId), [sessionResumePlan.run.id]);
@@ -2006,9 +2027,15 @@ try {
   assert.equal(sessionResumePreview.resumed[0].workerId, "smoke-detached-worker-1");
   assert.equal(sessionResumePreview.resumed[0].currentStatus, "stopped");
   assert.equal(sessionResumePreview.resumed[0].dryRun, true);
+  assert.equal(sessionResumePreview.nextStep.action, "resume_session");
+  assert.equal(sessionResumePreview.nextStep.reason, "dry_run_preview");
+  assert.equal(sessionResumePreview.nextStep.command.join(" "), `npm run cli -- runs resume-session ${detachedWorkerSessionName} --worker-id smoke-detached-worker-1`);
+  assert.equal(sessionResumePreview.actions.resumeSession.join(" "), `npm run cli -- runs resume-session ${detachedWorkerSessionName} --worker-id smoke-detached-worker-1`);
   const sessionResumed = await cliJson<{
     session: string;
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+    actions: { sessionWait: string[]; restartSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
     status: { session: { session: string } };
   }>(baseUrl, ["runs", "resume-session", detachedWorkerSessionName, "--worker-id", "smoke-detached-worker-1"]);
   assert.equal(sessionResumed.session, detachedWorkerSessionName);
@@ -2016,6 +2043,11 @@ try {
   assert.deepEqual(sessionResumed.resumed.map((run) => run.runId), [sessionResumePlan.run.id]);
   assert.equal(sessionResumed.resumed[0].status, "planned");
   assert.equal(sessionResumed.resumed[0].workerId, null);
+  assert.equal(sessionResumed.nextStep.action, "wait_session");
+  assert.equal(sessionResumed.nextStep.reason, "resumed_runs_for_live_workers");
+  assert.equal(sessionResumed.nextStep.command.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
+  assert.equal(sessionResumed.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
+  assert.equal(sessionResumed.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
 
   const superviseAgentResponse = await app.inject({
     method: "POST",
