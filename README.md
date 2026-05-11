@@ -255,6 +255,7 @@ npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overn
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
+npm run cli -- runs archive-sessions --dry-run
 npm run cli -- runs session-actions overnight
 npm run cli -- runs session-wait overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs session-wait overnight --recoverable --include-stopped --max-polls 1
@@ -442,7 +443,9 @@ sessions, `runs session-status <name>` to see worker liveness plus matching
 queued/claimed run branches, `runs session-watch <name>` to stream those snapshots
 while the session runs, `runs session-logs <name>` to read recent worker
 stdout/stderr, `runs sessions --summary --next` to see the next action for every
-recorded session in one fleet snapshot, and `runs stop-session <name>` to terminate the recorded process
+recorded session in one fleet snapshot, `runs archive-sessions --dry-run` to
+preview archiving dead local session records without touching run records or Git
+branches, and `runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add
 `--recover` to `runs stop-session` to requeue unfinished runs claimed by that
 session's workers when those runs do not have a running sandbox. Add

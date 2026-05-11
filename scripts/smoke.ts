@@ -3676,6 +3676,57 @@ try {
   assert.equal(liveSessionSummary.nextStep.reason, "workers_still_alive");
   assert.equal(liveSessionSummary.nextStep.command.join(" "), `npm run cli -- runs session-summary ${liveSummarySessionName} --next --max-polls 30 --interval-ms 10000`);
 
+  const skippedLiveArchive = await cliJson<{
+    archived: unknown[];
+    skipped: Array<{ session: string; reason: string; workers: { alive: number } }>;
+  }>(baseUrl, ["runs", "archive-sessions", "--session", liveSummarySessionName]);
+  assert.equal(skippedLiveArchive.archived.length, 0);
+  assert.equal(skippedLiveArchive.skipped[0]?.session, liveSummarySessionName);
+  assert.equal(skippedLiveArchive.skipped[0]?.reason, "workers_alive");
+  assert.equal(skippedLiveArchive.skipped[0]?.workers.alive, 1);
+  assert.equal(await fileExists(path.join(".threadbeat", "worker-sessions", `${liveSummarySessionName}.json`)), true);
+
+  const archiveSessionName = `archive-session-${process.pid}`;
+  const archiveSessionPath = path.join(".threadbeat", "worker-sessions", `${archiveSessionName}.json`);
+  const archiveSessionLogDir = path.join(".threadbeat", "worker-sessions", archiveSessionName);
+  await fs.mkdir(archiveSessionLogDir, { recursive: true });
+  await fs.writeFile(path.join(archiveSessionLogDir, "worker.out.log"), "finished\n");
+  await fs.writeFile(archiveSessionPath, `${JSON.stringify({
+    session: archiveSessionName,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: ["runs", "work", "--agent", cliWorkFinalizeAgent.agent.id],
+    workers: [{
+      workerId: "smoke-archive-worker-1",
+      pid: null,
+      stdoutPath: path.join(archiveSessionLogDir, "worker.out.log"),
+      stderrPath: path.join(archiveSessionLogDir, "worker.err.log"),
+    }],
+  })}\n`);
+  const archiveDryRun = await cliJson<{
+    dryRun: boolean;
+    archived: Array<{ session: string; reason: string; workers: { alive: number }; paths: { destinationFile: string; destinationLogDir: string } }>;
+  }>(baseUrl, ["runs", "archive-sessions", "--session", archiveSessionName, "--dry-run"]);
+  assert.equal(archiveDryRun.dryRun, true);
+  assert.equal(archiveDryRun.archived[0]?.session, archiveSessionName);
+  assert.equal(archiveDryRun.archived[0]?.reason, "all_workers_dead");
+  assert.equal(archiveDryRun.archived[0]?.workers.alive, 0);
+  assert.equal(await fileExists(archiveSessionPath), true);
+  assert.equal(await fileExists(archiveSessionLogDir), true);
+  const archivedSession = await cliJson<{
+    dryRun: boolean;
+    note: string;
+    archived: Array<{ session: string; reason: string; paths: { destinationFile: string; destinationLogDir: string } }>;
+  }>(baseUrl, ["runs", "archive-sessions", "--session", archiveSessionName]);
+  assert.equal(archivedSession.dryRun, false);
+  assert.equal(archivedSession.archived[0]?.session, archiveSessionName);
+  assert.equal(archivedSession.archived[0]?.reason, "all_workers_dead");
+  assert.match(archivedSession.note, /Git branches are unchanged/);
+  assert.equal(await fileExists(archiveSessionPath), false);
+  assert.equal(await fileExists(archiveSessionLogDir), false);
+  assert.equal(await fileExists(archivedSession.archived[0]?.paths.destinationFile ?? ""), true);
+  assert.equal(await fileExists(archivedSession.archived[0]?.paths.destinationLogDir ?? ""), true);
+
   const cliStep = await cliJson<{
     result: { stdout: string };
     finalized: { commitSha: string };
@@ -3750,4 +3801,14 @@ async function cliRaw(baseUrl: string, args: string[]): Promise<{ stdout: string
     cwd: path.resolve("."),
     env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
   });
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }

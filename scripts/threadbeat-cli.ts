@@ -1414,6 +1414,78 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson({ sessions: await listWorkerSessions(options.session) });
     return;
   }
+  if (subcommandName === "archive-sessions") {
+    const options = parseOptions(args);
+    const sessionNames = options.session ? [options.session] : await listWorkerSessionNames();
+    const archivedAt = new Date().toISOString();
+    const archiveDir = path.join(workerSessionDir, "archive", archivedAt.replace(/[:.]/g, "-"));
+    const archived: Array<{
+      session: string;
+      reason: string;
+      workers: { total: number; alive: number; dead: number } | null;
+      paths: { sessionFile: string; logDir: string; destinationFile: string; destinationLogDir: string };
+      dryRun: boolean;
+      error?: string;
+    }> = [];
+    const skipped: Array<{
+      session: string;
+      reason: string;
+      workers: { total: number; alive: number; dead: number } | null;
+      error?: string;
+    }> = [];
+    for (const sessionName of sessionNames) {
+      assertSafeSessionName(sessionName);
+      const sessionFile = workerSessionPath(sessionName);
+      const logDir = workerSessionLogDir(sessionName);
+      const destinationFile = path.join(archiveDir, `${sessionName}.json`);
+      const destinationLogDir = path.join(archiveDir, sessionName);
+      try {
+        const session = await readWorkerSession(sessionName);
+        const alive = session.workers.filter((worker) => processIsAlive(worker.pid)).length;
+        const workers = { total: session.workers.length, alive, dead: session.workers.length - alive };
+        if (alive > 0) {
+          skipped.push({ session: sessionName, reason: "workers_alive", workers });
+          continue;
+        }
+        archived.push({
+          session: sessionName,
+          reason: workers.total === 0 ? "no_recorded_workers" : "all_workers_dead",
+          workers,
+          paths: { sessionFile, logDir, destinationFile, destinationLogDir },
+          dryRun: options["dry-run"] === "1",
+        });
+      } catch (error) {
+        archived.push({
+          session: sessionName,
+          reason: "unreadable_session_record",
+          workers: null,
+          paths: { sessionFile, logDir, destinationFile, destinationLogDir },
+          dryRun: options["dry-run"] === "1",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (options["dry-run"] !== "1" && archived.length > 0) {
+      await fs.mkdir(archiveDir, { recursive: true });
+      for (const item of archived) {
+        if (await pathExists(item.paths.sessionFile)) {
+          await fs.rename(item.paths.sessionFile, item.paths.destinationFile);
+        }
+        if (await pathExists(item.paths.logDir)) {
+          await fs.rename(item.paths.logDir, item.paths.destinationLogDir);
+        }
+      }
+    }
+    await printJson({
+      archivedAt,
+      dryRun: options["dry-run"] === "1",
+      archiveDir,
+      archived,
+      skipped,
+      note: "Archived local worker-session metadata only; run records and Git branches are unchanged.",
+    });
+    return;
+  }
   if (subcommandName === "session-wait") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -3572,7 +3644,7 @@ async function startDetachedWorkerSession(
   await fs.mkdir(workerSessionDir, { recursive: true });
   const sessionPath = workerSessionPath(sessionName);
   await fs.writeFile(sessionPath, "", { encoding: "utf8", flag: "wx" });
-  const logDir = path.join(workerSessionDir, sessionName);
+  const logDir = workerSessionLogDir(sessionName);
   await fs.mkdir(logDir, { recursive: true });
   const session: WorkerSession = {
     session: sessionName,
@@ -3754,6 +3826,11 @@ async function tailFileLines(filePath: string, lineCount: number): Promise<strin
 function workerSessionPath(sessionName: string): string {
   assertSafeSessionName(sessionName);
   return path.join(workerSessionDir, `${sessionName}.json`);
+}
+
+function workerSessionLogDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, sessionName);
 }
 
 function assertSafeSessionName(value: string): void {
@@ -3994,6 +4071,7 @@ Commands:
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next]
+  runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
