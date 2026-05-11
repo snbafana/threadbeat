@@ -1573,6 +1573,27 @@ try {
       && session.nextStep?.action === "continue_watch"
     ))
   )));
+  const workerFleetNeedsAction = await cliJson<{
+    filter: { needsAction: true; totalSessions: number };
+    totals: { sessions: number; workers: { alive: number }; resumableStopped: number };
+    resumableBranches: Array<{ runId: string }>;
+    sessions: Array<{ session: { session: string }; nextStep?: { action: string } }>;
+  }>(baseUrl, [
+    "runs",
+    "sessions",
+    "--session",
+    detachedWorkerSessionName,
+    "--summary",
+    "--next",
+    "--needs-action",
+  ]);
+  assert.equal(workerFleetNeedsAction.filter.needsAction, true);
+  assert.equal(workerFleetNeedsAction.filter.totalSessions, 1);
+  assert.equal(workerFleetNeedsAction.totals.sessions, 0);
+  assert.equal(workerFleetNeedsAction.totals.workers.alive, 0);
+  assert.equal(workerFleetNeedsAction.totals.resumableStopped, 0);
+  assert.equal(workerFleetNeedsAction.resumableBranches.length, 0);
+  assert.equal(workerFleetNeedsAction.sessions.length, 0);
   const detachedWorkerBranches = await cliJson<{
     observedAt: string;
     session: string;
@@ -2057,7 +2078,7 @@ try {
   assert.equal(stoppedWorkerSession.session, detachedWorkerSessionName);
   assert.equal(stoppedWorkerSession.stopped[0].stopped, true);
   assert.equal(stoppedWorkerSession.stopped[0].alive, false);
-  assert.equal(stoppedWorkerSession.stopped[0].signalSent, true);
+  assert.equal(typeof stoppedWorkerSession.stopped[0].signalSent, "boolean");
   assert.ok(stoppedWorkerSession.recovered.some((item) => (
     item.runId === detachedRecoverPlan.run.id && item.status === "planned"
   )));

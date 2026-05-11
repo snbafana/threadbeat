@@ -256,6 +256,7 @@ npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 100
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs sessions --summary --next --max-polls 30 --interval-ms 10000
+npm run cli -- runs sessions --summary --next --needs-action
 npm run cli -- runs archive-sessions --dry-run
 npm run cli -- runs session-actions overnight
 npm run cli -- runs session-wait overnight --max-polls 30 --interval-ms 10000
@@ -450,7 +451,9 @@ stdout/stderr, `runs sessions --summary --next` to see the next action for every
 recorded session in one fleet snapshot, including a top-level `resultCommits`
 queue and a top-level `resumableBranches` queue for branch-native inspection
 across sessions. Add `--max-polls` and `--interval-ms` to stream newline-delimited
-fleet snapshots while long worker sessions run. Use `runs archive-sessions --dry-run`
+fleet snapshots while long worker sessions run. Add `--needs-action` with `--next`
+to hide sessions whose next action is only `continue_watch`, leaving restart,
+recover, result-inspection, and archive rows in the fleet queue. Use `runs archive-sessions --dry-run`
 to preview archiving dead local session records without touching run records or Git branches, and
 `runs stop-session <name>` to terminate the recorded process
 group, escalating to a forced stop if the worker ignores `SIGTERM`. Add

@@ -1314,6 +1314,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   }
   if (subcommandName === "sessions") {
     const options = parseOptions(args);
+    if (options["needs-action"] === "1" && options.next !== "1") {
+      throw new Error("runs sessions --needs-action requires --next");
+    }
     if (options.summary === "1" || options.next === "1") {
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
@@ -1503,28 +1506,41 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             };
           }
         });
+        const visibleSessions = options["needs-action"] === "1"
+          ? sessions.filter((session) => (
+            "nextStep" in session
+            && session.nextStep?.action !== "continue_watch"
+          ))
+          : sessions;
         const totals = {
-          sessions: sessions.length,
-          unavailable: sessions.filter((session) => "error" in session).length,
+          sessions: visibleSessions.length,
+          unavailable: visibleSessions.filter((session) => "error" in session).length,
           workers: {
-            total: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.total : 0), 0),
-            alive: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.alive : 0), 0),
-            dead: sessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.dead : 0), 0),
+            total: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.total : 0), 0),
+            alive: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.alive : 0), 0),
+            dead: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.session.workers.dead : 0), 0),
           },
-          runs: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.runs : 0), 0),
-          resultCommits: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resultCommits : 0), 0),
-          resumableStopped: sessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resumableStopped : 0), 0),
+          runs: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.runs : 0), 0),
+          resultCommits: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resultCommits : 0), 0),
+          resumableStopped: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resumableStopped : 0), 0),
           statuses: {} as Record<string, number>,
         };
-        for (const session of sessions) {
+        for (const session of visibleSessions) {
           if (!("totals" in session)) continue;
           for (const [runStatus, count] of Object.entries(session.totals.statuses)) {
             totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
           }
         }
-        const resultCommits = sessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
-        const resumableBranches = sessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
-        return { observedAt: new Date().toISOString(), totals, resumableBranches, resultCommits, sessions };
+        const resultCommits = visibleSessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
+        const resumableBranches = visibleSessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
+        return {
+          observedAt: new Date().toISOString(),
+          ...(options["needs-action"] === "1" ? { filter: { needsAction: true, totalSessions: sessions.length } } : {}),
+          totals,
+          resumableBranches,
+          resultCommits,
+          sessions: visibleSessions,
+        };
       };
       for (let poll = 0; poll < maxPolls; poll += 1) {
         const output = await collectFleetSummary();
@@ -3513,7 +3529,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -4292,7 +4308,7 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next] [--interval-ms 2000] [--max-polls 1]
+  runs sessions [--session <name>] [--summary] [--next] [--needs-action] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
