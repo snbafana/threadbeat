@@ -1462,6 +1462,7 @@ try {
       resultBranches: number;
       resumableBranches: number;
       recoveryCandidates: number;
+      branchNextSteps: number;
       changedResults: number | null;
       changedFiles: number | null;
       agentSummaries: Array<{
@@ -1505,9 +1506,11 @@ try {
       recoverSession: string[] | null;
       recoverStopped: string[] | null;
       resumeSession: string[] | null;
+      branchQueue: string[];
       changedResults: string[];
     };
     nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
+    branchNextSteps: Array<{ action: string; reason: string; runId: string; status: string; location: string; command: string[] }>;
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--lines", "5"]);
   assert.match(detachedWorkerReview.observedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -1519,6 +1522,7 @@ try {
   assert.ok(detachedWorkerReview.summary.resultBranches >= 1);
   assert.ok(detachedWorkerReview.summary.resumableBranches >= 1);
   assert.ok(detachedWorkerReview.summary.recoveryCandidates >= 1);
+  assert.ok(detachedWorkerReview.summary.branchNextSteps >= 2);
   assert.equal(detachedWorkerReview.summary.changedResults, null);
   assert.equal(detachedWorkerReview.summary.changedFiles, null);
   assert.ok(detachedWorkerReview.summary.agentSummaries.some((agent) => (
@@ -1539,6 +1543,10 @@ try {
     `npm run cli -- runs resume-session ${detachedWorkerSessionName}`,
   );
   assert.equal(
+    detachedWorkerReview.actions.branchQueue.join(" "),
+    `npm run cli -- runs branches --session ${detachedWorkerSessionName} --next`,
+  );
+  assert.equal(
     detachedWorkerReview.actions.changedResults.join(" "),
     `npm run cli -- runs results --session ${detachedWorkerSessionName} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results --changed-only --next`,
   );
@@ -1557,16 +1565,35 @@ try {
     && step.reason === "result_branches_available"
     && step.count >= 1
   )));
+  assert.ok(detachedWorkerReview.branchNextSteps.some((step) => (
+    step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.runId === detachedStoppedPlan.run.id
+    && step.status === "stopped"
+    && step.location === "unassigned"
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+  )));
+  assert.ok(detachedWorkerReview.branchNextSteps.some((step) => (
+    step.action === "review_branch"
+    && step.reason === "result_commit_available"
+    && step.runId === detachedResultPlan.run.id
+    && step.status === "completed"
+    && step.location === "session_worker"
+    && step.command.join(" ") === `npm run cli -- runs review ${detachedResultPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results/${detachedResultPlan.run.id}`
+  )));
   const detachedNextOnly = await cliJson<{
     session: { session: string };
-    summary: { agents: number; resultBranches: number; resumableBranches: number; recoveryCandidates: number };
+    summary: { agents: number; resultBranches: number; resumableBranches: number; recoveryCandidates: number; branchNextSteps: number };
     nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
+    branchNextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
     agents?: unknown;
     logs?: unknown;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next"]);
   assert.equal(detachedNextOnly.session.session, detachedWorkerSessionName);
   assert.equal(detachedNextOnly.summary.agents, detachedWorkerReview.summary.agents);
+  assert.equal(detachedNextOnly.summary.branchNextSteps, detachedWorkerReview.summary.branchNextSteps);
   assert.deepEqual(detachedNextOnly.nextSteps.map((step) => step.action), detachedWorkerReview.nextSteps.map((step) => step.action));
+  assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.runId), detachedWorkerReview.branchNextSteps.map((step) => step.runId));
   assert.equal(detachedNextOnly.agents, undefined);
   assert.equal(detachedNextOnly.logs, undefined);
   assert.ok(detachedWorkerReview.recoveryPreview.some((run) => (

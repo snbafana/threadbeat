@@ -1255,6 +1255,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const resumeSessionCommand = canResumeSession
       ? ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session]
       : null;
+    const branchQueueCommand = ["npm", "run", "cli", "--", "runs", "branches", "--session", status.session.session, "--next"];
     const changedResultsCommand = [
       "npm",
       "run",
@@ -1312,6 +1313,30 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         command: changedResultsCommand,
       }] : []),
     ];
+    const branchNextSteps = [
+      ...resumableBranches.map((run) => ({
+        action: "resume_branch",
+        reason: "stopped_branch_without_result_commit",
+        agentId: run.agentId,
+        runId: run.runId,
+        status: "stopped",
+        location: run.location,
+        branchName: run.branchName,
+        resultCommit: run.resultCommit,
+        command: run.commands.resumeBranch,
+      })),
+      ...resultBranches.map((run) => ({
+        action: "review_branch",
+        reason: "result_commit_available",
+        agentId: run.agentId,
+        runId: run.runId,
+        status: run.status,
+        location: run.location,
+        branchName: run.branchName,
+        resultCommit: run.resultCommit,
+        command: run.commands.reviewRun,
+      })),
+    ];
     const statuses: Record<string, number> = {};
     for (const agent of status.agents) {
       for (const [runStatus, count] of Object.entries(agent.statuses)) {
@@ -1342,6 +1367,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       recoveryCandidates: recoveryPreview.filter((run) => !run.skipped).length,
       recoverableActive: recoveryPreview.filter((run) => run.currentStatus !== "stopped" && !run.skipped).length,
       recoverableStopped: recoveryPreview.filter((run) => run.currentStatus === "stopped" && !run.skipped).length,
+      branchNextSteps: branchNextSteps.length,
       changedResults: changedResults?.length ?? null,
       changedFiles: changedResults
         ? changedResults.reduce((sum, run) => sum + run.changedFiles.length, 0)
@@ -1370,9 +1396,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         recoverSession: recoverSessionCommand,
         recoverStopped: recoverStoppedCommand,
         resumeSession: resumeSessionCommand,
+        branchQueue: branchQueueCommand,
         changedResults: changedResultsCommand,
       },
       nextSteps,
+      branchNextSteps,
       resumableBranches,
       resultBranches,
       recoveryPreview: recoveryPreview.map(({ run: _run, ...item }) => item),
@@ -1397,6 +1425,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         session: sessionReview.session,
         summary,
         nextSteps,
+        branchNextSteps,
       }
       : sessionReview);
     return;
