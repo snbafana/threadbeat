@@ -415,12 +415,23 @@ try {
   const restarted = await cliJson<{
     session: string;
     restarted: Array<{ workerId: string; pid: number | null }>;
+    status: {
+      session: {
+        command: string[];
+        workers: Array<{ workerId: string; alive: boolean }>;
+      };
+    };
     wait: {
       completed: boolean;
       timedOut: boolean;
       polls: number;
       summary: { workers: { total: number; alive: number; dead: number } };
-      commands: { sessionWatch: string[]; stopSession: string[]; restartSession: string[] };
+      commands: {
+        sessionWatch: string[];
+        stopSession: string[];
+        restartSession: string[];
+        restartSessionWithStopped: string[];
+      };
       nextStep: { action: string; reason: string; command: string[] };
     };
   }>(baseUrl, [
@@ -428,6 +439,7 @@ try {
     "restart-session",
     sessionName,
     "--recover",
+    "--resume-stopped",
     "--wait",
     "--interval-ms",
     "100",
@@ -437,6 +449,10 @@ try {
   assert.equal(restarted.session, sessionName);
   assert.deepEqual(restarted.restarted.map((worker) => worker.workerId), ["detached-smoke-worker-1"]);
   assert.equal(typeof restarted.restarted[0].pid, "number");
+  assert.ok(restarted.status.session.command.includes("--resume-stopped"));
+  assert.ok(restarted.status.session.workers.some((worker) => (
+    worker.workerId === "detached-smoke-worker-1" && worker.alive
+  )));
   assert.equal(restarted.wait.completed, false);
   assert.equal(restarted.wait.timedOut, true);
   assert.equal(restarted.wait.polls, 1);
@@ -449,6 +465,22 @@ try {
   assert.equal(restarted.wait.commands.sessionWatch.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
   assert.equal(restarted.wait.commands.stopSession.join(" "), `npm run cli -- runs stop-session ${sessionName} --recover`);
   assert.equal(restarted.wait.commands.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
+  assert.equal(
+    restarted.wait.commands.restartSessionWithStopped.join(" "),
+    `npm run cli -- runs restart-session ${sessionName} --recover --resume-stopped`,
+  );
+
+  let deadWorkerStoppedRun: { run: { status: string } } | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    deadWorkerStoppedRun = await cliJson<{ run: { status: string } }>(baseUrl, [
+      "runs",
+      "get",
+      deadWorkerStoppedPlan.run.id,
+    ]);
+    if (deadWorkerStoppedRun.run.status === "running") break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(deadWorkerStoppedRun?.run.status, "running");
 } finally {
   if (sessionStarted && baseUrl !== null) {
     try {
