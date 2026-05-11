@@ -1308,6 +1308,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const shouldReviewChangedResults = changedResults === null
       ? resultBranches.length > 0
       : changedResults.length > 0;
+    const recoverableStoppedRunIds = new Set(recoveryPreview
+      .filter((run) => run.currentStatus === "stopped" && !run.skipped)
+      .map((run) => run.runId));
     const nextSteps = [
       ...(restartSessionWithStoppedCommand ? [{
         action: "restart_session_with_stopped",
@@ -1360,8 +1363,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         location: run.location,
         branchName: run.branchName,
         resultCommit: run.resultCommit,
+        recoverable: recoverableStoppedRunIds.has(run.runId),
         command: run.commands.resumeBranch,
-        commands: run.commands,
+        commands: {
+          ...run.commands,
+          recoverStopped: recoverableStoppedRunIds.has(run.runId) ? recoverStoppedCommand : null,
+        },
       })),
       ...resultBranches.map((run) => ({
         action: "review_branch",

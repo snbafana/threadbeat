@@ -1535,12 +1535,14 @@ try {
       objective: string;
       workerId: string | null;
       location: string;
+      recoverable?: boolean;
       command: string[];
       commands: {
         checkoutBranch: string[];
         reviewRun?: string[];
         inspectRun?: string[];
         resumeBranch?: string[];
+        recoverStopped?: string[] | null;
       };
     }>;
     logs: Array<{ workerId: string; alive: boolean; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
@@ -1605,9 +1607,11 @@ try {
     && step.objective === "detached stopped branch"
     && step.workerId === null
     && step.location === "unassigned"
+    && step.recoverable === true
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
     && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${detachedStoppedPlan.run.id} --dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
     && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+    && step.commands.recoverStopped?.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`
   )));
   assert.ok(detachedWorkerReview.branchNextSteps.some((step) => (
     step.action === "review_branch"
@@ -1625,7 +1629,7 @@ try {
     session: { session: string };
     summary: { agents: number; resultBranches: number; resumableBranches: number; recoveryCandidates: number; branchNextSteps: number };
     nextSteps: Array<{ action: string; reason: string; count: number; command: string[] }>;
-    branchNextSteps: Array<{ action: string; reason: string; runId: string; objective: string; workerId: string | null; command: string[]; commands: { checkoutBranch: string[] } }>;
+    branchNextSteps: Array<{ action: string; reason: string; runId: string; objective: string; workerId: string | null; recoverable?: boolean; command: string[]; commands: { checkoutBranch: string[]; recoverStopped?: string[] | null } }>;
     agents?: unknown;
     logs?: unknown;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next"]);
@@ -1636,9 +1640,14 @@ try {
   assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.runId), detachedWorkerReview.branchNextSteps.map((step) => step.runId));
   assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.objective), detachedWorkerReview.branchNextSteps.map((step) => step.objective));
   assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.workerId), detachedWorkerReview.branchNextSteps.map((step) => step.workerId));
+  assert.deepEqual(detachedNextOnly.branchNextSteps.map((step) => step.recoverable ?? null), detachedWorkerReview.branchNextSteps.map((step) => step.recoverable ?? null));
   assert.deepEqual(
     detachedNextOnly.branchNextSteps.map((step) => step.commands.checkoutBranch.join(" ")),
     detachedWorkerReview.branchNextSteps.map((step) => step.commands.checkoutBranch.join(" ")),
+  );
+  assert.deepEqual(
+    detachedNextOnly.branchNextSteps.map((step) => step.commands.recoverStopped?.join(" ") ?? null),
+    detachedWorkerReview.branchNextSteps.map((step) => step.commands.recoverStopped?.join(" ") ?? null),
   );
   assert.equal(detachedNextOnly.agents, undefined);
   assert.equal(detachedNextOnly.logs, undefined);
