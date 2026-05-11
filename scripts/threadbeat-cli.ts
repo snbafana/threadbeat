@@ -1317,9 +1317,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["needs-action"] === "1" && options.next !== "1") {
       throw new Error("runs sessions --needs-action requires --next");
     }
+    if (options.action && options.next !== "1") {
+      throw new Error("runs sessions --action requires --next");
+    }
+    if (options["branch-action"] && options.next !== "1") {
+      throw new Error("runs sessions --branch-action requires --next");
+    }
     if (options.summary === "1" || options.next === "1") {
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+      const actionFilter = options.action ? new Set(parseList(options.action)) : null;
+      const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
       const collectFleetSummary = async () => {
         const sessionNames = options.session ? [options.session] : await listWorkerSessionNames();
         const sessions = await mapConcurrent(sessionNames, 4, async (listedSessionName) => {
@@ -1506,12 +1514,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             };
           }
         });
-        const visibleSessions = options["needs-action"] === "1"
+        let visibleSessions = options["needs-action"] === "1"
           ? sessions.filter((session) => (
             "nextStep" in session
             && session.nextStep?.action !== "continue_watch"
           ))
           : sessions;
+        if (actionFilter) {
+          visibleSessions = visibleSessions.filter((session) => (
+            "nextStep" in session
+            && session.nextStep
+            && actionFilter.has(session.nextStep.action)
+          ));
+        }
         const totals = {
           sessions: visibleSessions.length,
           unavailable: visibleSessions.filter((session) => "error" in session).length,
@@ -1531,10 +1546,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             totals.statuses[runStatus] = (totals.statuses[runStatus] ?? 0) + count;
           }
         }
-        const resultCommits = visibleSessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
-        const resumableBranches = visibleSessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
-        const branchActionQueue = [
-          ...resumableBranches.map((run) => ({
+        const visibleResultCommits = visibleSessions.flatMap((session) => ("resultCommits" in session ? session.resultCommits : []));
+        const visibleResumableBranches = visibleSessions.flatMap((session) => ("resumableBranches" in session ? session.resumableBranches : []));
+        const allBranchActionQueue = [
+          ...visibleResumableBranches.map((run) => ({
             session: run.session,
             action: "resume_branch",
             reason: "stopped_branch_without_result_commit",
@@ -1549,7 +1564,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             command: run.commands.resumeBranch,
             commands: run.commands,
           })),
-          ...resultCommits.map((run) => ({
+          ...visibleResultCommits.map((run) => ({
             session: run.session,
             action: "review_branch",
             reason: "result_commit_available",
@@ -1565,6 +1580,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             commands: run.commands,
           })),
         ];
+        const branchActionQueue = branchActionFilter
+          ? allBranchActionQueue.filter((item) => branchActionFilter.has(item.action))
+          : allBranchActionQueue;
+        const resultCommits = branchActionFilter && !branchActionFilter.has("review_branch")
+          ? []
+          : visibleResultCommits;
+        const resumableBranches = branchActionFilter && !branchActionFilter.has("resume_branch")
+          ? []
+          : visibleResumableBranches;
         const branchActions = branchActionQueue.reduce((counts, item) => {
           counts[item.action] = (counts[item.action] ?? 0) + 1;
           return counts;
@@ -1581,9 +1605,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           counts[item.action] = (counts[item.action] ?? 0) + 1;
           return counts;
         }, {} as Record<string, number>);
+        const filter = {
+          ...(options["needs-action"] === "1" ? { needsAction: true } : {}),
+          ...(actionFilter ? { action: [...actionFilter] } : {}),
+          ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+          ...(
+            options["needs-action"] === "1" || actionFilter || branchActionFilter
+              ? { totalSessions: sessions.length }
+              : {}
+          ),
+        };
         return {
           observedAt: new Date().toISOString(),
-          ...(options["needs-action"] === "1" ? { filter: { needsAction: true, totalSessions: sessions.length } } : {}),
+          ...(Object.keys(filter).length > 0 ? { filter } : {}),
           totals,
           ...(options.next === "1" ? { nextActions, actionQueue, branchActions, branchActionQueue } : {}),
           resumableBranches,
@@ -4359,7 +4393,7 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next] [--needs-action] [--interval-ms 2000] [--max-polls 1]
+  runs sessions [--session <name>] [--summary] [--next] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>

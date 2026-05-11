@@ -456,7 +456,9 @@ commands, plus `branchActions` counts and a `branchActionQueue` of runnable
 resume/review commands for durable run branches across sessions. Add `--max-polls`
 and `--interval-ms` to stream newline-delimited fleet snapshots while long
 worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
-next action is only `continue_watch`, leaving restart,
+next action is only `continue_watch`, `--action <name>` to show only matching
+session next-actions, or `--branch-action resume_branch|review_branch` to narrow
+the branch command queue without mutating any run branch, leaving restart,
 recover, result-inspection, and archive rows in the fleet queue. Use `runs archive-sessions --dry-run`
 to preview archiving dead local session records without touching run records or Git branches, and
 `runs stop-session <name>` to terminate the recorded process

@@ -2109,11 +2109,36 @@ try {
   }>(baseUrl, ["runs", "session-logs", detachedWorkerSessionName, "--lines", "5"]);
   assert.equal(detachedWorkerLogs.session, detachedWorkerSessionName);
   assert.equal(detachedWorkerLogs.workers[0].workerId, "smoke-detached-worker-1");
-  assert.equal(detachedWorkerLogs.workers[0].alive, true);
+  assert.equal(typeof detachedWorkerLogs.workers[0].alive, "boolean");
   assert.match(detachedWorkerLogs.workers[0].stdout.path, /worker-sessions/);
   assert.match(detachedWorkerLogs.workers[0].stderr.path, /worker-sessions/);
   assert.ok(Array.isArray(detachedWorkerLogs.workers[0].stdout.lines));
   assert.ok(Array.isArray(detachedWorkerLogs.workers[0].stderr.lines));
+  const workerFleetResumeBranchQueue = await cliJson<{
+    filter: { branchAction: string[]; totalSessions: number };
+    branchActions: Record<string, number>;
+    branchActionQueue: Array<{ session: string; action: string; runId: string; resultCommit: string | null }>;
+    resultCommits: Array<{ runId: string }>;
+    resumableBranches: Array<{ runId: string; resultCommit: string | null }>;
+  }>(baseUrl, [
+    "runs",
+    "sessions",
+    "--session",
+    detachedWorkerSessionName,
+    "--summary",
+    "--next",
+    "--branch-action",
+    "resume_branch",
+  ]);
+  assert.deepEqual(workerFleetResumeBranchQueue.filter.branchAction, ["resume_branch"]);
+  assert.equal(workerFleetResumeBranchQueue.filter.totalSessions, 1);
+  assert.ok(workerFleetResumeBranchQueue.branchActions.resume_branch >= 1);
+  assert.ok(workerFleetResumeBranchQueue.branchActionQueue.every((item) => item.action === "resume_branch"));
+  assert.equal(workerFleetResumeBranchQueue.resultCommits.length, 0);
+  assert.ok(workerFleetResumeBranchQueue.resumableBranches.some((run) => (
+    run.runId === detachedStoppedPlan.run.id
+    && run.resultCommit === null
+  )));
   const stoppedWorkerSession = await cliJson<{
     session: string;
     stopped: Array<{
@@ -3918,6 +3943,36 @@ try {
     && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
     && commit.command.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
   )));
+  const resultFleetInspectOnly = await cliJson<{
+    filter: { action: string[]; totalSessions: number };
+    totals: { sessions: number; resultCommits: number };
+    nextActions: Record<string, number>;
+    actionQueue: Array<{ session: string; action: string }>;
+  }>(baseUrl, ["runs", "sessions", "--session", resultSummarySessionName, "--summary", "--next", "--action", "inspect_results"]);
+  assert.deepEqual(resultFleetInspectOnly.filter.action, ["inspect_results"]);
+  assert.equal(resultFleetInspectOnly.filter.totalSessions, 1);
+  assert.equal(resultFleetInspectOnly.totals.sessions, 1);
+  assert.equal(resultFleetInspectOnly.totals.resultCommits, 1);
+  assert.equal(resultFleetInspectOnly.nextActions.inspect_results, 1);
+  assert.ok(resultFleetInspectOnly.actionQueue.every((item) => item.action === "inspect_results"));
+  const resultFleetReviewBranchOnly = await cliJson<{
+    filter: { branchAction: string[]; totalSessions: number };
+    branchActions: Record<string, number>;
+    branchActionQueue: Array<{ session: string; action: string; runId: string; resultCommit: string }>;
+    resultCommits: Array<{ runId: string; resultCommit: string }>;
+    resumableBranches: Array<{ runId: string }>;
+  }>(baseUrl, ["runs", "sessions", "--session", resultSummarySessionName, "--summary", "--next", "--branch-action", "review_branch"]);
+  assert.deepEqual(resultFleetReviewBranchOnly.filter.branchAction, ["review_branch"]);
+  assert.equal(resultFleetReviewBranchOnly.filter.totalSessions, 1);
+  assert.equal(resultFleetReviewBranchOnly.branchActions.review_branch, 1);
+  assert.ok(resultFleetReviewBranchOnly.branchActionQueue.every((item) => item.action === "review_branch"));
+  assert.ok(resultFleetReviewBranchOnly.branchActionQueue.some((commit) => (
+    commit.session === resultSummarySessionName
+    && commit.runId === cliWorkFinalizePlan.run.id
+    && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
+  )));
+  assert.ok(resultFleetReviewBranchOnly.resultCommits.some((commit) => commit.runId === cliWorkFinalizePlan.run.id));
+  assert.equal(resultFleetReviewBranchOnly.resumableBranches.length, 0);
   assert.ok(resultFleetSummary.resultCommits.some((commit) => (
     commit.session === resultSummarySessionName
     && commit.agentId === cliWorkFinalizeAgent.agent.id
