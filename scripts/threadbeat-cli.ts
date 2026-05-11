@@ -717,10 +717,41 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ...(changedFiles ? { changedFiles } : {}),
         agents,
       };
+      const nextSteps = agents.flatMap((agent) => agent.runs.map((run) => {
+        const review = (run as typeof run & { review?: { changedFiles: unknown[]; commits: unknown[]; error?: unknown } }).review;
+        const hasReviewChange = review
+          ? review.changedFiles.length > 0 || review.commits.length > 0 || Boolean(review.error)
+          : false;
+        return {
+          action: hasReviewChange ? "review_changed_result" : "review_result",
+          reason: hasReviewChange
+            ? "changed_result_branch"
+            : run.resultCommit
+              ? "result_branch_available"
+              : "branch_available",
+          agentId: agent.agentId,
+          runId: run.id,
+          status: run.status,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          changedFiles: review?.changedFiles.length ?? null,
+          commits: review?.commits.length ?? null,
+          command: run.commands.reviewRun,
+        };
+      }));
+      const output = options.next === "1"
+        ? {
+          observedAt: snapshot.observedAt,
+          ...(options.session ? { session: options.session } : {}),
+          ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
+          summary: snapshot.summary,
+          nextSteps,
+        }
+        : snapshot;
       if (maxPolls === 1) {
-        await printJson(snapshot);
+        await printJson(output);
       } else {
-        console.log(JSON.stringify(snapshot));
+        console.log(JSON.stringify(output));
         if (poll + 1 < maxPolls) await sleep(intervalMs);
       }
     }
@@ -1157,6 +1188,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       "--checkout-dir",
       resultCheckoutDir,
       "--changed-only",
+      "--next",
     ];
     const shouldReviewChangedResults = changedResults === null
       ? resultBranches.length > 0
@@ -2710,7 +2742,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>]
   runs session-status <name> [--status planned,running,stopped]

@@ -1474,7 +1474,7 @@ try {
   );
   assert.equal(
     detachedWorkerReview.actions.changedResults.join(" "),
-    `npm run cli -- runs results --session ${detachedWorkerSessionName} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results --changed-only`,
+    `npm run cli -- runs results --session ${detachedWorkerSessionName} --checkout-dir ./checkouts/${detachedWorkerSessionName}-results --changed-only --next`,
   );
   const detachedNextStepActions = detachedWorkerReview.nextSteps.map((step) => step.action);
   assert.ok(detachedNextStepActions.indexOf("recover_stopped") >= 0);
@@ -2620,6 +2620,45 @@ try {
   const changedOnlyFileCount = changedOnlyResults.agents
     .flatMap((agent) => agent.runs)
     .flatMap((run) => run.review?.changedFiles ?? []).length;
+  const changedOnlyNext = await cliJson<{
+    checkoutDir: string;
+    summary: { total: number; changed: number | null; changedFiles: number | null };
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      agentId: string;
+      runId: string;
+      changedFiles: number | null;
+      commits: number | null;
+      command: string[];
+    }>;
+    agents?: unknown;
+  }>(baseUrl, [
+    "runs",
+    "results",
+    "--agent",
+    checkoutAgent.agent.id,
+    "--status",
+    "stopped",
+    "--checkout-dir",
+    changedOnlyResultsDir,
+    "--changed-only",
+    "--next",
+  ]);
+  assert.equal(changedOnlyNext.checkoutDir, changedOnlyResults.checkoutDir);
+  assert.equal(changedOnlyNext.summary.total, changedOnlyResults.summary.total);
+  assert.equal(changedOnlyNext.summary.changed, changedOnlyResults.summary.changed);
+  assert.equal(changedOnlyNext.summary.changedFiles, changedOnlyResults.summary.changedFiles);
+  assert.equal(changedOnlyNext.agents, undefined);
+  assert.ok(changedOnlyNext.nextSteps.some((step) => (
+    step.action === "review_changed_result"
+    && step.reason === "changed_result_branch"
+    && step.agentId === checkoutAgent.agent.id
+    && step.runId === checkoutPlan.run.id
+    && step.changedFiles === 1
+    && step.commits === 1
+    && step.command.join(" ") === `npm run cli -- runs review ${checkoutPlan.run.id} --checkout-dir ${changedOnlyResultsDir}/${checkoutPlan.run.id}`
+  )));
   assert.equal(changedOnlyResults.summary.changedFiles, changedOnlyFileCount);
   assert.ok(changedOnlyResults.changedFiles.every((file) => file.path.length > 0));
   assert.ok(changedOnlyAgent?.runs.some((run) => run.id === checkoutPlan.run.id));

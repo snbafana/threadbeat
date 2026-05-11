@@ -211,6 +211,7 @@ npm run cli -- runs results --session overnight
 npm run cli -- runs results --session overnight --worker-id worker-a
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only
+npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-path report.md
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
@@ -298,7 +299,8 @@ Run planning is intentionally server-side and Pi-free for now:
   error, or `--changed-path <path[,path]>` to show only runs that changed
   specific paths. Result rows also include `commands.checkoutBranch`,
   `commands.reviewRun`, and `commands.inspectRun` commands for branch-native
-  inspection. Add
+  inspection. Add `--next` to return only the compact ordered review commands
+  for the visible result rows. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
   long session runs.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
@@ -404,7 +406,8 @@ worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
 runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, top-level result/resumable/changed counts,
 copyable checkout/review/inspect commands, and a `changedFiles` index when local
-checkouts are requested with `--checkout-dir`. Add `--worker-id <id>` to review
+checkouts are requested with `--checkout-dir`. Add `--next` to emit only the
+review commands for the visible result rows. Add `--worker-id <id>` to review
 only branches claimed by one worker.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
