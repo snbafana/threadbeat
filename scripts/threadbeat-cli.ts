@@ -1008,6 +1008,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const superviseActions = {
       sessionStatus: ["npm", "run", "cli", "--", "runs", "session-status", sessionName, "--recoverable", "--include-stopped"],
       sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
+      sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next"],
+      sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
       sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
@@ -1078,6 +1080,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         status: finalStatus,
         commands: {
           sessionWatch: superviseActions.sessionWatch,
+          sessionSummary: superviseActions.sessionSummary,
+          sessionSummaryWatch: superviseActions.sessionSummaryWatch,
           sessionReview: superviseActions.sessionReview,
           branchQueue: superviseActions.branchQueue,
           results: superviseActions.results,
@@ -1130,6 +1134,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const dispatchActions = {
       sessionStatus: ["npm", "run", "cli", "--", "runs", "session-status", sessionName, "--recoverable", "--include-stopped"],
       sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
+      sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next"],
+      sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
       sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
@@ -1247,6 +1253,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         status: finalStatus,
         commands: {
           sessionWatch: dispatchActions.sessionWatch,
+          sessionSummary: dispatchActions.sessionSummary,
+          sessionSummaryWatch: dispatchActions.sessionSummaryWatch,
           sessionReview: dispatchActions.sessionReview,
           branchQueue: dispatchActions.branchQueue,
           results: dispatchActions.results,
@@ -1289,6 +1297,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped,completed,failed"));
     const actions = {
       sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
+      sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", requiredSessionName, "--next"],
+      sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", requiredSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
       sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
       branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", requiredSessionName, "--next"],
       results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
@@ -1408,6 +1418,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         sessionStatus: ["npm", "run", "cli", "--", "runs", "session-status", sessionName, "--recoverable", "--include-stopped"],
         sessionWait: ["npm", "run", "cli", "--", "runs", "session-wait", sessionName],
         sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", sessionName, "--recoverable", "--include-stopped", "--next"],
+        sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next"],
+        sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", sessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
         sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", sessionName, "--include-stopped"],
         branchQueue: ["npm", "run", "cli", "--", "runs", "branches", "--session", sessionName, "--next"],
         results: ["npm", "run", "cli", "--", "runs", "results", "--session", sessionName],
@@ -1982,6 +1994,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       summary,
       agents: status.agents,
       actions: {
+        sessionSummary: ["npm", "run", "cli", "--", "runs", "session-summary", status.session.session, "--next"],
+        sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", status.session.session, "--next", "--max-polls", "30", "--interval-ms", "10000"],
         restartSession: restartSessionCommand,
         restartSessionWithStopped: restartSessionWithStoppedCommand,
         recoverSession: recoverSessionCommand,

@@ -1309,6 +1309,8 @@ try {
       sessionStatus: string[];
       sessionWait: string[];
       sessionWatch: string[];
+      sessionSummary: string[];
+      sessionSummaryWatch: string[];
       sessionReview: string[];
       branchQueue: string[];
       results: string[];
@@ -1323,6 +1325,8 @@ try {
   assert.equal(detachedWorkerActions.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${detachedWorkerSessionName} --recoverable --include-stopped`);
   assert.equal(detachedWorkerActions.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${detachedWorkerSessionName}`);
   assert.equal(detachedWorkerActions.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${detachedWorkerSessionName} --recoverable --include-stopped --next`);
+  assert.equal(detachedWorkerActions.actions.sessionSummary.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next`);
+  assert.equal(detachedWorkerActions.actions.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(detachedWorkerActions.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${detachedWorkerSessionName} --include-stopped`);
   assert.equal(detachedWorkerActions.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${detachedWorkerSessionName} --next`);
   assert.equal(detachedWorkerActions.actions.results.join(" "), `npm run cli -- runs results --session ${detachedWorkerSessionName}`);
@@ -1613,6 +1617,8 @@ try {
       recoverSession: string[] | null;
       recoverStopped: string[] | null;
       resumeSession: string[] | null;
+      sessionSummary: string[];
+      sessionSummaryWatch: string[];
       branchQueue: string[];
       changedResults: string[];
     };
@@ -1658,6 +1664,8 @@ try {
   )));
   assert.equal(detachedWorkerReview.actions.restartSession, null);
   assert.equal(detachedWorkerReview.actions.restartSessionWithStopped, null);
+  assert.equal(detachedWorkerReview.actions.sessionSummary.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next`);
+  assert.equal(detachedWorkerReview.actions.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(
     detachedWorkerReview.actions.recoverStopped?.join(" "),
     `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`,
@@ -2087,6 +2095,8 @@ try {
     actions: {
       sessionStatus: string[];
       sessionWatch: string[];
+      sessionSummary: string[];
+      sessionSummaryWatch: string[];
       sessionReview: string[];
       branchQueue: string[];
       results: string[];
@@ -2121,6 +2131,8 @@ try {
   assert.equal(typeof supervised.session.workers[0].pid, "number");
   assert.equal(supervised.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${superviseSessionName} --recoverable --include-stopped`);
   assert.equal(supervised.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${superviseSessionName} --recoverable --include-stopped --next`);
+  assert.equal(supervised.actions.sessionSummary.join(" "), `npm run cli -- runs session-summary ${superviseSessionName} --next`);
+  assert.equal(supervised.actions.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${superviseSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(supervised.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${superviseSessionName} --include-stopped`);
   assert.equal(supervised.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${superviseSessionName} --next`);
   assert.equal(supervised.actions.results.join(" "), `npm run cli -- runs results --session ${superviseSessionName}`);
@@ -2181,7 +2193,7 @@ try {
     dryRun: boolean;
     planned: Array<{ agentId: string; objective: string }>;
     session: { session: string; workerCount: number; command: string[] };
-    actions: { sessionWatch: string[]; sessionReview: string[]; results: string[]; sessionLogs: string[]; stopSession: string[] };
+    actions: { sessionWatch: string[]; sessionSummary: string[]; sessionSummaryWatch: string[]; sessionReview: string[]; results: string[]; sessionLogs: string[]; stopSession: string[] };
   }>(baseUrl, [
     "runs",
     "dispatch",
@@ -2216,6 +2228,8 @@ try {
   assert.equal(dispatchPreview.session.workerCount, 1);
   assert.ok(dispatchPreview.session.command.includes("--loop"));
   assert.equal(dispatchPreview.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${dispatchSessionName} --recoverable --include-stopped --next`);
+  assert.equal(dispatchPreview.actions.sessionSummary.join(" "), `npm run cli -- runs session-summary ${dispatchSessionName} --next`);
+  assert.equal(dispatchPreview.actions.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${dispatchSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(dispatchPreview.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${dispatchSessionName} --include-stopped`);
   assert.equal(dispatchPreview.actions.results.join(" "), `npm run cli -- runs results --session ${dispatchSessionName}`);
   assert.equal(dispatchPreview.actions.sessionLogs.join(" "), `npm run cli -- runs session-logs ${dispatchSessionName}`);
@@ -2256,6 +2270,8 @@ try {
     actions: {
       sessionStatus: string[];
       sessionWatch: string[];
+      sessionSummary: string[];
+      sessionSummaryWatch: string[];
       sessionReview: string[];
       branchQueue: string[];
       results: string[];
@@ -2299,6 +2315,8 @@ try {
   assert.equal(typeof dispatched.session.workers[0].pid, "number");
   assert.equal(dispatched.actions.sessionStatus.join(" "), `npm run cli -- runs session-status ${dispatchSessionName} --recoverable --include-stopped`);
   assert.equal(dispatched.actions.sessionWatch.join(" "), `npm run cli -- runs session-watch ${dispatchSessionName} --recoverable --include-stopped --next`);
+  assert.equal(dispatched.actions.sessionSummary.join(" "), `npm run cli -- runs session-summary ${dispatchSessionName} --next`);
+  assert.equal(dispatched.actions.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${dispatchSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(dispatched.actions.sessionReview.join(" "), `npm run cli -- runs session-review ${dispatchSessionName} --include-stopped`);
   assert.equal(dispatched.actions.branchQueue.join(" "), `npm run cli -- runs branches --session ${dispatchSessionName} --next`);
   assert.equal(dispatched.actions.results.join(" "), `npm run cli -- runs results --session ${dispatchSessionName}`);
