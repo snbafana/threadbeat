@@ -2087,6 +2087,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-summary") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-summary --format must be json or shell");
+    }
+    if (options["commands-only"] === "1" && options.next !== "1") {
+      throw new Error("runs session-summary --commands-only requires --next");
+    }
+    if (options.action && options.next !== "1") {
+      throw new Error("runs session-summary --action requires --next");
+    }
+    if (options["branch-action"] && options.next !== "1") {
+      throw new Error("runs session-summary --branch-action requires --next");
+    }
+    if (options.format && options.next !== "1") {
+      throw new Error("runs session-summary --format requires --next");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-summary --format shell requires --commands-only");
+    }
+    const actionFilter = options.action ? new Set(parseList(options.action)) : null;
+    const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
     const requiredSessionName = required(sessionName, "runs session-summary <session>");
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
@@ -2244,14 +2265,107 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                       reason: "dead_session_without_runs",
                       command: commands.archiveSessionPreview,
                     }
-                    : {
+                  : {
                     action: "review_session",
                     reason: "no_active_work",
                     command: commands.sessionReview,
                   }
         : null;
+      const allActionQueue = nextStep
+        ? [{
+          session: requiredSessionName,
+          action: nextStep.action,
+          reason: nextStep.reason,
+          command: nextStep.command,
+        }]
+        : [];
+      const actionQueue = actionFilter
+        ? allActionQueue.filter((item) => actionFilter.has(item.action))
+        : allActionQueue;
+      const nextActions = actionQueue.reduce((counts, item) => {
+        counts[item.action] = (counts[item.action] ?? 0) + 1;
+        return counts;
+      }, {} as Record<string, number>);
+      const allBranchActionQueue = [
+        ...resumableBranches.map((run) => ({
+          session: requiredSessionName,
+          action: "resume_branch",
+          reason: "stopped_branch_without_result_commit",
+          agentId: run.agentId,
+          runId: run.runId,
+          status: run.status,
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          command: run.commands.resumeBranch,
+          commands: run.commands,
+        })),
+        ...resultCommits.map((run) => ({
+          session: requiredSessionName,
+          action: "review_branch",
+          reason: "result_commit_available",
+          agentId: run.agentId,
+          runId: run.runId,
+          status: run.status,
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          command: run.commands.reviewRun,
+          commands: run.commands,
+        })),
+      ];
+      const branchActionQueue = branchActionFilter
+        ? allBranchActionQueue.filter((item) => branchActionFilter.has(item.action))
+        : allBranchActionQueue;
+      const branchActions = branchActionQueue.reduce((counts, item) => {
+        counts[item.action] = (counts[item.action] ?? 0) + 1;
+        return counts;
+      }, {} as Record<string, number>);
+      const visibleResumableBranches = branchActionFilter && !branchActionFilter.has("resume_branch")
+        ? []
+        : resumableBranches;
+      const visibleResultCommits = branchActionFilter && !branchActionFilter.has("review_branch")
+        ? []
+        : resultCommits;
+      const filter = {
+        ...(actionFilter ? { action: [...actionFilter] } : {}),
+        ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+        ...(actionFilter || branchActionFilter ? {
+          totalActions: allActionQueue.length,
+          totalBranchActions: allBranchActionQueue.length,
+        } : {}),
+      };
+      const commandQueue = [
+        ...actionQueue.map((item) => ({
+          scope: "session",
+          session: item.session,
+          action: item.action,
+          reason: item.reason,
+          command: item.command,
+        })),
+        ...branchActionQueue.map((item) => ({
+          scope: "branch",
+          session: item.session,
+          action: item.action,
+          reason: item.reason,
+          agentId: item.agentId,
+          runId: item.runId,
+          status: item.status,
+          objective: item.objective,
+          workerId: item.workerId,
+          location: item.location,
+          branchName: item.branchName,
+          resultCommit: item.resultCommit,
+          command: item.command,
+        })),
+      ];
       const output = {
         observedAt: new Date().toISOString(),
+        ...(Object.keys(filter).length > 0 ? { filter } : {}),
         session: {
           session: status.session.session,
           command: status.session.command,
@@ -2265,12 +2379,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           },
         },
         totals,
-        resumableBranches,
-        resultCommits,
+        ...(options["commands-only"] === "1"
+          ? {}
+          : {
+            resumableBranches: visibleResumableBranches,
+            resultCommits: visibleResultCommits,
+          }),
         agents: summaryAgents,
-        ...(commands ? { commands, nextStep } : {}),
+        ...(commands ? {
+          commands,
+          nextStep,
+          nextActions,
+          actionQueue,
+          branchActions,
+          branchActionQueue,
+        } : {}),
+        ...(options["commands-only"] === "1" ? { commands: commandQueue } : {}),
       };
-      if (maxPolls === 1) {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commandQueue);
+      } else if (maxPolls === 1) {
         await printJson(output);
       } else {
         console.log(JSON.stringify(output));
@@ -5108,7 +5236,7 @@ Commands:
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped]
-  runs session-summary <name> [--next] [--interval-ms 2000] [--max-polls 1]
+  runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--format json|shell]

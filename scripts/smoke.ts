@@ -1487,6 +1487,50 @@ try {
     && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${detachedStoppedPlan.run.id} --checkout-dir ./checkouts/${detachedWorkerSessionName}-resumable/${detachedStoppedPlan.run.id}`
     && run.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
   )));
+  const detachedWorkerSummaryCommands = await cliJson<{
+    filter: { branchAction: string[]; totalActions: number; totalBranchActions: number };
+    nextActions: Record<string, number>;
+    branchActions: Record<string, number>;
+    commands: Array<{ scope: string; action: string; runId?: string; resultCommit?: string | null; command: string[] }>;
+    resumableBranches?: unknown;
+    resultCommits?: unknown;
+  }>(baseUrl, [
+    "runs",
+    "session-summary",
+    detachedWorkerSessionName,
+    "--next",
+    "--commands-only",
+    "--branch-action",
+    "resume_branch",
+  ]);
+  assert.deepEqual(detachedWorkerSummaryCommands.filter.branchAction, ["resume_branch"]);
+  assert.equal(detachedWorkerSummaryCommands.filter.totalActions, 1);
+  assert.ok(detachedWorkerSummaryCommands.filter.totalBranchActions >= 1);
+  assert.equal(detachedWorkerSummaryCommands.nextActions.continue_watch, 1);
+  assert.ok(detachedWorkerSummaryCommands.branchActions.resume_branch >= 1);
+  assert.equal(detachedWorkerSummaryCommands.resumableBranches, undefined);
+  assert.equal(detachedWorkerSummaryCommands.resultCommits, undefined);
+  assert.ok(detachedWorkerSummaryCommands.commands.some((item) => (
+    item.scope === "branch"
+    && item.action === "resume_branch"
+    && item.runId === detachedStoppedPlan.run.id
+    && item.resultCommit === null
+    && item.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
+  )));
+  const detachedWorkerSummaryCommandsShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-summary",
+    detachedWorkerSessionName,
+    "--next",
+    "--commands-only",
+    "--branch-action",
+    "resume_branch",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(detachedWorkerSummaryCommandsShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`,
+  ));
   const workerFleetSummary = await cliJson<{
     totals: { sessions: number; unavailable: number; workers: { alive: number }; resumableStopped: number };
     branchActions: Record<string, number>;

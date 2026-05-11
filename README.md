@@ -510,7 +510,10 @@ payload includes a top-level `resultCommits` list with run ids, branch names,
 commit SHAs, worker ownership, and checkout/review/inspect commands for
 branch-native result inspection, plus a top-level `resumableBranches` list with
 checkout/review/inspect/resume commands for stopped branches that do not have a
-result commit yet.
+result commit yet. Add `--commands-only` with `--next` to emit only the runnable
+session and branch command queue, or `--format shell` to print copyable commands;
+use `--action <name>` or `--branch-action resume_branch|review_branch` to narrow
+that queue without mutating any branch.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete
