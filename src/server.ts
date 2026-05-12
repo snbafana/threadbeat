@@ -26,6 +26,7 @@ import {
   summarizeWorkerSessionApplyDrains,
 } from "./workerSessionDrains.js";
 import {
+  listWorkerSessionWatchWorkerNextSteps,
   listWorkerSessionWatchWorkers,
   restartWorkerSessionWatchWorker,
   startWorkerSessionWatchWorker,
@@ -384,6 +385,18 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         count: workers.length,
         workers,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/watch-workers/next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      return {
+        ok: true,
+        ...await listWorkerSessionWatchWorkerNextSteps(settings.projectRoot, name),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

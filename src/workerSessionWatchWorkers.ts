@@ -38,6 +38,26 @@ type StartSessionWatchWorkerOptions = {
   applyAction?: string;
 };
 
+export type SessionWatchWorkerNextStep = {
+  action: "restart_session_watch_worker";
+  reason: "stopped_session_watch_worker";
+  workerId: string;
+  watchId: string;
+  pid: number | null;
+  stoppedAt: string;
+  command: string[];
+  commands: {
+    restartSessionWatchWorker: string[];
+    inspectSessionWatchWorkers: string[];
+    retireSessionWatchWorker: string[];
+  };
+  api: {
+    restart: { method: "POST"; url: string; payload: { workerId: string } };
+    inspect: { method: "GET"; url: string };
+    retire: { method: "POST"; url: string; payload: { workerId: string; retire: true } };
+  };
+};
+
 export async function startWorkerSessionWatchWorker(
   projectRoot: string,
   baseUrl: string,
@@ -205,6 +225,62 @@ export async function stopWorkerSessionWatchWorkers(
       ...(options.workerId ? { workerId: options.workerId } : {}),
       includeRetired: true,
     }, options.lines),
+  };
+}
+
+export async function listWorkerSessionWatchWorkerNextSteps(
+  projectRoot: string,
+  sessionName: string,
+): Promise<{
+  session: string;
+  count: number;
+  nextSteps: SessionWatchWorkerNextStep[];
+  actions: { restart_session_watch_worker: number };
+}> {
+  assertSafeWorkerSessionName(sessionName);
+  const workers = await listWorkerSessionWatchWorkers(projectRoot, { sessionName }, 1);
+  const nextSteps = workers
+    .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
+    .map((worker): SessionWatchWorkerNextStep => {
+      const restartSessionWatchWorker = ["npm", "run", "cli", "--", "runs", "restart-session-watch-workers", sessionName, "--worker-id", worker.workerId];
+      const encodedSession = encodeURIComponent(sessionName);
+      const encodedWorker = encodeURIComponent(worker.workerId);
+      return {
+        action: "restart_session_watch_worker",
+        reason: "stopped_session_watch_worker",
+        workerId: worker.workerId,
+        watchId: worker.watchId,
+        pid: worker.pid,
+        stoppedAt: worker.stoppedAt as string,
+        command: restartSessionWatchWorker,
+        commands: {
+          restartSessionWatchWorker,
+          inspectSessionWatchWorkers: ["npm", "run", "cli", "--", "runs", "session-watch-workers", sessionName, "--worker-id", worker.workerId],
+          retireSessionWatchWorker: ["npm", "run", "cli", "--", "runs", "stop-session-watch-workers", sessionName, "--worker-id", worker.workerId, "--retire"],
+        },
+        api: {
+          restart: {
+            method: "POST",
+            url: `/api/worker-sessions/${encodedSession}/watch-workers/restart`,
+            payload: { workerId: worker.workerId },
+          },
+          inspect: {
+            method: "GET",
+            url: `/api/worker-sessions/${encodedSession}/watch-workers?workerId=${encodedWorker}`,
+          },
+          retire: {
+            method: "POST",
+            url: `/api/worker-sessions/${encodedSession}/watch-workers/stop`,
+            payload: { workerId: worker.workerId, retire: true },
+          },
+        },
+      };
+    });
+  return {
+    session: sessionName,
+    count: nextSteps.length,
+    nextSteps,
+    actions: { restart_session_watch_worker: nextSteps.length },
   };
 }
 

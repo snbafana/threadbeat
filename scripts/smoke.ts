@@ -8045,6 +8045,55 @@ async function smokeApiWatchWorkerRestart(
     stderrPath: apiRestartWatchWorkerStderrPath,
     stoppedAt: new Date().toISOString(),
   }, null, 2)}\n`);
+  const apiWatchWorkerNextResponse = await app.inject({
+    method: "GET",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers/next`,
+  });
+  assert.equal(apiWatchWorkerNextResponse.statusCode, 200);
+  const apiWatchWorkerNext = JSON.parse(apiWatchWorkerNextResponse.body) as {
+    session: string;
+    count: number;
+    actions: { restart_session_watch_worker: number };
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      workerId: string;
+      watchId: string;
+      pid: number | null;
+      stoppedAt?: string;
+      command: string[];
+      commands: {
+        restartSessionWatchWorker: string[];
+        inspectSessionWatchWorkers: string[];
+        retireSessionWatchWorker: string[];
+      };
+      api: {
+        restart: { method: string; url: string; payload: { workerId: string } };
+        inspect: { method: string; url: string };
+        retire: { method: string; url: string; payload: { workerId: string; retire: true } };
+      };
+    }>;
+  };
+  assert.equal(apiWatchWorkerNext.session, detachedWorkerSessionName);
+  assert.equal(apiWatchWorkerNext.count, 1);
+  assert.equal(apiWatchWorkerNext.actions.restart_session_watch_worker, 1);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.action, "restart_session_watch_worker");
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.reason, "stopped_session_watch_worker");
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.workerId, apiRestartWatchWorkerId);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.watchId, apiRestartWatchWorkerWatchId);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.pid, null);
+  assert.match(apiWatchWorkerNext.nextSteps[0]?.stoppedAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.command.join(" "), `npm run cli -- runs restart-session-watch-workers ${detachedWorkerSessionName} --worker-id ${apiRestartWatchWorkerId}`);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.commands.inspectSessionWatchWorkers.join(" "), `npm run cli -- runs session-watch-workers ${detachedWorkerSessionName} --worker-id ${apiRestartWatchWorkerId}`);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.commands.retireSessionWatchWorker.join(" "), `npm run cli -- runs stop-session-watch-workers ${detachedWorkerSessionName} --worker-id ${apiRestartWatchWorkerId} --retire`);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.api.restart.method, "POST");
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.api.restart.url, `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers/restart`);
+  assert.deepEqual(apiWatchWorkerNext.nextSteps[0]?.api.restart.payload, { workerId: apiRestartWatchWorkerId });
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.api.inspect.method, "GET");
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.api.inspect.url, `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers?workerId=${apiRestartWatchWorkerId}`);
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.api.retire.method, "POST");
+  assert.equal(apiWatchWorkerNext.nextSteps[0]?.api.retire.url, `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers/stop`);
+  assert.deepEqual(apiWatchWorkerNext.nextSteps[0]?.api.retire.payload, { workerId: apiRestartWatchWorkerId, retire: true });
   const apiRestartWatchWorkerResponse = await app.inject({
     method: "POST",
     url: `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers/restart`,
