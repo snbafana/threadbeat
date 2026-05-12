@@ -5846,9 +5846,9 @@ async function staleDrainContinuationResetNextSteps(sessionName: string, olderTh
   };
 }>> {
   assertSafeSessionName(sessionName);
-  const running = await fetchWorkerSessionDrainContinuations(sessionName, "100", ["running"]);
+  const running = await readWorkerSessionDrainContinuationRecords(sessionName, ["running"]);
   const nowMs = Date.now();
-  const stale = running.continuations.filter((record) => {
+  const stale = running.filter((record) => {
     const startedAtMs = Date.parse(record.startedAt ?? record.observedAt);
     return Number.isFinite(startedAtMs) && nowMs - startedAtMs >= olderThanMs;
   });
@@ -5877,6 +5877,30 @@ async function staleDrainContinuationResetNextSteps(sessionName: string, olderTh
       resetRunningDrainContinuations,
     },
   }];
+}
+
+async function readWorkerSessionDrainContinuationRecords(
+  sessionName: string,
+  status?: Array<NonNullable<WorkerSessionDrainContinuationRecord["status"]>>,
+): Promise<WorkerSessionDrainContinuationRecord[]> {
+  assertSafeSessionName(sessionName);
+  const statusFilter = status && status.length > 0 ? new Set(status) : null;
+  const continuationDir = workerSessionDrainContinuationDir(sessionName);
+  try {
+    const entries = await fs.readdir(continuationDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(continuationDir, entry.name), "utf8");
+        return JSON.parse(text) as WorkerSessionDrainContinuationRecord;
+      }));
+    return records
+      .filter((record) => !statusFilter || (record.status && statusFilter.has(record.status)))
+      .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
 }
 
 async function readDrainContinuationWorker(sessionName: string, workerId: string): Promise<DrainContinuationWorker> {

@@ -502,6 +502,8 @@ resume/review commands for durable run branches across sessions. Sessions with
 stale `running` drain continuations surface `reset_running_drain_continuations`
 as the session next action before ordinary watch/recover guidance; add
 `--older-than-ms` to tune when those running continuation records count as stale.
+The summary reads the durable local continuation records directly, so fleet
+triage does not need one server request per session just to detect stuck drains.
 Add `--max-polls` and `--interval-ms` to stream newline-delimited fleet snapshots while long
 worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
 next action is only `continue_watch`, `--action <name>` to show only matching
@@ -562,6 +564,8 @@ checkout/review/inspect/resume commands for stopped branches that do not have a
 result commit yet. Stale `running` drain continuations appear as
 `drainContinuationResetNextSteps` and become the session `nextStep` until reset;
 add `--older-than-ms` to choose the age threshold used by that reset command.
+The reset detection scans local continuation records, while the emitted reset
+command still performs the server-owned mutation.
 Add `--commands-only` with `--next` to emit only the runnable session and branch
 command queue, or `--format shell` to print copyable commands;
 use `--action <name>` or `--branch-action resume_branch|review_branch` to narrow
