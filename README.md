@@ -728,6 +728,8 @@ the same durable worker lifecycle at `POST /api/worker-sessions/:name/watch-work
 `GET /api/worker-sessions/:name/watch-workers`, and
 `POST /api/worker-sessions/:name/watch-workers/stop`, and
 `POST /api/worker-sessions/:name/watch-workers/restart`; use
+`GET /api/worker-sessions/:name/logs?lines=80` to inspect the durable session
+record, worker liveness, worker log tails, and next diagnostic commands, and use
 `GET /api/worker-sessions/:name/watch-workers/next` to surface stopped worker
 restart actions through the API. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including

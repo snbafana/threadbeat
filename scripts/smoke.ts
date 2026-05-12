@@ -1312,6 +1312,50 @@ try {
   }>(baseUrl, ["runs", "sessions", "--session", detachedWorkerSessionName]);
   assert.equal(listedWorkerSessions.sessions.length, 1);
   assert.equal(listedWorkerSessions.sessions[0].workers[0].alive, true);
+  const apiWorkerSessionLogsResponse = await app.inject({
+    method: "GET",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/logs?lines=2`,
+  });
+  assert.equal(apiWorkerSessionLogsResponse.statusCode, 200);
+  const apiWorkerSessionLogs = JSON.parse(apiWorkerSessionLogsResponse.body) as {
+    session: string;
+    startedAt: string;
+    stoppedAt: string | null;
+    restartedAt: string | null;
+    command: string[];
+    workers: Array<{
+      workerId: string;
+      pid: number | null;
+      alive: boolean;
+      stdout: { path: string; lines: string[] };
+      stderr: { path: string; lines: string[] };
+    }>;
+    commands: {
+      sessionStatus: string[];
+      sessionSummaryNext: string[];
+      sessionReview: string[];
+      sessionLogs: string[];
+      stopSessionRecover: string[];
+      restartSessionRecover: string[];
+    };
+  };
+  assert.equal(apiWorkerSessionLogs.session, detachedWorkerSessionName);
+  assert.match(apiWorkerSessionLogs.startedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(apiWorkerSessionLogs.stoppedAt, null);
+  assert.equal(apiWorkerSessionLogs.restartedAt, null);
+  assert.equal(apiWorkerSessionLogs.command[0], "runs");
+  assert.equal(apiWorkerSessionLogs.workers.length, 1);
+  assert.equal(apiWorkerSessionLogs.workers[0]?.workerId, "smoke-detached-worker-1");
+  assert.equal(apiWorkerSessionLogs.workers[0]?.alive, true);
+  assert.match(apiWorkerSessionLogs.workers[0]?.stdout.path ?? "", /worker-sessions/);
+  assert.ok(Array.isArray(apiWorkerSessionLogs.workers[0]?.stdout.lines));
+  assert.ok(Array.isArray(apiWorkerSessionLogs.workers[0]?.stderr.lines));
+  assert.equal(apiWorkerSessionLogs.commands.sessionStatus.join(" "), `npm run cli -- runs session-status ${detachedWorkerSessionName} --recoverable --include-stopped`);
+  assert.equal(apiWorkerSessionLogs.commands.sessionSummaryNext.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next`);
+  assert.equal(apiWorkerSessionLogs.commands.sessionReview.join(" "), `npm run cli -- runs session-review ${detachedWorkerSessionName} --include-stopped`);
+  assert.equal(apiWorkerSessionLogs.commands.sessionLogs.join(" "), `npm run cli -- runs session-logs ${detachedWorkerSessionName}`);
+  assert.equal(apiWorkerSessionLogs.commands.stopSessionRecover.join(" "), `npm run cli -- runs stop-session ${detachedWorkerSessionName} --recover`);
+  assert.equal(apiWorkerSessionLogs.commands.restartSessionRecover.join(" "), `npm run cli -- runs restart-session ${detachedWorkerSessionName} --recover`);
   const detachedWorkerActions = await cliJson<{
     session: { session: string; workers: number; command: string[] };
     actions: {
