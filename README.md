@@ -447,7 +447,10 @@ Run planning is intentionally server-side and Pi-free for now:
   instead of requiring the local session record. The server-backed results view
   supports `--run`, `--next`, `--commands-only`, `--limit`, `--offset`, and
   `--format shell` for branch-native result/resume inspection; checkout diff
-  filters still require the local checkout-backed results path.
+  filters still require the local checkout-backed results path. The backing
+  branch endpoint accepts the same run and page filters, so large sessions can
+  ask the server for a bounded branch queue instead of materializing every run
+  in the CLI first.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.

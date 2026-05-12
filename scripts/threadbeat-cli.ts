@@ -756,7 +756,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         observedAt: string;
         session: string;
         checkoutDir: string;
-        filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+        filter: {
+          statuses: string[];
+          resumable: boolean;
+          workerId: string | null;
+          runIds?: string[];
+          limit?: number | null;
+          offset?: number;
+          totalResultCommits?: number;
+          visibleResultCommits?: number;
+          totalNextSteps?: number;
+          visibleNextSteps?: number;
+          hasMore?: boolean;
+          nextOffset?: number | null;
+        };
         summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number };
         resultCommits: ServerResultCommit[];
         resumableBranches: unknown[];
@@ -768,12 +781,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         params.set("status", statusList.join(","));
         params.set("checkoutDir", checkoutCommandRootDir);
         if (options["worker-id"]) params.set("workerId", options["worker-id"]);
+        if (options.run) params.set("runId", options.run);
+        if (rowLimit) params.set("limit", String(rowLimit));
+        if (rowOffset > 0) params.set("offset", String(rowOffset));
         const response = await requestJson(
           "GET",
           withQuery(`/api/worker-sessions/${encodeURIComponent(options.session)}/branches`, params),
         ) as ServerBranchesResponse;
-        const resultCommits = response.resultCommits.filter((run: ServerResultCommit) => !runFilter || runFilter.has(run.runId));
-        const nextSteps = response.nextSteps.filter((step: ServerBranchStep) => !runFilter || runFilter.has(step.runId));
+        const resultCommits = response.resultCommits;
+        const nextSteps = response.nextSteps;
         const nextCommandQueue = nextSteps.map((step) => ({
           scope: "branch",
           action: step.action,
@@ -788,33 +804,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           resultCommit: step.resultCommit,
           command: step.command,
         }));
-        const pageEnd = rowLimit ? rowOffset + rowLimit : undefined;
-        const visibleResultCommits = rowOffset > 0 || rowLimit
-          ? resultCommits.slice(rowOffset, pageEnd)
-          : resultCommits;
-        const visibleNextSteps = rowOffset > 0 || rowLimit
-          ? nextSteps.slice(rowOffset, pageEnd)
-          : nextSteps;
-        const visibleNextCommandQueue = rowOffset > 0 || rowLimit
-          ? nextCommandQueue.slice(rowOffset, pageEnd)
-          : nextCommandQueue;
-        const pageFilter = rowOffset > 0 || rowLimit
-          ? {
-            ...(rowLimit ? { limit: rowLimit } : {}),
-            offset: rowOffset,
-            totalResultCommits: resultCommits.length,
-            visibleResultCommits: visibleResultCommits.length,
-            totalNextSteps: nextSteps.length,
-            visibleNextSteps: visibleNextSteps.length,
-            ...pageCursor(rowLimit, rowOffset, Math.max(resultCommits.length, nextSteps.length)),
-          }
-          : null;
         const summary = {
           ...response.summary,
-          total: nextSteps.length,
-          resultCommits: resultCommits.length,
-          resumable: nextSteps.filter((step) => step.state === "resumable").length,
-          warnings: nextSteps.filter((step) => step.warning).length,
           changed: null,
           changedFiles: null,
         };
@@ -824,14 +815,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             session: response.session,
             ...(runFilter ? { runFilter: Array.from(runFilter) } : {}),
             checkoutDir: response.checkoutDir,
-            filter: {
-              ...response.filter,
-              ...(pageFilter ?? {}),
-            },
+            filter: response.filter,
             summary,
             ...(options["commands-only"] === "1"
-              ? { commands: visibleNextCommandQueue }
-              : { resultCommits: visibleResultCommits, nextSteps: visibleNextSteps }),
+              ? { commands: nextCommandQueue }
+              : { resultCommits, nextSteps }),
           }
           : {
             observedAt: response.observedAt,
@@ -843,9 +831,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             resultCommits,
             resumableBranches: response.resumableBranches,
             agents: response.agents,
-          };
+        };
         if (outputFormat === "shell") {
-          printCommandQueueShell(visibleNextCommandQueue);
+          printCommandQueueShell(nextCommandQueue);
         } else if (maxPolls === 1) {
           await printJson(output);
         } else {

@@ -880,6 +880,13 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const workerIdFilter = parseOptionalString(query.workerId) ?? null;
       const resumableOnly = parseBoolean(query.resumable, false);
       const checkoutDir = parseOptionalString(query.checkoutDir) ?? `./checkouts/${name}-branches`;
+      const runIds = [
+        ...parseOptionalList(query.runId),
+        ...parseOptionalList(query.runIds),
+      ];
+      const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
+      const limit = parseOptionalInteger(query.limit) ?? null;
+      const offset = parseOptionalNonNegativeInteger(query.offset) ?? 0;
       const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
       const agents = await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
         const agent = await db.getAgent(agentId);
@@ -896,6 +903,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           .filter((run) => statusFilter.has(run.status))
           .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
           .filter((run) => !resumableOnly || (run.status === "stopped" && !run.result_commit))
+          .filter((run) => !runIdFilter || runIdFilter.has(run.id))
           .map((run) => {
             const branchLinks = deriveGitHubLinks(agent.repo_url, {
               compareBaseRef: run.input_ref,
@@ -1017,6 +1025,19 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           : run.commands.reviewRun,
         commands: run.commands,
       }));
+      const pageEnd = limit ? offset + limit : undefined;
+      const limitedResultCommits = offset > 0 || limit
+        ? resultCommits.slice(offset, pageEnd)
+        : resultCommits;
+      const limitedResumableBranches = offset > 0 || limit
+        ? resumableBranches.slice(offset, pageEnd)
+        : resumableBranches;
+      const limitedNextSteps = offset > 0 || limit
+        ? nextSteps.slice(offset, pageEnd)
+        : nextSteps;
+      const pageTotal = Math.max(resultCommits.length, resumableBranches.length, nextSteps.length);
+      const nextOffset = limit ? offset + limit : null;
+      const hasMore = nextOffset !== null && nextOffset < pageTotal;
       return {
         ok: true,
         observedAt: new Date().toISOString(),
@@ -1026,6 +1047,17 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           statuses: statusList,
           resumable: resumableOnly,
           workerId: workerIdFilter,
+          runIds,
+          limit,
+          offset,
+          totalResultCommits: resultCommits.length,
+          visibleResultCommits: limitedResultCommits.length,
+          totalResumableBranches: resumableBranches.length,
+          visibleResumableBranches: limitedResumableBranches.length,
+          totalNextSteps: nextSteps.length,
+          visibleNextSteps: limitedNextSteps.length,
+          hasMore,
+          nextOffset: hasMore ? nextOffset : null,
         },
         summary: {
           agents: agents.length,
@@ -1034,9 +1066,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           resumable: resumableBranches.length,
           warnings: visibleRuns.filter(({ run }) => run.warning).length,
         },
-        resultCommits,
-        resumableBranches,
-        nextSteps,
+        resultCommits: limitedResultCommits,
+        resumableBranches: limitedResumableBranches,
+        nextSteps: limitedNextSteps,
         agents,
       };
     } catch (error) {
@@ -1919,6 +1951,13 @@ const parseOptionalInteger = (value: unknown): number | undefined => {
   if (value === undefined || value === null || value === "") return undefined;
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error("expected positive integer");
+  return Math.floor(parsed);
+};
+
+const parseOptionalNonNegativeInteger = (value: unknown): number | undefined => {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error("expected non-negative integer");
   return Math.floor(parsed);
 };
 

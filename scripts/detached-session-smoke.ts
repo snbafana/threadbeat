@@ -359,13 +359,24 @@ try {
 
   const apiBranchesResponse = await app.inject({
     method: "GET",
-    url: `/api/worker-sessions/${sessionName}/branches?resumable=true`,
+    url: `/api/worker-sessions/${sessionName}/branches?resumable=true&runId=${stoppedPlan.run.id}&limit=1`,
   });
   assert.equal(apiBranchesResponse.statusCode, 200);
   const apiBranches = JSON.parse(apiBranchesResponse.body) as {
     session: string;
     checkoutDir: string;
-    filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+    filter: {
+      statuses: string[];
+      resumable: boolean;
+      workerId: string | null;
+      runIds: string[];
+      limit: number;
+      offset: number;
+      totalNextSteps: number;
+      visibleNextSteps: number;
+      hasMore: boolean;
+      nextOffset: number | null;
+    };
     summary: { total: number; resultCommits: number; resumable: number; warnings: number };
     resultCommits: unknown[];
     resumableBranches: Array<{
@@ -382,7 +393,14 @@ try {
   assert.deepEqual(apiBranches.filter.statuses, ["completed", "stopped"]);
   assert.equal(apiBranches.filter.resumable, true);
   assert.equal(apiBranches.filter.workerId, null);
-  assert.ok(apiBranches.summary.total >= 1);
+  assert.deepEqual(apiBranches.filter.runIds, [stoppedPlan.run.id]);
+  assert.equal(apiBranches.filter.limit, 1);
+  assert.equal(apiBranches.filter.offset, 0);
+  assert.equal(apiBranches.filter.totalNextSteps, 1);
+  assert.equal(apiBranches.filter.visibleNextSteps, 1);
+  assert.equal(apiBranches.filter.hasMore, false);
+  assert.equal(apiBranches.filter.nextOffset, null);
+  assert.equal(apiBranches.summary.total, 1);
   assert.equal(apiBranches.summary.resultCommits, 0);
   assert.ok(apiBranches.summary.resumable >= 1);
   assert.equal(apiBranches.resultCommits.length, 0);
@@ -441,6 +459,7 @@ try {
     runFilter: string[];
     summary: { total: number; resultCommits: number; resumable: number };
     commands: Array<{ scope: string; action: string; runId: string; command: string[] }>;
+    filter: { runIds: string[]; limit: number; offset: number; totalNextSteps: number; visibleNextSteps: number };
   }>(baseUrl, [
     "runs",
     "results",
@@ -451,6 +470,8 @@ try {
     stoppedPlan.run.id,
     "--next",
     "--commands-only",
+    "--limit",
+    "1",
   ]);
   assert.equal(serverResults.session, sessionName);
   assert.equal(serverResults.checkoutDir, `./checkouts/${sessionName}-results`);
@@ -458,6 +479,11 @@ try {
   assert.equal(serverResults.summary.total, 1);
   assert.equal(serverResults.summary.resultCommits, 0);
   assert.equal(serverResults.summary.resumable, 1);
+  assert.deepEqual(serverResults.filter.runIds, [stoppedPlan.run.id]);
+  assert.equal(serverResults.filter.limit, 1);
+  assert.equal(serverResults.filter.offset, 0);
+  assert.equal(serverResults.filter.totalNextSteps, 1);
+  assert.equal(serverResults.filter.visibleNextSteps, 1);
   assert.equal(serverResults.commands[0].scope, "branch");
   assert.equal(serverResults.commands[0].action, "resume_branch");
   assert.equal(serverResults.commands[0].runId, stoppedPlan.run.id);
