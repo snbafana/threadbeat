@@ -6,6 +6,7 @@ import { deriveGitHubLinks } from "../src/gitLinks.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
+const STALE_RUNNING_DRAIN_CONTINUATION_MS = 10 * 60 * 1000;
 
 const [command, subcommand, ...rest] = process.argv.slice(2);
 
@@ -2117,6 +2118,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       counts[item.action] = (counts[item.action] ?? 0) + 1;
       return counts;
     }, {} as Record<string, number>);
+    const drainContinuationResetNextSteps = options.next === "1" && !branchActionFilter
+      ? await staleDrainContinuationResetNextSteps(status.session.session)
+      : [];
+    const drainContinuationResetActions = drainContinuationResetNextSteps.reduce((counts, item) => {
+      counts[item.action] = (counts[item.action] ?? 0) + item.count;
+      return counts;
+    }, {} as Record<string, number>);
     const visibleBranchNextSteps = branchActionFilter && !branchActionFilter.has("resume_branch")
       ? []
       : branchNextSteps;
@@ -2149,6 +2157,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       queuedContinuations: item.queuedContinuations,
       command: item.command,
     })));
+    commandQueue.push(...drainContinuationResetNextSteps.map((item) => ({
+      scope: "drain_continuation",
+      session: status.session.session,
+      action: item.action,
+      reason: item.reason,
+      count: item.count,
+      continuationIds: item.continuationIds,
+      olderThanMs: item.olderThanMs,
+      command: item.command,
+    })));
     const output = {
       observedAt: new Date().toISOString(),
       ...status,
@@ -2156,10 +2174,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       ...(recoveryPreview ? { recoveryPreview } : {}),
       ...(branchNextSteps && options["commands-only"] !== "1" ? { branchNextSteps: visibleBranchNextSteps } : {}),
       ...(options.next === "1" && options["commands-only"] !== "1" && !branchActionFilter ? { drainWorkerNextSteps } : {}),
+      ...(options.next === "1" && options["commands-only"] !== "1" && !branchActionFilter ? { drainContinuationResetNextSteps } : {}),
       ...(options.next === "1" ? {
         branchActions,
         branchActionQueue,
-        ...(branchActionFilter ? {} : { drainWorkerActions }),
+        ...(branchActionFilter ? {} : { drainWorkerActions, drainContinuationResetActions }),
       } : {}),
       ...(options["commands-only"] === "1" ? { commands: commandQueue } : {}),
     };
@@ -3729,6 +3748,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           command: string[];
         } => step.command !== null);
         const drainWorkerNextSteps = await drainContinuationWorkerNextSteps(status.session.session);
+        const drainContinuationResetNextSteps = await staleDrainContinuationResetNextSteps(status.session.session);
+        const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
         const commandQueue = [
           ...nextSteps.map((step) => ({
             scope: "session",
@@ -3761,6 +3782,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             workerId: step.workerId,
             pid: step.pid,
             queuedContinuations: step.queuedContinuations,
+            command: step.command,
+          })),
+          ...drainContinuationResetNextSteps.map((step) => ({
+            scope: "drain_continuation",
+            session: status.session.session,
+            action: step.action,
+            reason: step.reason,
+            count: step.count,
+            continuationIds: step.continuationIds,
+            olderThanMs: step.olderThanMs,
             command: step.command,
           })),
           ...(applyActionQueue?.actions ?? []).map((step) => ({
@@ -3799,6 +3830,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             recoveryCandidates: recoverableActive + recoverableStopped,
             branchNextSteps: branchNextSteps.length,
             drainWorkerRestarts: drainWorkerNextSteps.length,
+            drainContinuationResets,
             applyActions: applyActionQueue?.counts.actionable ?? 0,
             applyResumeNeeded: applyActionQueue?.counts.resumeNeeded ?? 0,
             applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
@@ -3816,6 +3848,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             nextSteps,
             branchNextSteps,
             drainWorkerNextSteps,
+            drainContinuationResetNextSteps,
             ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
           }),
         };
@@ -5749,6 +5782,52 @@ async function drainContinuationWorkerNextSteps(sessionName: string): Promise<Ar
         },
       };
     });
+}
+
+async function staleDrainContinuationResetNextSteps(sessionName: string): Promise<Array<{
+  action: "reset_running_drain_continuations";
+  reason: "stale_running_drain_continuations";
+  count: number;
+  continuationIds: string[];
+  olderThanMs: number;
+  command: string[];
+  commands: {
+    inspectDrainContinuations: string[];
+    resetRunningDrainContinuations: string[];
+  };
+}>> {
+  assertSafeSessionName(sessionName);
+  const running = await fetchWorkerSessionDrainContinuations(sessionName, "100", ["running"]);
+  const nowMs = Date.now();
+  const stale = running.continuations.filter((record) => {
+    const startedAtMs = Date.parse(record.startedAt ?? record.observedAt);
+    return Number.isFinite(startedAtMs) && nowMs - startedAtMs >= STALE_RUNNING_DRAIN_CONTINUATION_MS;
+  });
+  if (stale.length === 0) return [];
+  const resetRunningDrainContinuations = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-drain-continuations",
+    sessionName,
+    "--reset-running",
+    "--older-than-ms",
+    String(STALE_RUNNING_DRAIN_CONTINUATION_MS),
+  ];
+  return [{
+    action: "reset_running_drain_continuations",
+    reason: "stale_running_drain_continuations",
+    count: stale.length,
+    continuationIds: stale.map((record) => record.continuationId),
+    olderThanMs: STALE_RUNNING_DRAIN_CONTINUATION_MS,
+    command: resetRunningDrainContinuations,
+    commands: {
+      inspectDrainContinuations: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName, "--status", "running"],
+      resetRunningDrainContinuations,
+    },
+  }];
 }
 
 async function readDrainContinuationWorker(sessionName: string, workerId: string): Promise<DrainContinuationWorker> {

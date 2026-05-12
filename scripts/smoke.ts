@@ -3303,6 +3303,99 @@ try {
   assert.equal(freshRunningReset.resetCount, 0);
   assert.equal(freshRunningReset.skippedRunning, 1);
   assert.equal(freshRunningReset.continuations.length, 0);
+  const staleNextStartedAt = new Date(Date.now() - 900_000).toISOString();
+  await fs.writeFile(staleRunningContinuation.continuationPath, `${JSON.stringify({
+    ...staleRunningContinuation.continuation,
+    status: "running",
+    startedAt: staleNextStartedAt,
+  }, null, 2)}\n`);
+  const resetRunningCommand = `npm run cli -- runs session-drain-continuations ${detachedWorkerSessionName} --reset-running --older-than-ms 600000`;
+  const drainResetWatchNext = await cliJson<{
+    summary: { drainContinuationResets: number };
+    drainContinuationResetNextSteps: Array<{
+      action: string;
+      reason: string;
+      count: number;
+      continuationIds: string[];
+      olderThanMs: number;
+      command: string[];
+      commands: {
+        inspectDrainContinuations: string[];
+        resetRunningDrainContinuations: string[];
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(drainResetWatchNext.summary.drainContinuationResets, 1);
+  assert.ok(drainResetWatchNext.drainContinuationResetNextSteps.some((step) => (
+    step.action === "reset_running_drain_continuations"
+    && step.reason === "stale_running_drain_continuations"
+    && step.count === 1
+    && step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
+    && step.olderThanMs === 600000
+    && step.command.join(" ") === resetRunningCommand
+    && step.commands.resetRunningDrainContinuations.join(" ") === resetRunningCommand
+    && step.commands.inspectDrainContinuations.join(" ") === `npm run cli -- runs session-drain-continuations ${detachedWorkerSessionName} --status running`
+  )));
+  const drainResetWatchShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(drainResetWatchShell.stdout.trim().split("\n").includes(resetRunningCommand));
+  const drainResetStatusNext = await cliJson<{
+    drainContinuationResetActions: { reset_running_drain_continuations?: number };
+    drainContinuationResetNextSteps: Array<{
+      action: string;
+      reason: string;
+      count: number;
+      continuationIds: string[];
+      command: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+  ]);
+  assert.equal(drainResetStatusNext.drainContinuationResetActions.reset_running_drain_continuations, 1);
+  assert.ok(drainResetStatusNext.drainContinuationResetNextSteps.some((step) => (
+    step.action === "reset_running_drain_continuations"
+    && step.reason === "stale_running_drain_continuations"
+    && step.count === 1
+    && step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
+    && step.command.join(" ") === resetRunningCommand
+  )));
+  const drainResetStatusShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(drainResetStatusShell.stdout.trim().split("\n").includes(resetRunningCommand));
   const staleRunningReset = await cliJson<{
     session: string;
     inspected: number;
@@ -3336,7 +3429,7 @@ try {
   assert.equal(staleRunningReset.continuations[0]?.startedAt, undefined);
   assert.equal(typeof staleRunningReset.continuations[0]?.resetAt, "string");
   assert.equal(staleRunningReset.continuations[0]?.resetReason, "operator_reset_running");
-  assert.equal(staleRunningReset.continuations[0]?.previousStartedAt, staleStartedAt);
+  assert.equal(staleRunningReset.continuations[0]?.previousStartedAt, staleNextStartedAt);
   assert.equal(staleRunningReset.continuations[0]?.continueDrains.succeeded, 0);
   assert.equal(staleRunningReset.continuations[0]?.continueDrains.failed, 0);
   assert.equal(staleRunningReset.continuations[0]?.drains[0]?.exitCode, null);

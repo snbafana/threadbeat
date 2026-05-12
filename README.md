@@ -527,9 +527,11 @@ a dry-run recovery preview in the live session snapshot; combine it with
 `--include-stopped` to surface unfinished stopped branches too. `session-status`
 also includes `branchNextSteps` with checkout/resume/recover commands when the
 recoverable preview is enabled. With `--next`, `session-status` also includes
-restartable `drainWorkerNextSteps` for stopped drain-continuation workers. Add
+restartable `drainWorkerNextSteps` for stopped drain-continuation workers and
+`drainContinuationResetNextSteps` for stale `running` drain continuations. Add
 `--next --commands-only --format shell` to `runs session-status --recoverable`
-to print copyable branch-resume and drain-worker restart commands; use
+to print copyable branch-resume, drain-worker restart, and stale-continuation
+reset commands; use
 `--branch-action resume_branch` to keep the queue explicitly scoped to branch
 resumes. Add `--next` to `runs session-watch` to stream only
 the compact restart/recover/resume command
@@ -538,8 +540,10 @@ payload also includes `branchNextSteps` for stopped branch rows, with objective,
 worker ownership, checkout/review/inspect/watch/resume commands, and
 recoverability when available. It also includes `drainWorkerNextSteps` when a
 stopped drain-continuation worker can be restarted or queued drain continuations
-are waiting without a live worker. Pass `--checkout-dir` to choose where those
-branch commands materialize local checkouts.
+are waiting without a live worker, plus `drainContinuationResetNextSteps` when
+stale `running` drain continuations should be reset before execution resumes.
+Pass `--checkout-dir` to choose where those branch commands materialize local
+checkouts.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents. Add
 `--max-polls` and `--interval-ms` for a compact newline-delimited status feed
