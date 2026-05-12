@@ -15,6 +15,9 @@ export type SessionWatchWorker = {
   stoppedAt?: string;
   stopResult?: StopProcessGroupResult & { aliveBefore: boolean };
   retiredAt?: string;
+  restartedAt?: string;
+  restartCount?: number;
+  previousPid?: number | null;
 };
 
 type StopProcessGroupResult = {
@@ -203,6 +206,93 @@ export async function stopWorkerSessionWatchWorkers(
       includeRetired: true,
     }, options.lines),
   };
+}
+
+export async function restartWorkerSessionWatchWorker(
+  projectRoot: string,
+  baseUrl: string,
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  restarted: Array<{
+    workerId: string;
+    watchId: string;
+    previousPid: number | null;
+    pid: number | null;
+    restartedAt: string;
+    restartCount: number;
+    command: string[];
+  }>;
+  workers: Awaited<ReturnType<typeof listWorkerSessionWatchWorkers>>;
+}> {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(options.workerId);
+  let worker: SessionWatchWorker;
+  try {
+    worker = await readWorkerSessionWatchWorker(projectRoot, sessionName, options.workerId);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`session watch worker '${options.workerId}' not found for session '${sessionName}'`);
+    }
+    throw error;
+  }
+  if (worker.retiredAt && !options.includeRetired) {
+    throw new Error(`session watch worker '${options.workerId}' is retired; pass includeRetired to restart it`);
+  }
+  if (processIsAlive(worker.pid)) {
+    throw new Error(`session watch worker '${options.workerId}' is already alive with pid ${worker.pid}`);
+  }
+  if (worker.session !== sessionName || worker.workerId !== options.workerId) {
+    throw new Error(`session watch worker record mismatch for '${options.workerId}'`);
+  }
+  const stdout = await fs.open(worker.stdoutPath, "a");
+  const stderr = await fs.open(worker.stderrPath, "a");
+  try {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+      cwd: projectRoot,
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const restartedAt = new Date().toISOString();
+    const updated: SessionWatchWorker = {
+      ...worker,
+      baseUrl,
+      startedAt: restartedAt,
+      pid: child.pid ?? null,
+      stoppedAt: undefined,
+      stopResult: undefined,
+      retiredAt: undefined,
+      restartedAt,
+      restartCount: (worker.restartCount ?? 0) + 1,
+      previousPid: worker.pid,
+    };
+    await writeWorkerSessionWatchWorker(projectRoot, updated);
+    return {
+      session: sessionName,
+      count: 1,
+      restarted: [{
+        workerId: updated.workerId,
+        watchId: updated.watchId,
+        previousPid: updated.previousPid ?? null,
+        pid: updated.pid,
+        restartedAt,
+        restartCount: updated.restartCount ?? 1,
+        command: updated.command,
+      }],
+      workers: await listWorkerSessionWatchWorkers(projectRoot, {
+        sessionName,
+        workerId: options.workerId,
+        includeRetired: true,
+      }, options.lines),
+    };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
 }
 
 async function readWorkerSessionWatchWorker(projectRoot: string, sessionName: string, workerId: string): Promise<SessionWatchWorker> {

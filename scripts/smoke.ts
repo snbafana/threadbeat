@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import type { FastifyInstance } from "fastify";
 
 import { buildServer } from "../src/server.js";
 import type { Settings } from "../src/config.js";
@@ -2665,6 +2666,7 @@ try {
   assert.match(apiWatchWorkerStop.stopped[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(apiWatchWorkerStop.workers[0]?.workerId, apiWatchWorkerId);
   assert.match(apiWatchWorkerStop.workers[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  await smokeApiWatchWorkerRestart(app, baseUrl, detachedWorkerSessionName);
   const watchRestartWatchWorkerId = "smoke-watch-worker-watch-restart";
   const watchRestartWatchWorkerWatchId = "smoke-watch-worker-watch-restart-record";
   const watchRestartWatchWorkerDir = path.join(".threadbeat", "worker-sessions", "watch-workers", detachedWorkerSessionName);
@@ -8004,6 +8006,88 @@ try {
 } finally {
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });
+}
+
+async function smokeApiWatchWorkerRestart(
+  app: FastifyInstance,
+  baseUrl: string,
+  detachedWorkerSessionName: string,
+): Promise<void> {
+  const apiRestartWatchWorkerId = "smoke-api-watch-worker-restart";
+  const apiRestartWatchWorkerWatchId = "smoke-api-watch-worker-restart-record";
+  const apiRestartWatchWorkerDir = path.join(".threadbeat", "worker-sessions", "watch-workers", detachedWorkerSessionName);
+  const apiRestartWatchWorkerStdoutPath = path.join(apiRestartWatchWorkerDir, `${apiRestartWatchWorkerId}.out.log`);
+  const apiRestartWatchWorkerStderrPath = path.join(apiRestartWatchWorkerDir, `${apiRestartWatchWorkerId}.err.log`);
+  await fs.mkdir(apiRestartWatchWorkerDir, { recursive: true });
+  await fs.writeFile(apiRestartWatchWorkerStdoutPath, "api restart worker stdout\n");
+  await fs.writeFile(apiRestartWatchWorkerStderrPath, "");
+  await fs.writeFile(path.join(apiRestartWatchWorkerDir, `${apiRestartWatchWorkerId}.json`), `${JSON.stringify({
+    session: detachedWorkerSessionName,
+    workerId: apiRestartWatchWorkerId,
+    watchId: apiRestartWatchWorkerWatchId,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: [
+      "runs",
+      "session-watch",
+      detachedWorkerSessionName,
+      "--next",
+      "--until-empty",
+      "--watch-id",
+      apiRestartWatchWorkerWatchId,
+      "--max-polls",
+      "1",
+      "--interval-ms",
+      "1",
+    ],
+    pid: null,
+    stdoutPath: apiRestartWatchWorkerStdoutPath,
+    stderrPath: apiRestartWatchWorkerStderrPath,
+    stoppedAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+  const apiRestartWatchWorkerResponse = await app.inject({
+    method: "POST",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers/restart`,
+    headers: { host: new URL(baseUrl).host },
+    payload: { workerId: apiRestartWatchWorkerId, lines: 5 },
+  });
+  assert.equal(apiRestartWatchWorkerResponse.statusCode, 200);
+  const apiRestartWatchWorker = JSON.parse(apiRestartWatchWorkerResponse.body) as {
+    session: string;
+    count: number;
+    restarted: Array<{
+      workerId: string;
+      watchId: string;
+      previousPid: number | null;
+      pid: number | null;
+      restartedAt: string;
+      restartCount: number;
+      command: string[];
+    }>;
+    workers: Array<{
+      workerId: string;
+      watchId: string;
+      previousPid?: number | null;
+      restartCount?: number;
+      stoppedAt?: string;
+      retiredAt?: string;
+    }>;
+  };
+  assert.equal(apiRestartWatchWorker.session, detachedWorkerSessionName);
+  assert.equal(apiRestartWatchWorker.count, 1);
+  assert.equal(apiRestartWatchWorker.restarted[0]?.workerId, apiRestartWatchWorkerId);
+  assert.equal(apiRestartWatchWorker.restarted[0]?.watchId, apiRestartWatchWorkerWatchId);
+  assert.equal(apiRestartWatchWorker.restarted[0]?.previousPid, null);
+  assert.equal(typeof apiRestartWatchWorker.restarted[0]?.pid, "number");
+  assert.equal(typeof apiRestartWatchWorker.restarted[0]?.restartedAt, "string");
+  assert.equal(apiRestartWatchWorker.restarted[0]?.restartCount, 1);
+  assert.equal(apiRestartWatchWorker.restarted[0]?.command.join(" "), `runs session-watch ${detachedWorkerSessionName} --next --until-empty --watch-id ${apiRestartWatchWorkerWatchId} --max-polls 1 --interval-ms 1`);
+  assert.equal(apiRestartWatchWorker.workers[0]?.workerId, apiRestartWatchWorkerId);
+  assert.equal(apiRestartWatchWorker.workers[0]?.watchId, apiRestartWatchWorkerWatchId);
+  assert.equal(apiRestartWatchWorker.workers[0]?.previousPid, null);
+  assert.equal(apiRestartWatchWorker.workers[0]?.restartCount, 1);
+  assert.equal(apiRestartWatchWorker.workers[0]?.stoppedAt, undefined);
+  assert.equal(apiRestartWatchWorker.workers[0]?.retiredAt, undefined);
 }
 
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {

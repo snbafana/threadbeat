@@ -726,7 +726,8 @@ retired, `runs session-watch <name> --next` and `runs session-status <name>
 --next` include a `restart-session-watch-workers` next step. The server exposes
 the same durable worker lifecycle at `POST /api/worker-sessions/:name/watch-workers`,
 `GET /api/worker-sessions/:name/watch-workers`, and
-`POST /api/worker-sessions/:name/watch-workers/stop`. Add `--commands-only
+`POST /api/worker-sessions/:name/watch-workers/stop`, and
+`POST /api/worker-sessions/:name/watch-workers/restart`. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including
 recovery, branch resume, and apply action-queue commands. Add
 `--apply-action inspect_drain_continuation_resets` with `--action-queue` to
