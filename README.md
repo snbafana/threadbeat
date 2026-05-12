@@ -288,6 +288,8 @@ npm run cli -- runs session-applies overnight --continue-drains --drain-prefix o
 npm run cli -- runs session-drains overnight --format shell
 npm run cli -- runs session-drain-continuations overnight --queue --drain-prefix overnight-drain --dry-run --max-polls 5
 npm run cli -- runs session-drain-continuations overnight --execute-queued --max-continuations 5
+npm run cli -- runs session-drain-continuations overnight --execute-queued --detach --worker-id overnight-drain-worker
+npm run cli -- runs session-drain-workers overnight --lines 40
 npm run cli -- runs session-drain-continuations overnight --execute-next
 npm run cli -- runs session-drain-continuations overnight --execute <continuation-id>
 npm run cli -- runs session-drain-continuations overnight --status queued,running,failed
@@ -610,7 +612,10 @@ specific queued record can be executed with `--execute <continuation-id>`. All
 execution paths run the stored commands through the server and persist the same
 record as `running`, then `executed` or `failed` with command results. Add
 `--status queued,running,failed` to inspect pending, in-flight, or stuck
-continuation records without mixing in completed attempts.
+continuation records without mixing in completed attempts. Add `--detach` with
+`--execute-queued` to leave the bounded server drain running in the background;
+`runs session-drain-workers <name>` returns the durable worker PID, command, log
+paths, liveness, and recent stdout/stderr lines.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a

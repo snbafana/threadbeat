@@ -3477,6 +3477,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }));
       return;
     }
+    if (options.detach === "1") {
+      if (options["execute-queued"] !== "1") {
+        throw new Error("runs session-drain-continuations --detach requires --execute-queued");
+      }
+      const worker = await startDetachedDrainContinuationWorker(requiredSessionName, {
+        workerId: options["worker-id"],
+        ...(options["max-continuations"] ? { maxContinuations: parsePositiveInteger(options["max-continuations"], "--max-continuations") } : {}),
+      });
+      await printJson({ ok: true, session: requiredSessionName, worker });
+      return;
+    }
     if (options.execute) {
       const response = await executeWorkerSessionDrainContinuation(requiredSessionName, options.execute);
       if (response.continuation.continueDrains.failed > 0) process.exitCode = 1;
@@ -3503,6 +3514,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       options.status ? parseList(options.status) : undefined,
     );
     await printJson(response);
+    return;
+  }
+  if (subcommandName === "session-drain-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const workers = await listDrainContinuationWorkers(
+      sessionName ? { sessionName } : {},
+      parsePositiveInteger(options.lines ?? "20", "--lines"),
+    );
+    await printJson({
+      session: sessionName ?? null,
+      count: workers.length,
+      workers,
+    });
     return;
   }
   if (subcommandName === "session-watch") {
@@ -5196,6 +5221,17 @@ type WorkerSession = {
   restartedAt?: string;
 };
 
+type DrainContinuationWorker = {
+  session: string;
+  workerId: string;
+  baseUrl: string;
+  startedAt: string;
+  command: string[];
+  pid: number | null;
+  stdoutPath: string;
+  stderrPath: string;
+};
+
 type SessionApplyCommand = {
   scope: string;
   action: string;
@@ -5336,6 +5372,94 @@ async function startDetachedWorkerSession(
     return session;
   } catch (error) {
     await fs.rm(sessionPath, { force: true });
+    throw error;
+  }
+}
+
+async function startDetachedDrainContinuationWorker(
+  sessionName: string,
+  options: { workerId?: string; maxContinuations?: number },
+): Promise<DrainContinuationWorker & { alive: boolean }> {
+  assertSafeSessionName(sessionName);
+  const workerId = options.workerId ?? createDrainContinuationWorkerId();
+  assertSafeSessionName(workerId);
+  const workerDir = drainContinuationWorkerDir(sessionName);
+  await fs.mkdir(workerDir, { recursive: true });
+  const stdoutPath = path.join(workerDir, `${workerId}.out.log`);
+  const stderrPath = path.join(workerDir, `${workerId}.err.log`);
+  const recordPath = drainContinuationWorkerPath(sessionName, workerId);
+  if (await pathExists(recordPath)) {
+    throw new Error(`drain continuation worker '${workerId}' already exists for session '${sessionName}'`);
+  }
+  const command = [
+    "runs",
+    "session-drain-continuations",
+    sessionName,
+    "--execute-queued",
+    ...(options.maxContinuations ? ["--max-continuations", String(options.maxContinuations)] : []),
+  ];
+  const stdout = await fs.open(stdoutPath, "a");
+  const stderr = await fs.open(stderrPath, "a");
+  try {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const worker: DrainContinuationWorker = {
+      session: sessionName,
+      workerId,
+      baseUrl,
+      startedAt: new Date().toISOString(),
+      command,
+      pid: child.pid ?? null,
+      stdoutPath,
+      stderrPath,
+    };
+    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    return { ...worker, alive: processIsAlive(worker.pid) };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
+}
+
+async function listDrainContinuationWorkers(
+  options: { sessionName?: string },
+  lines: number,
+): Promise<Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
+  const sessionNames = options.sessionName ? [options.sessionName] : await listDrainContinuationWorkerSessionNames();
+  const workers = await Promise.all(sessionNames.map(async (sessionName) => {
+    assertSafeSessionName(sessionName);
+    try {
+      const entries = await fs.readdir(drainContinuationWorkerDir(sessionName), { withFileTypes: true });
+      return await Promise.all(entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .map(async (entry) => {
+          const text = await fs.readFile(path.join(drainContinuationWorkerDir(sessionName), entry.name), "utf8");
+          const worker = JSON.parse(text) as DrainContinuationWorker;
+          return {
+            ...worker,
+            alive: processIsAlive(worker.pid),
+            stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
+            stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
+          };
+        }));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }));
+  return workers.flat().sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+}
+
+async function listDrainContinuationWorkerSessionNames(): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(drainContinuationWorkerRootDir(), { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
 }
@@ -6038,6 +6162,25 @@ function workerSessionDrainContinuationPath(sessionName: string, continuationId:
   return path.join(workerSessionDrainContinuationDir(sessionName), `${continuationId}.json`);
 }
 
+function drainContinuationWorkerRootDir(): string {
+  return path.join(workerSessionDir, "drain-continuation-workers");
+}
+
+function drainContinuationWorkerDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(drainContinuationWorkerRootDir(), sessionName);
+}
+
+function drainContinuationWorkerPath(sessionName: string, workerId: string): string {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(workerId);
+  return path.join(drainContinuationWorkerDir(sessionName), `${workerId}.json`);
+}
+
+function createDrainContinuationWorkerId(): string {
+  return `drain-worker-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 17)}`;
+}
+
 function assertSafeSessionName(value: string): void {
   if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
     throw new Error("session names may only contain letters, numbers, '.', '_', and '-'");
@@ -6285,7 +6428,8 @@ Commands:
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
-  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
+  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
+  runs session-drain-workers [name] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
