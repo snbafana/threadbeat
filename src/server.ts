@@ -16,6 +16,7 @@ import { buildPreflightReport } from "./preflight.js";
 import { runPlanFromRow } from "./runPlanning.js";
 import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
 import {
+  acknowledgeWorkerSessionApplyResetAudit,
   executeNextWorkerSessionDrainContinuationRecord,
   executeQueuedWorkerSessionDrainContinuationRecords,
   executeWorkerSessionDrainContinuationRecord,
@@ -245,6 +246,36 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         filter: { applyIds, source: sourceFilter ? [...sourceFilter] : [], limit },
         summary: summarizeWorkerSessionApplyRecords(filtered),
         applies: filtered,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/applies/:applyId/reset-audit/ack", async (request, reply) => {
+    try {
+      const { name, applyId } = request.params as { name: string; applyId: string };
+      const body = requestBody(request.body);
+      const dryRun = parseBoolean(body.dryRun, false);
+      const acknowledged = await acknowledgeWorkerSessionApplyResetAudit(
+        settings.projectRoot,
+        name,
+        applyId,
+        { dryRun, acknowledgedBy: "server" },
+      );
+      return {
+        ok: true,
+        session: name,
+        applyId,
+        applyPath: acknowledged.path,
+        dryRun,
+        resetAudit: {
+          acknowledged: true,
+          acknowledgedAt: acknowledged.acknowledgedAt,
+          acknowledgedBy: acknowledged.record.resetAuditAcknowledgedBy,
+        },
+        summary: summarizeWorkerSessionApplyRecords([acknowledged.record]).applies[0],
+        record: acknowledged.record,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

@@ -3669,15 +3669,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (outputFormat !== "json") {
         throw new Error("runs session-applies --server requires json output");
       }
+      if (options["ack-reset-audit"] === "1") {
+        const applyId = required(
+          options["apply-id"],
+          "runs session-applies --server --ack-reset-audit requires --apply-id",
+        );
+        await printJson(await acknowledgeWorkerSessionApplyResetAudit(
+          requiredSessionName,
+          applyId,
+          { dryRun: options["dry-run"] === "1" },
+        ));
+        return;
+      }
       if (
         options.summary === "1"
         || options["action-queue"] === "1"
         || options["summary-group"]
         || options["ready-results"] === "1"
         || options["continue-drains"] === "1"
-        || options["ack-reset-audit"] === "1"
       ) {
-        throw new Error("runs session-applies --server cannot be combined with local summary, action queue, drain continuation, or reset-audit modes");
+        throw new Error("runs session-applies --server cannot be combined with local summary, action queue, or drain continuation modes");
       }
       await printJson(await fetchWorkerSessionApplies(requiredSessionName, {
         applyId: options["apply-id"],
@@ -5433,6 +5444,28 @@ type WorkerSessionAppliesResponse = {
   applies: SessionApplyRecord[];
 };
 
+type WorkerSessionApplyResetAuditAckResponse = {
+  ok: true;
+  session: string;
+  applyId: string;
+  applyPath: string;
+  dryRun: boolean;
+  resetAudit: {
+    acknowledged: true;
+    acknowledgedAt: string;
+    acknowledgedBy?: string;
+  };
+  summary: {
+    applyId: string;
+    source: string;
+    selected: number;
+    succeeded: number;
+    failed: number;
+    pending: number;
+  };
+  record: SessionApplyRecord;
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -5540,6 +5573,18 @@ async function fetchWorkerSessionApplies(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/applies`, params),
   ) as WorkerSessionAppliesResponse;
+}
+
+async function acknowledgeWorkerSessionApplyResetAudit(
+  sessionName: string,
+  applyId: string,
+  options: { dryRun: boolean },
+): Promise<WorkerSessionApplyResetAuditAckResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/applies/${encodeURIComponent(applyId)}/reset-audit/ack`,
+    { dryRun: options.dryRun },
+  ) as WorkerSessionApplyResetAuditAckResponse;
 }
 
 async function queueWorkerSessionDrainContinuations(

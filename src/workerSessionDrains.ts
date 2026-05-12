@@ -9,17 +9,23 @@ type SessionApplyCommand = {
 };
 
 type SessionApplyExecution = {
+  action?: string;
   command: string[];
   exitCode: number | null;
+  output?: unknown;
 };
 
 type SessionApplyRecord = {
+  observedAt?: string;
   session: string;
   applyId: string;
+  applyPath?: string;
   source: string;
   dryRun?: boolean;
   filter: Record<string, unknown>;
   updatedAt: string;
+  resetAuditAcknowledgedAt?: string;
+  resetAuditAcknowledgedBy?: string;
   selected: number;
   commands: SessionApplyCommand[];
   executions: SessionApplyExecution[];
@@ -118,6 +124,48 @@ export async function listWorkerSessionApplyRecords(projectRoot: string, session
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+export async function readWorkerSessionApplyRecord(
+  projectRoot: string,
+  sessionName: string,
+  applyId: string,
+): Promise<SessionApplyRecord | null> {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(applyId);
+  try {
+    const text = await fs.readFile(workerSessionApplyPath(projectRoot, sessionName, applyId), "utf8");
+    return JSON.parse(text) as SessionApplyRecord;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export async function acknowledgeWorkerSessionApplyResetAudit(
+  projectRoot: string,
+  sessionName: string,
+  applyId: string,
+  options: { dryRun?: boolean; acknowledgedBy?: string } = {},
+): Promise<{ path: string; record: SessionApplyRecord; acknowledgedAt: string }> {
+  const record = await readWorkerSessionApplyRecord(projectRoot, sessionName, applyId);
+  if (!record) throw new Error(`session apply ${applyId} does not exist for ${sessionName}`);
+  const resetExecutions = sessionApplyDrainContinuationResetExecutions(record);
+  if (resetExecutions.length === 0) {
+    throw new Error(`session apply ${applyId} has no drain continuation reset audit to acknowledge`);
+  }
+  const acknowledgedAt = record.resetAuditAcknowledgedAt ?? new Date().toISOString();
+  const updatedRecord: SessionApplyRecord = {
+    ...record,
+    updatedAt: new Date().toISOString(),
+    resetAuditAcknowledgedAt: acknowledgedAt,
+    resetAuditAcknowledgedBy: options.acknowledgedBy ?? "server",
+  };
+  const applyPath = workerSessionApplyPath(projectRoot, sessionName, applyId);
+  if (options.dryRun !== true) {
+    await writeWorkerSessionApplyRecord(projectRoot, updatedRecord);
+  }
+  return { path: applyPath, record: updatedRecord, acknowledgedAt };
 }
 
 export function summarizeWorkerSessionApplyRecords(records: SessionApplyRecord[]): {
@@ -453,6 +501,18 @@ export async function writeWorkerSessionDrainContinuationRecord(
   return { path: continuationPath, record };
 }
 
+async function writeWorkerSessionApplyRecord(
+  projectRoot: string,
+  record: SessionApplyRecord,
+): Promise<{ path: string; record: SessionApplyRecord }> {
+  assertSafeWorkerSessionName(record.session);
+  assertSafeWorkerSessionName(record.applyId);
+  const applyPath = workerSessionApplyPath(projectRoot, record.session, record.applyId);
+  await fs.mkdir(path.dirname(applyPath), { recursive: true });
+  await fs.writeFile(applyPath, `${JSON.stringify({ ...record, applyPath }, null, 2)}\n`);
+  return { path: applyPath, record: { ...record, applyPath } };
+}
+
 export function summarizeWorkerSessionApplyDrains(records: SessionApplyRecord[]): {
   counts: {
     total: number;
@@ -509,6 +569,14 @@ export function summarizeWorkerSessionApplyDrains(records: SessionApplyRecord[])
     },
     drains,
   };
+}
+
+function sessionApplyDrainContinuationResetExecutions(record: SessionApplyRecord): SessionApplyExecution[] {
+  return record.executions
+    .filter((execution) => (
+      execution.action === "reset_failed_drain_continuations"
+      || execution.action === "reset_running_drain_continuations"
+    ));
 }
 
 function summarizeApplyRecord(record: SessionApplyRecord): {
@@ -629,6 +697,12 @@ function stringListFromUnknown(value: unknown): string[] {
 function workerSessionApplyDir(projectRoot: string, sessionName: string): string {
   assertSafeWorkerSessionName(sessionName);
   return path.join(projectRoot, ".threadbeat", "worker-sessions", "apply", sessionName);
+}
+
+function workerSessionApplyPath(projectRoot: string, sessionName: string, applyId: string): string {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(applyId);
+  return path.join(workerSessionApplyDir(projectRoot, sessionName), `${applyId}.json`);
 }
 
 function workerSessionDrainContinuationDir(projectRoot: string, sessionName: string): string {

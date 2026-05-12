@@ -629,6 +629,28 @@ try {
   assert.equal(serverApplyRecords.applies[0].source, "status");
   assert.equal(serverApplyRecords.applies[0].executions[0].action, "reset_failed_drain_continuations");
   assert.equal(serverApplyRecords.applies[0].executions[0].exitCode, 0);
+  const serverResetAuditAck = await cliJson<{
+    session: string;
+    applyId: string;
+    dryRun: boolean;
+    resetAudit: { acknowledged: boolean; acknowledgedAt: string; acknowledgedBy: string };
+    record: { resetAuditAcknowledgedAt: string; resetAuditAcknowledgedBy: string };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--ack-reset-audit",
+  ]);
+  assert.equal(serverResetAuditAck.session, sessionName);
+  assert.equal(serverResetAuditAck.applyId, "detached-session-api-backed-reset");
+  assert.equal(serverResetAuditAck.dryRun, false);
+  assert.equal(serverResetAuditAck.resetAudit.acknowledged, true);
+  assert.equal(serverResetAuditAck.resetAudit.acknowledgedBy, "server");
+  assert.equal(serverResetAuditAck.record.resetAuditAcknowledgedAt, serverResetAuditAck.resetAudit.acknowledgedAt);
+  assert.equal(serverResetAuditAck.record.resetAuditAcknowledgedBy, "server");
   await fs.rm(apiBackedResetContinuationPath, { force: true });
 
   const deadWorkerPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
