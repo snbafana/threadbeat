@@ -3136,8 +3136,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (queueSource !== "review" && queueSource !== "status" && queueSource !== "watch") {
       throw new Error("runs session-apply --source must be review, status, or watch");
     }
-    if (!options.action && !options["branch-action"]) {
-      throw new Error("runs session-apply requires --action or --branch-action");
+    const applyActionFilter = options["apply-action"] ? new Set(parseList(options["apply-action"])) : null;
+    if (!options.action && !options["branch-action"] && !applyActionFilter) {
+      throw new Error("runs session-apply requires --action, --apply-action, or --branch-action");
+    }
+    if (applyActionFilter && queueSource !== "watch") {
+      throw new Error("runs session-apply --apply-action requires --source watch");
+    }
+    if (applyActionFilter && (options.action || options["branch-action"])) {
+      throw new Error("runs session-apply --apply-action cannot be combined with --action or --branch-action");
+    }
+    if (
+      applyActionFilter
+      && [...applyActionFilter].some((action) => (
+        action !== "retry_failed"
+        && action !== "resume_pending"
+        && action !== "review_ready_results"
+        && action !== "inspect_drain_continuation_resets"
+      ))
+    ) {
+      throw new Error("runs session-apply --apply-action must be retry_failed, resume_pending, review_ready_results, or inspect_drain_continuation_resets");
     }
     if (options["until-empty"] === "1") {
       if (queueSource !== "watch") {
@@ -3198,6 +3216,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           "--source",
           "watch",
           ...(options.action ? ["--action", options.action] : []),
+          ...(options["apply-action"] ? ["--apply-action", options["apply-action"]] : []),
           ...(options["branch-action"] ? ["--branch-action", options["branch-action"]] : []),
           ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
           ...(options.status ? ["--status", options.status] : []),
@@ -3337,6 +3356,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
           ...(options.status ? ["--status", options.status] : []),
           ...(options["checkout-dir"] ? ["--checkout-dir", options["checkout-dir"]] : []),
+          ...(options["apply-action"] ? ["--apply-action", options["apply-action"]] : []),
           ...(options["changed-only"] === "1" ? ["--changed-only"] : []),
           ...(options["changed-path"] ? ["--changed-path", options["changed-path"]] : []),
         ]
@@ -3377,9 +3397,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
     const filteredQueueCommands = queueSource === "watch" || queueSource === "status"
       ? queueCommands.filter((item) => (
-        item.scope === "branch"
-          ? branchActionFilter?.has(item.action)
-          : actionFilter?.has(item.action)
+        applyActionFilter
+          ? item.scope === "apply" && applyActionFilter.has(item.action)
+          : item.scope === "branch"
+            ? branchActionFilter?.has(item.action)
+            : actionFilter?.has(item.action)
       ))
       : queueCommands;
     const runFilter = options.run ? new Set(parseList(options.run)) : null;
@@ -7309,7 +7331,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]

@@ -5000,6 +5000,36 @@ try {
   assert.ok(resetOnlyWatchActionQueueShellLines.includes(failedResetInspectionCommand.join(" ")));
   assert.ok(resetOnlyWatchActionQueueShellLines.includes(runningResetInspectionCommand.join(" ")));
   assert.ok(!resetOnlyWatchActionQueueShellLines.includes(retryInspection.summary.actions.retryFailed.join(" ")));
+  const resetOnlyWatchApplyPreview = await cliJson<{
+    source: string;
+    selected: number;
+    applySelection: {
+      filteredQueueCommands: number;
+      candidateQueueCommands: number;
+      selectedQueueCommands: number;
+    };
+    commandsToRun: Array<{ scope: string; action: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "watch",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--dry-run",
+  ]);
+  assert.equal(resetOnlyWatchApplyPreview.source, "watch");
+  assert.ok(resetOnlyWatchApplyPreview.selected >= 2);
+  assert.equal(resetOnlyWatchApplyPreview.applySelection.filteredQueueCommands, resetOnlyWatchApplyPreview.commandsToRun.length);
+  assert.equal(resetOnlyWatchApplyPreview.applySelection.candidateQueueCommands, resetOnlyWatchApplyPreview.commandsToRun.length);
+  assert.equal(resetOnlyWatchApplyPreview.applySelection.selectedQueueCommands, resetOnlyWatchApplyPreview.commandsToRun.length);
+  assert.ok(resetOnlyWatchApplyPreview.commandsToRun.every((command) => (
+    command.scope === "apply" && command.action === "inspect_drain_continuation_resets"
+  )));
+  assert.ok(resetOnlyWatchApplyPreview.commandsToRun.some((command) => command.command.join(" ") === failedResetInspectionCommand.join(" ")));
+  assert.ok(resetOnlyWatchApplyPreview.commandsToRun.some((command) => command.command.join(" ") === runningResetInspectionCommand.join(" ")));
+  assert.ok(!resetOnlyWatchApplyPreview.commandsToRun.some((command) => command.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")));
   const retryWatchApplyPreview = await cliJson<{
     source: string;
     selected: number;

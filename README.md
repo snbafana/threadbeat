@@ -721,7 +721,8 @@ recovery, branch resume, and apply action-queue commands. Add
 print only reset-audit apply inspection commands from the watch queue. Use
 `runs session-apply <name> --source watch` with an explicit `--action` or
 `--branch-action` to execute a filtered slice of that watch queue through the
-durable apply ledger. Add `--until-empty --max-polls <n>` to repeatedly take a
+durable apply ledger, or use `--apply-action inspect_drain_continuation_resets`
+to execute only reset-audit apply commands. Add `--until-empty --max-polls <n>` to repeatedly take a
 bounded watch snapshot and write one apply record per poll until the filtered
 queue is empty. Add `--continue-prefix <prefix>` with `--until-empty` to keep
 draining from the next recorded `<prefix>-NNN` apply ID; it refuses completed
