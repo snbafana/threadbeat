@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
@@ -3368,6 +3368,103 @@ try {
     item.continuationId === openDrainQueuedDetached.continuation.continuationId
     && item.status === "executed"
   )));
+  const stopDrainWorkerSessionName = `${detachedWorkerSessionName}-stop`;
+  const stopDrainWorkerId = "smoke-drain-worker-stop";
+  const stopDrainWorkerDir = path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", stopDrainWorkerSessionName);
+  const stopDrainWorkerStdoutPath = path.join(stopDrainWorkerDir, `${stopDrainWorkerId}.out.log`);
+  const stopDrainWorkerStderrPath = path.join(stopDrainWorkerDir, `${stopDrainWorkerId}.err.log`);
+  await fs.mkdir(stopDrainWorkerDir, { recursive: true });
+  await fs.writeFile(stopDrainWorkerStdoutPath, "stop worker stdout\n");
+  await fs.writeFile(stopDrainWorkerStderrPath, "");
+  const stopDrainWorkerProcess = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  stopDrainWorkerProcess.unref();
+  try {
+    await fs.writeFile(path.join(stopDrainWorkerDir, `${stopDrainWorkerId}.json`), `${JSON.stringify({
+      session: stopDrainWorkerSessionName,
+      workerId: stopDrainWorkerId,
+      baseUrl,
+      startedAt: new Date().toISOString(),
+      command: [process.execPath, "-e", "setInterval(() => {}, 1000)"],
+      pid: stopDrainWorkerProcess.pid ?? null,
+      stdoutPath: stopDrainWorkerStdoutPath,
+      stderrPath: stopDrainWorkerStderrPath,
+    }, null, 2)}\n`);
+    const stoppedDrainWorker = await cliJson<{
+      session: string;
+      count: number;
+      stopped: Array<{
+        workerId: string;
+        pid: number | null;
+        aliveBefore: boolean;
+        stopped: boolean;
+        signalSent: boolean;
+        alive: boolean;
+        stoppedAt: string;
+        retiredAt?: string;
+      }>;
+      workers: Array<{
+        workerId: string;
+        alive: boolean;
+        stoppedAt?: string;
+        retiredAt?: string;
+        stopResult?: { aliveBefore: boolean; alive: boolean; signalSent: boolean };
+        stdout: { path: string; lines: string[] };
+      }>;
+    }>(baseUrl, [
+      "runs",
+      "stop-drain-workers",
+      stopDrainWorkerSessionName,
+      "--worker-id",
+      stopDrainWorkerId,
+      "--retire",
+      "--lines",
+      "5",
+    ]);
+    assert.equal(stoppedDrainWorker.session, stopDrainWorkerSessionName);
+    assert.equal(stoppedDrainWorker.count, 1);
+    assert.equal(stoppedDrainWorker.stopped[0]?.workerId, stopDrainWorkerId);
+    assert.equal(stoppedDrainWorker.stopped[0]?.pid, stopDrainWorkerProcess.pid);
+    assert.equal(stoppedDrainWorker.stopped[0]?.aliveBefore, true);
+    assert.equal(stoppedDrainWorker.stopped[0]?.stopped, true);
+    assert.equal(stoppedDrainWorker.stopped[0]?.signalSent, true);
+    assert.equal(stoppedDrainWorker.stopped[0]?.alive, false);
+    assert.equal(typeof stoppedDrainWorker.stopped[0]?.stoppedAt, "string");
+    assert.equal(typeof stoppedDrainWorker.stopped[0]?.retiredAt, "string");
+    assert.equal(stoppedDrainWorker.workers[0]?.workerId, stopDrainWorkerId);
+    assert.equal(stoppedDrainWorker.workers[0]?.alive, false);
+    assert.equal(typeof stoppedDrainWorker.workers[0]?.stoppedAt, "string");
+    assert.equal(typeof stoppedDrainWorker.workers[0]?.retiredAt, "string");
+    assert.equal(stoppedDrainWorker.workers[0]?.stopResult?.aliveBefore, true);
+    assert.equal(stoppedDrainWorker.workers[0]?.stopResult?.alive, false);
+    assert.equal(stoppedDrainWorker.workers[0]?.stdout.path, stopDrainWorkerStdoutPath);
+    assert.ok(stoppedDrainWorker.workers[0]?.stdout.lines.includes("stop worker stdout"));
+    const hiddenRetiredDrainWorkers = await cliJson<{ count: number; workers: Array<{ workerId: string }> }>(baseUrl, [
+      "runs",
+      "session-drain-workers",
+      stopDrainWorkerSessionName,
+    ]);
+    assert.equal(hiddenRetiredDrainWorkers.count, 0);
+    const includedRetiredDrainWorkers = await cliJson<{ count: number; workers: Array<{ workerId: string; retiredAt?: string }> }>(baseUrl, [
+      "runs",
+      "session-drain-workers",
+      stopDrainWorkerSessionName,
+      "--include-retired",
+    ]);
+    assert.equal(includedRetiredDrainWorkers.count, 1);
+    assert.equal(includedRetiredDrainWorkers.workers[0]?.workerId, stopDrainWorkerId);
+    assert.equal(typeof includedRetiredDrainWorkers.workers[0]?.retiredAt, "string");
+  } finally {
+    if (stopDrainWorkerProcess.pid) {
+      try {
+        process.kill(-stopDrainWorkerProcess.pid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    }
+  }
   const openDrainContinueDrainsPreview = await cliJson<{
     continuationId: string;
     continuationPath: string;

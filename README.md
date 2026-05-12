@@ -290,6 +290,7 @@ npm run cli -- runs session-drain-continuations overnight --queue --drain-prefix
 npm run cli -- runs session-drain-continuations overnight --execute-queued --max-continuations 5
 npm run cli -- runs session-drain-continuations overnight --execute-queued --detach --worker-id overnight-drain-worker
 npm run cli -- runs session-drain-workers overnight --lines 40
+npm run cli -- runs stop-drain-workers overnight --worker-id overnight-drain-worker --retire
 npm run cli -- runs session-drain-continuations overnight --execute-next
 npm run cli -- runs session-drain-continuations overnight --execute <continuation-id>
 npm run cli -- runs session-drain-continuations overnight --status queued,running,failed
@@ -615,7 +616,11 @@ record as `running`, then `executed` or `failed` with command results. Add
 continuation records without mixing in completed attempts. Add `--detach` with
 `--execute-queued` to leave the bounded server drain running in the background;
 `runs session-drain-workers <name>` returns the durable worker PID, command, log
-paths, liveness, and recent stdout/stderr lines.
+paths, liveness, and recent stdout/stderr lines. Use
+`runs stop-drain-workers <name> --worker-id <id>` to terminate one drain worker
+process group and persist stop metadata; add `--retire` to hide it from default
+worker listings while keeping the durable record available with
+`runs session-drain-workers <name> --include-retired`.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a

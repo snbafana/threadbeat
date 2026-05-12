@@ -3520,7 +3520,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const workers = await listDrainContinuationWorkers(
-      sessionName ? { sessionName } : {},
+      {
+        ...(sessionName ? { sessionName } : {}),
+        ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+        includeRetired: options["include-retired"] === "1",
+      },
       parsePositiveInteger(options.lines ?? "20", "--lines"),
     );
     await printJson({
@@ -3528,6 +3532,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       count: workers.length,
       workers,
     });
+    return;
+  }
+  if (subcommandName === "stop-drain-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const response = await stopDrainContinuationWorkers(required(sessionName, "runs stop-drain-workers <session>"), {
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+      retire: options.retire === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    });
+    await printJson(response);
     return;
   }
   if (subcommandName === "session-watch") {
@@ -4689,7 +4704,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -5230,6 +5245,9 @@ type DrainContinuationWorker = {
   pid: number | null;
   stdoutPath: string;
   stderrPath: string;
+  stoppedAt?: string;
+  stopResult?: StopProcessGroupResult & { aliveBefore: boolean };
+  retiredAt?: string;
 };
 
 type SessionApplyCommand = {
@@ -5426,7 +5444,7 @@ async function startDetachedDrainContinuationWorker(
 }
 
 async function listDrainContinuationWorkers(
-  options: { sessionName?: string },
+  options: { sessionName?: string; workerId?: string; includeRetired?: boolean },
   lines: number,
 ): Promise<Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
   const sessionNames = options.sessionName ? [options.sessionName] : await listDrainContinuationWorkerSessionNames();
@@ -5435,10 +5453,14 @@ async function listDrainContinuationWorkers(
     try {
       const entries = await fs.readdir(drainContinuationWorkerDir(sessionName), { withFileTypes: true });
       return await Promise.all(entries
-        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .filter((entry) => (
+          entry.isFile()
+          && entry.name.endsWith(".json")
+          && (!options.workerId || entry.name === `${options.workerId}.json`)
+        ))
         .map(async (entry) => {
-          const text = await fs.readFile(path.join(drainContinuationWorkerDir(sessionName), entry.name), "utf8");
-          const worker = JSON.parse(text) as DrainContinuationWorker;
+          const worker = await readDrainContinuationWorker(sessionName, entry.name.replace(/\.json$/, ""));
+          if (worker.retiredAt && !options.includeRetired) return null;
           return {
             ...worker,
             alive: processIsAlive(worker.pid),
@@ -5451,7 +5473,7 @@ async function listDrainContinuationWorkers(
       throw error;
     }
   }));
-  return workers.flat().sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+  return workers.flat().filter((worker): worker is NonNullable<typeof worker> => worker !== null).sort((left, right) => right.startedAt.localeCompare(left.startedAt));
 }
 
 async function listDrainContinuationWorkerSessionNames(): Promise<string[]> {
@@ -5462,6 +5484,80 @@ async function listDrainContinuationWorkerSessionNames(): Promise<string[]> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+async function stopDrainContinuationWorkers(
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  stopped: Array<{
+    workerId: string;
+    pid: number | null;
+    aliveBefore: boolean;
+    stopped: boolean;
+    signalSent: boolean;
+    forced: boolean;
+    alive: boolean;
+    stoppedAt: string;
+    retiredAt?: string;
+  }>;
+  workers: Awaited<ReturnType<typeof listDrainContinuationWorkers>>;
+}> {
+  assertSafeSessionName(sessionName);
+  if (options.workerId) assertSafeSessionName(options.workerId);
+  const workers = await listDrainContinuationWorkers({
+    sessionName,
+    ...(options.workerId ? { workerId: options.workerId } : {}),
+    includeRetired: true,
+  }, 0);
+  if (options.workerId && workers.length === 0) {
+    throw new Error(`drain continuation worker '${options.workerId}' not found for session '${sessionName}'`);
+  }
+  const stopped = [];
+  for (const worker of workers) {
+    const aliveBefore = processIsAlive(worker.pid);
+    const result = await stopProcessGroup(worker.pid);
+    const stoppedAt = new Date().toISOString();
+    const updated: DrainContinuationWorker = {
+      ...worker,
+      stoppedAt,
+      stopResult: { ...result, aliveBefore },
+      ...(options.retire ? { retiredAt: stoppedAt } : {}),
+    };
+    await writeDrainContinuationWorker(updated);
+    stopped.push({
+      workerId: worker.workerId,
+      pid: worker.pid,
+      aliveBefore,
+      stopped: !result.alive,
+      signalSent: result.signalSent,
+      forced: result.forced,
+      alive: result.alive,
+      stoppedAt,
+      ...(updated.retiredAt ? { retiredAt: updated.retiredAt } : {}),
+    });
+  }
+  return {
+    session: sessionName,
+    count: stopped.length,
+    stopped,
+    workers: await listDrainContinuationWorkers({
+      sessionName,
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      includeRetired: true,
+    }, options.lines),
+  };
+}
+
+async function readDrainContinuationWorker(sessionName: string, workerId: string): Promise<DrainContinuationWorker> {
+  const text = await fs.readFile(drainContinuationWorkerPath(sessionName, workerId), "utf8");
+  return JSON.parse(text) as DrainContinuationWorker;
+}
+
+async function writeDrainContinuationWorker(worker: DrainContinuationWorker): Promise<void> {
+  await fs.writeFile(drainContinuationWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
 }
 
 async function listWorkerSessions(sessionName?: string): Promise<Array<WorkerSession & { workers: Array<WorkerSession["workers"][number] & { alive: boolean }> }>> {
@@ -6429,7 +6525,8 @@ Commands:
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
-  runs session-drain-workers [name] [--lines 20]
+  runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
+  runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
