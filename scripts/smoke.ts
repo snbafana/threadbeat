@@ -4266,6 +4266,52 @@ try {
   assert.deepEqual(runningResetSummary.continuationIds, [staleRunningContinuation.continuation.continuationId]);
   assert.deepEqual(runningResetSummary.resetReasons, ["operator_reset_running"]);
   assert.deepEqual(runningResetSummary.commands, [resetRunningCommand.split(" ")]);
+  const failedResetInspectionCommand = ["npm", "run", "cli", "--", "runs", "session-applies", detachedWorkerSessionName, "--apply-id", "smoke-reset-failed-status"];
+  const runningResetInspectionCommand = ["npm", "run", "cli", "--", "runs", "session-applies", detachedWorkerSessionName, "--apply-id", "smoke-reset-running-status"];
+  const resetApplyActionQueue = await cliJson<{
+    actionQueue: {
+      counts: { resetAudits: number };
+      actions: Array<{
+        applyId: string;
+        action: string;
+        resetCount: number;
+        resetActions: string[];
+        continuationIds: string[];
+        resetReasons: string[];
+        command: string[];
+      }>;
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--action-queue"]);
+  assert.ok(resetApplyActionQueue.actionQueue.counts.resetAudits >= 2);
+  assert.ok(resetApplyActionQueue.actionQueue.actions.some((action) => (
+    action.applyId === "smoke-reset-failed-status"
+    && action.action === "inspect_drain_continuation_resets"
+    && action.resetCount === 1
+    && action.resetActions.join(",") === "reset_failed_drain_continuations"
+    && action.continuationIds.join(",") === failedDrainNextStepContinuationId
+    && action.resetReasons.join(",") === "operator_reset_failed"
+    && action.command.join(" ") === failedResetInspectionCommand.join(" ")
+  )));
+  assert.ok(resetApplyActionQueue.actionQueue.actions.some((action) => (
+    action.applyId === "smoke-reset-running-status"
+    && action.action === "inspect_drain_continuation_resets"
+    && action.resetCount === 1
+    && action.resetActions.join(",") === "reset_running_drain_continuations"
+    && action.continuationIds.join(",") === staleRunningContinuation.continuation.continuationId
+    && action.resetReasons.join(",") === "operator_reset_running"
+    && action.command.join(" ") === runningResetInspectionCommand.join(" ")
+  )));
+  const resetApplyActionQueueShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--action-queue",
+    "--format",
+    "shell",
+  ]);
+  const resetActionQueueShellLines = resetApplyActionQueueShell.stdout.trim().split("\n");
+  assert.ok(resetActionQueueShellLines.includes(failedResetInspectionCommand.join(" ")));
+  assert.ok(resetActionQueueShellLines.includes(runningResetInspectionCommand.join(" ")));
   assert.equal(staleRunningReset.session, detachedWorkerSessionName);
   assert.equal(staleRunningReset.running, 1);
   assert.equal(staleRunningReset.resetCount, 1);

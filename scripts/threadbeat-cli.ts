@@ -4012,12 +4012,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               ? "session_apply_failed_commands"
               : step.action === "resume_pending"
                 ? "session_apply_pending_commands"
-                : "session_apply_ready_results",
+                : step.action === "review_ready_results"
+                  ? "session_apply_ready_results"
+                  : "session_apply_drain_continuation_resets",
             applyId: step.applyId,
             selected: step.selected,
             failed: step.failed,
             pending: step.pending,
             resultRuns: step.resultRuns,
+            resetCount: step.resetCount,
+            resetActions: step.resetActions,
+            continuationIds: step.continuationIds,
+            resetReasons: step.resetReasons,
             command: step.command,
           })),
         ];
@@ -5670,6 +5676,7 @@ type SessionApplyRunStatus = {
 };
 
 type SessionApplySummary = {
+  session: string;
   applyId: string;
   applyPath: string;
   source?: string;
@@ -6367,6 +6374,7 @@ function summarizeSessionApplyRecord(
     .filter((run) => run.currentRun?.resultCommit)
     .map((run) => run.runId);
   return {
+    session: record.session,
     applyId: record.applyId,
     applyPath: record.applyPath,
     source: record.source,
@@ -6450,6 +6458,11 @@ function sessionApplyReadyResultsCommand(
   ];
 }
 
+function sessionApplyResetInspectionCommand(summary: SessionApplySummary): string[] | null {
+  if (summary.drainContinuationResetExecutions.length === 0) return null;
+  return ["npm", "run", "cli", "--", "runs", "session-applies", summary.session, "--apply-id", summary.applyId];
+}
+
 function sessionApplyShellCommand(
   summary: SessionApplySummary,
   options: Record<string, string>,
@@ -6457,7 +6470,7 @@ function sessionApplyShellCommand(
   if (options["action-queue"] === "1") {
     if (summary.failed > 0) return summary.actions.retryFailed;
     if (summary.pending > 0) return summary.actions.resumePending;
-    return sessionApplyReadyResultsCommand(summary, options);
+    return sessionApplyReadyResultsCommand(summary, options) ?? sessionApplyResetInspectionCommand(summary);
   }
   if (options["ready-results"] === "1" || options["summary-group"] === "ready-to-review") {
     return sessionApplyReadyResultsCommand(summary, options);
@@ -6479,19 +6492,28 @@ function summarizeSessionApplyActionQueue(
     actionable: number;
     resumeNeeded: number;
     readyToReview: number;
+    resetAudits: number;
     waiting: number;
     failed: number;
     pending: number;
   };
   actions: Array<Pick<SessionApplySummary, "applyId" | "failed" | "pending" | "selected"> & {
-    action: "retry_failed" | "resume_pending" | "review_ready_results";
+    action: "retry_failed" | "resume_pending" | "review_ready_results" | "inspect_drain_continuation_resets";
     resultRuns: string[];
+    resetCount: number;
+    resetActions: Array<"reset_failed_drain_continuations" | "reset_running_drain_continuations">;
+    continuationIds: string[];
+    resetReasons: string[];
     command: string[];
   }>;
 } {
   const actions: Array<Pick<SessionApplySummary, "applyId" | "failed" | "pending" | "selected"> & {
-    action: "retry_failed" | "resume_pending" | "review_ready_results";
+    action: "retry_failed" | "resume_pending" | "review_ready_results" | "inspect_drain_continuation_resets";
     resultRuns: string[];
+    resetCount: number;
+    resetActions: Array<"reset_failed_drain_continuations" | "reset_running_drain_continuations">;
+    continuationIds: string[];
+    resetReasons: string[];
     command: string[];
   }> = [];
   for (const apply of applies) {
@@ -6503,6 +6525,10 @@ function summarizeSessionApplyActionQueue(
         pending: apply.pending,
         selected: apply.selected,
         resultRuns: [],
+        resetCount: 0,
+        resetActions: [],
+        continuationIds: [],
+        resetReasons: [],
         command: apply.actions.retryFailed,
       });
       continue;
@@ -6515,22 +6541,47 @@ function summarizeSessionApplyActionQueue(
         pending: apply.pending,
         selected: apply.selected,
         resultRuns: [],
+        resetCount: 0,
+        resetActions: [],
+        continuationIds: [],
+        resetReasons: [],
         command: apply.actions.resumePending,
       });
       continue;
     }
     const command = sessionApplyReadyResultsCommand(apply, options);
-    if (!command) continue;
+    if (command) {
+      actions.push({
+        applyId: apply.applyId,
+        action: "review_ready_results",
+        failed: apply.failed,
+        pending: apply.pending,
+        selected: apply.selected,
+        resultRuns: apply.affectedRuns
+          .filter((run) => run.currentRun?.resultCommit)
+          .map((run) => run.runId),
+        resetCount: 0,
+        resetActions: [],
+        continuationIds: [],
+        resetReasons: [],
+        command,
+      });
+      continue;
+    }
+    const resetInspectionCommand = sessionApplyResetInspectionCommand(apply);
+    if (!resetInspectionCommand) continue;
     actions.push({
       applyId: apply.applyId,
-      action: "review_ready_results",
+      action: "inspect_drain_continuation_resets",
       failed: apply.failed,
       pending: apply.pending,
       selected: apply.selected,
-      resultRuns: apply.affectedRuns
-        .filter((run) => run.currentRun?.resultCommit)
-        .map((run) => run.runId),
-      command,
+      resultRuns: [],
+      resetCount: apply.drainContinuationResetExecutions.reduce((sum, execution) => sum + execution.resetCount, 0),
+      resetActions: [...new Set(apply.drainContinuationResetExecutions.map((execution) => execution.action))],
+      continuationIds: [...new Set(apply.drainContinuationResetExecutions.flatMap((execution) => execution.continuationIds))],
+      resetReasons: [...new Set(apply.drainContinuationResetExecutions.flatMap((execution) => execution.resetReasons))],
+      command: resetInspectionCommand,
     });
   }
   return {
@@ -6539,6 +6590,7 @@ function summarizeSessionApplyActionQueue(
       actionable: actions.length,
       resumeNeeded: actions.filter((action) => action.action === "retry_failed" || action.action === "resume_pending").length,
       readyToReview: actions.filter((action) => action.action === "review_ready_results").length,
+      resetAudits: actions.filter((action) => action.action === "inspect_drain_continuation_resets").length,
       waiting: applies.length - actions.length,
       failed: applies.reduce((sum, apply) => sum + apply.failed, 0),
       pending: applies.reduce((sum, apply) => sum + apply.pending, 0),

@@ -651,9 +651,10 @@ IDs, whether the drain reached an empty queue, and the next apply ID that would
 continue the same prefix. Add
 `--action-queue` for a compact JSON preview of the next actionable command per
 apply record, or `--action-queue --format shell` to print that queue as runnable commands. The
-queue prioritizes retry/resume commands before result-review commands; pass
-`--checkout-dir`, `--changed-only`, or `--changed-path` through when it includes
-result review. Add
+queue prioritizes retry/resume commands before result-review commands, then
+includes reset-audit inspection commands for drain-continuation reset applies;
+pass `--checkout-dir`, `--changed-only`, or `--changed-path` through when it
+includes result review. Add
 `--summary-group resume-needed --format shell` to print only retry/resume
 commands for apply records that still need execution, or
 `--summary-group ready-to-review --format shell` to print only review-ready
