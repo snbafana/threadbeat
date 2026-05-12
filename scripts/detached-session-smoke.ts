@@ -1039,10 +1039,73 @@ try {
   assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.method, "POST");
   assert.match(applyActionWorkerNext.nextSteps[0]?.api.restart.url ?? "", /\/apply-action-workers\/restart$/);
   assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.payload.workerId, "detached-smoke-apply-action-worker");
+  const serverDrainWorkerId = "detached-smoke-drain-worker";
+  const serverDrainWorkerDir = path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", sessionName);
+  const serverDrainWorkerStdoutPath = path.join(serverDrainWorkerDir, `${serverDrainWorkerId}.out.log`);
+  const serverDrainWorkerStderrPath = path.join(serverDrainWorkerDir, `${serverDrainWorkerId}.err.log`);
+  await fs.mkdir(serverDrainWorkerDir, { recursive: true });
+  await fs.writeFile(serverDrainWorkerStdoutPath, "server drain worker stdout\n");
+  await fs.writeFile(serverDrainWorkerStderrPath, "");
+  await fs.writeFile(path.join(serverDrainWorkerDir, `${serverDrainWorkerId}.json`), `${JSON.stringify({
+    session: sessionName,
+    workerId: serverDrainWorkerId,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: ["runs", "session-drain-workers", sessionName, "--server"],
+    pid: null,
+    stdoutPath: serverDrainWorkerStdoutPath,
+    stderrPath: serverDrainWorkerStderrPath,
+    stoppedAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+  const serverDrainWorkers = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    workers: Array<{ workerId: string; alive: boolean; stoppedAt?: string; stdout: { path: string; lines: string[] } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    serverDrainWorkerId,
+    "--lines",
+    "5",
+  ]);
+  assert.equal(serverDrainWorkers.ok, true);
+  assert.equal(serverDrainWorkers.session, sessionName);
+  assert.equal(serverDrainWorkers.count, 1);
+  assert.equal(serverDrainWorkers.workers[0]?.workerId, serverDrainWorkerId);
+  assert.equal(serverDrainWorkers.workers[0]?.alive, false);
+  assert.equal(typeof serverDrainWorkers.workers[0]?.stoppedAt, "string");
+  assert.equal(serverDrainWorkers.workers[0]?.stdout.path, serverDrainWorkerStdoutPath);
+  assert.ok(serverDrainWorkers.workers[0]?.stdout.lines.includes("server drain worker stdout"));
+  const stoppedServerDrainWorker = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    stopped: Array<{ workerId: string; pid: number | null; aliveBefore: boolean; alive: boolean; stoppedAt: string }>;
+  }>(baseUrl, [
+    "runs",
+    "stop-drain-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    serverDrainWorkerId,
+  ]);
+  assert.equal(stoppedServerDrainWorker.ok, true);
+  assert.equal(stoppedServerDrainWorker.session, sessionName);
+  assert.equal(stoppedServerDrainWorker.count, 1);
+  assert.equal(stoppedServerDrainWorker.stopped[0]?.workerId, serverDrainWorkerId);
+  assert.equal(stoppedServerDrainWorker.stopped[0]?.pid, null);
+  assert.equal(stoppedServerDrainWorker.stopped[0]?.aliveBefore, false);
+  assert.equal(stoppedServerDrainWorker.stopped[0]?.alive, false);
+  assert.equal(typeof stoppedServerDrainWorker.stopped[0]?.stoppedAt, "string");
   const controlPlaneStatus = await cliJson<{
     ok?: true;
     session: string;
     workers: {
+      drain: { total: number; stopped: number; retired: number };
       applyAction: { total: number; stopped: number; retired: number };
     };
     queues: {
@@ -1051,8 +1114,11 @@ try {
     };
     recovery: {
       count: number;
-      actions: { restart_apply_action_worker: number };
-      nextSteps: { applyActionWorkers: Array<{ workerId: string; action: string }> };
+      actions: { restart_drain_worker: number; restart_apply_action_worker: number };
+      nextSteps: {
+        drainWorkers: Array<{ workerId: string; action: string }>;
+        applyActionWorkers: Array<{ workerId: string; action: string }>;
+      };
     };
   }>(baseUrl, [
     "runs",
@@ -1062,6 +1128,9 @@ try {
   ]);
   assert.equal(controlPlaneStatus.ok, true);
   assert.equal(controlPlaneStatus.session, sessionName);
+  assert.equal(controlPlaneStatus.workers.drain.total, 1);
+  assert.equal(controlPlaneStatus.workers.drain.stopped, 1);
+  assert.equal(controlPlaneStatus.workers.drain.retired, 0);
   assert.equal(controlPlaneStatus.workers.applyAction.total, 1);
   assert.equal(controlPlaneStatus.workers.applyAction.stopped, 1);
   assert.equal(controlPlaneStatus.workers.applyAction.retired, 0);
@@ -1075,9 +1144,41 @@ try {
       + controlPlaneStatus.queues.drainContinuations.failed
       <= controlPlaneStatus.queues.drainContinuations.total,
   );
+  assert.equal(controlPlaneStatus.recovery.actions.restart_drain_worker, 1);
+  assert.equal(controlPlaneStatus.recovery.nextSteps.drainWorkers[0]?.workerId, serverDrainWorkerId);
+  assert.equal(controlPlaneStatus.recovery.nextSteps.drainWorkers[0]?.action, "restart_drain_worker");
   assert.equal(controlPlaneStatus.recovery.actions.restart_apply_action_worker, 1);
   assert.equal(controlPlaneStatus.recovery.nextSteps.applyActionWorkers[0]?.workerId, "detached-smoke-apply-action-worker");
   assert.equal(controlPlaneStatus.recovery.nextSteps.applyActionWorkers[0]?.action, "restart_apply_action_worker");
+  const restartedServerDrainWorker = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    restarted: Array<{ workerId: string; previousPid: number | null; pid: number | null; restartCount: number; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "restart-drain-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    serverDrainWorkerId,
+  ]);
+  assert.equal(restartedServerDrainWorker.ok, true);
+  assert.equal(restartedServerDrainWorker.session, sessionName);
+  assert.equal(restartedServerDrainWorker.count, 1);
+  assert.equal(restartedServerDrainWorker.restarted[0]?.workerId, serverDrainWorkerId);
+  assert.equal(restartedServerDrainWorker.restarted[0]?.previousPid, null);
+  assert.equal(restartedServerDrainWorker.restarted[0]?.restartCount, 1);
+  assert.deepEqual(restartedServerDrainWorker.restarted[0]?.command, ["runs", "session-drain-workers", sessionName, "--server"]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-drain-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    serverDrainWorkerId,
+    "--retire",
+  ]);
   const restartedApplyActionWorkers = await cliJson<{
     ok?: true;
     count: number;
@@ -1357,6 +1458,7 @@ async function cleanupSession(session: string): Promise<void> {
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-executions", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-workers", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuations", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", session), { recursive: true, force: true });
 }
 
 async function writeDrainContinuation(

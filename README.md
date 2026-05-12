@@ -750,14 +750,16 @@ a continuation stuck as `running`, use `--reset-running` to move it back to
 timestamp is at least ten minutes old. Add `--detach` with
 `--execute-queued` to leave the bounded server drain running in the background;
 `runs session-drain-workers <name>` returns the durable worker PID, command, log
-paths, liveness, and recent stdout/stderr lines. Use
-`runs stop-drain-workers <name> --worker-id <id>` to terminate one drain worker
-process group and persist stop metadata; add `--retire` to hide it from default
-worker listings while keeping the durable record available with
-`runs session-drain-workers <name> --include-retired`. Use
-`runs restart-drain-workers <name> --worker-id <id>` to restart a stopped or
-lost worker from its saved command and log paths; pass `--include-retired` when
-the saved record was intentionally retired.
+paths, liveness, and recent stdout/stderr lines. Add `--server`, or call
+`GET /api/worker-sessions/:name/drain-workers`, to inspect the same drain-worker
+records through the control-plane server. Use
+`runs stop-drain-workers <name> --server --worker-id <id>` to terminate one drain
+worker process group through the server and persist stop metadata; add `--retire`
+to hide it from default worker listings while keeping the durable record
+available with `runs session-drain-workers <name> --server --include-retired`.
+Use `runs restart-drain-workers <name> --server --worker-id <id>` to restart a
+stopped or lost worker from its saved command and log paths; pass
+`--include-retired` when the saved record was intentionally retired.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a

@@ -4053,6 +4053,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-drain-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    if (options.server === "1") {
+      await printJson(await fetchWorkerSessionDrainWorkers(required(sessionName, "runs session-drain-workers <session> --server"), {
+        ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      }));
+      return;
+    }
     const workers = await listDrainContinuationWorkers(
       {
         ...(sessionName ? { sessionName } : {}),
@@ -4071,6 +4079,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "stop-drain-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    if (options.server === "1") {
+      const response = await stopWorkerSessionDrainWorkersViaServer(required(sessionName, "runs stop-drain-workers <session> --server"), {
+        ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+        retire: options.retire === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      });
+      await printJson(response);
+      return;
+    }
     const response = await stopDrainContinuationWorkers(required(sessionName, "runs stop-drain-workers <session>"), {
       ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
       retire: options.retire === "1",
@@ -4082,6 +4099,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "restart-drain-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    if (options.server === "1") {
+      const response = await restartWorkerSessionDrainWorkerViaServer(required(sessionName, "runs restart-drain-workers <session> --server"), {
+        workerId: required(options["worker-id"], "runs restart-drain-workers <session> --server --worker-id <id>"),
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      });
+      await printJson(response);
+      return;
+    }
     const response = await restartDrainContinuationWorkers(required(sessionName, "runs restart-drain-workers <session>"), {
       workerId: required(options["worker-id"], "runs restart-drain-workers <session> --worker-id <id>"),
       includeRetired: options["include-retired"] === "1",
@@ -5903,6 +5929,30 @@ async function fetchWorkerSessionApplyActionExecutions(
   ) as WorkerSessionApplyActionExecutionsResponse;
 }
 
+async function fetchWorkerSessionDrainWorkers(
+  sessionName: string,
+  options: { workerId?: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  workers: Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+}> {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.includeRetired) params.set("includeRetired", "1");
+  params.set("lines", String(options.lines));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/drain-workers`, params),
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    workers: Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+}
+
 async function fetchWorkerSessionApplyActionWorkers(
   sessionName: string,
   options: { workerId?: string; includeRetired: boolean; lines: number },
@@ -5990,6 +6040,7 @@ async function fetchWorkerSessionControlPlaneStatus(
   session: string;
   workers: {
     watch: { total: number; alive: number; stopped: number; retired: number };
+    drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
   };
   queues: {
@@ -6008,8 +6059,8 @@ async function fetchWorkerSessionControlPlaneStatus(
   };
   recovery: {
     count: number;
-    actions: { restart_session_watch_worker: number; restart_apply_action_worker: number };
-    nextSteps: { watchWorkers: unknown[]; applyActionWorkers: unknown[] };
+    actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number };
+    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
   };
 }> {
   return await requestJson(
@@ -6023,6 +6074,7 @@ async function fetchWorkerSessionControlPlaneStatus(
     session: string;
     workers: {
       watch: { total: number; alive: number; stopped: number; retired: number };
+      drain: { total: number; alive: number; stopped: number; retired: number };
       applyAction: { total: number; alive: number; stopped: number; retired: number };
     };
     queues: {
@@ -6041,9 +6093,97 @@ async function fetchWorkerSessionControlPlaneStatus(
     };
     recovery: {
       count: number;
-      actions: { restart_session_watch_worker: number; restart_apply_action_worker: number };
-      nextSteps: { watchWorkers: unknown[]; applyActionWorkers: unknown[] };
+      actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number };
+      nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
     };
+  };
+}
+
+async function stopWorkerSessionDrainWorkersViaServer(
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  stopped: Array<{
+    workerId: string;
+    pid: number | null;
+    aliveBefore: boolean;
+    stopped: boolean;
+    signalSent: boolean;
+    forced: boolean;
+    alive: boolean;
+    stoppedAt: string;
+    retiredAt?: string;
+  }>;
+  workers: Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/drain-workers/stop`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      retire: options.retire,
+      lines: options.lines,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    stopped: Array<{
+      workerId: string;
+      pid: number | null;
+      aliveBefore: boolean;
+      stopped: boolean;
+      signalSent: boolean;
+      forced: boolean;
+      alive: boolean;
+      stoppedAt: string;
+      retiredAt?: string;
+    }>;
+    workers: Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+}
+
+async function restartWorkerSessionDrainWorkerViaServer(
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  restarted: Array<{
+    workerId: string;
+    previousPid: number | null;
+    pid: number | null;
+    restartedAt: string;
+    restartCount: number;
+    command: string[];
+  }>;
+  workers: Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/drain-workers/restart`,
+    {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    restarted: Array<{
+      workerId: string;
+      previousPid: number | null;
+      pid: number | null;
+      restartedAt: string;
+      restartCount: number;
+      command: string[];
+    }>;
+    workers: Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
   };
 }
 
@@ -9179,9 +9319,9 @@ Commands:
   runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--execute-next|--execute-queued] [--max-actions 10] [--until-empty] [--max-polls 10] [--interval-ms 2000] [--continue-on-failure] [--detach] [--worker-id id] [--action-executions] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
-  runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
-  runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
-  runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
+  runs session-drain-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
+  runs stop-drain-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
+  runs restart-drain-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]

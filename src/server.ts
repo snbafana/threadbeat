@@ -38,6 +38,12 @@ import {
   stopWorkerSessionApplyActionWorkers,
 } from "./workerSessionApplyActionWorkers.js";
 import {
+  listWorkerSessionDrainWorkerNextSteps,
+  listWorkerSessionDrainWorkers,
+  restartWorkerSessionDrainWorker,
+  stopWorkerSessionDrainWorkers,
+} from "./workerSessionDrainWorkers.js";
+import {
   listWorkerSessionWatchWorkerNextSteps,
   listWorkerSessionWatchWorkers,
   restartWorkerSessionWatchWorker,
@@ -367,6 +373,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         drainContinuations,
         watchWorkers,
         watchWorkerNextSteps,
+        drainWorkers,
+        drainWorkerNextSteps,
         applyActionWorkers,
         applyActionWorkerNextSteps,
       ] = await Promise.all([
@@ -374,6 +382,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
         listWorkerSessionWatchWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
         listWorkerSessionWatchWorkerNextSteps(settings.projectRoot, name),
+        listWorkerSessionDrainWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+        listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
         listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
         listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
       ]);
@@ -383,6 +393,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         workers: {
           watch: summarizeControlPlaneWorkers(watchWorkers),
+          drain: summarizeControlPlaneWorkers(drainWorkers),
           applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
         },
         queues: {
@@ -390,16 +401,90 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
         },
         recovery: {
-          count: watchWorkerNextSteps.count + applyActionWorkerNextSteps.count,
+          count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count,
           actions: {
             ...watchWorkerNextSteps.actions,
+            ...drainWorkerNextSteps.actions,
             ...applyActionWorkerNextSteps.actions,
           },
           nextSteps: {
             watchWorkers: watchWorkerNextSteps.nextSteps,
+            drainWorkers: drainWorkerNextSteps.nextSteps,
             applyActionWorkers: applyActionWorkerNextSteps.nextSteps,
           },
         },
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/drain-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const lines = parseOptionalInteger(query.lines) ?? 20;
+      const workers = await listWorkerSessionDrainWorkers(settings.projectRoot, {
+        sessionName: name,
+        ...(query.workerId ? { workerId: query.workerId } : {}),
+        includeRetired: parseBoolean(query.includeRetired, false),
+      }, lines);
+      return {
+        ok: true,
+        session: name,
+        count: workers.length,
+        workers,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/drain-workers/next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      return {
+        ok: true,
+        ...await listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/drain-workers/stop", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await stopWorkerSessionDrainWorkers(settings.projectRoot, name, {
+          ...(body.workerId ? { workerId: parseString(body.workerId, "workerId") } : {}),
+          retire: parseBoolean(body.retire, false),
+          lines: parseOptionalInteger(body.lines) ?? 20,
+        }),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/drain-workers/restart", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await restartWorkerSessionDrainWorker(
+          settings.projectRoot,
+          requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+          name,
+          {
+            workerId: parseString(body.workerId, "workerId"),
+            includeRetired: parseBoolean(body.includeRetired, false),
+            lines: parseOptionalInteger(body.lines) ?? 20,
+          },
+        ),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
