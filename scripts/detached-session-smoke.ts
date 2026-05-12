@@ -599,6 +599,36 @@ try {
   assert.equal(apiBackedReset.executions[0].output.continuations[0].continuationId, apiBackedResetContinuationId);
   assert.equal(apiBackedReset.executions[0].output.continuations[0].status, "queued");
   assert.equal(apiBackedReset.executions[0].output.continuations[0].resetReason, "operator_reset_failed");
+  const serverApplyRecords = await cliJson<{
+    session: string;
+    count: number;
+    returned: number;
+    summary: {
+      counts: { total: number; succeeded: number; failed: number; pending: number; dryRun: number };
+      applies: Array<{ applyId: string; source: string; selected: number; succeeded: number; failed: number; pending: number }>;
+    };
+    applies: Array<{ applyId: string; source: string; selected: number; executions: Array<{ action: string; exitCode: number }> }>;
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+  ]);
+  assert.equal(serverApplyRecords.session, sessionName);
+  assert.equal(serverApplyRecords.returned, 1);
+  assert.equal(serverApplyRecords.summary.counts.total, 1);
+  assert.equal(serverApplyRecords.summary.counts.succeeded, 1);
+  assert.equal(serverApplyRecords.summary.counts.failed, 0);
+  assert.equal(serverApplyRecords.summary.counts.pending, 0);
+  assert.equal(serverApplyRecords.summary.applies[0].applyId, "detached-session-api-backed-reset");
+  assert.equal(serverApplyRecords.summary.applies[0].source, "status");
+  assert.equal(serverApplyRecords.summary.applies[0].selected, 1);
+  assert.equal(serverApplyRecords.applies[0].applyId, "detached-session-api-backed-reset");
+  assert.equal(serverApplyRecords.applies[0].source, "status");
+  assert.equal(serverApplyRecords.applies[0].executions[0].action, "reset_failed_drain_continuations");
+  assert.equal(serverApplyRecords.applies[0].executions[0].exitCode, 0);
   await fs.rm(apiBackedResetContinuationPath, { force: true });
 
   const deadWorkerPlan = await cliJson<{ run: { id: string } }>(baseUrl, [

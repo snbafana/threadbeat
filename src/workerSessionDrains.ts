@@ -17,6 +17,7 @@ type SessionApplyRecord = {
   session: string;
   applyId: string;
   source: string;
+  dryRun?: boolean;
   filter: Record<string, unknown>;
   updatedAt: string;
   selected: number;
@@ -117,6 +118,29 @@ export async function listWorkerSessionApplyRecords(projectRoot: string, session
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+export function summarizeWorkerSessionApplyRecords(records: SessionApplyRecord[]): {
+  counts: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    pending: number;
+    dryRun: number;
+  };
+  applies: Array<ReturnType<typeof summarizeApplyRecord>>;
+} {
+  const applies = records.map((record) => summarizeApplyRecord(record));
+  return {
+    counts: {
+      total: applies.length,
+      succeeded: applies.reduce((sum, apply) => sum + apply.succeeded, 0),
+      failed: applies.reduce((sum, apply) => sum + apply.failed, 0),
+      pending: applies.reduce((sum, apply) => sum + apply.pending, 0),
+      dryRun: records.filter((record) => record.dryRun === true).length,
+    },
+    applies,
+  };
 }
 
 export async function listWorkerSessionDrainContinuationRecords(

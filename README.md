@@ -287,6 +287,7 @@ npm run cli -- runs session-apply overnight --source status --include-stopped --
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume --resume-filter failed
 npm run cli -- runs session-applies overnight --apply-id overnight-resume-1
+npm run cli -- runs session-applies overnight --server --apply-id overnight-resume-1
 npm run cli -- runs session-applies overnight --summary
 npm run cli -- runs session-applies overnight --action-queue
 npm run cli -- runs session-applies overnight --action-queue --format shell
@@ -654,7 +655,8 @@ set `--apply-id <id>` and rerun with `--resume` to skip commands that already
 exited cleanly in that recorded apply. Add `--resume-filter failed`, `pending`,
 or `failed,pending` to retry only the failed commands, only commands that never
 started, or both. Use `runs session-applies <name>` to list those apply records,
-or `--apply-id <id>` to inspect the failed executions, pending commands,
+`runs session-applies <name> --server` to inspect the same durable records
+through the server API, or `--apply-id <id>` to inspect the failed executions, pending commands,
 affected runs, drain-continuation reset effects, exact resume commands, and
 branch-native inspect/checkout/review commands for one recorded apply. Add
 `--summary` to group recorded applies into resume-needed, ready-to-review,
