@@ -2097,6 +2097,7 @@ try {
   const detachedLimitedNextOnly = await cliJson<{
     filter: {
       limit: number;
+      offset: number;
       totalNextSteps: number;
       visibleNextSteps: number;
       totalBranchNextSteps: number;
@@ -2108,6 +2109,7 @@ try {
     branchNextSteps: Array<{ runId: string }>;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1"]);
   assert.equal(detachedLimitedNextOnly.filter.limit, 1);
+  assert.equal(detachedLimitedNextOnly.filter.offset, 0);
   assert.equal(detachedLimitedNextOnly.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
   assert.equal(detachedLimitedNextOnly.filter.visibleNextSteps, 1);
   assert.equal(detachedLimitedNextOnly.filter.totalBranchNextSteps, detachedWorkerReview.branchNextSteps.length);
@@ -2116,6 +2118,26 @@ try {
   assert.equal(detachedLimitedNextOnly.branchNextSteps.length, 1);
   assert.equal(detachedLimitedNextOnly.nextSteps[0]?.action, detachedWorkerReview.nextSteps[0]?.action);
   assert.equal(detachedLimitedNextOnly.branchNextSteps[0]?.runId, detachedWorkerReview.branchNextSteps[0]?.runId);
+  const detachedOffsetNextOnly = await cliJson<{
+    filter: {
+      limit: number;
+      offset: number;
+      totalNextSteps: number;
+      visibleNextSteps: number;
+      totalBranchNextSteps: number;
+      visibleBranchNextSteps: number;
+    };
+    nextSteps: Array<{ action: string }>;
+    branchNextSteps: Array<{ runId: string }>;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1", "--offset", "1"]);
+  assert.equal(detachedOffsetNextOnly.filter.limit, 1);
+  assert.equal(detachedOffsetNextOnly.filter.offset, 1);
+  assert.equal(detachedOffsetNextOnly.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
+  assert.equal(detachedOffsetNextOnly.filter.visibleNextSteps, Math.min(1, Math.max(0, detachedWorkerReview.nextSteps.length - 1)));
+  assert.equal(detachedOffsetNextOnly.filter.totalBranchNextSteps, detachedWorkerReview.branchNextSteps.length);
+  assert.equal(detachedOffsetNextOnly.filter.visibleBranchNextSteps, Math.min(1, Math.max(0, detachedWorkerReview.branchNextSteps.length - 1)));
+  assert.equal(detachedOffsetNextOnly.nextSteps[0]?.action, detachedWorkerReview.nextSteps[1]?.action);
+  assert.equal(detachedOffsetNextOnly.branchNextSteps[0]?.runId, detachedWorkerReview.branchNextSteps[1]?.runId);
   const detachedReviewCommands = await cliJson<{
     session: { session: string };
     summary: { branchNextSteps: number };
@@ -2136,6 +2158,7 @@ try {
   const detachedLimitedReviewCommands = await cliJson<{
     filter: {
       limit: number;
+      offset: number;
       totalCommands: number;
       visibleCommands: number;
       totalNextSteps: number;
@@ -2146,6 +2169,7 @@ try {
     branchNextSteps?: unknown;
   }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1", "--commands-only"]);
   assert.equal(detachedLimitedReviewCommands.filter.limit, 1);
+  assert.equal(detachedLimitedReviewCommands.filter.offset, 0);
   assert.equal(detachedLimitedReviewCommands.filter.totalCommands, detachedReviewCommands.commands.length);
   assert.equal(detachedLimitedReviewCommands.filter.visibleCommands, 1);
   assert.equal(detachedLimitedReviewCommands.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
@@ -2159,6 +2183,10 @@ try {
   const detachedLimitedReviewCommandsShell = await cliRaw(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1", "--commands-only", "--format", "shell"]);
   assert.deepEqual(detachedLimitedReviewCommandsShell.stdout.trim().split("\n"), [
     detachedReviewCommands.commands[0]?.command.join(" "),
+  ]);
+  const detachedOffsetReviewCommandsShell = await cliRaw(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1", "--offset", "1", "--commands-only", "--format", "shell"]);
+  assert.deepEqual(detachedOffsetReviewCommandsShell.stdout.trim().split("\n"), [
+    detachedReviewCommands.commands[1]?.command.join(" "),
   ]);
   const detachedReviewResumeCommands = await cliJson<{
     filter: { branchAction: string[]; totalBranchNextSteps: number };
@@ -5068,6 +5096,7 @@ try {
   const limitedRunResults = await cliJson<{
     filter: {
       limit: number;
+      offset: number;
       totalResultCommits: number;
       visibleResultCommits: number;
       totalNextSteps: number;
@@ -5078,12 +5107,33 @@ try {
     nextSteps: Array<{ runId: string; resultCommit: string | null; command: string[] }>;
   }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id, "--next", "--limit", "1"]);
   assert.equal(limitedRunResults.filter.limit, 1);
+  assert.equal(limitedRunResults.filter.offset, 0);
   assert.equal(limitedRunResults.filter.totalNextSteps, limitedRunResults.summary.total);
   assert.equal(limitedRunResults.filter.totalResultCommits, limitedRunResults.summary.resultCommits);
   assert.equal(limitedRunResults.filter.visibleNextSteps, 1);
   assert.equal(limitedRunResults.nextSteps.length, 1);
   assert.ok(limitedRunResults.filter.visibleResultCommits <= 1);
   assert.ok(limitedRunResults.resultCommits.length <= 1);
+  const offsetRunResults = await cliJson<{
+    filter: {
+      limit: number;
+      offset: number;
+      totalNextSteps: number;
+      visibleNextSteps: number;
+      totalResultCommits: number;
+      visibleResultCommits: number;
+    };
+    nextSteps: Array<{ runId: string }>;
+    resultCommits: Array<{ runId: string }>;
+  }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id, "--next", "--limit", "1", "--offset", "1"]);
+  assert.equal(offsetRunResults.filter.limit, 1);
+  assert.equal(offsetRunResults.filter.offset, 1);
+  assert.equal(offsetRunResults.filter.totalNextSteps, limitedRunResults.filter.totalNextSteps);
+  assert.equal(offsetRunResults.filter.totalResultCommits, limitedRunResults.filter.totalResultCommits);
+  assert.equal(offsetRunResults.filter.visibleNextSteps, Math.min(1, Math.max(0, limitedRunResults.filter.totalNextSteps - 1)));
+  assert.equal(offsetRunResults.nextSteps.length, offsetRunResults.filter.visibleNextSteps);
+  assert.equal(offsetRunResults.filter.visibleResultCommits, Math.min(1, Math.max(0, limitedRunResults.filter.totalResultCommits - 1)));
+  assert.equal(offsetRunResults.resultCommits.length, offsetRunResults.filter.visibleResultCommits);
   const watchedResults = await cliRaw(baseUrl, [
     "runs",
     "results",

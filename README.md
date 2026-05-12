@@ -255,6 +255,7 @@ npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overn
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
 npm run cli -- runs results --session overnight --next --commands-only --format shell
 npm run cli -- runs results --session overnight --next --limit 20
+npm run cli -- runs results --session overnight --next --limit 20 --offset 20
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-path report.md
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
@@ -276,6 +277,7 @@ npm run cli -- runs session-summary overnight --next --older-than-ms 120000 --co
 npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --next --limit 20
+npm run cli -- runs session-review overnight --include-stopped --next --limit 20 --offset 20
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --format shell
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --branch-action resume_branch --format shell
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --run <run-id> --dry-run
@@ -416,7 +418,8 @@ Run planning is intentionally server-side and Pi-free for now:
   `commands.resumeBranch` commands for branch-native inspection. Add `--next`
   to return the compact ordered review/resume commands for the visible result
   rows. Add `--limit <n>` with `--next` to bound top-level result commit and
-  review/resume queues while preserving exact summary counts. Add
+  review/resume queues while preserving exact summary counts, and combine it
+  with `--offset <n>` to page through the queue. Add
   `--run <run-id[,run-id]>` to narrow a result snapshot or command
   queue to specific branch runs from a session/apply queue. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
@@ -603,9 +606,10 @@ commands, or `--format shell` to print one copyable command per line. Use
 `--action <name>` or `--branch-action resume_branch|review_branch` with
 `--next` to narrow a session-review queue to one class of recovery, result
 inspection, or branch resume commands without touching the branch state. Add
-`--limit <n>` with `--next` to bound session-level and branch-level queue rows;
-with `--commands-only`, the same limit bounds the combined runnable command
-stream while the filter metadata preserves exact unbounded totals. Add
+`--limit <n>` with `--next` to bound session-level and branch-level queue rows,
+and combine it with `--offset <n>` to page through later rows; with
+`--commands-only`, the same page bounds the combined runnable command stream
+while the filter metadata preserves exact unbounded totals. Add
 `runs session-apply <name> --action ...` or `--branch-action ...` to execute an
 explicitly filtered queue; use `--dry-run`, `--run <id>`, `--limit`, and
 `--concurrency` to preview or bound that execution before changing run state.

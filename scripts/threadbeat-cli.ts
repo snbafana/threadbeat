@@ -738,6 +738,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.limit && options.next !== "1") {
       throw new Error("runs results --limit requires --next");
     }
+    if (options.offset && options.next !== "1") {
+      throw new Error("runs results --offset requires --next");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs results --format shell requires --commands-only");
     }
@@ -756,6 +759,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs results --format shell supports one poll");
     }
     const rowLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
+    const rowOffset = options.offset ? parseNonNegativeInteger(options.offset, "--offset") : 0;
     const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
     const checkoutCommandRootDir = options["checkout-dir"]
       ?? (options.session ? `./checkouts/${options.session}-results` : "./checkouts/results");
@@ -1011,16 +1015,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         commits: step.commits,
         command: step.command,
       }));
-      const limitedResultCommits = rowLimit ? resultCommits.slice(0, rowLimit) : resultCommits;
-      const limitedNextSteps = rowLimit ? nextSteps.slice(0, rowLimit) : nextSteps;
-      const limitedNextCommandQueue = rowLimit ? nextCommandQueue.slice(0, rowLimit) : nextCommandQueue;
-      const limitFilter = rowLimit
+      const pageEnd = rowLimit ? rowOffset + rowLimit : undefined;
+      const visibleResultCommits = rowOffset > 0 || rowLimit
+        ? resultCommits.slice(rowOffset, pageEnd)
+        : resultCommits;
+      const visibleNextSteps = rowOffset > 0 || rowLimit
+        ? nextSteps.slice(rowOffset, pageEnd)
+        : nextSteps;
+      const visibleNextCommandQueue = rowOffset > 0 || rowLimit
+        ? nextCommandQueue.slice(rowOffset, pageEnd)
+        : nextCommandQueue;
+      const pageFilter = rowOffset > 0 || rowLimit
         ? {
-          limit: rowLimit,
+          ...(rowLimit ? { limit: rowLimit } : {}),
+          offset: rowOffset,
           totalResultCommits: resultCommits.length,
-          visibleResultCommits: limitedResultCommits.length,
+          visibleResultCommits: visibleResultCommits.length,
           totalNextSteps: nextSteps.length,
-          visibleNextSteps: limitedNextSteps.length,
+          visibleNextSteps: visibleNextSteps.length,
         }
         : null;
       const output = options.next === "1"
@@ -1029,15 +1041,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...(options.session ? { session: options.session } : {}),
           ...(runFilter ? { runFilter: Array.from(runFilter) } : {}),
           ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
-          ...(limitFilter ? { filter: limitFilter } : {}),
+          ...(pageFilter ? { filter: pageFilter } : {}),
           summary: snapshot.summary,
           ...(options["commands-only"] === "1"
-            ? { commands: limitedNextCommandQueue }
-            : { resultCommits: limitedResultCommits, nextSteps: limitedNextSteps }),
+            ? { commands: visibleNextCommandQueue }
+            : { resultCommits: visibleResultCommits, nextSteps: visibleNextSteps }),
         }
         : snapshot;
       if (outputFormat === "shell") {
-        printCommandQueueShell(limitedNextCommandQueue);
+        printCommandQueueShell(visibleNextCommandQueue);
       } else if (maxPolls === 1) {
         await printJson(output);
       } else {
@@ -2632,6 +2644,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.limit && options.next !== "1") {
       throw new Error("runs session-review --limit requires --next");
     }
+    if (options.offset && options.next !== "1") {
+      throw new Error("runs session-review --offset requires --next");
+    }
     if (options.format && options.next !== "1") {
       throw new Error("runs session-review --format requires --next");
     }
@@ -2641,6 +2656,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const actionFilter = options.action ? new Set(parseList(options.action)) : null;
     const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
     const rowLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
+    const rowOffset = options.offset ? parseNonNegativeInteger(options.offset, "--offset") : 0;
     const requiredSessionName = required(sessionName, "runs session-review <session>");
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const status = await workerSessionStatus(requiredSessionName, statusFilter);
@@ -2941,8 +2957,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const filteredBranchNextSteps = branchActionFilter
       ? branchNextSteps.filter((step) => branchActionFilter.has(step.action))
       : branchNextSteps;
-    const limitedNextSteps = rowLimit ? filteredNextSteps.slice(0, rowLimit) : filteredNextSteps;
-    const limitedBranchNextSteps = rowLimit ? filteredBranchNextSteps.slice(0, rowLimit) : filteredBranchNextSteps;
+    const pageEnd = rowLimit ? rowOffset + rowLimit : undefined;
+    const limitedNextSteps = rowOffset > 0 || rowLimit
+      ? filteredNextSteps.slice(rowOffset, pageEnd)
+      : filteredNextSteps;
+    const limitedBranchNextSteps = rowOffset > 0 || rowLimit
+      ? filteredBranchNextSteps.slice(rowOffset, pageEnd)
+      : filteredBranchNextSteps;
     const commandQueue = [
       ...filteredNextSteps.map((step) => ({
         scope: "session",
@@ -2967,16 +2988,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         command: step.command,
       })),
     ];
-    const limitedCommandQueue = rowLimit ? commandQueue.slice(0, rowLimit) : commandQueue;
+    const limitedCommandQueue = rowOffset > 0 || rowLimit
+      ? commandQueue.slice(rowOffset, pageEnd)
+      : commandQueue;
     const filter = {
       ...(actionFilter ? { action: [...actionFilter] } : {}),
       ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
-      ...(actionFilter || branchActionFilter || rowLimit ? {
+      ...(actionFilter || branchActionFilter || rowLimit || rowOffset > 0 ? {
         totalNextSteps: nextSteps.length,
         totalBranchNextSteps: branchNextSteps.length,
       } : {}),
-      ...(rowLimit ? {
-        limit: rowLimit,
+      ...(rowLimit || rowOffset > 0 ? {
+        ...(rowLimit ? { limit: rowLimit } : {}),
+        offset: rowOffset,
         visibleNextSteps: limitedNextSteps.length,
         visibleBranchNextSteps: limitedBranchNextSteps.length,
         totalCommands: commandQueue.length,
@@ -4962,6 +4986,12 @@ function parsePositiveInteger(value: string, flag: string): number {
   return parsed;
 }
 
+function parseNonNegativeInteger(value: string, flag: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${flag} must be a non-negative integer`);
+  return parsed;
+}
+
 async function mapConcurrent<T, R>(
   items: T[],
   concurrency: number,
@@ -6939,7 +6969,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next] [--limit 10] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
@@ -6947,7 +6977,7 @@ Commands:
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--limit 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
-  runs session-review <name> [--include-stopped] [--next] [--limit 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
+  runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
