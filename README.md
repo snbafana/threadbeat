@@ -731,7 +731,10 @@ the same durable worker lifecycle at `POST /api/worker-sessions/:name/watch-work
 `GET /api/worker-sessions/:name/logs?lines=80` to inspect the durable session
 record, worker liveness, worker log tails, and next diagnostic commands,
 `GET /api/worker-sessions/:name/next` to combine that snapshot with stopped
-watch-worker restart cues and a recommended next command, and use
+watch-worker restart cues and a recommended next command,
+`GET /api/worker-sessions/:name/branches?resumable=true` to inspect
+branch-native result commits, resumable stopped branches, GitHub links, and
+review/resume commands through the server API, and use
 `GET /api/worker-sessions/:name/watch-workers/next` to surface stopped worker
 restart actions through the API. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including

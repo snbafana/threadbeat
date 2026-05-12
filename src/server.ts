@@ -8,6 +8,7 @@ import { buildAgentTemplate } from "./agentTemplate.js";
 import { GitHubHostedGitProvider } from "./hostedGit.js";
 import { createInitialCommit } from "./gitRepositoryBootstrap.js";
 import { assertValidGitRef } from "./git.js";
+import { deriveGitHubLinks } from "./gitLinks.js";
 import { Database } from "./db.js";
 import { createSandboxProvider } from "./modalProvider.js";
 import { MessageBus } from "./messageBus.js";
@@ -32,7 +33,12 @@ import {
   startWorkerSessionWatchWorker,
   stopWorkerSessionWatchWorkers,
 } from "./workerSessionWatchWorkers.js";
-import { readWorkerSessionLogs, readWorkerSessionNext } from "./workerSessions.js";
+import {
+  readWorkerSession,
+  readWorkerSessionLogs,
+  readWorkerSessionNext,
+  workerSessionAgentIds,
+} from "./workerSessions.js";
 import type { Settings } from "./config.js";
 
 type AppParts = {
@@ -396,6 +402,180 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           name,
           parseOptionalInteger(query.lines) ?? 20,
         ),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/branches", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const session = await readWorkerSession(settings.projectRoot, name);
+      const statusList = parseOptionalStatusList(query.status) ?? ["completed", "stopped"];
+      const statusFilter = new Set(statusList);
+      const workerIdFilter = parseOptionalString(query.workerId) ?? null;
+      const resumableOnly = parseBoolean(query.resumable, false);
+      const checkoutDir = parseOptionalString(query.checkoutDir) ?? `./checkouts/${name}-branches`;
+      const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+      const agents = await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+        const agent = await db.getAgent(agentId);
+        if (!agent) {
+          return {
+            agentId,
+            available: false,
+            repository: { repoWebUrl: null },
+            summary: { total: 0, resultCommits: 0, resumable: 0, warnings: 0 },
+            runs: [],
+          };
+        }
+        const runs = (await db.listAgentRuns(agentId, statusList))
+          .filter((run) => statusFilter.has(run.status))
+          .filter((run) => workerIdFilter === null || run.worker_id === workerIdFilter)
+          .filter((run) => !resumableOnly || (run.status === "stopped" && !run.result_commit))
+          .map((run) => {
+            const branchLinks = deriveGitHubLinks(agent.repo_url, {
+              compareBaseRef: run.input_ref,
+              compareHeadRef: run.run_branch,
+              treeRef: run.run_branch,
+            });
+            const resultLinks = deriveGitHubLinks(agent.repo_url, {
+              commitRef: run.result_commit,
+              compareBaseRef: run.input_ref,
+              compareHeadRef: run.result_commit,
+              treeRef: run.result_commit,
+            });
+            const state = run.result_commit ? "result" : run.status === "stopped" ? "resumable" : run.status;
+            const warning = run.status === "completed" && !run.result_commit
+              ? "completed_without_result_commit"
+              : null;
+            return {
+              id: run.id,
+              status: run.status,
+              state,
+              warning,
+              objective: run.objective,
+              baseRef: run.input_ref,
+              branchName: run.run_branch,
+              resultCommit: run.result_commit,
+              workerId: run.worker_id,
+              location: run.worker_id === null
+                ? "unassigned"
+                : sessionWorkerIds.has(run.worker_id)
+                  ? "session_worker"
+                  : "other_worker",
+              commands: {
+                checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${checkoutDir}/${run.id}`],
+                reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${checkoutDir}/${run.id}`],
+                inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                resumeBranch: state === "resumable"
+                  ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+                  : null,
+              },
+              links: {
+                repoUrl: branchLinks.repoUrl,
+                branchTreeUrl: branchLinks.treeUrl,
+                branchCompareUrl: branchLinks.compareUrl,
+                resultTreeUrl: resultLinks.treeUrl,
+                resultCommitUrl: resultLinks.commitUrl,
+                resultCompareUrl: resultLinks.compareUrl,
+              },
+            };
+          });
+        return {
+          agentId,
+          available: true,
+          repository: { repoWebUrl: deriveGitHubLinks(agent.repo_url, {}).repoUrl },
+          summary: {
+            total: runs.length,
+            resultCommits: runs.filter((run) => run.resultCommit).length,
+            resumable: runs.filter((run) => run.state === "resumable").length,
+            warnings: runs.filter((run) => run.warning).length,
+          },
+          runs,
+        };
+      }));
+      const visibleRuns = agents.flatMap((agent) => agent.runs.map((run) => ({ agentId: agent.agentId, run })));
+      const resultCommits = visibleRuns
+        .filter(({ run }) => run.resultCommit)
+        .map(({ agentId, run }) => ({
+          agentId,
+          runId: run.id,
+          status: run.status,
+          state: run.state,
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          links: {
+            resultCommitUrl: run.links.resultCommitUrl,
+            resultTreeUrl: run.links.resultTreeUrl,
+            resultCompareUrl: run.links.resultCompareUrl,
+          },
+          commands: {
+            inspectRun: run.commands.inspectRun,
+            checkoutBranch: run.commands.checkoutBranch,
+            reviewRun: run.commands.reviewRun,
+          },
+        }));
+      const resumableBranches = visibleRuns
+        .filter(({ run }) => run.state === "resumable")
+        .map(({ agentId, run }) => ({
+          agentId,
+          runId: run.id,
+          status: run.status,
+          state: run.state,
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          commands: run.commands,
+          links: run.links,
+        }));
+      const nextSteps = visibleRuns.map(({ agentId, run }) => ({
+        action: run.state === "resumable" ? "resume_branch" : "review_branch",
+        reason: run.state === "resumable"
+          ? "stopped_branch_without_result_commit"
+          : run.warning ?? (run.resultCommit ? "result_commit_available" : "branch_available"),
+        agentId,
+        runId: run.id,
+        status: run.status,
+        state: run.state,
+        warning: run.warning,
+        objective: run.objective,
+        workerId: run.workerId,
+        location: run.location,
+        branchName: run.branchName,
+        resultCommit: run.resultCommit,
+        command: run.state === "resumable" && run.commands.resumeBranch
+          ? run.commands.resumeBranch
+          : run.commands.reviewRun,
+        commands: run.commands,
+      }));
+      return {
+        ok: true,
+        observedAt: new Date().toISOString(),
+        session: name,
+        checkoutDir,
+        filter: {
+          statuses: statusList,
+          resumable: resumableOnly,
+          workerId: workerIdFilter,
+        },
+        summary: {
+          agents: agents.length,
+          total: visibleRuns.length,
+          resultCommits: resultCommits.length,
+          resumable: resumableBranches.length,
+          warnings: visibleRuns.filter(({ run }) => run.warning).length,
+        },
+        resultCommits,
+        resumableBranches,
+        nextSteps,
+        agents,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

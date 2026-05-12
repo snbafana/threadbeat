@@ -296,6 +296,53 @@ try {
   assert.equal(apiNext.workers[0].workerId, "detached-smoke-worker-1");
   assert.equal(apiNext.workers[0].alive, true);
 
+  const apiBranchesResponse = await app.inject({
+    method: "GET",
+    url: `/api/worker-sessions/${sessionName}/branches?resumable=true`,
+  });
+  assert.equal(apiBranchesResponse.statusCode, 200);
+  const apiBranches = JSON.parse(apiBranchesResponse.body) as {
+    session: string;
+    checkoutDir: string;
+    filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+    summary: { total: number; resultCommits: number; resumable: number; warnings: number };
+    resultCommits: unknown[];
+    resumableBranches: Array<{
+      runId: string;
+      resultCommit: string | null;
+      location: string;
+      commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[]; resumeBranch: string[] | null };
+      links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
+    }>;
+    nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+  };
+  assert.equal(apiBranches.session, sessionName);
+  assert.equal(apiBranches.checkoutDir, `./checkouts/${sessionName}-branches`);
+  assert.deepEqual(apiBranches.filter.statuses, ["completed", "stopped"]);
+  assert.equal(apiBranches.filter.resumable, true);
+  assert.equal(apiBranches.filter.workerId, null);
+  assert.ok(apiBranches.summary.total >= 1);
+  assert.equal(apiBranches.summary.resultCommits, 0);
+  assert.ok(apiBranches.summary.resumable >= 1);
+  assert.equal(apiBranches.resultCommits.length, 0);
+  assert.ok(apiBranches.resumableBranches.some((run) => (
+    run.runId === stoppedPlan.run.id
+    && run.resultCommit === null
+    && run.location === "unassigned"
+    && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${stoppedPlan.run.id} --dir ./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`
+    && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${stoppedPlan.run.id} --checkout-dir ./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`
+    && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${stoppedPlan.run.id}`
+    && run.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
+    && run.links.branchTreeUrl !== null
+    && run.links.resultCommitUrl === null
+  )));
+  assert.ok(apiBranches.nextSteps.some((step) => (
+    step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.runId === stoppedPlan.run.id
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
+  )));
+
   const stopped = await cliJson<{
     session: string;
     stopped: Array<{ workerId: string; pid: number | null; stopped: boolean; alive: boolean }>;

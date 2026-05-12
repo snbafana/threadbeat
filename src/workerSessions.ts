@@ -66,6 +66,14 @@ export async function readWorkerSession(
   return JSON.parse(text) as WorkerSession;
 }
 
+export function workerSessionAgentIds(session: WorkerSession): string[] {
+  const commandArgs = session.command[0] === "runs" && session.command[1] === "work"
+    ? session.command.slice(2)
+    : session.command;
+  const options = parseCommandOptions(commandArgs);
+  return parseList(options.agents ?? required(options.agent, "recorded session --agent or --agents"));
+}
+
 export async function readWorkerSessionLogs(
   projectRoot: string,
   sessionName: string,
@@ -184,4 +192,35 @@ function assertSafeWorkerSessionName(value: string): void {
   if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
     throw new Error("worker session names may only contain letters, numbers, '.', '_', and '-'");
   }
+}
+
+function parseCommandOptions(args: string[]): Record<string, string> {
+  const options: Record<string, string> = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg.startsWith("--")) continue;
+    const equals = arg.indexOf("=");
+    if (equals !== -1) {
+      options[arg.slice(2, equals)] = arg.slice(equals + 1);
+      continue;
+    }
+    const key = arg.slice(2);
+    const next = args[index + 1];
+    if (!next || next.startsWith("--")) {
+      options[key] = "1";
+      continue;
+    }
+    options[key] = next;
+    index += 1;
+  }
+  return options;
+}
+
+function parseList(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function required(value: string | undefined, label: string): string {
+  if (!value) throw new Error(`missing ${label}`);
+  return value;
 }
