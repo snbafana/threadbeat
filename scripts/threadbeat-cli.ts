@@ -5720,6 +5720,20 @@ type SessionApplySummary = {
   }>;
 };
 
+type SessionApplyDrainContinuationResetGroupItem = Pick<SessionApplySummary, "applyId" | "selected"> & {
+  resetActions: Array<"reset_failed_drain_continuations" | "reset_running_drain_continuations">;
+  states: Array<"succeeded" | "failed">;
+  resetCount: number;
+  inspected: number;
+  failed: number;
+  running: number;
+  skippedFailed: number;
+  skippedRunning: number;
+  continuationIds: string[];
+  resetReasons: string[];
+  commands: string[][];
+};
+
 async function startDetachedWorkerSession(
   sessionName: string,
   workerCount: number,
@@ -6550,6 +6564,8 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
     readyToReview: number;
     waiting: number;
     drainPrefixes: number;
+    drainContinuationResetApplies: number;
+    drainContinuationResets: number;
     failed: number;
     pending: number;
   };
@@ -6557,6 +6573,7 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
     resumeNeeded: Array<Pick<SessionApplySummary, "applyId" | "failed" | "pending" | "selected"> & { command: string[] }>;
     readyToReview: Array<Pick<SessionApplySummary, "applyId" | "selected"> & { resultRuns: string[]; command: string[] }>;
     waiting: Array<Pick<SessionApplySummary, "applyId" | "selected"> & { affectedRuns: number }>;
+    drainContinuationResets: SessionApplyDrainContinuationResetGroupItem[];
     drainPrefixes: Array<{
       prefix: string;
       polls: number;
@@ -6593,8 +6610,14 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
         .map((run) => run.runId),
       command: apply.actions.reviewReadyResults as string[],
     }));
+  const drainContinuationResets = summarizeSessionApplyDrainContinuationResets(applies);
   const waiting = applies
-    .filter((apply) => apply.failed === 0 && apply.pending === 0 && !apply.actions.reviewReadyResults)
+    .filter((apply) => (
+      apply.failed === 0
+      && apply.pending === 0
+      && !apply.actions.reviewReadyResults
+      && apply.drainContinuationResetExecutions.length === 0
+    ))
     .map((apply) => ({
       applyId: apply.applyId,
       selected: apply.selected,
@@ -6608,11 +6631,36 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
       readyToReview: readyToReview.length,
       waiting: waiting.length,
       drainPrefixes: drainPrefixes.length,
+      drainContinuationResetApplies: drainContinuationResets.length,
+      drainContinuationResets: drainContinuationResets.reduce((sum, apply) => sum + apply.resetCount, 0),
       failed: applies.reduce((sum, apply) => sum + apply.failed, 0),
       pending: applies.reduce((sum, apply) => sum + apply.pending, 0),
     },
-    groups: { resumeNeeded, readyToReview, waiting, drainPrefixes },
+    groups: { resumeNeeded, readyToReview, waiting, drainContinuationResets, drainPrefixes },
   };
+}
+
+function summarizeSessionApplyDrainContinuationResets(
+  applies: SessionApplySummary[],
+): SessionApplyDrainContinuationResetGroupItem[] {
+  return applies
+    .filter((apply) => apply.drainContinuationResetExecutions.length > 0)
+    .map((apply) => ({
+      applyId: apply.applyId,
+      selected: apply.selected,
+      resetActions: [...new Set(apply.drainContinuationResetExecutions.map((execution) => execution.action))],
+      states: [...new Set(apply.drainContinuationResetExecutions.map((execution) => execution.state))],
+      resetCount: apply.drainContinuationResetExecutions.reduce((sum, execution) => sum + execution.resetCount, 0),
+      inspected: apply.drainContinuationResetExecutions.reduce((sum, execution) => sum + (execution.inspected ?? 0), 0),
+      failed: apply.drainContinuationResetExecutions.reduce((sum, execution) => sum + (execution.failed ?? 0), 0),
+      running: apply.drainContinuationResetExecutions.reduce((sum, execution) => sum + (execution.running ?? 0), 0),
+      skippedFailed: apply.drainContinuationResetExecutions.reduce((sum, execution) => sum + (execution.skippedFailed ?? 0), 0),
+      skippedRunning: apply.drainContinuationResetExecutions.reduce((sum, execution) => sum + (execution.skippedRunning ?? 0), 0),
+      continuationIds: [...new Set(apply.drainContinuationResetExecutions.flatMap((execution) => execution.continuationIds))],
+      resetReasons: [...new Set(apply.drainContinuationResetExecutions.flatMap((execution) => execution.resetReasons))],
+      commands: apply.drainContinuationResetExecutions.map((execution) => execution.command),
+    }))
+    .sort((left, right) => right.applyId.localeCompare(left.applyId));
 }
 
 function sessionApplyDrainParts(applyId: string): { prefix: string; poll: number } | null {

@@ -4218,6 +4218,54 @@ try {
     resetReasons: ["operator_reset_running"],
     command: resetRunningCommand.split(" "),
   }]);
+  const resetApplySummary = await cliJson<{
+    summary: {
+      counts: { drainContinuationResetApplies: number; drainContinuationResets: number };
+      groups: {
+        waiting: Array<{ applyId: string }>;
+        drainContinuationResets: Array<{
+          applyId: string;
+          resetActions: string[];
+          states: string[];
+          resetCount: number;
+          inspected: number;
+          failed: number;
+          running: number;
+          skippedFailed: number;
+          skippedRunning: number;
+          continuationIds: string[];
+          resetReasons: string[];
+          commands: string[][];
+        }>;
+      };
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--summary"]);
+  assert.ok(resetApplySummary.summary.counts.drainContinuationResetApplies >= 2);
+  assert.ok(resetApplySummary.summary.counts.drainContinuationResets >= 2);
+  assert.ok(!resetApplySummary.summary.groups.waiting.some((apply) => apply.applyId === "smoke-reset-failed-status"));
+  assert.ok(!resetApplySummary.summary.groups.waiting.some((apply) => apply.applyId === "smoke-reset-running-status"));
+  const failedResetSummary = resetApplySummary.summary.groups.drainContinuationResets.find((apply) => apply.applyId === "smoke-reset-failed-status");
+  assert.ok(failedResetSummary);
+  assert.deepEqual(failedResetSummary.resetActions, ["reset_failed_drain_continuations"]);
+  assert.deepEqual(failedResetSummary.states, ["succeeded"]);
+  assert.equal(failedResetSummary.resetCount, 1);
+  assert.equal(failedResetSummary.inspected, 4);
+  assert.equal(failedResetSummary.failed, 1);
+  assert.equal(failedResetSummary.skippedFailed, 0);
+  assert.deepEqual(failedResetSummary.continuationIds, [failedDrainNextStepContinuationId]);
+  assert.deepEqual(failedResetSummary.resetReasons, ["operator_reset_failed"]);
+  assert.deepEqual(failedResetSummary.commands, [resetFailedCommand.split(" ")]);
+  const runningResetSummary = resetApplySummary.summary.groups.drainContinuationResets.find((apply) => apply.applyId === "smoke-reset-running-status");
+  assert.ok(runningResetSummary);
+  assert.deepEqual(runningResetSummary.resetActions, ["reset_running_drain_continuations"]);
+  assert.deepEqual(runningResetSummary.states, ["succeeded"]);
+  assert.equal(runningResetSummary.resetCount, 1);
+  assert.equal(runningResetSummary.inspected, 4);
+  assert.equal(runningResetSummary.running, 1);
+  assert.equal(runningResetSummary.skippedRunning, 0);
+  assert.deepEqual(runningResetSummary.continuationIds, [staleRunningContinuation.continuation.continuationId]);
+  assert.deepEqual(runningResetSummary.resetReasons, ["operator_reset_running"]);
+  assert.deepEqual(runningResetSummary.commands, [resetRunningCommand.split(" ")]);
   assert.equal(staleRunningReset.session, detachedWorkerSessionName);
   assert.equal(staleRunningReset.running, 1);
   assert.equal(staleRunningReset.resetCount, 1);
