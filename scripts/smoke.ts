@@ -3368,6 +3368,79 @@ try {
     item.continuationId === openDrainQueuedDetached.continuation.continuationId
     && item.status === "executed"
   )));
+  const watchRestartDrainWorkerId = "smoke-drain-worker-watch-restart";
+  const watchRestartDrainWorkerDir = path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", detachedWorkerSessionName);
+  const watchRestartDrainWorkerStdoutPath = path.join(watchRestartDrainWorkerDir, `${watchRestartDrainWorkerId}.out.log`);
+  const watchRestartDrainWorkerStderrPath = path.join(watchRestartDrainWorkerDir, `${watchRestartDrainWorkerId}.err.log`);
+  await fs.writeFile(watchRestartDrainWorkerStdoutPath, "watch restart worker stdout\n");
+  await fs.writeFile(watchRestartDrainWorkerStderrPath, "");
+  await fs.writeFile(path.join(watchRestartDrainWorkerDir, `${watchRestartDrainWorkerId}.json`), `${JSON.stringify({
+    session: detachedWorkerSessionName,
+    workerId: watchRestartDrainWorkerId,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: [
+      "runs",
+      "session-drain-continuations",
+      detachedWorkerSessionName,
+      "--execute-queued",
+      "--max-continuations",
+      "1",
+    ],
+    pid: null,
+    stdoutPath: watchRestartDrainWorkerStdoutPath,
+    stderrPath: watchRestartDrainWorkerStderrPath,
+    stoppedAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+  const drainWorkerWatchNext = await cliJson<{
+    summary: { drainWorkerRestarts: number };
+    drainWorkerNextSteps: Array<{
+      action: string;
+      reason: string;
+      workerId: string;
+      pid: number | null;
+      stoppedAt?: string;
+      queuedContinuations: number;
+      command: string[];
+      commands: { inspectDrainWorkers: string[]; restartDrainWorker: string[] };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(drainWorkerWatchNext.summary.drainWorkerRestarts >= 1);
+  assert.ok(drainWorkerWatchNext.drainWorkerNextSteps.some((step) => (
+    step.action === "restart_drain_worker"
+    && step.reason === "stopped_drain_worker"
+    && step.workerId === watchRestartDrainWorkerId
+    && step.pid === null
+    && typeof step.stoppedAt === "string"
+    && step.command.join(" ") === `npm run cli -- runs restart-drain-workers ${detachedWorkerSessionName} --worker-id ${watchRestartDrainWorkerId}`
+    && step.commands.restartDrainWorker.join(" ") === step.command.join(" ")
+    && step.commands.inspectDrainWorkers.join(" ") === `npm run cli -- runs session-drain-workers ${detachedWorkerSessionName} --worker-id ${watchRestartDrainWorkerId}`
+  )));
+  const drainWorkerWatchShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(drainWorkerWatchShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs restart-drain-workers ${detachedWorkerSessionName} --worker-id ${watchRestartDrainWorkerId}`,
+  ));
   const stopDrainWorkerSessionName = `${detachedWorkerSessionName}-stop`;
   const stopDrainWorkerId = "smoke-drain-worker-stop";
   const stopDrainWorkerDir = path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", stopDrainWorkerSessionName);

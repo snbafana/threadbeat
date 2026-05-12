@@ -533,8 +533,10 @@ the compact restart/recover/resume command
 queue for each poll instead of the full session snapshot. The compact watch
 payload also includes `branchNextSteps` for stopped branch rows, with objective,
 worker ownership, checkout/review/inspect/watch/resume commands, and
-recoverability when available. Pass `--checkout-dir` to choose where those branch
-commands materialize local checkouts.
+recoverability when available. It also includes `drainWorkerNextSteps` when a
+stopped drain-continuation worker can be restarted or queued drain continuations
+are waiting without a live worker. Pass `--checkout-dir` to choose where those
+branch commands materialize local checkouts.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
 result commits, and resumable stopped branches for that session's agents. Add
 `--max-polls` and `--interval-ms` for a compact newline-delimited status feed

@@ -3702,6 +3702,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           count: number;
           command: string[];
         } => step.command !== null);
+        const drainWorkerNextSteps = await drainContinuationWorkerNextSteps(status.session.session);
         const commandQueue = [
           ...nextSteps.map((step) => ({
             scope: "session",
@@ -3724,6 +3725,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             location: step.location,
             branchName: step.branchName,
             resultCommit: step.resultCommit,
+            command: step.command,
+          })),
+          ...drainWorkerNextSteps.map((step) => ({
+            scope: "drain_worker",
+            session: status.session.session,
+            action: step.action,
+            reason: step.reason,
+            workerId: step.workerId,
+            pid: step.pid,
+            queuedContinuations: step.queuedContinuations,
             command: step.command,
           })),
           ...(applyActionQueue?.actions ?? []).map((step) => ({
@@ -3761,6 +3772,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             resumableBranches: resumableBranches.length,
             recoveryCandidates: recoverableActive + recoverableStopped,
             branchNextSteps: branchNextSteps.length,
+            drainWorkerRestarts: drainWorkerNextSteps.length,
             applyActions: applyActionQueue?.counts.actionable ?? 0,
             applyResumeNeeded: applyActionQueue?.counts.resumeNeeded ?? 0,
             applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
@@ -3777,6 +3789,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...(options["commands-only"] === "1" ? { commands: commandQueue } : {
             nextSteps,
             branchNextSteps,
+            drainWorkerNextSteps,
             ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
           }),
         };
@@ -5645,6 +5658,45 @@ async function restartDrainContinuationWorkers(
     await stdout.close();
     await stderr.close();
   }
+}
+
+async function drainContinuationWorkerNextSteps(sessionName: string): Promise<Array<{
+  action: "restart_drain_worker";
+  reason: "stopped_drain_worker" | "queued_drain_continuations_without_worker";
+  workerId: string;
+  pid: number | null;
+  stoppedAt?: string;
+  queuedContinuations: number;
+  command: string[];
+  commands: {
+    restartDrainWorker: string[];
+    inspectDrainWorkers: string[];
+  };
+}>> {
+  assertSafeSessionName(sessionName);
+  const [workers, queued] = await Promise.all([
+    listDrainContinuationWorkers({ sessionName }, 1),
+    fetchWorkerSessionDrainContinuations(sessionName, "100", ["queued"]),
+  ]);
+  const queuedContinuations = queued.continuations.length;
+  return workers
+    .filter((worker) => !worker.alive && (worker.stoppedAt || queuedContinuations > 0))
+    .map((worker) => {
+      const restartDrainWorker = ["npm", "run", "cli", "--", "runs", "restart-drain-workers", sessionName, "--worker-id", worker.workerId];
+      return {
+        action: "restart_drain_worker" as const,
+        reason: worker.stoppedAt ? "stopped_drain_worker" as const : "queued_drain_continuations_without_worker" as const,
+        workerId: worker.workerId,
+        pid: worker.pid,
+        ...(worker.stoppedAt ? { stoppedAt: worker.stoppedAt } : {}),
+        queuedContinuations,
+        command: restartDrainWorker,
+        commands: {
+          restartDrainWorker,
+          inspectDrainWorkers: ["npm", "run", "cli", "--", "runs", "session-drain-workers", sessionName, "--worker-id", worker.workerId],
+        },
+      };
+    });
 }
 
 async function readDrainContinuationWorker(sessionName: string, workerId: string): Promise<DrainContinuationWorker> {
