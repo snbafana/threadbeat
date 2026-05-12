@@ -2891,6 +2891,23 @@ try {
     && action.action === "retry_failed"
     && action.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")
   )));
+  const retryWatchActionQueueShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--action-queue",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(retryWatchActionQueueShell.stdout.trim().split("\n").includes(
+    retryInspection.summary.actions.retryFailed.join(" "),
+  ));
   const retryFailedPreview = await cliJson<{
     resumeFilter: string[];
     selected: number;

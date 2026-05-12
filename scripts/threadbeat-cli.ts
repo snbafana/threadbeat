@@ -3198,9 +3198,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const requiredSessionName = required(sessionName, "runs session-watch <session>");
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-watch --format must be json or shell");
+    }
+    if (options["commands-only"] === "1" && options.next !== "1") {
+      throw new Error("runs session-watch --commands-only requires --next");
+    }
+    if (options.format && options.next !== "1") {
+      throw new Error("runs session-watch --format requires --next");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-watch --format shell requires --commands-only");
+    }
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
-    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
+    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : outputFormat === "shell" ? 1 : null;
+    if (outputFormat === "shell" && maxPolls !== 1) {
+      throw new Error("runs session-watch --format shell supports one poll");
+    }
     const branchCheckoutDir = options["checkout-dir"] ?? `./checkouts/${requiredSessionName}-resumable`;
     const actionQueueOptions = { ...options, "checkout-dir": branchCheckoutDir };
     let polls = 0;
@@ -3279,7 +3295,80 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             statuses[runStatus] = (statuses[runStatus] ?? 0) + count;
           }
         }
-        console.log(JSON.stringify({
+        const nextSteps = [
+          ...(deadWorkerCount > 0 && resumableBranches.length > 0 ? [{
+            action: "restart_session_with_stopped",
+            reason: "dead_workers_and_resumable_branches",
+            count: deadWorkerCount,
+            command: ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover", "--resume-stopped"],
+          }] : []),
+          ...(deadWorkerCount > 0 && resumableBranches.length === 0 ? [{
+            action: "restart_session",
+            reason: "dead_workers",
+            count: deadWorkerCount,
+            command: ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover"],
+          }] : []),
+          ...(recoverableActive > 0 ? [{
+            action: "recover_session",
+            reason: "stale_running_claims",
+            count: recoverableActive,
+            command: ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session],
+          }] : []),
+          ...(recoverableStopped > 0 ? [{
+            action: "recover_stopped",
+            reason: "unfinished_stopped_branches",
+            count: recoverableStopped,
+            command: recoverStoppedCommand,
+          }] : []),
+          ...(resumableBranches.length > 0 ? [{
+            action: "resume_session",
+            reason: "resumable_branch_runs",
+            count: resumableBranches.length,
+            command: ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session],
+          }] : []),
+        ].filter((step): step is {
+          action: string;
+          reason: string;
+          count: number;
+          command: string[];
+        } => step.command !== null);
+        const commandQueue = [
+          ...nextSteps.map((step) => ({
+            scope: "session",
+            session: status.session.session,
+            action: step.action,
+            reason: step.reason,
+            count: step.count,
+            command: step.command,
+          })),
+          ...branchNextSteps.map((step) => ({
+            scope: "branch",
+            session: status.session.session,
+            action: step.action,
+            reason: step.reason,
+            agentId: step.agentId,
+            runId: step.runId,
+            status: step.status,
+            objective: step.objective,
+            workerId: step.workerId,
+            location: step.location,
+            branchName: step.branchName,
+            resultCommit: step.resultCommit,
+            command: step.command,
+          })),
+          ...(applyActionQueue?.actions ?? []).map((step) => ({
+            scope: "apply",
+            session: status.session.session,
+            action: step.action,
+            applyId: step.applyId,
+            selected: step.selected,
+            failed: step.failed,
+            pending: step.pending,
+            resultRuns: step.resultRuns,
+            command: step.command,
+          })),
+        ];
+        const output = {
           observedAt,
           session: {
             session: status.session.session,
@@ -3301,41 +3390,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
           },
           checkoutDir: branchCheckoutDir,
-          nextSteps: [
-            ...(deadWorkerCount > 0 && resumableBranches.length > 0 ? [{
-              action: "restart_session_with_stopped",
-              reason: "dead_workers_and_resumable_branches",
-              count: deadWorkerCount,
-              command: ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover", "--resume-stopped"],
-            }] : []),
-            ...(deadWorkerCount > 0 && resumableBranches.length === 0 ? [{
-              action: "restart_session",
-              reason: "dead_workers",
-              count: deadWorkerCount,
-              command: ["npm", "run", "cli", "--", "runs", "restart-session", status.session.session, "--recover"],
-            }] : []),
-            ...(recoverableActive > 0 ? [{
-              action: "recover_session",
-              reason: "stale_running_claims",
-              count: recoverableActive,
-              command: ["npm", "run", "cli", "--", "runs", "recover-session", status.session.session],
-            }] : []),
-            ...(recoverableStopped > 0 ? [{
-              action: "recover_stopped",
-              reason: "unfinished_stopped_branches",
-              count: recoverableStopped,
-              command: recoverStoppedCommand,
-            }] : []),
-            ...(resumableBranches.length > 0 ? [{
-              action: "resume_session",
-              reason: "resumable_branch_runs",
-              count: resumableBranches.length,
-              command: ["npm", "run", "cli", "--", "runs", "resume-session", status.session.session],
-            }] : []),
-          ],
-          branchNextSteps,
-          ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
-        }));
+          ...(options["commands-only"] === "1" ? { commands: commandQueue } : {
+            nextSteps,
+            branchNextSteps,
+            ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
+          }),
+        };
+        if (outputFormat === "shell") {
+          printCommandQueueShell(commandQueue);
+        } else {
+          console.log(JSON.stringify(output));
+        }
       } else {
         console.log(JSON.stringify({
           observedAt,
@@ -5600,7 +5665,7 @@ Commands:
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
-  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
+  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
