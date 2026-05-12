@@ -941,6 +941,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
                 checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${checkoutDir}/${run.id}`],
                 reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${checkoutDir}/${run.id}`],
                 inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--checkout-dir", `${checkoutDir}/${run.id}`],
                 resumeBranch: state === "resumable"
                   ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
                   : null,

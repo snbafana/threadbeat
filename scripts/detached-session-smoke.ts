@@ -384,7 +384,7 @@ try {
       runId: string;
       resultCommit: string | null;
       location: string;
-      commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[]; resumeBranch: string[] | null };
+      commands: { checkoutBranch: string[]; reviewRun: string[]; inspectRun: string[]; inspectResult: string[]; resumeBranch: string[] | null };
       links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
     }>;
     nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
@@ -413,10 +413,19 @@ try {
     && run.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${stoppedPlan.run.id} --dir ./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`
     && run.commands.reviewRun.join(" ") === `npm run cli -- runs review ${stoppedPlan.run.id} --checkout-dir ./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`
     && run.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${stoppedPlan.run.id}`
+    && run.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${stoppedPlan.run.id} --checkout-dir ./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`
     && run.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
     && run.links.branchTreeUrl !== null
     && run.links.resultCommitUrl === null
   )));
+  const inspectMissingResult = await cliJson<{
+    result: { available: boolean; reason: string };
+    commands: { resumeBranch: string[] | null; inspectResult: string[] };
+  }>(baseUrl, ["runs", "inspect-result", stoppedPlan.run.id, "--checkout-dir", `./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`]);
+  assert.equal(inspectMissingResult.result.available, false);
+  assert.equal(inspectMissingResult.result.reason, "stopped_branch_without_result_commit");
+  assert.equal(inspectMissingResult.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`);
+  assert.equal(inspectMissingResult.commands.inspectResult.join(" "), `npm run cli -- runs inspect-result ${stoppedPlan.run.id} --checkout-dir ./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`);
   assert.ok(apiBranches.nextSteps.some((step) => (
     step.action === "resume_branch"
     && step.reason === "stopped_branch_without_result_commit"

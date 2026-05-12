@@ -294,6 +294,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       commands: {
         checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", status.run.id, "--dir", checkoutDir],
         reviewRun: ["npm", "run", "cli", "--", "runs", "review", status.run.id, "--checkout-dir", checkoutDir],
+        inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", status.run.id, "--checkout-dir", checkoutDir],
         watchRun: ["npm", "run", "cli", "--", "runs", "watch", status.run.id],
         resumeBranch: status.run.status === "stopped" && status.run.result_commit === null
           ? ["npm", "run", "cli", "--", "runs", "resume-branch", status.run.id]
@@ -309,6 +310,125 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         checkout: checkout.checkout,
         review: checkout.review,
       } : {}),
+    });
+    return;
+  }
+  if (subcommandName === "inspect-result") {
+    const [id, ...optionArgs] = args;
+    if (!id) throw new Error("runs inspect-result requires a run id");
+    const options = parseOptions(optionArgs);
+    const checkoutDir = options["checkout-dir"] ?? `./checkouts/${id}-result`;
+    const status = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=1`) as {
+      run: {
+        id: string;
+        agent_id: string;
+        objective: string;
+        input_ref: string;
+        run_branch: string;
+        result_commit: string | null;
+        status: string;
+        worker_id: string | null;
+      };
+    };
+    const repository = await requestJson("GET", `/api/agents/${encodeURIComponent(status.run.agent_id)}/repository`) as {
+      repository: { repoUrl: string; repoWebUrl: string | null };
+    };
+    const resultLinks = deriveGitHubLinks(repository.repository.repoUrl, {
+      commitRef: status.run.result_commit,
+      compareBaseRef: status.run.input_ref,
+      compareHeadRef: status.run.result_commit,
+      treeRef: status.run.result_commit,
+    });
+    const commands = {
+      inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", id],
+      checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", id, "--dir", checkoutDir],
+      reviewRun: ["npm", "run", "cli", "--", "runs", "review", id, "--checkout-dir", checkoutDir],
+      inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", id, "--checkout-dir", checkoutDir],
+      resumeBranch: status.run.status === "stopped" && status.run.result_commit === null
+        ? ["npm", "run", "cli", "--", "runs", "resume-branch", id]
+        : null,
+      showCommit: status.run.result_commit
+        ? ["git", "-C", checkoutDir, "show", "--stat", "--oneline", status.run.result_commit]
+        : null,
+      changedFiles: status.run.result_commit
+        ? ["git", "-C", checkoutDir, "diff", "--name-status", `refs/threadbeat/bases/${id}...${status.run.result_commit}`]
+        : null,
+      diff: status.run.result_commit
+        ? ["git", "-C", checkoutDir, "diff", `refs/threadbeat/bases/${id}...${status.run.result_commit}`]
+        : null,
+    };
+    if (!status.run.result_commit) {
+      await printJson({
+        run: {
+          id: status.run.id,
+          agentId: status.run.agent_id,
+          status: status.run.status,
+          objective: status.run.objective,
+          baseRef: status.run.input_ref,
+          branchName: status.run.run_branch,
+          resultCommit: null,
+          workerId: status.run.worker_id,
+        },
+        repository: repository.repository,
+        result: {
+          available: false,
+          reason: status.run.status === "stopped"
+            ? "stopped_branch_without_result_commit"
+            : "result_commit_not_recorded",
+        },
+        commands,
+      });
+      return;
+    }
+    const checkout = await checkoutRunBranch(id, path.resolve(checkoutDir));
+    const baseRef = `refs/threadbeat/bases/${id}`;
+    const diffRange = `${baseRef}...${status.run.result_commit}`;
+    const [shortstatOutput, statOutput, changedOutput, commitOutput] = await Promise.all([
+      git(["diff", "--shortstat", diffRange], checkout.checkout.dir),
+      git(["diff", "--stat", diffRange], checkout.checkout.dir),
+      git(["diff", "--name-status", diffRange], checkout.checkout.dir),
+      git(["log", "--format=%H%x09%s", `${baseRef}..${status.run.result_commit}`], checkout.checkout.dir),
+    ]);
+    await printJson({
+      run: {
+        id: status.run.id,
+        agentId: status.run.agent_id,
+        status: status.run.status,
+        objective: status.run.objective,
+        baseRef: status.run.input_ref,
+        branchName: status.run.run_branch,
+        resultCommit: status.run.result_commit,
+        workerId: status.run.worker_id,
+      },
+      repository: repository.repository,
+      links: {
+        resultTreeUrl: resultLinks.treeUrl,
+        resultCommitUrl: resultLinks.commitUrl,
+        resultCompareUrl: resultLinks.compareUrl,
+      },
+      checkout: checkout.checkout,
+      result: {
+        available: true,
+        commit: status.run.result_commit,
+        baseRef: checkout.review.baseRef,
+        baseCommit: checkout.review.baseCommit,
+        matchesCheckoutHead: checkout.checkout.matchesResultCommit,
+        shortstat: shortstatOutput.trim(),
+        stat: statOutput.trim().split("\n").filter(Boolean),
+        changedFiles: changedOutput.trim()
+          ? changedOutput.trim().split("\n").map((line) => {
+            const [fileStatus, ...filePath] = line.split("\t");
+            return { status: fileStatus, path: filePath.join("\t") };
+          })
+          : [],
+        commits: commitOutput.trim()
+          ? commitOutput.trim().split("\n").map((line) => {
+            const [sha, ...subject] = line.split("\t");
+            return { sha, subject: subject.join("\t") };
+          })
+          : [],
+      },
+      commands,
     });
     return;
   }
@@ -333,6 +453,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       review: reviewed.review,
       commands: {
         inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", id],
+        inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", id, "--checkout-dir", checkoutDir],
         checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", id, "--dir", checkoutDir],
         changedFiles: ["git", "-C", checkoutDir, "diff", "--name-status", `${baseRef}...HEAD`],
         diff: ["git", "-C", checkoutDir, "diff", `${baseRef}...HEAD`],
@@ -579,6 +700,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `${checkoutCommandRootDir}/${run.id}`],
               reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `${checkoutCommandRootDir}/${run.id}`],
               inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+              inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--checkout-dir", `${checkoutCommandRootDir}/${run.id}`],
               resumeBranch: state === "resumable"
                 ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
                 : null,
@@ -952,6 +1074,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                   `${checkoutCommandRootDir}/${run.id}`,
                 ],
                 inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+                inspectResult: [
+                  "npm",
+                  "run",
+                  "cli",
+                  "--",
+                  "runs",
+                  "inspect-result",
+                  run.id,
+                  "--checkout-dir",
+                  `${checkoutCommandRootDir}/${run.id}`,
+                ],
                 resumeBranch: run.status === "stopped" && !run.result_commit
                   ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
                   : null,
@@ -1046,6 +1179,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           },
           commands: {
             inspectRun: run.commands.inspectRun,
+            inspectResult: run.commands.inspectResult,
             checkoutBranch: run.commands.checkoutBranch,
             reviewRun: run.commands.reviewRun,
           },
@@ -9563,6 +9697,7 @@ Commands:
   runs get <run>
   runs status <run> [--limit 20]
   runs inspect <run> [--limit 10] [--checkout] [--checkout-dir ./checkouts/run]
+  runs inspect-result <run> [--checkout-dir ./checkouts/run-result]
   runs checkout <run> --dir ./checkouts/run
   runs review <run> [--checkout-dir ./checkouts/run]
   runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--resumable] [--worker-id worker-a] [--concurrency 2]
