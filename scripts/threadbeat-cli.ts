@@ -3181,6 +3181,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         applyPath: string;
         selected: number;
         commandsToRun: number;
+        unselectedQueueCommands: number;
+        hasMore: boolean;
         exitCode: number | null;
         failed: number;
       }> = [];
@@ -3213,6 +3215,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           applyPath?: string;
           selected?: number;
           commandsToRun?: unknown[];
+          applySelection?: {
+            unselectedQueueCommands?: number;
+            hasMore?: boolean;
+          };
           executions?: Array<{ exitCode: number | null }>;
         } | null;
         if (!pollOutput) {
@@ -3226,6 +3232,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           applyPath: pollOutput.applyPath ?? workerSessionApplyPath(requiredSessionName, pollApplyId),
           selected: pollOutput.selected ?? 0,
           commandsToRun: remaining,
+          unselectedQueueCommands: pollOutput.applySelection?.unselectedQueueCommands ?? 0,
+          hasMore: pollOutput.applySelection?.hasMore ?? false,
           exitCode: pollResult.exitCode,
           failed,
         });
@@ -3353,10 +3361,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : queueCommands;
     const runFilter = options.run ? new Set(parseList(options.run)) : null;
     const limit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
-    const selectedFromQueue = (runFilter
+    const candidateQueueCommands = runFilter
       ? filteredQueueCommands.filter((item) => item.runId && runFilter.has(item.runId))
-      : filteredQueueCommands).slice(0, limit ?? undefined);
+      : filteredQueueCommands;
+    const selectedFromQueue = candidateQueueCommands.slice(0, limit ?? undefined);
     const selectedCommands = existingApply?.commands ?? selectedFromQueue;
+    const applySelection = {
+      totalQueueCommands: queueCommands.length,
+      filteredQueueCommands: filteredQueueCommands.length,
+      candidateQueueCommands: candidateQueueCommands.length,
+      selectedQueueCommands: selectedFromQueue.length,
+      unselectedQueueCommands: Math.max(candidateQueueCommands.length - selectedFromQueue.length, 0),
+      hasMore: selectedFromQueue.length < candidateQueueCommands.length,
+    };
     const resumeFilter = parseSessionApplyResumeFilter(options["resume-filter"] ?? "failed,pending");
     const commandStates = sessionApplyCommandStates(existingApply);
     const skippedCompleted = selectedCommands.filter((item) => commandStates.get(commandKey(item.command))?.succeeded).length;
@@ -3395,6 +3412,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       selected: selectedCommands.length,
       skippedCompleted,
       skippedByResumeFilter,
+      applySelection,
       commands: selectedCommands,
       commandsToRun: pendingCommands,
     };

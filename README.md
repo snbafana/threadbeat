@@ -621,6 +621,10 @@ while the filter metadata preserves exact unbounded totals and exposes
 `runs session-apply <name> --action ...` or `--branch-action ...` to execute an
 explicitly filtered queue; use `--dry-run`, `--run <id>`, `--limit`, and
 `--concurrency` to preview or bound that execution before changing run state.
+Apply output includes an `applySelection` block with the total command queue,
+filtered candidates, selected commands, unselected commands, and `hasMore`, so
+bounded operators can tell when a `--limit` pass intentionally left more work in
+the queue.
 Use `--source status --branch-action resume_branch` when the apply should come
 from the lighter `session-status --recoverable --next` queue instead of the
 full session review snapshot.
@@ -701,7 +705,9 @@ bounded watch snapshot and write one apply record per poll until the filtered
 queue is empty. Add `--continue-prefix <prefix>` with `--until-empty` to keep
 draining from the next recorded `<prefix>-NNN` apply ID; it refuses completed
 prefixes and prefixes that stopped on failed executions so the durable ledger
-stays explicit.
+stays explicit. Each drain poll records the nested apply selection's
+`unselectedQueueCommands` and `hasMore` values, which keeps bounded drains
+inspectable when `--limit` leaves additional commands for a later poll.
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

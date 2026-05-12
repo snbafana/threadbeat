@@ -2238,6 +2238,14 @@ try {
     dryRun: boolean;
     selected: number;
     filter: { branchAction: string[]; run: string[]; limit: number };
+    applySelection: {
+      totalQueueCommands: number;
+      filteredQueueCommands: number;
+      candidateQueueCommands: number;
+      selectedQueueCommands: number;
+      unselectedQueueCommands: number;
+      hasMore: boolean;
+    };
     commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
   }>(baseUrl, ["runs", "session-apply", detachedWorkerSessionName, "--include-stopped", "--branch-action", "resume_branch", "--run", detachedStoppedPlan.run.id, "--limit", "1", "--dry-run"]);
   assert.equal(detachedApplyResumePreview.session, detachedWorkerSessionName);
@@ -2247,6 +2255,12 @@ try {
   assert.deepEqual(detachedApplyResumePreview.filter.branchAction, ["resume_branch"]);
   assert.deepEqual(detachedApplyResumePreview.filter.run, [detachedStoppedPlan.run.id]);
   assert.equal(detachedApplyResumePreview.filter.limit, 1);
+  assert.ok(detachedApplyResumePreview.applySelection.totalQueueCommands >= detachedApplyResumePreview.applySelection.filteredQueueCommands);
+  assert.ok(detachedApplyResumePreview.applySelection.filteredQueueCommands >= detachedApplyResumePreview.applySelection.candidateQueueCommands);
+  assert.equal(detachedApplyResumePreview.applySelection.candidateQueueCommands, 1);
+  assert.equal(detachedApplyResumePreview.applySelection.selectedQueueCommands, 1);
+  assert.equal(detachedApplyResumePreview.applySelection.unselectedQueueCommands, 0);
+  assert.equal(detachedApplyResumePreview.applySelection.hasMore, false);
   assert.equal(detachedApplyResumePreview.commands[0].scope, "branch");
   assert.equal(detachedApplyResumePreview.commands[0].action, "resume_branch");
   assert.equal(detachedApplyResumePreview.commands[0].runId, detachedStoppedPlan.run.id);
@@ -2257,6 +2271,14 @@ try {
     dryRun: boolean;
     selected: number;
     filter: { branchAction: string[]; run: string[]; limit: number; totalBranchNextSteps: number };
+    applySelection: {
+      totalQueueCommands: number;
+      filteredQueueCommands: number;
+      candidateQueueCommands: number;
+      selectedQueueCommands: number;
+      unselectedQueueCommands: number;
+      hasMore: boolean;
+    };
     commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
   }>(baseUrl, [
     "runs",
@@ -2281,6 +2303,11 @@ try {
   assert.deepEqual(detachedApplyStatusResumePreview.filter.run, [detachedStoppedPlan.run.id]);
   assert.equal(detachedApplyStatusResumePreview.filter.limit, 1);
   assert.ok(detachedApplyStatusResumePreview.filter.totalBranchNextSteps >= 1);
+  assert.ok(detachedApplyStatusResumePreview.applySelection.totalQueueCommands >= detachedApplyStatusResumePreview.applySelection.filteredQueueCommands);
+  assert.equal(detachedApplyStatusResumePreview.applySelection.candidateQueueCommands, 1);
+  assert.equal(detachedApplyStatusResumePreview.applySelection.selectedQueueCommands, 1);
+  assert.equal(detachedApplyStatusResumePreview.applySelection.unselectedQueueCommands, 0);
+  assert.equal(detachedApplyStatusResumePreview.applySelection.hasMore, false);
   assert.equal(detachedApplyStatusResumePreview.commands[0].scope, "branch");
   assert.equal(detachedApplyStatusResumePreview.commands[0].action, "resume_branch");
   assert.equal(detachedApplyStatusResumePreview.commands[0].runId, detachedStoppedPlan.run.id);
@@ -4253,7 +4280,7 @@ try {
     applyIdPrefix: string;
     continuePrefix: string;
     untilEmpty: { done: boolean; remaining: number; polls: number; startPoll: number; maxPolls: number };
-    polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; exitCode: number | null; failed: number }>;
+    polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; unselectedQueueCommands: number; hasMore: boolean; exitCode: number | null; failed: number }>;
   }>(baseUrl, [
     "runs",
     "session-apply",
@@ -4286,6 +4313,8 @@ try {
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].applyId, `${openDrainPrefix}-002`);
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].selected, 1);
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].commandsToRun, 1);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].unselectedQueueCommands, 0);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].hasMore, false);
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].exitCode, 0);
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].failed, 0);
   const retryWatchActionQueue = await cliJson<{
@@ -4351,6 +4380,12 @@ try {
   const retryWatchApplyPreview = await cliJson<{
     source: string;
     selected: number;
+    applySelection: {
+      candidateQueueCommands: number;
+      selectedQueueCommands: number;
+      unselectedQueueCommands: number;
+      hasMore: boolean;
+    };
     commandsToRun: Array<{ scope: string; action: string; reason: string; command: string[] }>;
   }>(baseUrl, [
     "runs",
@@ -4366,6 +4401,10 @@ try {
   ]);
   assert.equal(retryWatchApplyPreview.source, "watch");
   assert.equal(retryWatchApplyPreview.selected, 1);
+  assert.equal(retryWatchApplyPreview.applySelection.candidateQueueCommands, 1);
+  assert.equal(retryWatchApplyPreview.applySelection.selectedQueueCommands, 1);
+  assert.equal(retryWatchApplyPreview.applySelection.unselectedQueueCommands, 0);
+  assert.equal(retryWatchApplyPreview.applySelection.hasMore, false);
   assert.equal(retryWatchApplyPreview.commandsToRun.length, 1);
   assert.equal(retryWatchApplyPreview.commandsToRun[0].scope, "apply");
   assert.equal(retryWatchApplyPreview.commandsToRun[0].action, "retry_failed");
@@ -4376,7 +4415,7 @@ try {
     dryRun: boolean;
     applyIdPrefix: string;
     untilEmpty: { done: boolean; remaining: number; polls: number; maxPolls: number };
-    polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; exitCode: number | null; failed: number }>;
+    polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; unselectedQueueCommands: number; hasMore: boolean; exitCode: number | null; failed: number }>;
   }>(baseUrl, [
     "runs",
     "session-apply",
@@ -4406,6 +4445,8 @@ try {
   assert.equal(retryWatchApplyDrainPreview.polls[0].applyId, "retry-watch-drain-preview-001");
   assert.equal(retryWatchApplyDrainPreview.polls[0].selected, 1);
   assert.equal(retryWatchApplyDrainPreview.polls[0].commandsToRun, 1);
+  assert.equal(retryWatchApplyDrainPreview.polls[0].unselectedQueueCommands, 0);
+  assert.equal(retryWatchApplyDrainPreview.polls[0].hasMore, false);
   assert.equal(retryWatchApplyDrainPreview.polls[0].exitCode, 0);
   assert.equal(retryWatchApplyDrainPreview.polls[0].failed, 0);
   const retryFailedPreview = await cliJson<{
