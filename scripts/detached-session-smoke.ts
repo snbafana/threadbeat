@@ -865,6 +865,8 @@ try {
     "--server",
     "--action-queue",
     "--execute-queued",
+    "--record-worker",
+    "detached-smoke-apply-action-worker",
     "--apply-id",
     "detached-session-api-backed-reset",
     "--apply-action",
@@ -899,7 +901,21 @@ try {
   assert.ok(serverApplyActionExecutionsAfterWorker.count >= 4);
   const applyActionWorkers = await cliJson<{
     count: number;
-    workers: Array<{ workerId: string; command: string[]; stdout: { path: string }; stderr: { path: string } }>;
+    workers: Array<{
+      workerId: string;
+      command: string[];
+      lastRun?: {
+        status: string;
+        executed: number;
+        failed: number;
+        stoppedReason: string;
+        remainingQueued: number;
+        repeatedActions?: string[];
+        polls: Array<{ executed: number; failed: number; remainingQueued: number }>;
+      };
+      stdout: { path: string };
+      stderr: { path: string };
+    }>;
   }>(baseUrl, [
     "runs",
     "session-apply-action-workers",
@@ -909,6 +925,16 @@ try {
   ]);
   assert.equal(applyActionWorkers.count, 1);
   assert.equal(applyActionWorkers.workers[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.equal(applyActionWorkers.workers[0]?.lastRun?.status, "completed");
+  assert.equal(applyActionWorkers.workers[0]?.lastRun?.executed, 1);
+  assert.equal(applyActionWorkers.workers[0]?.lastRun?.failed, 0);
+  assert.equal(applyActionWorkers.workers[0]?.lastRun?.stoppedReason, "repeated_action");
+  assert.equal(applyActionWorkers.workers[0]?.lastRun?.remainingQueued, 1);
+  assert.deepEqual(applyActionWorkers.workers[0]?.lastRun?.repeatedActions, [
+    "detached-session-api-backed-reset:status:inspect_drain_continuation_resets",
+  ]);
+  assert.equal(applyActionWorkers.workers[0]?.lastRun?.polls.length, 1);
+  assert.equal(applyActionWorkers.workers[0]?.lastRun?.polls[0]?.executed, 1);
   assert.match(applyActionWorkers.workers[0]?.stdout.path ?? "", /apply-action-workers/);
   assert.match(applyActionWorkers.workers[0]?.stderr.path ?? "", /apply-action-workers/);
   const stoppedApplyActionWorkers = await cliJson<{

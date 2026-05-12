@@ -680,7 +680,9 @@ an action already executed in that loop. Add `--detach --worker-id <id>` to
 leave that executor running in the background, then
 inspect it with `runs session-apply-action-workers`, stop or retire it with
 `runs stop-apply-action-workers`, and restart the stored command with
-`runs restart-apply-action-workers`. Server-executed actions are also written to
+`runs restart-apply-action-workers`. Detached apply-action workers record their
+latest execution summary in `lastRun`, including exit counts, stop reason,
+remaining queued actions, and per-poll counts. Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,
 `runs session-applies <name> --server --apply-id <id> --ack-reset-audit` to

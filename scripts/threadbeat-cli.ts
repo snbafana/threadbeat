@@ -3731,6 +3731,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             })
             : await executeQueuedWorkerSessionApplyActions(requiredSessionName, executeOptions);
           if (applyActionExecutionResponses(response).some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
+          if (options["record-worker"]) {
+            await completeApplyActionWorkerRunSummary(requiredSessionName, options["record-worker"], response);
+          }
           await printJson(response);
           return;
         }
@@ -5985,6 +5988,77 @@ function workerSessionApplyActionKey(
   return `${action.applyId}:${action.source}:${action.action}`;
 }
 
+async function completeApplyActionWorkerRunSummary(
+  sessionName: string,
+  workerId: string,
+  response: ExecuteQueuedWorkerSessionApplyActionsResponse | ExecuteQueuedWorkerSessionApplyActionsLoopResponse,
+): Promise<void> {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(workerId);
+  const worker = await readApplyActionWorkerEventually(sessionName, workerId);
+  await writeApplyActionWorker({
+    ...worker,
+    lastRun: summarizeApplyActionWorkerRun(response),
+  });
+}
+
+async function readApplyActionWorkerEventually(sessionName: string, workerId: string): Promise<ApplyActionWorker> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      return await readApplyActionWorker(sessionName, workerId);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await sleep(50);
+    }
+  }
+  return await readApplyActionWorker(sessionName, workerId);
+}
+
+function summarizeApplyActionWorkerRun(
+  response: ExecuteQueuedWorkerSessionApplyActionsResponse | ExecuteQueuedWorkerSessionApplyActionsLoopResponse,
+): ApplyActionWorkerRunSummary {
+  const loopResponse = "polls" in response;
+  const polls = loopResponse
+    ? response.polls.map((poll) => ({
+      poll: poll.poll,
+      observedAt: poll.observedAt,
+      executed: poll.executed,
+      failed: poll.executions.filter((execution) => execution.exitCode !== 0).length,
+      remainingQueued: poll.remainingQueued,
+      stoppedOnFailure: poll.stoppedOnFailure,
+    }))
+    : [{
+      poll: 1,
+      observedAt: new Date().toISOString(),
+      executed: response.executed,
+      failed: response.executions.filter((execution) => execution.exitCode !== 0).length,
+      remainingQueued: response.remainingQueued,
+      stoppedOnFailure: response.stoppedOnFailure,
+    }];
+  const failed = loopResponse
+    ? response.failed
+    : response.executions.filter((execution) => execution.exitCode !== 0).length;
+  return {
+    recordedAt: new Date().toISOString(),
+    status: failed > 0 ? "failed" : "completed",
+    executed: response.executed,
+    failed,
+    remainingQueued: response.remainingQueued,
+    stoppedReason: loopResponse
+      ? response.stoppedReason
+      : response.stoppedOnFailure
+        ? "failed_action"
+        : "batch_complete",
+    ...(loopResponse ? {
+      maxPolls: response.maxPolls,
+      intervalMs: response.intervalMs,
+      repeatedActions: response.repeatedActions,
+    } : {}),
+    filter: response.filter,
+    polls,
+  };
+}
+
 async function queueWorkerSessionDrainContinuations(
   sessionName: string,
   options: { drainPrefix?: string[]; dryRun: boolean; maxPolls?: number; intervalMs?: number },
@@ -6358,6 +6432,28 @@ type ApplyActionWorker = {
   restartedAt?: string;
   restartCount?: number;
   previousPid?: number | null;
+  lastRun?: ApplyActionWorkerRunSummary;
+};
+
+type ApplyActionWorkerRunSummary = {
+  recordedAt: string;
+  status: "completed" | "failed";
+  executed: number;
+  failed: number;
+  remainingQueued: number;
+  stoppedReason: "batch_complete" | ExecuteQueuedWorkerSessionApplyActionsLoopResponse["stoppedReason"];
+  maxPolls?: number;
+  intervalMs?: number;
+  repeatedActions?: string[];
+  filter: Record<string, unknown>;
+  polls: Array<{
+    poll: number;
+    observedAt: string;
+    executed: number;
+    failed: number;
+    remainingQueued: number;
+    stoppedOnFailure: boolean;
+  }>;
 };
 
 type SessionWatchWorker = {
@@ -6657,6 +6753,8 @@ async function startDetachedApplyActionWorker(
     "--server",
     "--action-queue",
     "--execute-queued",
+    "--record-worker",
+    workerId,
     ...(options.applyId ? ["--apply-id", options.applyId] : []),
     ...(options.source ? ["--source", options.source] : []),
     ...(options.action ? ["--apply-action", options.action] : []),
@@ -6670,24 +6768,34 @@ async function startDetachedApplyActionWorker(
   const stdout = await fs.open(stdoutPath, "a");
   const stderr = await fs.open(stderrPath, "a");
   try {
+    const startedAt = new Date().toISOString();
+    const initialWorker: ApplyActionWorker = {
+      session: sessionName,
+      workerId,
+      baseUrl,
+      startedAt,
+      command,
+      pid: null,
+      stdoutPath,
+      stderrPath,
+    };
+    await fs.writeFile(recordPath, `${JSON.stringify(initialWorker, null, 2)}\n`, { flag: "wx" });
     const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
       detached: true,
       env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
       stdio: ["ignore", stdout.fd, stderr.fd],
     });
     child.unref();
+    const recordedWorker = await readApplyActionWorker(sessionName, workerId);
     const worker: ApplyActionWorker = {
-      session: sessionName,
-      workerId,
-      baseUrl,
-      startedAt: new Date().toISOString(),
-      command,
+      ...recordedWorker,
       pid: child.pid ?? null,
-      stdoutPath,
-      stderrPath,
     };
-    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    await writeApplyActionWorker(worker);
     return { ...worker, alive: processIsAlive(worker.pid) };
+  } catch (error) {
+    await fs.rm(recordPath, { force: true });
+    throw error;
   } finally {
     await stdout.close();
     await stderr.close();
@@ -7296,24 +7404,31 @@ async function restartApplyActionWorkers(
   const stdout = await fs.open(worker.stdoutPath, "a");
   const stderr = await fs.open(worker.stderrPath, "a");
   try {
-    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
-      detached: true,
-      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
-      stdio: ["ignore", stdout.fd, stderr.fd],
-    });
-    child.unref();
     const restartedAt = new Date().toISOString();
-    const updated: ApplyActionWorker = {
+    const pendingRestart: ApplyActionWorker = {
       ...worker,
       baseUrl,
       startedAt: restartedAt,
-      pid: child.pid ?? null,
+      pid: null,
       stoppedAt: undefined,
       stopResult: undefined,
       retiredAt: undefined,
       restartedAt,
       restartCount: (worker.restartCount ?? 0) + 1,
       previousPid: worker.pid,
+      lastRun: undefined,
+    };
+    await writeApplyActionWorker(pendingRestart);
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const recordedWorker = await readApplyActionWorker(sessionName, options.workerId);
+    const updated: ApplyActionWorker = {
+      ...recordedWorker,
+      pid: child.pid ?? null,
     };
     await writeApplyActionWorker(updated);
     return {
