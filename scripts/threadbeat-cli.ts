@@ -542,6 +542,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs resume-branch requires a run id");
     const options = parseOptions(optionArgs);
+    if (options.inspect === "1") {
+      await printJson(await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/resume-inspection`));
+      return;
+    }
     await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/resume-branch`, {
       dryRun: options["dry-run"] === "1",
       ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
@@ -5813,7 +5817,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -9707,7 +9711,7 @@ Commands:
   runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--resumable] [--worker-id worker-a] [--concurrency 2]
   runs claim <run> [--worker-id worker-a]
   runs requeue <run> [--worker-id worker-a]
-  runs resume-branch <run> [--dry-run] [--worker-id worker-a]
+  runs resume-branch <run> [--inspect] [--dry-run] [--worker-id worker-a]
   runs recover --agent <agent>|--agents <agent,agent> [--include-stopped] [--dry-run] [--worker-id worker-a] [--concurrency 4]
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>

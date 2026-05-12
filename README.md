@@ -239,6 +239,7 @@ npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight-resume --resumable --worker-id worker-a
 npm run cli -- runs claim <run> --worker-id worker-a
 npm run cli -- runs requeue <run> --worker-id worker-a
+npm run cli -- runs resume-branch <stopped-run> --inspect
 npm run cli -- runs resume-branch <stopped-run> --worker-id worker-a
 npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --dry-run
 npm run cli -- runs recover --agents <agent>,<agent> --include-stopped --worker-id worker-a
@@ -490,6 +491,10 @@ Run planning is intentionally server-side and Pi-free for now:
   path for stopped runs without result commits. Pass `{ "dryRun": true }` to
   validate resumability without changing state, or `{ "workerId": "..." }` to
   tag the durable requeue message.
+- `GET /api/runs/:id/resume-inspection` backs
+  `runs resume-branch <run> --inspect` with read-only resume readiness metadata:
+  branch/result links, running-sandbox blockers, exact resume/dry-run commands,
+  and the next branch action before any state is requeued.
 - `POST /api/worker-sessions/:name/resume-branches` is the server-owned bulk
   session resume path. It reads the durable worker-session record, resumes
   stopped branches without result commits that belong to the session workers

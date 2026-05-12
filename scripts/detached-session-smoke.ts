@@ -127,6 +127,45 @@ try {
   assert.equal(apiResumePreview.resumable.resultCommit, null);
   assert.equal(apiResumePreview.resumable.currentStatus, "stopped");
   assert.equal(apiResumePreview.dryRun, true);
+  const apiResumeInspectionResponse = await app.inject({
+    method: "GET",
+    url: `/api/runs/${apiResumePlan.run.id}/resume-inspection`,
+  });
+  assert.equal(apiResumeInspectionResponse.statusCode, 200);
+  const apiResumeInspection = JSON.parse(apiResumeInspectionResponse.body) as {
+    run: { id: string; status: string; resultCommit: string | null };
+    recovery: { ready: boolean; reason: string; inspectionMode: string; runningSandboxes: unknown[] };
+    links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
+    commands: { resumeBranch: string[] | null; resumeBranchDryRun: string[]; inspectResult: string[] };
+    nextStep: { action: string; reason: string; command: string[] };
+  };
+  assert.equal(apiResumeInspection.run.id, apiResumePlan.run.id);
+  assert.equal(apiResumeInspection.run.status, "stopped");
+  assert.equal(apiResumeInspection.run.resultCommit, null);
+  assert.equal(apiResumeInspection.recovery.ready, true);
+  assert.equal(apiResumeInspection.recovery.reason, "stopped_branch_without_result_commit");
+  assert.equal(apiResumeInspection.recovery.inspectionMode, "server_metadata");
+  assert.deepEqual(apiResumeInspection.recovery.runningSandboxes, []);
+  assert.ok(apiResumeInspection.links.branchTreeUrl !== null);
+  assert.equal(apiResumeInspection.links.resultCommitUrl, null);
+  assert.equal(apiResumeInspection.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${apiResumePlan.run.id}`);
+  assert.equal(apiResumeInspection.commands.resumeBranchDryRun.join(" "), `npm run cli -- runs resume-branch ${apiResumePlan.run.id} --dry-run`);
+  assert.equal(apiResumeInspection.commands.inspectResult.join(" "), `npm run cli -- runs inspect-result ${apiResumePlan.run.id} --server`);
+  assert.equal(apiResumeInspection.nextStep.action, "resume_branch");
+  assert.equal(apiResumeInspection.nextStep.reason, "stopped_branch_without_result_commit");
+  assert.equal(apiResumeInspection.nextStep.command.join(" "), `npm run cli -- runs resume-branch ${apiResumePlan.run.id}`);
+  const cliResumeInspection = await cliJson<{
+    run: { id: string; status: string; resultCommit: string | null };
+    recovery: { ready: boolean; reason: string };
+    nextStep: { action: string; command: string[] };
+  }>(baseUrl, ["runs", "resume-branch", apiResumePlan.run.id, "--inspect"]);
+  assert.equal(cliResumeInspection.run.id, apiResumePlan.run.id);
+  assert.equal(cliResumeInspection.run.status, "stopped");
+  assert.equal(cliResumeInspection.run.resultCommit, null);
+  assert.equal(cliResumeInspection.recovery.ready, true);
+  assert.equal(cliResumeInspection.recovery.reason, "stopped_branch_without_result_commit");
+  assert.equal(cliResumeInspection.nextStep.action, "resume_branch");
+  assert.equal(cliResumeInspection.nextStep.command.join(" "), `npm run cli -- runs resume-branch ${apiResumePlan.run.id}`);
   const apiResumeResponse = await app.inject({
     method: "POST",
     url: `/api/runs/${apiResumePlan.run.id}/resume-branch`,
