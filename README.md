@@ -717,7 +717,11 @@ resume, or apply actions left, or until `--max-polls` is reached; this is a
 bounded wait and does not execute queued commands. Add `--watch-id <id>` to
 persist the watch attempt, its poll outputs, and the final stop reason under
 `.threadbeat/worker-sessions/watch/<session>/`; inspect those durable attempts
-with `runs session-watches <name> [--watch-id <id>]`. Add `--commands-only
+with `runs session-watches <name> [--watch-id <id>]`. Use
+`runs start-session-watch-worker <name> --watch-id <id>` for a detached bounded
+watch loop that keeps the same durable watch record plus stdout/stderr worker
+logs, and inspect or stop it with `runs session-watch-workers` and
+`runs stop-session-watch-workers`. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including
 recovery, branch resume, and apply action-queue commands. Add
 `--apply-action inspect_drain_continuation_resets` with `--action-queue` to

@@ -2497,6 +2497,86 @@ try {
   assert.equal(durableWatchRecords.watches[0]?.polls[0]?.remaining, durableWatch.untilEmpty.remaining);
   assert.equal(durableWatchRecords.watches[0]?.polls[0]?.output.observedAt, durableWatch.observedAt);
   assert.equal(durableWatchRecords.watches[0]?.polls[0]?.output.untilEmpty?.poll, 1);
+  const watchWorkerId = "smoke-session-watch-worker";
+  const watchWorkerWatchId = "smoke-session-watch-worker-record";
+  const startedWatchWorker = await cliJson<{
+    session: string;
+    workerId: string;
+    watchId: string;
+    pid: number | null;
+    alive: boolean;
+    command: string[];
+    stdoutPath: string;
+    stderrPath: string;
+  }>(baseUrl, [
+    "runs",
+    "start-session-watch-worker",
+    detachedWorkerSessionName,
+    "--worker-id",
+    watchWorkerId,
+    "--watch-id",
+    watchWorkerWatchId,
+    "--recoverable",
+    "--include-stopped",
+    "--action-queue",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(startedWatchWorker.session, detachedWorkerSessionName);
+  assert.equal(startedWatchWorker.workerId, watchWorkerId);
+  assert.equal(startedWatchWorker.watchId, watchWorkerWatchId);
+  assert.equal(startedWatchWorker.command.join(" "), `runs session-watch ${detachedWorkerSessionName} --next --until-empty --watch-id ${watchWorkerWatchId} --max-polls 1 --interval-ms 1 --recoverable --include-stopped --action-queue`);
+  assert.match(startedWatchWorker.stdoutPath, /watch-workers/);
+  assert.match(startedWatchWorker.stderrPath, /watch-workers/);
+  let detachedWatchRecord: {
+    status?: string;
+    polls?: Array<{ remaining: number | null }>;
+  } | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const records = await cliJson<{
+      watches: Array<{ status: string; polls: Array<{ remaining: number | null }> }>;
+    }>(baseUrl, ["runs", "session-watches", detachedWorkerSessionName, "--watch-id", watchWorkerWatchId]);
+    detachedWatchRecord = records.watches[0] ?? null;
+    if (detachedWatchRecord?.status === "completed") break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(detachedWatchRecord?.status, "completed");
+  assert.equal(detachedWatchRecord?.polls?.length, 1);
+  const watchWorkers = await cliJson<{
+    session: string;
+    count: number;
+    workers: Array<{
+      workerId: string;
+      watchId: string;
+      alive: boolean;
+      stdout: { path: string; lines: string[] };
+      stderr: { path: string; lines: string[] };
+    }>;
+  }>(baseUrl, ["runs", "session-watch-workers", detachedWorkerSessionName, "--worker-id", watchWorkerId, "--lines", "5"]);
+  assert.equal(watchWorkers.session, detachedWorkerSessionName);
+  assert.equal(watchWorkers.count, 1);
+  assert.equal(watchWorkers.workers[0]?.workerId, watchWorkerId);
+  assert.equal(watchWorkers.workers[0]?.watchId, watchWorkerWatchId);
+  assert.equal(typeof watchWorkers.workers[0]?.alive, "boolean");
+  assert.match(watchWorkers.workers[0]?.stdout.path ?? "", /watch-workers/);
+  assert.match(watchWorkers.workers[0]?.stderr.path ?? "", /watch-workers/);
+  assert.ok(Array.isArray(watchWorkers.workers[0]?.stdout.lines));
+  const stoppedWatchWorkers = await cliJson<{
+    session: string;
+    count: number;
+    stopped: Array<{ workerId: string; watchId: string; aliveBefore: boolean; alive: boolean; retiredAt?: string }>;
+    workers: Array<{ workerId: string; retiredAt?: string }>;
+  }>(baseUrl, ["runs", "stop-session-watch-workers", detachedWorkerSessionName, "--worker-id", watchWorkerId, "--retire", "--lines", "5"]);
+  assert.equal(stoppedWatchWorkers.session, detachedWorkerSessionName);
+  assert.equal(stoppedWatchWorkers.count, 1);
+  assert.equal(stoppedWatchWorkers.stopped[0]?.workerId, watchWorkerId);
+  assert.equal(stoppedWatchWorkers.stopped[0]?.watchId, watchWorkerWatchId);
+  assert.equal(stoppedWatchWorkers.stopped[0]?.alive, false);
+  assert.match(stoppedWatchWorkers.stopped[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(stoppedWatchWorkers.workers[0]?.workerId, watchWorkerId);
+  assert.match(stoppedWatchWorkers.workers[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   const detachedWorkerLogs = await cliJson<{
     session: string;
     workers: Array<{
