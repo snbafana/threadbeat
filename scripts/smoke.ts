@@ -5096,6 +5096,66 @@ try {
   assert.ok(resetAuditWatchDrainGroup.continueCommand.includes("inspect_drain_continuation_resets"));
   assert.ok(resetAuditWatchDrainGroup.continueCommand.includes("--continue-prefix"));
   assert.ok(!resetAuditWatchDrainGroup.continueCommand.includes("--action"));
+  const acknowledgedFailedResetAudit = await cliJson<{
+    dryRun: boolean;
+    resetAudit: { acknowledged: boolean; acknowledgedAt: string; acknowledgedBy: string };
+    summary: { resetAuditAcknowledgedAt: string; actions: { resumeApply: string[] } };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--apply-id",
+    "smoke-reset-failed-status",
+    "--ack-reset-audit",
+  ]);
+  assert.equal(acknowledgedFailedResetAudit.dryRun, false);
+  assert.equal(acknowledgedFailedResetAudit.resetAudit.acknowledged, true);
+  assert.equal(acknowledgedFailedResetAudit.resetAudit.acknowledgedBy, "session-applies");
+  assert.equal(acknowledgedFailedResetAudit.summary.resetAuditAcknowledgedAt, acknowledgedFailedResetAudit.resetAudit.acknowledgedAt);
+  assert.ok(acknowledgedFailedResetAudit.summary.actions.resumeApply.includes("--action"));
+  const acknowledgedFailedResetActionQueue = await cliJson<{
+    actionQueue: { counts: { resetAudits: number }; actions: Array<{ action: string; command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--apply-id",
+    "smoke-reset-failed-status",
+    "--action-queue",
+  ]);
+  assert.equal(acknowledgedFailedResetActionQueue.actionQueue.counts.resetAudits, 0);
+  assert.ok(!acknowledgedFailedResetActionQueue.actionQueue.actions.some((action) => action.action === "inspect_drain_continuation_resets"));
+  const resetOnlyWatchAfterAck = await cliRaw(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--action-queue",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  const resetOnlyWatchAfterAckLines = resetOnlyWatchAfterAck.stdout.trim().split("\n").filter(Boolean);
+  assert.ok(!resetOnlyWatchAfterAckLines.includes(failedResetInspectionCommand.join(" ")));
+  assert.ok(resetOnlyWatchAfterAckLines.includes(runningResetInspectionCommand.join(" ")));
+  const resetSummaryGroupAfterAck = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--summary-group",
+    "drain-resets",
+    "--format",
+    "shell",
+  ]);
+  const resetSummaryGroupAfterAckLines = resetSummaryGroupAfterAck.stdout.trim().split("\n").filter(Boolean);
+  assert.ok(!resetSummaryGroupAfterAckLines.includes(failedResetInspectionCommand.join(" ")));
+  assert.ok(resetSummaryGroupAfterAckLines.includes(runningResetInspectionCommand.join(" ")));
   const retryWatchApplyPreview = await cliJson<{
     source: string;
     selected: number;

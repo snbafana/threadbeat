@@ -723,7 +723,10 @@ print only reset-audit apply inspection commands from the watch queue. Use
 `--branch-action` to execute a filtered slice of that watch queue through the
 durable apply ledger, or use `--apply-action inspect_drain_continuation_resets`
 to execute only reset-audit apply commands; resume and drain-continuation
-commands preserve the same apply-action filter. Add `--until-empty --max-polls <n>` to repeatedly take a
+commands preserve the same apply-action filter. After inspecting a reset-audit
+apply, run `runs session-applies <name> --apply-id <id> --ack-reset-audit` to
+remove that audit from the live watch queue while keeping the durable apply
+record. Add `--until-empty --max-polls <n>` to repeatedly take a
 bounded watch snapshot and write one apply record per poll until the filtered
 queue is empty. Add `--continue-prefix <prefix>` with `--until-empty` to keep
 draining from the next recorded `<prefix>-NNN` apply ID; it refuses completed
