@@ -31,6 +31,7 @@ import {
   summarizeWorkerSessionApplyRecords,
   writeWorkerSessionApplyActionExecutionRecord,
 } from "./workerSessionDrains.js";
+import { listWorkerSessionApplyActionWorkers } from "./workerSessionApplyActionWorkers.js";
 import {
   listWorkerSessionWatchWorkerNextSteps,
   listWorkerSessionWatchWorkers,
@@ -309,6 +310,30 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           limit,
         },
         executions,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/apply-action-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const workers = await listWorkerSessionApplyActionWorkers(
+        settings.projectRoot,
+        {
+          sessionName: name,
+          ...(query.workerId ? { workerId: query.workerId } : {}),
+          includeRetired: parseBoolean(query.includeRetired, false),
+        },
+        parseOptionalInteger(query.lines) ?? 20,
+      );
+      return {
+        ok: true,
+        session: name,
+        count: workers.length,
+        workers,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

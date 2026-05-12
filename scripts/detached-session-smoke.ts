@@ -937,6 +937,35 @@ try {
   assert.equal(applyActionWorkers.workers[0]?.lastRun?.polls[0]?.executed, 1);
   assert.match(applyActionWorkers.workers[0]?.stdout.path ?? "", /apply-action-workers/);
   assert.match(applyActionWorkers.workers[0]?.stderr.path ?? "", /apply-action-workers/);
+  const serverApplyActionWorkers = await cliJson<{
+    ok: true;
+    count: number;
+    workers: Array<{
+      workerId: string;
+      lastRun?: {
+        status: string;
+        executed: number;
+        stoppedReason: string;
+        repeatedActions?: string[];
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+  ]);
+  assert.equal(serverApplyActionWorkers.ok, true);
+  assert.equal(serverApplyActionWorkers.count, 1);
+  assert.equal(serverApplyActionWorkers.workers[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.equal(serverApplyActionWorkers.workers[0]?.lastRun?.status, "completed");
+  assert.equal(serverApplyActionWorkers.workers[0]?.lastRun?.executed, 1);
+  assert.equal(serverApplyActionWorkers.workers[0]?.lastRun?.stoppedReason, "repeated_action");
+  assert.deepEqual(serverApplyActionWorkers.workers[0]?.lastRun?.repeatedActions, [
+    "detached-session-api-backed-reset:status:inspect_drain_continuation_resets",
+  ]);
   const stoppedApplyActionWorkers = await cliJson<{
     count: number;
     stopped: Array<{ workerId: string; retiredAt?: string }>;

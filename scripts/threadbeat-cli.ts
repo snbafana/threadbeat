@@ -4093,6 +4093,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-apply-action-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    if (options.server === "1") {
+      const requiredSessionName = required(sessionName, "runs session-apply-action-workers <session> --server");
+      await printJson(await fetchWorkerSessionApplyActionWorkers(requiredSessionName, {
+        ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      }));
+      return;
+    }
     const workers = await listApplyActionWorkers(
       {
         ...(sessionName ? { sessionName } : {}),
@@ -5851,6 +5860,30 @@ async function fetchWorkerSessionApplyActionExecutions(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-action-executions`, params),
   ) as WorkerSessionApplyActionExecutionsResponse;
+}
+
+async function fetchWorkerSessionApplyActionWorkers(
+  sessionName: string,
+  options: { workerId?: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  workers: Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+}> {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.includeRetired) params.set("includeRetired", "1");
+  params.set("lines", String(options.lines));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-action-workers`, params),
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    workers: Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
 }
 
 async function executeNextWorkerSessionApplyAction(
@@ -8900,7 +8933,7 @@ Commands:
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
-  runs session-apply-action-workers [name] [--worker-id id] [--include-retired] [--lines 20]
+  runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-apply-action-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
