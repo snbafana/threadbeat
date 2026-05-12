@@ -424,6 +424,65 @@ try {
   }>(baseUrl, ["runs", "sessions", "--session", sessionName]);
   assert.equal(stoppedSessions.sessions[0].workers[0].alive, false);
 
+  const apiSessionResumePlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session api resume branches",
+  ]);
+  await cliJson(baseUrl, ["runs", "claim", apiSessionResumePlan.run.id, "--worker-id", "detached-smoke-worker-1"]);
+  await cliJson(baseUrl, ["runs", "stop", apiSessionResumePlan.run.id]);
+  const apiSessionResumePreviewResponse = await app.inject({
+    method: "POST",
+    url: `/api/worker-sessions/${sessionName}/resume-branches`,
+    payload: { workerId: "detached-smoke-worker-1", dryRun: true },
+  });
+  assert.equal(apiSessionResumePreviewResponse.statusCode, 200);
+  const apiSessionResumePreview = JSON.parse(apiSessionResumePreviewResponse.body) as {
+    session: string;
+    resumed: Array<{ runId: string; branchName: string; workerId: string | null; currentStatus?: string; dryRun?: boolean }>;
+    nextStep: { action: string; reason: string; command: string[] };
+  };
+  assert.equal(apiSessionResumePreview.session, sessionName);
+  assert.deepEqual(apiSessionResumePreview.resumed.map((run) => run.runId), [apiSessionResumePlan.run.id]);
+  assert.equal(apiSessionResumePreview.resumed[0].branchName, apiSessionResumePlan.plan.branchName);
+  assert.equal(apiSessionResumePreview.resumed[0].workerId, "detached-smoke-worker-1");
+  assert.equal(apiSessionResumePreview.resumed[0].currentStatus, "stopped");
+  assert.equal(apiSessionResumePreview.resumed[0].dryRun, true);
+  assert.equal(apiSessionResumePreview.nextStep.action, "resume_session");
+  assert.equal(apiSessionResumePreview.nextStep.reason, "dry_run_preview");
+  assert.equal(apiSessionResumePreview.nextStep.command.join(" "), `npm run cli -- runs resume-session ${sessionName} --worker-id detached-smoke-worker-1`);
+  const apiSessionResumeResponse = await app.inject({
+    method: "POST",
+    url: `/api/worker-sessions/${sessionName}/resume-branches`,
+    payload: { workerId: "detached-smoke-worker-1" },
+  });
+  assert.equal(apiSessionResumeResponse.statusCode, 200);
+  const apiSessionResume = JSON.parse(apiSessionResumeResponse.body) as {
+    session: string;
+    resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+    nextStep: { action: string; reason: string };
+    status: { session: { session: string } };
+  };
+  assert.equal(apiSessionResume.session, sessionName);
+  assert.equal(apiSessionResume.status.session.session, sessionName);
+  assert.deepEqual(apiSessionResume.resumed.map((run) => run.runId), [apiSessionResumePlan.run.id]);
+  assert.equal(apiSessionResume.resumed[0].status, "planned");
+  assert.equal(apiSessionResume.resumed[0].workerId, null);
+  assert.equal(apiSessionResume.nextStep.action, "restart_session");
+  assert.equal(apiSessionResume.nextStep.reason, "resumed_runs_without_live_workers");
+  const apiSessionResumeMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    apiSessionResumePlan.run.id,
+  ]);
+  assert.ok(apiSessionResumeMessages.messages.some((message) => (
+    message.type === "agent_run_requeued" && message.text === "Requeued run by detached-smoke-worker-1"
+  )));
+
   const deadWorkerPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",

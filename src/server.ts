@@ -582,6 +582,172 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/worker-sessions/:name/resume-branches", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const session = await readWorkerSession(settings.projectRoot, name);
+      const dryRun = parseBoolean(body.dryRun, false);
+      const workerIdFilter = parseOptionalString(body.workerId) ?? null;
+      const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+      if (workerIdFilter && !sessionWorkerIds.has(workerIdFilter)) {
+        return reply.code(400).send({
+          ok: false,
+          error: `worker ${workerIdFilter} is not recorded in session ${session.session}`,
+        });
+      }
+      const includeUnassigned = workerIdFilter === null;
+      const selectedWorkerIds = workerIdFilter ? new Set([workerIdFilter]) : sessionWorkerIds;
+      const candidates = (await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+        const runs = await db.listAgentRuns(agentId, ["stopped"]);
+        return runs
+          .filter((run) => run.result_commit === null)
+          .filter((run) => run.worker_id === null ? includeUnassigned : selectedWorkerIds.has(run.worker_id))
+          .map((run) => ({ agentId, run }));
+      }))).flat();
+      const resumed = [];
+      for (const { agentId, run } of candidates) {
+        const item = {
+          agentId,
+          runId: run.id,
+          objective: run.objective,
+          branchName: run.run_branch,
+          resultCommit: run.result_commit,
+          workerId: run.worker_id,
+        };
+        if (dryRun) {
+          resumed.push({ ...item, currentStatus: run.status, dryRun: true });
+          continue;
+        }
+        const hasRunningSandbox = (await db.listSandboxes({ runId: run.id }))
+          .some((sandbox) => sandbox.state === "running");
+        if (hasRunningSandbox) {
+          resumed.push({ ...item, skipped: "run has a running sandbox" });
+          continue;
+        }
+        const requeued = await db.requeueAgentRun(run.id);
+        if (!requeued) {
+          resumed.push({ ...item, skipped: "run could not be resumed" });
+          continue;
+        }
+        await db.appendMessage({
+          agentId: requeued.agent_id,
+          runId: requeued.id,
+          type: "agent_run_requeued",
+          text: `Requeued run by ${workerIdFilter ?? session.session}`,
+        });
+        resumed.push({ ...item, status: requeued.status, workerId: requeued.worker_id });
+      }
+      const resumeSession = ["npm", "run", "cli", "--", "runs", "resume-session", session.session];
+      if (workerIdFilter) resumeSession.push("--worker-id", workerIdFilter);
+      const actions = {
+        sessionWait: ["npm", "run", "cli", "--", "runs", "session-wait", session.session],
+        sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
+        sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
+        restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover"],
+        resumeSession,
+      };
+      const changedRuns = resumed.filter((item) => !("skipped" in item)).length;
+      if (dryRun) {
+        return {
+          ok: true,
+          session: session.session,
+          resumed,
+          actions,
+          nextStep: {
+            action: "resume_session",
+            reason: "dry_run_preview",
+            count: changedRuns,
+            command: actions.resumeSession,
+          },
+        };
+      }
+      const logs = await readWorkerSessionLogs(settings.projectRoot, session.session, 0);
+      const aliveWorkers = logs.workers.filter((worker) => worker.alive).length;
+      const workerRuns = new Map(session.workers.map((worker) => [
+        worker.workerId,
+        [] as Array<{
+          agentId: string;
+          id: string;
+          status: string;
+          objective: string;
+          branchName: string;
+          resultCommit: string | null;
+        }>,
+      ]));
+      const statusAgents = await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+        const runs = await db.listAgentRuns(agentId);
+        const statuses: Record<string, number> = {};
+        let resumableStopped = 0;
+        const unassigned = [];
+        const otherWorkers = [];
+        for (const run of runs) {
+          statuses[run.status] = (statuses[run.status] ?? 0) + 1;
+          if (run.status === "stopped" && !run.result_commit) resumableStopped += 1;
+          if (!["planned", "running", "stopped"].includes(run.status)) continue;
+          const visibleRun = {
+            id: run.id,
+            status: run.status,
+            objective: run.objective,
+            branchName: run.run_branch,
+            resultCommit: run.result_commit,
+          };
+          if (!run.worker_id) {
+            unassigned.push(visibleRun);
+            continue;
+          }
+          const sessionRuns = workerRuns.get(run.worker_id);
+          if (sessionRuns) {
+            sessionRuns.push({ agentId, ...visibleRun });
+            continue;
+          }
+          otherWorkers.push({ ...visibleRun, workerId: run.worker_id });
+        }
+        return { agentId, total: runs.length, statuses, resumableStopped, unassigned, otherWorkers };
+      }));
+      const aliveByWorkerId = new Map(logs.workers.map((worker) => [worker.workerId, worker.alive]));
+      return {
+        ok: true,
+        session: session.session,
+        resumed,
+        actions,
+        nextStep: changedRuns > 0 && aliveWorkers > 0
+          ? {
+            action: "wait_session",
+            reason: "resumed_runs_for_live_workers",
+            count: changedRuns,
+            command: actions.sessionWait,
+          }
+          : changedRuns > 0
+            ? {
+              action: "restart_session",
+              reason: "resumed_runs_without_live_workers",
+              count: changedRuns,
+              command: actions.restartSession,
+            }
+            : {
+              action: "review_session",
+              reason: "no_runs_resumed",
+              count: 0,
+              command: actions.sessionReview,
+            },
+        status: {
+          session: {
+            ...session,
+            workers: session.workers.map((worker) => ({
+              ...worker,
+              alive: aliveByWorkerId.get(worker.workerId) ?? false,
+              runs: workerRuns.get(worker.workerId) ?? [],
+            })),
+          },
+          agents: statusAgents,
+        },
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.get("/api/worker-sessions/:name/watch-workers", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };

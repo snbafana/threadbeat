@@ -4425,115 +4425,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "resume-session") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
-    const session = await readWorkerSession(required(sessionName, "runs resume-session <session>"));
-    const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
-    const workerIds = options["worker-id"] ? new Set([options["worker-id"]]) : sessionWorkerIds;
-    if (options["worker-id"] && !sessionWorkerIds.has(options["worker-id"])) {
-      throw new Error(`worker ${options["worker-id"]} is not recorded in session ${session.session}`);
-    }
-    const includeUnassigned = !options["worker-id"];
-    const candidateRuns: Array<{
-      id: string;
-      agent_id: string;
-      objective: string;
-      run_branch: string;
-      result_commit: string | null;
-      status: string;
-      worker_id: string | null;
-    }> = [];
-    for (const agentId of workerSessionAgentIds(session)) {
-      const listed = await requestJson("GET", withQuery(
-        `/api/agents/${encodeURIComponent(agentId)}/runs`,
-        new URLSearchParams({ status: "stopped" }),
-      )) as {
-        runs: Array<{
-          id: string;
-          agent_id: string;
-          objective: string;
-          run_branch: string;
-          result_commit: string | null;
-          status: string;
-          worker_id: string | null;
-        }>;
-      };
-      candidateRuns.push(...listed.runs.filter((run) => (
-        run.result_commit === null
-        && (run.worker_id === null ? includeUnassigned : workerIds.has(run.worker_id))
-      )));
-    }
-    const operator = { workerId: options["worker-id"] ?? session.session };
-    const resumed = await mapConcurrent(
-      candidateRuns,
-      parsePositiveInteger(options.concurrency ?? "4", "--concurrency"),
-      async (run) => {
-        const item = {
-          agentId: run.agent_id,
-          runId: run.id,
-          objective: run.objective,
-          branchName: run.run_branch,
-          resultCommit: run.result_commit,
-          workerId: run.worker_id,
-        };
-        if (options["dry-run"] === "1") return { ...item, currentStatus: run.status, dryRun: true };
-        const requeued = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/requeue`, operator, [409]) as {
-          run?: { status: string; worker_id: string | null };
-          error?: string;
-        };
-        if (!requeued.run) return { ...item, skipped: requeued.error ?? "run was not resumed" };
-        return { ...item, status: requeued.run.status, workerId: requeued.run.worker_id };
-      },
-    );
-    const resumeCommand = ["npm", "run", "cli", "--", "runs", "resume-session", session.session];
-    if (options["worker-id"]) resumeCommand.push("--worker-id", options["worker-id"]);
-    const resumeActions = {
-      sessionWait: ["npm", "run", "cli", "--", "runs", "session-wait", session.session],
-      sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
-      sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
-      restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover"],
-      resumeSession: resumeCommand,
-    };
-    const status = options["dry-run"] === "1"
-      ? null
-      : await workerSessionStatus(session.session, new Set(["planned", "running", "stopped"]));
-    const aliveWorkers = status
-      ? (status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>).filter((worker) => worker.alive).length
-      : 0;
-    const changedRuns = resumed.filter((item) => !("skipped" in item)).length;
-    await printJson({
-      session: session.session,
-      resumed,
-      actions: resumeActions,
-      nextStep: options["dry-run"] === "1"
-        ? {
-          action: "resume_session",
-          reason: "dry_run_preview",
-          count: changedRuns,
-          command: resumeActions.resumeSession,
-        }
-        : changedRuns > 0 && aliveWorkers > 0
-          ? {
-            action: "wait_session",
-            reason: "resumed_runs_for_live_workers",
-            count: changedRuns,
-            command: resumeActions.sessionWait,
-          }
-          : changedRuns > 0
-            ? {
-              action: "restart_session",
-              reason: "resumed_runs_without_live_workers",
-              count: changedRuns,
-              command: resumeActions.restartSession,
-            }
-            : {
-              action: "review_session",
-              reason: "no_runs_resumed",
-              count: 0,
-              command: resumeActions.sessionReview,
-            },
-      ...(options["dry-run"] === "1" ? {} : {
-        status,
-      }),
-    });
+    const requiredSessionName = required(sessionName, "runs resume-session <session>");
+    await printJson(await requestJson("POST", `/api/worker-sessions/${encodeURIComponent(requiredSessionName)}/resume-branches`, {
+      dryRun: options["dry-run"] === "1",
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+      ...(options.concurrency ? { concurrency: parsePositiveInteger(options.concurrency, "--concurrency") } : {}),
+    }));
     return;
   }
   if (subcommandName === "restart-session") {

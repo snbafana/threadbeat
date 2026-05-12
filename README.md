@@ -452,6 +452,11 @@ Run planning is intentionally server-side and Pi-free for now:
   path for stopped runs without result commits. Pass `{ "dryRun": true }` to
   validate resumability without changing state, or `{ "workerId": "..." }` to
   tag the durable requeue message.
+- `POST /api/worker-sessions/:name/resume-branches` is the server-owned bulk
+  session resume path. It reads the durable worker-session record, resumes
+  stopped branches without result commits that belong to the session workers
+  (plus unassigned stopped branches when no `workerId` is supplied), and accepts
+  `{ "dryRun": true, "workerId": "..." }` for guarded previews.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts. Repeated calls return
@@ -812,7 +817,9 @@ add `--worker-id <id>` to focus on one worker's claimed branches, or add
 Use `runs resume-branch <run>` to requeue one of those stopped branch runs back to
 `planned` without touching the rest of the session; the CLI uses
 `POST /api/runs/:id/resume-branch`, so API clients can perform the same guarded
-single-branch resume without shelling out.
+single-branch resume without shelling out. `runs resume-session <name>` now uses
+`POST /api/worker-sessions/:name/resume-branches` for the same guarded resume
+logic across all resumable branches in a durable worker session.
 `runs workers` groups running runs by the `worker_id` that claimed them.
 `runs stop-matching --status planned` cancels queued runs for one or more
 agents; include `running` in the status list to stop active run sandboxes too.
