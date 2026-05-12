@@ -317,6 +317,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs inspect-result requires a run id");
     const options = parseOptions(optionArgs);
+    if (options.server === "1") {
+      await printJson(await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/result-inspection`));
+      return;
+    }
     const checkoutDir = options["checkout-dir"] ?? `./checkouts/${id}-result`;
     const status = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=1`) as {
       run: {
@@ -9697,7 +9701,7 @@ Commands:
   runs get <run>
   runs status <run> [--limit 20]
   runs inspect <run> [--limit 10] [--checkout] [--checkout-dir ./checkouts/run]
-  runs inspect-result <run> [--checkout-dir ./checkouts/run-result]
+  runs inspect-result <run> [--server] [--checkout-dir ./checkouts/run-result]
   runs checkout <run> --dir ./checkouts/run
   runs review <run> [--checkout-dir ./checkouts/run]
   runs checkout-session <name> --dir ./checkouts [--status completed,stopped] [--resumable] [--worker-id worker-a] [--concurrency 2]

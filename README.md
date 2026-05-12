@@ -230,6 +230,7 @@ npm run cli -- runs list --agent <agent> [--status planned,running,completed,sto
 npm run cli -- runs status <run>
 npm run cli -- runs inspect <run>
 npm run cli -- runs inspect <run> --checkout --checkout-dir ./checkouts/<run>
+npm run cli -- runs inspect-result <run> --server
 npm run cli -- runs inspect-result <run> --checkout-dir ./checkouts/<run>-result
 npm run cli -- runs checkout <run> --dir ./checkouts/<run>
 npm run cli -- runs review <run> --checkout-dir ./checkouts/<run>
@@ -408,6 +409,10 @@ Run planning is intentionally server-side and Pi-free for now:
   result links, and copyable `git show`/`git diff` commands. If the run has no
   result commit yet, it returns a structured reason plus the relevant
   resume/review commands without mutating branch state.
+- `runs inspect-result <run> --server` calls
+  `GET /api/runs/:id/result-inspection` and returns the same durable run,
+  branch, result commit, link, and next-command metadata without cloning or
+  refreshing a local checkout.
 - `runs checkout <run> --dir <path>` clones or refreshes the run branch into a
   local Git checkout and reports base/head commits, commits ahead, and changed
   files so the branch state can be reviewed directly.

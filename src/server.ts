@@ -1437,6 +1437,74 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     };
   });
 
+  app.get("/api/runs/:id/result-inspection", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const run = await db.getAgentRun(id);
+    if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
+    const agent = await db.getAgent(run.agent_id);
+    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
+    const branchLinks = deriveGitHubLinks(agent.repo_url, {
+      compareBaseRef: run.input_ref,
+      compareHeadRef: run.run_branch,
+      treeRef: run.run_branch,
+    });
+    const resultLinks = deriveGitHubLinks(agent.repo_url, {
+      commitRef: run.result_commit,
+      compareBaseRef: run.input_ref,
+      compareHeadRef: run.result_commit,
+      treeRef: run.result_commit,
+    });
+    const resultAvailable = run.result_commit !== null;
+    return {
+      ok: true,
+      run: {
+        id: run.id,
+        agentId: run.agent_id,
+        status: run.status,
+        objective: run.objective,
+        baseRef: run.input_ref,
+        branchName: run.run_branch,
+        resultCommit: run.result_commit,
+        workerId: run.worker_id,
+      },
+      repository: {
+        repoUrl: agent.repo_url,
+        repoWebUrl: branchLinks.repoUrl,
+      },
+      links: {
+        branchTreeUrl: branchLinks.treeUrl,
+        branchCompareUrl: branchLinks.compareUrl,
+        resultTreeUrl: resultLinks.treeUrl,
+        resultCommitUrl: resultLinks.commitUrl,
+        resultCompareUrl: resultLinks.compareUrl,
+      },
+      result: resultAvailable
+        ? {
+            available: true,
+            commit: run.result_commit,
+            baseRef: run.input_ref,
+            branchName: run.run_branch,
+            inspectionMode: "server_metadata",
+          }
+        : {
+            available: false,
+            reason: run.status === "stopped"
+              ? "stopped_branch_without_result_commit"
+              : "result_commit_not_recorded",
+            inspectionMode: "server_metadata",
+          },
+      commands: {
+        inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+        inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"],
+        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `./checkouts/${run.id}`],
+        reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", `./checkouts/${run.id}`],
+        resumeBranch: run.status === "stopped" && run.result_commit === null
+          ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+          : null,
+      },
+    };
+  });
+
   app.post("/api/runs/:id/claim", async (request, reply) => {
     const { id } = request.params as { id: string };
     const workerId = parseOptionalString(requestBody(request.body).workerId);

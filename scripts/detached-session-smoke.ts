@@ -426,6 +426,37 @@ try {
   assert.equal(inspectMissingResult.result.reason, "stopped_branch_without_result_commit");
   assert.equal(inspectMissingResult.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`);
   assert.equal(inspectMissingResult.commands.inspectResult.join(" "), `npm run cli -- runs inspect-result ${stoppedPlan.run.id} --checkout-dir ./checkouts/${sessionName}-branches/${stoppedPlan.run.id}`);
+  const apiResultInspectionResponse = await app.inject({
+    method: "GET",
+    url: `/api/runs/${stoppedPlan.run.id}/result-inspection`,
+  });
+  assert.equal(apiResultInspectionResponse.statusCode, 200);
+  const apiResultInspection = JSON.parse(apiResultInspectionResponse.body) as {
+    run: { id: string; resultCommit: string | null };
+    result: { available: boolean; reason: string; inspectionMode: string };
+    commands: { inspectResult: string[]; resumeBranch: string[] | null };
+    links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
+  };
+  assert.equal(apiResultInspection.run.id, stoppedPlan.run.id);
+  assert.equal(apiResultInspection.run.resultCommit, null);
+  assert.equal(apiResultInspection.result.available, false);
+  assert.equal(apiResultInspection.result.reason, "stopped_branch_without_result_commit");
+  assert.equal(apiResultInspection.result.inspectionMode, "server_metadata");
+  assert.equal(apiResultInspection.commands.inspectResult.join(" "), `npm run cli -- runs inspect-result ${stoppedPlan.run.id} --server`);
+  assert.equal(apiResultInspection.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`);
+  assert.ok(apiResultInspection.links.branchTreeUrl !== null);
+  assert.equal(apiResultInspection.links.resultCommitUrl, null);
+  const serverInspectMissingResult = await cliJson<{
+    run: { id: string; resultCommit: string | null };
+    result: { available: boolean; reason: string; inspectionMode: string };
+    commands: { inspectResult: string[] };
+  }>(baseUrl, ["runs", "inspect-result", stoppedPlan.run.id, "--server"]);
+  assert.equal(serverInspectMissingResult.run.id, stoppedPlan.run.id);
+  assert.equal(serverInspectMissingResult.run.resultCommit, null);
+  assert.equal(serverInspectMissingResult.result.available, false);
+  assert.equal(serverInspectMissingResult.result.reason, "stopped_branch_without_result_commit");
+  assert.equal(serverInspectMissingResult.result.inspectionMode, "server_metadata");
+  assert.equal(serverInspectMissingResult.commands.inspectResult.join(" "), `npm run cli -- runs inspect-result ${stoppedPlan.run.id} --server`);
   assert.ok(apiBranches.nextSteps.some((step) => (
     step.action === "resume_branch"
     && step.reason === "stopped_branch_without_result_commit"
