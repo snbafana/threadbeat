@@ -33,6 +33,7 @@ import {
 } from "./workerSessionDrains.js";
 import {
   listWorkerSessionApplyActionWorkers,
+  restartWorkerSessionApplyActionWorker,
   stopWorkerSessionApplyActionWorkers,
 } from "./workerSessionApplyActionWorkers.js";
 import {
@@ -354,6 +355,28 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           retire: parseBoolean(body.retire, false),
           lines: parseOptionalInteger(body.lines) ?? 20,
         }),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-action-workers/restart", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await restartWorkerSessionApplyActionWorker(
+          settings.projectRoot,
+          requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+          name,
+          {
+            workerId: parseString(body.workerId, "workerId"),
+            includeRetired: parseBoolean(body.includeRetired, false),
+            lines: parseOptionalInteger(body.lines) ?? 20,
+          },
+        ),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

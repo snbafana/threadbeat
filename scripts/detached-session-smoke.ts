@@ -987,6 +987,37 @@ try {
   assert.equal(stoppedApplyActionWorkers.workers[0]?.workerId, "detached-smoke-apply-action-worker");
   assert.equal(stoppedApplyActionWorkers.workers[0]?.alive, false);
   assert.equal(typeof stoppedApplyActionWorkers.workers[0]?.retiredAt, "string");
+  const restartedApplyActionWorkers = await cliJson<{
+    ok?: true;
+    count: number;
+    restarted: Array<{ workerId: string; restartCount: number; command: string[] }>;
+    workers: Array<{ workerId: string; restartedAt?: string; retiredAt?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "restart-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+    "--include-retired",
+  ]);
+  assert.equal(restartedApplyActionWorkers.ok, true);
+  assert.equal(restartedApplyActionWorkers.count, 1);
+  assert.equal(restartedApplyActionWorkers.restarted[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.equal(restartedApplyActionWorkers.restarted[0]?.restartCount, 1);
+  assert.deepEqual(restartedApplyActionWorkers.restarted[0]?.command.slice(0, 4), ["runs", "session-applies", sessionName, "--server"]);
+  assert.equal(restartedApplyActionWorkers.workers[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.equal(typeof restartedApplyActionWorkers.workers[0]?.restartedAt, "string");
+  assert.equal(restartedApplyActionWorkers.workers[0]?.retiredAt, undefined);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+    "--retire",
+  ]);
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;

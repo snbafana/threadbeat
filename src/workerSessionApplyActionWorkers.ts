@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -151,6 +152,98 @@ export async function stopWorkerSessionApplyActionWorkers(
       includeRetired: true,
     }, options.lines),
   };
+}
+
+export async function restartWorkerSessionApplyActionWorker(
+  projectRoot: string,
+  baseUrl: string,
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  restarted: Array<{
+    workerId: string;
+    previousPid: number | null;
+    pid: number | null;
+    restartedAt: string;
+    restartCount: number;
+    command: string[];
+  }>;
+  workers: Awaited<ReturnType<typeof listWorkerSessionApplyActionWorkers>>;
+}> {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(options.workerId);
+  let worker: ApplyActionWorker;
+  try {
+    worker = await readApplyActionWorker(projectRoot, sessionName, options.workerId);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`apply action worker '${options.workerId}' not found for session '${sessionName}'`);
+    }
+    throw error;
+  }
+  if (worker.retiredAt && !options.includeRetired) {
+    throw new Error(`apply action worker '${options.workerId}' is retired; pass includeRetired to restart it`);
+  }
+  if (processIsAlive(worker.pid)) {
+    throw new Error(`apply action worker '${options.workerId}' is already alive with pid ${worker.pid}`);
+  }
+  if (worker.session !== sessionName || worker.workerId !== options.workerId) {
+    throw new Error(`apply action worker record mismatch for '${options.workerId}'`);
+  }
+  const stdout = await fs.open(worker.stdoutPath, "a");
+  const stderr = await fs.open(worker.stderrPath, "a");
+  try {
+    const restartedAt = new Date().toISOString();
+    const pendingRestart: ApplyActionWorker = {
+      ...worker,
+      baseUrl,
+      startedAt: restartedAt,
+      pid: null,
+      stoppedAt: undefined,
+      stopResult: undefined,
+      retiredAt: undefined,
+      restartedAt,
+      restartCount: (worker.restartCount ?? 0) + 1,
+      previousPid: worker.pid,
+      lastRun: undefined,
+    };
+    await writeApplyActionWorker(projectRoot, pendingRestart);
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+      cwd: projectRoot,
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const recordedWorker = await readApplyActionWorker(projectRoot, sessionName, options.workerId);
+    const updated: ApplyActionWorker = {
+      ...recordedWorker,
+      pid: child.pid ?? null,
+    };
+    await writeApplyActionWorker(projectRoot, updated);
+    return {
+      session: sessionName,
+      count: 1,
+      restarted: [{
+        workerId: updated.workerId,
+        previousPid: updated.previousPid ?? null,
+        pid: updated.pid,
+        restartedAt,
+        restartCount: updated.restartCount ?? 1,
+        command: updated.command,
+      }],
+      workers: await listWorkerSessionApplyActionWorkers(projectRoot, {
+        sessionName,
+        workerId: options.workerId,
+        includeRetired: true,
+      }, options.lines),
+    };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
 }
 
 async function readApplyActionWorker(projectRoot: string, sessionName: string, workerId: string): Promise<ApplyActionWorker> {
