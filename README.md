@@ -714,7 +714,10 @@ apply counts, alongside worker and branch recovery counts, and generated
 result-review commands use the watch checkout directory. Add `--until-empty`
 with `--next` to keep polling until the watch queue has no recovery, branch
 resume, or apply actions left, or until `--max-polls` is reached; this is a
-bounded wait and does not execute queued commands. Add `--commands-only
+bounded wait and does not execute queued commands. Add `--watch-id <id>` to
+persist the watch attempt, its poll outputs, and the final stop reason under
+`.threadbeat/worker-sessions/watch/<session>/`; inspect those durable attempts
+with `runs session-watches <name> [--watch-id <id>]`. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including
 recovery, branch resume, and apply action-queue commands. Add
 `--apply-action inspect_drain_continuation_resets` with `--action-queue` to

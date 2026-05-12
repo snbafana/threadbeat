@@ -3874,6 +3874,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "session-watches") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-watches <session>");
+    const watches = options["watch-id"]
+      ? [await readSessionWatchRecord(requiredSessionName, options["watch-id"])].filter((watch): watch is SessionWatchRecord => watch !== null)
+      : await listSessionWatchRecords(requiredSessionName);
+    await printJson({
+      session: requiredSessionName,
+      count: watches.length,
+      watches: watches.slice(0, parsePositiveInteger(options.limit ?? "20", "--limit")),
+    });
+    return;
+  }
   if (subcommandName === "session-watch") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -3913,6 +3927,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (untilEmpty && outputFormat === "shell") {
       throw new Error("runs session-watch --until-empty requires json output");
     }
+    if (options["watch-id"] && outputFormat === "shell") {
+      throw new Error("runs session-watch --watch-id requires json output");
+    }
+    const watchId = options["watch-id"] ?? null;
+    if (watchId) assertSafeSessionName(watchId);
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : outputFormat === "shell" ? 1 : untilEmpty ? 60 : null;
@@ -3922,6 +3941,33 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const branchCheckoutDir = options["checkout-dir"] ?? `./checkouts/${requiredSessionName}-resumable`;
     const actionQueueOptions = { ...options, "checkout-dir": branchCheckoutDir };
     let polls = 0;
+    let watchRecord: SessionWatchRecord | null = null;
+    if (watchId) {
+      const startedAt = new Date().toISOString();
+      watchRecord = {
+        session: requiredSessionName,
+        watchId,
+        watchPath: workerSessionWatchPath(requiredSessionName, watchId),
+        startedAt,
+        updatedAt: startedAt,
+        status: "running",
+        command: ["runs", "session-watch", requiredSessionName, ...optionArgs],
+        filter: {
+          status: [...statusFilter],
+          recoverable: options.recoverable === "1",
+          includeStopped: options["include-stopped"] === "1",
+          next: options.next === "1",
+          actionQueue: options["action-queue"] === "1",
+          untilEmpty,
+          checkoutDir: branchCheckoutDir,
+          intervalMs,
+          ...(maxPolls !== null ? { maxPolls } : {}),
+          ...(applyActionFilter ? { applyAction: [...applyActionFilter] } : {}),
+        },
+        polls: [],
+      };
+      await writeSessionWatchRecord(watchRecord);
+    }
     while (true) {
       let commandQueueLength: number | null = null;
       const status = await workerSessionStatus(requiredSessionName, statusFilter);
@@ -4159,17 +4205,39 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         } else {
           console.log(JSON.stringify(output));
         }
+        if (watchRecord) {
+          await appendSessionWatchRecordPoll(watchRecord, {
+            poll: polls + 1,
+            observedAt,
+            remaining: commandQueueLength,
+            output,
+          });
+        }
       } else {
-        console.log(JSON.stringify({
+        const output = {
           observedAt,
           ...status,
           ...(recoveryPreview ? { recoveryPreview } : {}),
           ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
-        }));
+        };
+        console.log(JSON.stringify(output));
+        if (watchRecord) {
+          await appendSessionWatchRecordPoll(watchRecord, {
+            poll: polls + 1,
+            observedAt,
+            remaining: null,
+            output,
+          });
+        }
       }
       polls += 1;
-      if (untilEmpty && commandQueueLength === 0) return;
-      if (maxPolls !== null && polls >= maxPolls) return;
+      const reachedEmpty = untilEmpty && commandQueueLength === 0;
+      const reachedMaxPolls = maxPolls !== null && polls >= maxPolls;
+      if (watchRecord && (reachedEmpty || reachedMaxPolls)) {
+        await completeSessionWatchRecord(watchRecord, reachedEmpty ? "empty" : "max_polls");
+      }
+      if (reachedEmpty) return;
+      if (reachedMaxPolls) return;
       await sleep(intervalMs);
     }
   }
@@ -5830,6 +5898,25 @@ type SessionApplyDrainContinuationResetGroupItem = Pick<SessionApplySummary, "ap
   commands: string[][];
 };
 
+type SessionWatchRecord = {
+  session: string;
+  watchId: string;
+  watchPath: string;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  status: "running" | "completed";
+  stoppedReason?: "empty" | "max_polls";
+  command: string[];
+  filter: Record<string, unknown>;
+  polls: Array<{
+    poll: number;
+    observedAt: string;
+    remaining: number | null;
+    output: unknown;
+  }>;
+};
+
 async function startDetachedWorkerSession(
   sessionName: string,
   workerCount: number,
@@ -6444,6 +6531,62 @@ async function listSessionApplyRecords(sessionName: string): Promise<SessionAppl
 async function writeSessionApplyRecord(record: SessionApplyRecord): Promise<void> {
   await fs.mkdir(path.dirname(record.applyPath), { recursive: true });
   await fs.writeFile(record.applyPath, `${JSON.stringify(record, null, 2)}\n`);
+}
+
+async function readSessionWatchRecord(sessionName: string, watchId: string): Promise<SessionWatchRecord | null> {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(watchId);
+  try {
+    const text = await fs.readFile(workerSessionWatchPath(sessionName, watchId), "utf8");
+    return JSON.parse(text) as SessionWatchRecord;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function listSessionWatchRecords(sessionName: string): Promise<SessionWatchRecord[]> {
+  assertSafeSessionName(sessionName);
+  const watchDir = workerSessionWatchDir(sessionName);
+  try {
+    const entries = await fs.readdir(watchDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(watchDir, entry.name), "utf8");
+        return JSON.parse(text) as SessionWatchRecord;
+      }));
+    return records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writeSessionWatchRecord(record: SessionWatchRecord): Promise<void> {
+  await fs.mkdir(path.dirname(record.watchPath), { recursive: true });
+  await fs.writeFile(record.watchPath, `${JSON.stringify(record, null, 2)}\n`);
+}
+
+async function appendSessionWatchRecordPoll(
+  record: SessionWatchRecord,
+  poll: SessionWatchRecord["polls"][number],
+): Promise<void> {
+  record.polls.push(poll);
+  record.updatedAt = poll.observedAt;
+  await writeSessionWatchRecord(record);
+}
+
+async function completeSessionWatchRecord(
+  record: SessionWatchRecord,
+  stoppedReason: NonNullable<SessionWatchRecord["stoppedReason"]>,
+): Promise<void> {
+  const completedAt = new Date().toISOString();
+  record.status = "completed";
+  record.stoppedReason = stoppedReason;
+  record.completedAt = completedAt;
+  record.updatedAt = completedAt;
+  await writeSessionWatchRecord(record);
 }
 
 function summarizeSessionApplyRecord(
@@ -7116,6 +7259,17 @@ function workerSessionApplyPath(sessionName: string, applyId: string): string {
   return path.join(workerSessionApplyDir(sessionName), `${applyId}.json`);
 }
 
+function workerSessionWatchDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, "watch", sessionName);
+}
+
+function workerSessionWatchPath(sessionName: string, watchId: string): string {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(watchId);
+  return path.join(workerSessionWatchDir(sessionName), `${watchId}.json`);
+}
+
 function workerSessionDrainContinuationDir(sessionName: string): string {
   assertSafeSessionName(sessionName);
   return path.join(workerSessionDir, "drain-continuations", sessionName);
@@ -7397,7 +7551,8 @@ Commands:
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
-  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
+  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
+  runs session-watches <name> [--watch-id id] [--limit 20]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]

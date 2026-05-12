@@ -2446,6 +2446,57 @@ try {
     && step.commands.resumeBranch.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
     && step.commands.recoverStopped?.join(" ") === `npm run cli -- runs recover-session ${detachedWorkerSessionName} --include-stopped`
   )));
+  const durableWatchId = "smoke-session-watch-record";
+  const durableWatch = await cliJson<{
+    observedAt: string;
+    untilEmpty: { done: boolean; remaining: number; poll: number; maxPolls: number };
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--until-empty",
+    "--watch-id",
+    durableWatchId,
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(durableWatch.untilEmpty.poll, 1);
+  assert.equal(durableWatch.untilEmpty.maxPolls, 1);
+  const durableWatchRecords = await cliJson<{
+    session: string;
+    count: number;
+    watches: Array<{
+      session: string;
+      watchId: string;
+      status: string;
+      stoppedReason: string;
+      watchPath: string;
+      polls: Array<{
+        poll: number;
+        observedAt: string;
+        remaining: number | null;
+        output: { observedAt: string; untilEmpty?: { poll: number; remaining: number } };
+      }>;
+    }>;
+  }>(baseUrl, ["runs", "session-watches", detachedWorkerSessionName, "--watch-id", durableWatchId]);
+  assert.equal(durableWatchRecords.session, detachedWorkerSessionName);
+  assert.equal(durableWatchRecords.count, 1);
+  assert.equal(durableWatchRecords.watches[0]?.session, detachedWorkerSessionName);
+  assert.equal(durableWatchRecords.watches[0]?.watchId, durableWatchId);
+  assert.equal(durableWatchRecords.watches[0]?.status, "completed");
+  assert.equal(durableWatchRecords.watches[0]?.stoppedReason, durableWatch.untilEmpty.done ? "empty" : "max_polls");
+  assert.match(durableWatchRecords.watches[0]?.watchPath ?? "", /worker-sessions\/watch/);
+  assert.equal(durableWatchRecords.watches[0]?.polls.length, 1);
+  assert.equal(durableWatchRecords.watches[0]?.polls[0]?.poll, 1);
+  assert.equal(durableWatchRecords.watches[0]?.polls[0]?.observedAt, durableWatch.observedAt);
+  assert.equal(durableWatchRecords.watches[0]?.polls[0]?.remaining, durableWatch.untilEmpty.remaining);
+  assert.equal(durableWatchRecords.watches[0]?.polls[0]?.output.observedAt, durableWatch.observedAt);
+  assert.equal(durableWatchRecords.watches[0]?.polls[0]?.output.untilEmpty?.poll, 1);
   const detachedWorkerLogs = await cliJson<{
     session: string;
     workers: Array<{
