@@ -2849,6 +2849,23 @@ try {
     retryActionQueueShell.stdout.trim(),
     retryInspection.summary.actions.retryFailed.join(" "),
   );
+  const retryActionQueueJson = await cliJson<{
+    actionQueue: {
+      counts: { actionable: number; resumeNeeded: number; readyToReview: number; failed: number; pending: number };
+      actions: Array<{ applyId: string; action: string; resultRuns: string[]; command: string[] }>;
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--action-queue"]);
+  assert.ok(retryActionQueueJson.actionQueue.counts.actionable >= 1);
+  assert.ok(retryActionQueueJson.actionQueue.counts.resumeNeeded >= 1);
+  assert.equal(retryActionQueueJson.actionQueue.counts.readyToReview, 0);
+  assert.ok(retryActionQueueJson.actionQueue.counts.failed >= 1);
+  assert.ok(retryActionQueueJson.actionQueue.counts.pending >= 1);
+  assert.ok(retryActionQueueJson.actionQueue.actions.some((action) => (
+    action.applyId === retryApplyId
+    && action.action === "retry_failed"
+    && action.resultRuns.length === 0
+    && action.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")
+  )));
   const retryFailedPreview = await cliJson<{
     resumeFilter: string[];
     selected: number;
@@ -4579,6 +4596,31 @@ try {
     readyResultActionQueueShell.stdout.trim(),
     `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only --checkout-dir ./checkouts/smoke-ready-results --changed-only --changed-path report.md`,
   );
+  const readyResultActionQueueJson = await cliJson<{
+    actionQueue: {
+      counts: { actionable: number; resumeNeeded: number; readyToReview: number; waiting: number };
+      actions: Array<{ applyId: string; action: string; resultRuns: string[]; command: string[] }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    resultSummarySessionName,
+    "--action-queue",
+    "--checkout-dir",
+    "./checkouts/smoke-ready-results",
+    "--changed-only",
+    "--changed-path",
+    "report.md",
+  ]);
+  assert.ok(readyResultActionQueueJson.actionQueue.counts.actionable >= 1);
+  assert.equal(readyResultActionQueueJson.actionQueue.counts.resumeNeeded, 0);
+  assert.ok(readyResultActionQueueJson.actionQueue.counts.readyToReview >= 1);
+  assert.ok(readyResultActionQueueJson.actionQueue.actions.some((action) => (
+    action.applyId === resultApplyId
+    && action.action === "review_ready_results"
+    && action.resultRuns.join(",") === cliWorkFinalizePlan.run.id
+    && action.command.join(" ") === `npm run cli -- runs results --session ${resultSummarySessionName} --run ${cliWorkFinalizePlan.run.id} --next --commands-only --checkout-dir ./checkouts/smoke-ready-results --changed-only --changed-path report.md`
+  )));
   const readyResultApplySummary = await cliJson<{
     summary: {
       counts: { readyToReview: number; resumeNeeded: number; waiting: number };

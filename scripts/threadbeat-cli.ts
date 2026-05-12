@@ -3096,9 +3096,6 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["ready-results"] === "1" && outputFormat !== "shell") {
       throw new Error("runs session-applies --ready-results requires --format shell");
     }
-    if (options["action-queue"] === "1" && outputFormat !== "shell") {
-      throw new Error("runs session-applies --action-queue requires --format shell");
-    }
     if (options["summary-group"] && outputFormat !== "shell") {
       throw new Error("runs session-applies --summary-group requires --format shell");
     }
@@ -3114,6 +3111,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (options["action-queue"] === "1" && (options["summary-group"] || options["ready-results"] === "1")) {
       throw new Error("runs session-applies --action-queue cannot be combined with --summary-group or --ready-results");
+    }
+    if (options["action-queue"] === "1" && options.summary === "1") {
+      throw new Error("runs session-applies --action-queue cannot be combined with --summary");
     }
     if (options["changed-only"] === "1" && !options["checkout-dir"]) {
       throw new Error("runs session-applies --changed-only requires --checkout-dir");
@@ -3137,6 +3137,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (outputFormat === "shell") {
         const command = sessionApplyShellCommand(summary, options);
         if (command) console.log(command.map(shellArg).join(" "));
+        return;
+      }
+      if (options["action-queue"] === "1") {
+        await printJson({
+          session: requiredSessionName,
+          applyId,
+          applyPath: workerSessionApplyPath(requiredSessionName, applyId),
+          actionQueue: summarizeSessionApplyActionQueue([summary], options),
+        });
         return;
       }
       await printJson({
@@ -3167,6 +3176,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const runStatusIndex = await sessionApplyRunStatusIndex(requiredSessionName);
     const applies = records.map((record) => summarizeSessionApplyRecord(record, runStatusIndex));
+    if (options["action-queue"] === "1") {
+      await printJson({
+        session: requiredSessionName,
+        applyDir: workerSessionApplyDir(requiredSessionName),
+        count: applies.length,
+        actionQueue: summarizeSessionApplyActionQueue(applies, options),
+      });
+      return;
+    }
     await printJson({
       session: requiredSessionName,
       applyDir: workerSessionApplyDir(requiredSessionName),
@@ -4994,6 +5012,83 @@ function sessionApplyShellCommand(
     return null;
   }
   return summary.actions.resumeApply;
+}
+
+function summarizeSessionApplyActionQueue(
+  applies: SessionApplySummary[],
+  options: Record<string, string>,
+): {
+  counts: {
+    total: number;
+    actionable: number;
+    resumeNeeded: number;
+    readyToReview: number;
+    waiting: number;
+    failed: number;
+    pending: number;
+  };
+  actions: Array<Pick<SessionApplySummary, "applyId" | "failed" | "pending" | "selected"> & {
+    action: "retry_failed" | "resume_pending" | "review_ready_results";
+    resultRuns: string[];
+    command: string[];
+  }>;
+} {
+  const actions: Array<Pick<SessionApplySummary, "applyId" | "failed" | "pending" | "selected"> & {
+    action: "retry_failed" | "resume_pending" | "review_ready_results";
+    resultRuns: string[];
+    command: string[];
+  }> = [];
+  for (const apply of applies) {
+    if (apply.failed > 0) {
+      actions.push({
+        applyId: apply.applyId,
+        action: "retry_failed",
+        failed: apply.failed,
+        pending: apply.pending,
+        selected: apply.selected,
+        resultRuns: [],
+        command: apply.actions.retryFailed,
+      });
+      continue;
+    }
+    if (apply.pending > 0) {
+      actions.push({
+        applyId: apply.applyId,
+        action: "resume_pending",
+        failed: apply.failed,
+        pending: apply.pending,
+        selected: apply.selected,
+        resultRuns: [],
+        command: apply.actions.resumePending,
+      });
+      continue;
+    }
+    const command = sessionApplyReadyResultsCommand(apply, options);
+    if (!command) continue;
+    actions.push({
+      applyId: apply.applyId,
+      action: "review_ready_results",
+      failed: apply.failed,
+      pending: apply.pending,
+      selected: apply.selected,
+      resultRuns: apply.affectedRuns
+        .filter((run) => run.currentRun?.resultCommit)
+        .map((run) => run.runId),
+      command,
+    });
+  }
+  return {
+    counts: {
+      total: applies.length,
+      actionable: actions.length,
+      resumeNeeded: actions.filter((action) => action.action === "retry_failed" || action.action === "resume_pending").length,
+      readyToReview: actions.filter((action) => action.action === "review_ready_results").length,
+      waiting: applies.length - actions.length,
+      failed: applies.reduce((sum, apply) => sum + apply.failed, 0),
+      pending: applies.reduce((sum, apply) => sum + apply.pending, 0),
+    },
+    actions,
+  };
 }
 
 function summarizeSessionApplies(applies: SessionApplySummary[]): {
