@@ -32,7 +32,7 @@ import {
   startWorkerSessionWatchWorker,
   stopWorkerSessionWatchWorkers,
 } from "./workerSessionWatchWorkers.js";
-import { readWorkerSessionLogs } from "./workerSessions.js";
+import { readWorkerSessionLogs, readWorkerSessionNext } from "./workerSessions.js";
 import type { Settings } from "./config.js";
 
 type AppParts = {
@@ -378,6 +378,23 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           settings.projectRoot,
           name,
           parseOptionalInteger(query.lines) ?? 80,
+        ),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      return {
+        ok: true,
+        ...await readWorkerSessionNext(
+          settings.projectRoot,
+          name,
+          parseOptionalInteger(query.lines) ?? 20,
         ),
       };
     } catch (error) {

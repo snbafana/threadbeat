@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import {
+  listWorkerSessionWatchWorkerNextSteps,
+  type SessionWatchWorkerNextStep,
+} from "./workerSessionWatchWorkers.js";
+
 export type WorkerSession = {
   session: string;
   baseUrl: string;
@@ -37,6 +42,18 @@ export type WorkerSessionLogs = {
     sessionLogs: string[];
     stopSessionRecover: string[];
     restartSessionRecover: string[];
+  };
+};
+
+export type WorkerSessionNext = WorkerSessionLogs & {
+  aliveWorkers: number;
+  watchWorkerNextSteps: SessionWatchWorkerNextStep[];
+  watchWorkerActions: { restart_session_watch_worker: number };
+  nextStep: {
+    action: "inspect_live_session" | "restart_session_watch_worker" | "restart_session" | "review_session";
+    reason: "live_worker_session" | "stopped_session_watch_worker" | "stopped_worker_session" | "no_live_workers";
+    count: number;
+    command: string[];
   };
 };
 
@@ -83,6 +100,51 @@ export async function readWorkerSessionLogs(
       stopSessionRecover: ["npm", "run", "cli", "--", "runs", "stop-session", session.session, "--recover"],
       restartSessionRecover: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover"],
     },
+  };
+}
+
+export async function readWorkerSessionNext(
+  projectRoot: string,
+  sessionName: string,
+  lines: number,
+): Promise<WorkerSessionNext> {
+  const logs = await readWorkerSessionLogs(projectRoot, sessionName, lines);
+  const watchWorkerNext = await listWorkerSessionWatchWorkerNextSteps(projectRoot, sessionName);
+  const aliveWorkers = logs.workers.filter((worker) => worker.alive).length;
+  const stoppedSession = logs.stoppedAt !== null;
+  const nextStep = stoppedSession
+    ? {
+        action: "restart_session" as const,
+        reason: "stopped_worker_session" as const,
+        count: logs.workers.length,
+        command: logs.commands.restartSessionRecover,
+      }
+    : aliveWorkers > 0
+      ? {
+          action: "inspect_live_session" as const,
+          reason: "live_worker_session" as const,
+          count: aliveWorkers,
+          command: logs.commands.sessionSummaryNext,
+        }
+      : watchWorkerNext.nextSteps[0]
+        ? {
+            action: "restart_session_watch_worker" as const,
+            reason: "stopped_session_watch_worker" as const,
+            count: watchWorkerNext.count,
+            command: watchWorkerNext.nextSteps[0].command,
+          }
+        : {
+            action: "review_session" as const,
+            reason: "no_live_workers" as const,
+            count: logs.workers.length,
+            command: logs.commands.sessionReview,
+          };
+  return {
+    ...logs,
+    aliveWorkers,
+    watchWorkerNextSteps: watchWorkerNext.nextSteps,
+    watchWorkerActions: watchWorkerNext.actions,
+    nextStep,
   };
 }
 

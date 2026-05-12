@@ -272,6 +272,30 @@ try {
   assert.match(logs.workers[0].stdout.path, /worker-sessions/);
   assert.match(logs.workers[0].stderr.path, /worker-sessions/);
 
+  const apiNextResponse = await app.inject({
+    method: "GET",
+    url: `/api/worker-sessions/${sessionName}/next?lines=2`,
+  });
+  assert.equal(apiNextResponse.statusCode, 200);
+  const apiNext = JSON.parse(apiNextResponse.body) as {
+    session: string;
+    aliveWorkers: number;
+    nextStep: { action: string; reason: string; count: number; command: string[] };
+    watchWorkerActions: { restart_session_watch_worker: number };
+    watchWorkerNextSteps: unknown[];
+    workers: Array<{ workerId: string; alive: boolean }>;
+  };
+  assert.equal(apiNext.session, sessionName);
+  assert.equal(apiNext.aliveWorkers, 1);
+  assert.equal(apiNext.nextStep.action, "inspect_live_session");
+  assert.equal(apiNext.nextStep.reason, "live_worker_session");
+  assert.equal(apiNext.nextStep.count, 1);
+  assert.equal(apiNext.nextStep.command.join(" "), `npm run cli -- runs session-summary ${sessionName} --next`);
+  assert.equal(apiNext.watchWorkerActions.restart_session_watch_worker, 0);
+  assert.deepEqual(apiNext.watchWorkerNextSteps, []);
+  assert.equal(apiNext.workers[0].workerId, "detached-smoke-worker-1");
+  assert.equal(apiNext.workers[0].alive, true);
+
   const stopped = await cliJson<{
     session: string;
     stopped: Array<{ workerId: string; pid: number | null; stopped: boolean; alive: boolean }>;
@@ -461,7 +485,7 @@ try {
   assert.equal(restarted.wait.summary.workers.dead, 0);
   assert.equal(restarted.wait.nextStep.action, "continue_watch");
   assert.equal(restarted.wait.nextStep.reason, "workers_still_alive");
-  assert.equal(restarted.wait.nextStep.command.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
+  assert.equal(restarted.wait.nextStep.command.join(" "), `npm run cli -- runs session-summary ${sessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(restarted.wait.commands.sessionWatch.join(" "), `npm run cli -- runs session-watch ${sessionName} --recoverable --include-stopped --next`);
   assert.equal(restarted.wait.commands.stopSession.join(" "), `npm run cli -- runs stop-session ${sessionName} --recover`);
   assert.equal(restarted.wait.commands.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
