@@ -51,6 +51,8 @@ type AppParts = {
   db: Database;
 };
 
+type WorkerSessionApplyActionSummary = ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["actions"][number];
+
 export const buildServer = async (settings: Settings): Promise<AppParts> => {
   const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
   await db.initSchema();
@@ -344,35 +346,94 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         };
       }
       const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
-      const observedAt = new Date().toISOString();
-      const result = await runCliContinuationCommand(settings.projectRoot, baseUrl, nextAction.command);
-      const execution = await writeWorkerSessionApplyActionExecutionRecord(settings.projectRoot, {
-        session: name,
-        observedAt,
-        completedAt: new Date().toISOString(),
-        status: result.exitCode === 0 ? "executed" : "failed",
-        filter: { applyIds, source: sourceFilter ? [...sourceFilter] : [], action: actionFilter ? [...actionFilter] : [], limit },
-        applyId: nextAction.applyId,
-        source: nextAction.source,
-        action: nextAction.action,
-        command: nextAction.command,
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        ...(result.stderr ? { stderr: result.stderr } : {}),
-        output: parseJsonMaybe(result.stdout),
-      });
+      const filter = { applyIds, source: sourceFilter ? [...sourceFilter] : [], action: actionFilter ? [...actionFilter] : [], limit };
+      const executedAction = await executeWorkerSessionApplyActionCommand(
+        settings.projectRoot,
+        baseUrl,
+        name,
+        nextAction,
+        filter,
+      );
       return {
         ok: true,
         session: name,
         executed: true,
-        filter: { applyIds, source: sourceFilter ? [...sourceFilter] : [], action: actionFilter ? [...actionFilter] : [], limit },
+        filter,
         action: nextAction,
-        exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        output: parseJsonMaybe(result.stdout),
-        executionPath: execution.path,
-        execution: execution.record,
+        exitCode: executedAction.result.exitCode,
+        stdout: executedAction.result.stdout,
+        stderr: executedAction.result.stderr,
+        output: executedAction.output,
+        executionPath: executedAction.execution.path,
+        execution: executedAction.execution.record,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-actions/execute-queued", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const applyIds = [
+        ...parseOptionalList(body.applyIds),
+        ...parseOptionalList(body.applyId),
+      ];
+      const applyIdFilter = applyIds.length > 0 ? new Set(applyIds) : null;
+      const sourceFilter = body.source ? new Set(parseOptionalList(body.source)) : null;
+      const actionFilter = body.action ? new Set(parseOptionalApplyActions(body.action)) : null;
+      const limit = parseOptionalInteger(body.limit) ?? null;
+      const maxActions = parseOptionalInteger(body.maxActions) ?? 10;
+      if (maxActions < 1) throw new Error("maxActions must be at least 1");
+      const stopOnFailure = parseBoolean(body.stopOnFailure, true);
+      const records = await listWorkerSessionApplyRecords(settings.projectRoot, name);
+      const filtered = records
+        .filter((record) => !applyIdFilter || applyIdFilter.has(record.applyId))
+        .filter((record) => !sourceFilter || sourceFilter.has(record.source))
+        .slice(0, limit ?? undefined);
+      const actionQueue = summarizeWorkerSessionApplyActionQueue(filtered);
+      const matchingActions = actionQueue.actions
+        .filter((action) => !actionFilter || actionFilter.has(action.action));
+      const actions = matchingActions.slice(0, maxActions);
+      const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
+      const filter = {
+        applyIds,
+        source: sourceFilter ? [...sourceFilter] : [],
+        action: actionFilter ? [...actionFilter] : [],
+        limit,
+        maxActions,
+        stopOnFailure,
+      };
+      const executions = [];
+      for (const action of actions) {
+        const executedAction = await executeWorkerSessionApplyActionCommand(
+          settings.projectRoot,
+          baseUrl,
+          name,
+          action,
+          filter,
+        );
+        executions.push({
+          action,
+          exitCode: executedAction.result.exitCode,
+          stdout: executedAction.result.stdout,
+          stderr: executedAction.result.stderr,
+          output: executedAction.output,
+          executionPath: executedAction.execution.path,
+          execution: executedAction.execution.record,
+        });
+        if (stopOnFailure && executedAction.result.exitCode !== 0) break;
+      }
+      return {
+        ok: true,
+        session: name,
+        executed: executions.length,
+        stoppedOnFailure: stopOnFailure && executions.some((item) => item.exitCode !== 0),
+        remainingQueued: Math.max(0, matchingActions.length - executions.length),
+        filter,
+        actionQueue,
+        executions,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -1742,6 +1803,38 @@ const runCliContinuationCommand = async (
       resolve({ exitCode, stdout: stdout.trim(), stderr: stderr.trim() });
     });
   });
+};
+
+const executeWorkerSessionApplyActionCommand = async (
+  projectRoot: string,
+  baseUrl: string,
+  sessionName: string,
+  action: WorkerSessionApplyActionSummary,
+  filter: Record<string, unknown>,
+): Promise<{
+  result: { exitCode: number | null; stdout: string; stderr: string };
+  output: unknown;
+  execution: Awaited<ReturnType<typeof writeWorkerSessionApplyActionExecutionRecord>>;
+}> => {
+  const observedAt = new Date().toISOString();
+  const result = await runCliContinuationCommand(projectRoot, baseUrl, action.command);
+  const output = parseJsonMaybe(result.stdout);
+  const execution = await writeWorkerSessionApplyActionExecutionRecord(projectRoot, {
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    status: result.exitCode === 0 ? "executed" : "failed",
+    filter,
+    applyId: action.applyId,
+    source: action.source,
+    action: action.action,
+    command: action.command,
+    exitCode: result.exitCode,
+    stdout: result.stdout,
+    ...(result.stderr ? { stderr: result.stderr } : {}),
+    output,
+  });
+  return { result, output, execution };
 };
 
 const executeDrainContinuationCommand = async <T extends { command: string[] }>(

@@ -291,6 +291,7 @@ npm run cli -- runs session-applies overnight --server --apply-id overnight-resu
 npm run cli -- runs session-applies overnight --server --action-queue
 npm run cli -- runs session-applies overnight --server --action-queue --format shell
 npm run cli -- runs session-applies overnight --server --action-queue --execute-next --apply-action retry_failed
+npm run cli -- runs session-applies overnight --server --action-queue --execute-queued --max-actions 5
 npm run cli -- runs session-applies overnight --server --action-executions
 npm run cli -- runs session-applies overnight --server --apply-id overnight-reset-1 --ack-reset-audit
 npm run cli -- runs session-applies overnight --summary
@@ -665,9 +666,11 @@ through the server API, `runs session-applies <name> --server --action-queue`
 to read server-computed retry, resume, and reset-audit actions, or add
 `--format shell` to print the runnable command lines. Add `--execute-next`
 with `--apply-action retry_failed`, `resume_pending`, or
-`inspect_drain_continuation_resets` to execute one queued server action.
-Server-executed actions are also written to durable execution records, and
-`runs session-applies <name> --server --action-executions` lists those records,
+`inspect_drain_continuation_resets` to execute one queued server action, or use
+`--execute-queued --max-actions <n>` to execute a bounded batch and stop on the
+first failed action unless `--continue-on-failure` is set. Server-executed
+actions are also written to durable execution records, and `runs session-applies
+<name> --server --action-executions` lists those records,
 `runs session-applies <name> --server --apply-id <id> --ack-reset-audit` to
 acknowledge a drain-continuation reset audit through the server API, or
 `--apply-id <id>` to inspect the failed executions, pending commands,

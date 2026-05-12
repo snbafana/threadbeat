@@ -734,6 +734,57 @@ try {
   assert.equal(serverApplyActionExecutions.executions[0]?.action, "inspect_drain_continuation_resets");
   assert.equal(serverApplyActionExecutions.executions[0]?.status, "executed");
   assert.equal(serverApplyActionExecutions.executions[0]?.exitCode, 0);
+  const serverExecutedApplyActionBatch = await cliJson<{
+    executed: number;
+    stoppedOnFailure: boolean;
+    remainingQueued: number;
+    executions: Array<{
+      action: { applyId: string; action: string };
+      exitCode: number;
+      execution: { applyId: string; action: string; status: string; exitCode: number };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-queued",
+    "--max-actions",
+    "2",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+  ]);
+  assert.equal(serverExecutedApplyActionBatch.executed, 1);
+  assert.equal(serverExecutedApplyActionBatch.stoppedOnFailure, false);
+  assert.equal(serverExecutedApplyActionBatch.remainingQueued, 0);
+  assert.equal(serverExecutedApplyActionBatch.executions[0]?.action.applyId, "detached-session-api-backed-reset");
+  assert.equal(serverExecutedApplyActionBatch.executions[0]?.action.action, "inspect_drain_continuation_resets");
+  assert.equal(serverExecutedApplyActionBatch.executions[0]?.exitCode, 0);
+  assert.equal(serverExecutedApplyActionBatch.executions[0]?.execution.status, "executed");
+  const serverApplyActionExecutionsAfterBatch = await cliJson<{
+    count: number;
+    executions: Array<{ applyId: string; action: string; status: string; exitCode: number }>;
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-executions",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+  ]);
+  assert.equal(serverApplyActionExecutionsAfterBatch.count, 2);
+  assert.ok(serverApplyActionExecutionsAfterBatch.executions.every((execution) => (
+    execution.applyId === "detached-session-api-backed-reset"
+    && execution.action === "inspect_drain_continuation_resets"
+    && execution.status === "executed"
+    && execution.exitCode === 0
+  )));
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;
