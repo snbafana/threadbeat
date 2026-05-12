@@ -92,6 +92,10 @@ type ResetRunningWorkerSessionDrainContinuationsOptions = {
   olderThanMs?: number;
 };
 
+type ResetFailedWorkerSessionDrainContinuationsOptions = {
+  continuationIds?: string[];
+};
+
 type WorkerSessionDrainContinuationExecution = WorkerSessionDrainContinuationRecord["drains"][number] & {
   output?: unknown;
   stderr?: string;
@@ -336,6 +340,63 @@ export async function resetRunningWorkerSessionDrainContinuationRecords(
     running: running.length,
     resetCount: reset.length,
     skippedRunning: running.length - reset.length,
+    reset,
+  };
+}
+
+export async function resetFailedWorkerSessionDrainContinuationRecords(
+  projectRoot: string,
+  sessionName: string,
+  options: ResetFailedWorkerSessionDrainContinuationsOptions = {},
+): Promise<{
+  inspected: number;
+  failed: number;
+  resetCount: number;
+  skippedFailed: number;
+  reset: Array<{ path: string; record: WorkerSessionDrainContinuationRecord }>;
+}> {
+  const records = await listWorkerSessionDrainContinuationRecords(projectRoot, sessionName, Number.MAX_SAFE_INTEGER);
+  const continuationIdFilter = options.continuationIds && options.continuationIds.length > 0
+    ? new Set(options.continuationIds)
+    : null;
+  if (continuationIdFilter) {
+    for (const continuationId of continuationIdFilter) {
+      assertSafeWorkerSessionName(continuationId);
+    }
+  }
+  const failed = records
+    .filter((record) => record.status === "failed")
+    .filter((record) => !continuationIdFilter || continuationIdFilter.has(record.continuationId));
+  const reset: Array<{ path: string; record: WorkerSessionDrainContinuationRecord }> = [];
+  for (const record of failed) {
+    const resetAt = new Date().toISOString();
+    reset.push(await writeWorkerSessionDrainContinuationRecord(projectRoot, {
+      ...record,
+      status: "queued",
+      startedAt: undefined,
+      completedAt: undefined,
+      resetAt,
+      resetReason: "operator_reset_failed",
+      previousStartedAt: record.startedAt,
+      error: undefined,
+      continueDrains: {
+        ...record.continueDrains,
+        succeeded: 0,
+        failed: 0,
+      },
+      drains: record.drains.map((drain) => ({
+        prefix: drain.prefix,
+        nextApplyId: drain.nextApplyId,
+        command: drain.command,
+        exitCode: null,
+      })),
+    }));
+  }
+  return {
+    inspected: records.length,
+    failed: failed.length,
+    resetCount: reset.length,
+    skippedFailed: failed.length - reset.length,
     reset,
   };
 }

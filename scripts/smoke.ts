@@ -3485,6 +3485,62 @@ try {
     && item.status === "failed"
     && item.error === "drain continuation completed with 1 failed drain(s)"
   )));
+  const failedDrainReset = await cliJson<{
+    session: string;
+    inspected: number;
+    failed: number;
+    resetCount: number;
+    skippedFailed: number;
+    continuations: Array<{
+      continuationId: string;
+      status: string;
+      startedAt?: string;
+      completedAt?: string;
+      resetAt?: string;
+      resetReason?: string;
+      previousStartedAt?: string;
+      error?: string;
+      continueDrains: { succeeded: number; failed: number };
+      drains: Array<{ exitCode: number | null; output?: unknown; stderr?: string }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--reset-failed",
+    "--continuation",
+    failedDrainContinuationId,
+  ]);
+  assert.equal(failedDrainReset.session, detachedWorkerSessionName);
+  assert.equal(failedDrainReset.failed, 1);
+  assert.equal(failedDrainReset.resetCount, 1);
+  assert.equal(failedDrainReset.skippedFailed, 0);
+  assert.equal(failedDrainReset.continuations[0]?.continuationId, failedDrainContinuationId);
+  assert.equal(failedDrainReset.continuations[0]?.status, "queued");
+  assert.equal(failedDrainReset.continuations[0]?.startedAt, undefined);
+  assert.equal(failedDrainReset.continuations[0]?.completedAt, undefined);
+  assert.equal(typeof failedDrainReset.continuations[0]?.resetAt, "string");
+  assert.equal(failedDrainReset.continuations[0]?.resetReason, "operator_reset_failed");
+  assert.equal(typeof failedDrainReset.continuations[0]?.previousStartedAt, "string");
+  assert.equal(failedDrainReset.continuations[0]?.error, undefined);
+  assert.equal(failedDrainReset.continuations[0]?.continueDrains.succeeded, 0);
+  assert.equal(failedDrainReset.continuations[0]?.continueDrains.failed, 0);
+  assert.equal(failedDrainReset.continuations[0]?.drains[0]?.exitCode, null);
+  assert.equal(failedDrainReset.continuations[0]?.drains[0]?.output, undefined);
+  assert.equal(failedDrainReset.continuations[0]?.drains[0]?.stderr, undefined);
+  const failedDrainStatusAfterReset = await cliJson<{
+    continuations: Array<{ continuationId: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--status",
+    "failed",
+    "--limit",
+    "10",
+  ]);
+  assert.ok(!failedDrainStatusAfterReset.continuations.some((item) => item.continuationId === failedDrainContinuationId));
+  await fs.rm(failedDrainContinuationPath);
   const staleRunningContinuation = await cliJson<typeof openDrainQueuedContinuation>(baseUrl, [
     "runs",
     "session-drain-continuations",

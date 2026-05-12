@@ -668,7 +668,9 @@ non-zero nested drain command marks the attempt `failed`, so
 `--status failed` finds drains that need operator attention without scanning
 `continueDrains.failed` inside executed records. Add
 `--status queued,running,failed` to inspect pending, in-flight, or failed
-continuation records without mixing in completed attempts. If a host crash leaves
+continuation records without mixing in completed attempts. Use `--reset-failed`
+to move failed attempts back to `queued` after inspecting the error; add
+`--continuation <id>` to reset a specific failed attempt. If a host crash leaves
 a continuation stuck as `running`, use `--reset-running` to move it back to
 `queued`; add `--older-than-ms 600000` to only reset records whose `startedAt`
 timestamp is at least ten minutes old. Add `--detach` with

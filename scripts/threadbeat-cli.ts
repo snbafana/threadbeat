@@ -3726,6 +3726,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await printJson(response);
       return;
     }
+    if (options["reset-failed"] === "1") {
+      const response = await resetFailedWorkerSessionDrainContinuations(requiredSessionName, {
+        ...(options.continuation ? { continuationIds: parseList(options.continuation) } : {}),
+      });
+      await printJson(response);
+      return;
+    }
     if (options.execute) {
       const response = await executeWorkerSessionDrainContinuation(requiredSessionName, options.execute);
       if (response.continuation.continueDrains.failed > 0) process.exitCode = 1;
@@ -4980,7 +4987,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -5210,6 +5217,16 @@ type ResetRunningWorkerSessionDrainContinuationsResponse = {
   continuations: WorkerSessionDrainContinuationRecord[];
 };
 
+type ResetFailedWorkerSessionDrainContinuationsResponse = {
+  ok: true;
+  session: string;
+  inspected: number;
+  failed: number;
+  resetCount: number;
+  skippedFailed: number;
+  continuations: WorkerSessionDrainContinuationRecord[];
+};
+
 async function fetchWorkerSessionApplyDrains(
   sessionName: string,
   drainPrefix?: string,
@@ -5281,6 +5298,19 @@ async function resetRunningWorkerSessionDrainContinuations(
       ...(options.olderThanMs ? { olderThanMs: options.olderThanMs } : {}),
     },
   ) as ResetRunningWorkerSessionDrainContinuationsResponse;
+}
+
+async function resetFailedWorkerSessionDrainContinuations(
+  sessionName: string,
+  options: { continuationIds?: string[] },
+): Promise<ResetFailedWorkerSessionDrainContinuationsResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drain-continuations/reset-failed`,
+    {
+      ...(options.continuationIds ? { continuationIds: options.continuationIds } : {}),
+    },
+  ) as ResetFailedWorkerSessionDrainContinuationsResponse;
 }
 
 async function fetchWorkerSessionDrainContinuations(
@@ -7046,7 +7076,7 @@ Commands:
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
-  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running] [--older-than-ms 600000] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
+  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]

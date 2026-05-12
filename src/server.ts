@@ -21,6 +21,7 @@ import {
   listWorkerSessionApplyRecords,
   listWorkerSessionDrainContinuationRecords,
   queueWorkerSessionDrainContinuations,
+  resetFailedWorkerSessionDrainContinuationRecords,
   resetRunningWorkerSessionDrainContinuationRecords,
   summarizeWorkerSessionApplyDrains,
 } from "./workerSessionDrains.js";
@@ -327,6 +328,26 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         settings.projectRoot,
         name,
         { olderThanMs: parseOptionalInteger(body.olderThanMs) },
+      );
+      return {
+        ok: true,
+        session: name,
+        ...reset,
+        continuations: reset.reset.map((item) => item.record),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-drain-continuations/reset-failed", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const reset = await resetFailedWorkerSessionDrainContinuationRecords(
+        settings.projectRoot,
+        name,
+        { continuationIds: parseOptionalList(body.continuationIds) },
       );
       return {
         ok: true,
