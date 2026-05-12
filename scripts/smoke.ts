@@ -2926,6 +2926,29 @@ try {
   assert.ok(retryWatchActionQueueShell.stdout.trim().split("\n").includes(
     retryInspection.summary.actions.retryFailed.join(" "),
   ));
+  const retryWatchApplyPreview = await cliJson<{
+    source: string;
+    selected: number;
+    commandsToRun: Array<{ scope: string; action: string; reason: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "watch",
+    "--action",
+    "retry_failed",
+    "--limit",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(retryWatchApplyPreview.source, "watch");
+  assert.equal(retryWatchApplyPreview.selected, 1);
+  assert.equal(retryWatchApplyPreview.commandsToRun.length, 1);
+  assert.equal(retryWatchApplyPreview.commandsToRun[0].scope, "apply");
+  assert.equal(retryWatchApplyPreview.commandsToRun[0].action, "retry_failed");
+  assert.equal(retryWatchApplyPreview.commandsToRun[0].reason, "session_apply_failed_commands");
+  assert.equal(retryWatchApplyPreview.commandsToRun[0].command.join(" "), retryInspection.summary.actions.retryFailed.join(" "));
   const retryFailedPreview = await cliJson<{
     resumeFilter: string[];
     selected: number;

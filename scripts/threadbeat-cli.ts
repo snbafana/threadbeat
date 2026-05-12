@@ -2936,8 +2936,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     const requiredSessionName = required(sessionName, "runs session-apply <session>");
     const queueSource = options.source ?? "review";
-    if (queueSource !== "review" && queueSource !== "status") {
-      throw new Error("runs session-apply --source must be review or status");
+    if (queueSource !== "review" && queueSource !== "status" && queueSource !== "watch") {
+      throw new Error("runs session-apply --source must be review, status, or watch");
     }
     if (!options.action && !options["branch-action"]) {
       throw new Error("runs session-apply requires --action or --branch-action");
@@ -2973,6 +2973,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ...(options.status ? ["--status", options.status] : []),
         ...(options["branch-action"] ? ["--branch-action", options["branch-action"]] : []),
       ]
+      : queueSource === "watch"
+        ? [
+          "runs",
+          "session-watch",
+          requiredSessionName,
+          "--recoverable",
+          "--next",
+          "--commands-only",
+          "--action-queue",
+          "--max-polls",
+          "1",
+          "--interval-ms",
+          "1",
+          ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
+          ...(options.status ? ["--status", options.status] : []),
+          ...(options["checkout-dir"] ? ["--checkout-dir", options["checkout-dir"]] : []),
+          ...(options["changed-only"] === "1" ? ["--changed-only"] : []),
+          ...(options["changed-path"] ? ["--changed-path", options["changed-path"]] : []),
+        ]
       : [
         "runs",
         "session-review",
@@ -2997,16 +3016,29 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       commands: Array<{
         scope: string;
         action: string;
-        reason: string;
+        reason?: string;
         runId?: string;
         command: string[];
       }>;
     };
+    const queueCommands = queue.commands.map((item) => ({
+      ...item,
+      reason: item.reason ?? `${item.action}_from_${queueSource}_queue`,
+    }));
+    const actionFilter = options.action ? new Set(parseList(options.action)) : null;
+    const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
+    const filteredQueueCommands = queueSource === "watch"
+      ? queueCommands.filter((item) => (
+        item.scope === "branch"
+          ? branchActionFilter?.has(item.action)
+          : actionFilter?.has(item.action)
+      ))
+      : queueCommands;
     const runFilter = options.run ? new Set(parseList(options.run)) : null;
     const limit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
     const selectedFromQueue = (runFilter
-      ? queue.commands.filter((item) => item.runId && runFilter.has(item.runId))
-      : queue.commands).slice(0, limit ?? undefined);
+      ? filteredQueueCommands.filter((item) => item.runId && runFilter.has(item.runId))
+      : filteredQueueCommands).slice(0, limit ?? undefined);
     const selectedCommands = existingApply?.commands ?? selectedFromQueue;
     const resumeFilter = parseSessionApplyResumeFilter(options["resume-filter"] ?? "failed,pending");
     const commandStates = sessionApplyCommandStates(existingApply);
@@ -3368,6 +3400,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             scope: "apply",
             session: status.session.session,
             action: step.action,
+            reason: step.action === "retry_failed"
+              ? "session_apply_failed_commands"
+              : step.action === "resume_pending"
+                ? "session_apply_pending_commands"
+                : "session_apply_ready_results",
             applyId: step.applyId,
             selected: step.selected,
             failed: step.failed,
@@ -5681,7 +5718,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
