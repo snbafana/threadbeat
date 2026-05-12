@@ -3202,11 +3202,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
     const branchCheckoutDir = options["checkout-dir"] ?? `./checkouts/${requiredSessionName}-resumable`;
+    const actionQueueOptions = { ...options, "checkout-dir": branchCheckoutDir };
     let polls = 0;
     while (true) {
       const status = await workerSessionStatus(requiredSessionName, statusFilter);
       const recoveryPreview = options.recoverable === "1"
         ? await recoverableSessionRuns(status, options)
+        : null;
+      const applyActionQueue = options["action-queue"] === "1"
+        ? await sessionApplyActionQueue(requiredSessionName, actionQueueOptions)
         : null;
       const observedAt = new Date().toISOString();
       if (options.next === "1") {
@@ -3292,6 +3296,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             resumableBranches: resumableBranches.length,
             recoveryCandidates: recoverableActive + recoverableStopped,
             branchNextSteps: branchNextSteps.length,
+            applyActions: applyActionQueue?.counts.actionable ?? 0,
+            applyResumeNeeded: applyActionQueue?.counts.resumeNeeded ?? 0,
+            applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
           },
           checkoutDir: branchCheckoutDir,
           nextSteps: [
@@ -3327,12 +3334,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             }] : []),
           ],
           branchNextSteps,
+          ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
         }));
       } else {
         console.log(JSON.stringify({
           observedAt,
           ...status,
           ...(recoveryPreview ? { recoveryPreview } : {}),
+          ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
         }));
       }
       polls += 1;
@@ -5091,6 +5100,16 @@ function summarizeSessionApplyActionQueue(
   };
 }
 
+async function sessionApplyActionQueue(
+  sessionName: string,
+  options: Record<string, string>,
+): Promise<ReturnType<typeof summarizeSessionApplyActionQueue>> {
+  const records = await listSessionApplyRecords(sessionName);
+  const runStatusIndex = await sessionApplyRunStatusIndex(sessionName);
+  const applies = records.map((record) => summarizeSessionApplyRecord(record, runStatusIndex));
+  return summarizeSessionApplyActionQueue(applies, options);
+}
+
 function summarizeSessionApplies(applies: SessionApplySummary[]): {
   counts: {
     total: number;
@@ -5581,7 +5600,7 @@ Commands:
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
-  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
+  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]

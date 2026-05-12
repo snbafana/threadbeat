@@ -289,6 +289,7 @@ npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --checkout-dir ./checkouts/overnight-watch
+npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --action-queue --checkout-dir ./checkouts/overnight-watch
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs recover-session overnight --dry-run
 npm run cli -- runs resume-session overnight --worker-id worker-a --dry-run
@@ -585,6 +586,10 @@ only those review-ready result commands across recorded applies, and pass
 result-review commands. JSON apply summaries also include each affected run's
 current status, result commit, worker location, and next branch action when the
 worker session is still available. Add
+`--action-queue` to `runs session-watch <name>` to include the same apply queue
+inside live watch snapshots; with `--next`, the compact watch summary includes
+apply action counts alongside worker and branch recovery counts, and generated
+result-review commands use the watch checkout directory.
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

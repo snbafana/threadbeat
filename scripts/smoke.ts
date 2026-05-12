@@ -2866,6 +2866,31 @@ try {
     && action.resultRuns.length === 0
     && action.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")
   )));
+  const retryWatchActionQueue = await cliJson<{
+    summary: { applyActions: number; applyResumeNeeded: number; applyReadyToReview: number };
+    actionQueue: {
+      counts: { actionable: number; resumeNeeded: number; readyToReview: number };
+      actions: Array<{ applyId: string; action: string; command: string[] }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--action-queue",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(retryWatchActionQueue.summary.applyActions, retryWatchActionQueue.actionQueue.counts.actionable);
+  assert.equal(retryWatchActionQueue.summary.applyResumeNeeded, retryWatchActionQueue.actionQueue.counts.resumeNeeded);
+  assert.equal(retryWatchActionQueue.summary.applyReadyToReview, retryWatchActionQueue.actionQueue.counts.readyToReview);
+  assert.ok(retryWatchActionQueue.actionQueue.actions.some((action) => (
+    action.applyId === retryApplyId
+    && action.action === "retry_failed"
+    && action.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")
+  )));
   const retryFailedPreview = await cliJson<{
     resumeFilter: string[];
     selected: number;
