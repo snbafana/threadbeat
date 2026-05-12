@@ -3465,6 +3465,95 @@ try {
       }
     }
   }
+  const restartDrainWorkerSessionName = `${detachedWorkerSessionName}-restart`;
+  const restartDrainWorkerId = "smoke-drain-worker-restart";
+  const restartDrainWorkerDir = path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", restartDrainWorkerSessionName);
+  const restartDrainWorkerStdoutPath = path.join(restartDrainWorkerDir, `${restartDrainWorkerId}.out.log`);
+  const restartDrainWorkerStderrPath = path.join(restartDrainWorkerDir, `${restartDrainWorkerId}.err.log`);
+  await fs.mkdir(restartDrainWorkerDir, { recursive: true });
+  await fs.writeFile(restartDrainWorkerStdoutPath, "restart worker stdout\n");
+  await fs.writeFile(restartDrainWorkerStderrPath, "");
+  await fs.writeFile(path.join(restartDrainWorkerDir, `${restartDrainWorkerId}.json`), `${JSON.stringify({
+    session: restartDrainWorkerSessionName,
+    workerId: restartDrainWorkerId,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: [
+      "runs",
+      "session-drain-continuations",
+      restartDrainWorkerSessionName,
+      "--execute-queued",
+      "--max-continuations",
+      "1",
+    ],
+    pid: null,
+    stdoutPath: restartDrainWorkerStdoutPath,
+    stderrPath: restartDrainWorkerStderrPath,
+    stoppedAt: new Date().toISOString(),
+    retiredAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+  const restartedDrainWorker = await cliJson<{
+    session: string;
+    count: number;
+    restarted: Array<{
+      workerId: string;
+      previousPid: number | null;
+      pid: number | null;
+      restartedAt: string;
+      restartCount: number;
+      command: string[];
+    }>;
+    workers: Array<{
+      workerId: string;
+      pid: number | null;
+      previousPid?: number | null;
+      restartedAt?: string;
+      restartCount?: number;
+      retiredAt?: string;
+      stdout: { path: string; lines: string[] };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "restart-drain-workers",
+    restartDrainWorkerSessionName,
+    "--worker-id",
+    restartDrainWorkerId,
+    "--include-retired",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(restartedDrainWorker.session, restartDrainWorkerSessionName);
+  assert.equal(restartedDrainWorker.count, 1);
+  assert.equal(restartedDrainWorker.restarted[0]?.workerId, restartDrainWorkerId);
+  assert.equal(restartedDrainWorker.restarted[0]?.previousPid, null);
+  assert.equal(typeof restartedDrainWorker.restarted[0]?.pid, "number");
+  assert.equal(typeof restartedDrainWorker.restarted[0]?.restartedAt, "string");
+  assert.equal(restartedDrainWorker.restarted[0]?.restartCount, 1);
+  assert.deepEqual(restartedDrainWorker.restarted[0]?.command, [
+    "runs",
+    "session-drain-continuations",
+    restartDrainWorkerSessionName,
+    "--execute-queued",
+    "--max-continuations",
+    "1",
+  ]);
+  assert.equal(restartedDrainWorker.workers[0]?.workerId, restartDrainWorkerId);
+  assert.equal(restartedDrainWorker.workers[0]?.pid, restartedDrainWorker.restarted[0]?.pid);
+  assert.equal(restartedDrainWorker.workers[0]?.previousPid, null);
+  assert.equal(typeof restartedDrainWorker.workers[0]?.restartedAt, "string");
+  assert.equal(restartedDrainWorker.workers[0]?.restartCount, 1);
+  assert.equal(restartedDrainWorker.workers[0]?.retiredAt, undefined);
+  assert.equal(restartedDrainWorker.workers[0]?.stdout.path, restartDrainWorkerStdoutPath);
+  assert.ok(restartedDrainWorker.workers[0]?.stdout.lines.includes("restart worker stdout"));
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-drain-workers",
+    restartDrainWorkerSessionName,
+    "--worker-id",
+    restartDrainWorkerId,
+    "--lines",
+    "1",
+  ]);
   const openDrainContinueDrainsPreview = await cliJson<{
     continuationId: string;
     continuationPath: string;

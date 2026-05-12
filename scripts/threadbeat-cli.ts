@@ -3545,6 +3545,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "restart-drain-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const response = await restartDrainContinuationWorkers(required(sessionName, "runs restart-drain-workers <session>"), {
+      workerId: required(options["worker-id"], "runs restart-drain-workers <session> --worker-id <id>"),
+      includeRetired: options["include-retired"] === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    });
+    await printJson(response);
+    return;
+  }
   if (subcommandName === "session-watch") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -5248,6 +5259,9 @@ type DrainContinuationWorker = {
   stoppedAt?: string;
   stopResult?: StopProcessGroupResult & { aliveBefore: boolean };
   retiredAt?: string;
+  restartedAt?: string;
+  restartCount?: number;
+  previousPid?: number | null;
 };
 
 type SessionApplyCommand = {
@@ -5549,6 +5563,88 @@ async function stopDrainContinuationWorkers(
       includeRetired: true,
     }, options.lines),
   };
+}
+
+async function restartDrainContinuationWorkers(
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  restarted: Array<{
+    workerId: string;
+    previousPid: number | null;
+    pid: number | null;
+    restartedAt: string;
+    restartCount: number;
+    command: string[];
+  }>;
+  workers: Awaited<ReturnType<typeof listDrainContinuationWorkers>>;
+}> {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(options.workerId);
+  let worker: DrainContinuationWorker;
+  try {
+    worker = await readDrainContinuationWorker(sessionName, options.workerId);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`drain continuation worker '${options.workerId}' not found for session '${sessionName}'`);
+    }
+    throw error;
+  }
+  if (worker.retiredAt && !options.includeRetired) {
+    throw new Error(`drain continuation worker '${options.workerId}' is retired; pass --include-retired to restart it`);
+  }
+  if (processIsAlive(worker.pid)) {
+    throw new Error(`drain continuation worker '${options.workerId}' is already alive with pid ${worker.pid}`);
+  }
+  if (worker.session !== sessionName || worker.workerId !== options.workerId) {
+    throw new Error(`drain continuation worker record mismatch for '${options.workerId}'`);
+  }
+  const stdout = await fs.open(worker.stdoutPath, "a");
+  const stderr = await fs.open(worker.stderrPath, "a");
+  try {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const restartedAt = new Date().toISOString();
+    const updated: DrainContinuationWorker = {
+      ...worker,
+      baseUrl,
+      startedAt: restartedAt,
+      pid: child.pid ?? null,
+      stoppedAt: undefined,
+      stopResult: undefined,
+      retiredAt: undefined,
+      restartedAt,
+      restartCount: (worker.restartCount ?? 0) + 1,
+      previousPid: worker.pid,
+    };
+    await writeDrainContinuationWorker(updated);
+    return {
+      session: sessionName,
+      count: 1,
+      restarted: [{
+        workerId: updated.workerId,
+        previousPid: updated.previousPid ?? null,
+        pid: updated.pid,
+        restartedAt,
+        restartCount: updated.restartCount ?? 1,
+        command: updated.command,
+      }],
+      workers: await listDrainContinuationWorkers({
+        sessionName,
+        workerId: options.workerId,
+        includeRetired: true,
+      }, options.lines),
+    };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
 }
 
 async function readDrainContinuationWorker(sessionName: string, workerId: string): Promise<DrainContinuationWorker> {
@@ -6527,6 +6623,7 @@ Commands:
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
+  runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

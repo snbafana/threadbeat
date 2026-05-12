@@ -291,6 +291,7 @@ npm run cli -- runs session-drain-continuations overnight --execute-queued --max
 npm run cli -- runs session-drain-continuations overnight --execute-queued --detach --worker-id overnight-drain-worker
 npm run cli -- runs session-drain-workers overnight --lines 40
 npm run cli -- runs stop-drain-workers overnight --worker-id overnight-drain-worker --retire
+npm run cli -- runs restart-drain-workers overnight --worker-id overnight-drain-worker --include-retired
 npm run cli -- runs session-drain-continuations overnight --execute-next
 npm run cli -- runs session-drain-continuations overnight --execute <continuation-id>
 npm run cli -- runs session-drain-continuations overnight --status queued,running,failed
@@ -620,7 +621,10 @@ paths, liveness, and recent stdout/stderr lines. Use
 `runs stop-drain-workers <name> --worker-id <id>` to terminate one drain worker
 process group and persist stop metadata; add `--retire` to hide it from default
 worker listings while keeping the durable record available with
-`runs session-drain-workers <name> --include-retired`.
+`runs session-drain-workers <name> --include-retired`. Use
+`runs restart-drain-workers <name> --worker-id <id>` to restart a stopped or
+lost worker from its saved command and log paths; pass `--include-retired` when
+the saved record was intentionally retired.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a
