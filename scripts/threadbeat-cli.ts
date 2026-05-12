@@ -3637,6 +3637,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["action-queue"] === "1" && options.summary === "1") {
       throw new Error("runs session-applies --action-queue cannot be combined with --summary");
     }
+    if (options["action-executions"] === "1" && outputFormat !== "json") {
+      throw new Error("runs session-applies --action-executions requires json output");
+    }
+    if (options["action-executions"] === "1" && options["action-queue"] === "1") {
+      throw new Error("runs session-applies --action-executions cannot be combined with --action-queue");
+    }
     if (
       options["continue-drains"] === "1"
       && (
@@ -3679,6 +3685,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           applyId,
           { dryRun: options["dry-run"] === "1" },
         ));
+        return;
+      }
+      if (options["action-executions"] === "1") {
+        await printJson(await fetchWorkerSessionApplyActionExecutions(requiredSessionName, {
+          applyId: options["apply-id"],
+          action: options["apply-action"],
+          status: options.status,
+          limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+        }));
         return;
       }
       if (options["action-queue"] === "1") {
@@ -5287,7 +5302,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -5538,6 +5553,33 @@ type ExecuteNextWorkerSessionApplyActionResponse = {
   stdout?: string;
   stderr?: string;
   output?: unknown;
+  executionPath?: string;
+  execution?: WorkerSessionApplyActionExecutionRecord;
+};
+
+type WorkerSessionApplyActionExecutionRecord = {
+  executionId: string;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  status: "executed" | "failed";
+  filter: Record<string, unknown>;
+  applyId: string;
+  source: string;
+  action: WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number]["action"];
+  command: string[];
+  exitCode: number | null;
+  stdout?: string;
+  stderr?: string;
+  output?: unknown;
+};
+
+type WorkerSessionApplyActionExecutionsResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  filter: Record<string, unknown>;
+  executions: WorkerSessionApplyActionExecutionRecord[];
 };
 
 type WorkerSessionDrainContinuationRecord = {
@@ -5673,6 +5715,21 @@ async function fetchWorkerSessionApplyActions(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-actions`, params),
   ) as WorkerSessionApplyActionsResponse;
+}
+
+async function fetchWorkerSessionApplyActionExecutions(
+  sessionName: string,
+  options: { applyId?: string; action?: string; status?: string; limit?: number | null },
+): Promise<WorkerSessionApplyActionExecutionsResponse> {
+  const params = new URLSearchParams();
+  if (options.applyId) params.set("applyId", options.applyId);
+  if (options.action) params.set("action", options.action);
+  if (options.status) params.set("status", options.status);
+  if (options.limit) params.set("limit", String(options.limit));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-action-executions`, params),
+  ) as WorkerSessionApplyActionExecutionsResponse;
 }
 
 async function executeNextWorkerSessionApplyAction(
@@ -8180,7 +8237,7 @@ Commands:
   runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
-  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--action-executions] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]

@@ -681,6 +681,7 @@ try {
       summary: { counts: { succeeded: number; failed: number; pending: number } };
       applies: Array<{ applyId: string }>;
     };
+    execution: { executionId: string; applyId: string; action: string; status: string; exitCode: number };
   }>(baseUrl, [
     "runs",
     "session-applies",
@@ -703,6 +704,36 @@ try {
   assert.equal(serverExecutedApplyAction.output.summary.counts.succeeded, 1);
   assert.equal(serverExecutedApplyAction.output.summary.counts.failed, 0);
   assert.equal(serverExecutedApplyAction.output.summary.counts.pending, 0);
+  assert.equal(serverExecutedApplyAction.execution?.applyId, "detached-session-api-backed-reset");
+  assert.equal(serverExecutedApplyAction.execution?.action, "inspect_drain_continuation_resets");
+  assert.equal(serverExecutedApplyAction.execution?.status, "executed");
+  assert.equal(serverExecutedApplyAction.execution?.exitCode, 0);
+  const serverApplyActionExecutions = await cliJson<{
+    count: number;
+    executions: Array<{
+      executionId: string;
+      applyId: string;
+      action: string;
+      status: string;
+      exitCode: number;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-executions",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+  ]);
+  assert.equal(serverApplyActionExecutions.count, 1);
+  assert.equal(serverApplyActionExecutions.executions[0]?.executionId, serverExecutedApplyAction.execution?.executionId);
+  assert.equal(serverApplyActionExecutions.executions[0]?.applyId, "detached-session-api-backed-reset");
+  assert.equal(serverApplyActionExecutions.executions[0]?.action, "inspect_drain_continuation_resets");
+  assert.equal(serverApplyActionExecutions.executions[0]?.status, "executed");
+  assert.equal(serverApplyActionExecutions.executions[0]?.exitCode, 0);
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;

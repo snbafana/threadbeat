@@ -63,6 +63,23 @@ type WorkerSessionApplyAction = {
   ackCommand?: string[];
 };
 
+type WorkerSessionApplyActionExecutionRecord = {
+  executionId: string;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  status: "executed" | "failed";
+  filter: Record<string, unknown>;
+  applyId: string;
+  source: string;
+  action: WorkerSessionApplyAction["action"];
+  command: string[];
+  exitCode: number | null;
+  stdout?: string;
+  stderr?: string;
+  output?: unknown;
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -155,6 +172,50 @@ export async function readWorkerSessionApplyRecord(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
+}
+
+export async function listWorkerSessionApplyActionExecutionRecords(
+  projectRoot: string,
+  sessionName: string,
+  limit = 20,
+): Promise<WorkerSessionApplyActionExecutionRecord[]> {
+  assertSafeWorkerSessionName(sessionName);
+  const executionDir = workerSessionApplyActionExecutionDir(projectRoot, sessionName);
+  try {
+    const entries = await fs.readdir(executionDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(executionDir, entry.name), "utf8");
+        return JSON.parse(text) as WorkerSessionApplyActionExecutionRecord;
+      }));
+    return records
+      .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+      .slice(0, limit);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+export async function writeWorkerSessionApplyActionExecutionRecord(
+  projectRoot: string,
+  record: Omit<WorkerSessionApplyActionExecutionRecord, "executionId"> & { executionId?: string },
+): Promise<{ path: string; record: WorkerSessionApplyActionExecutionRecord }> {
+  assertSafeWorkerSessionName(record.session);
+  const executionRecord: WorkerSessionApplyActionExecutionRecord = {
+    ...record,
+    executionId: record.executionId ?? createApplyActionExecutionId(record.observedAt),
+  };
+  assertSafeWorkerSessionName(executionRecord.executionId);
+  const executionPath = workerSessionApplyActionExecutionPath(
+    projectRoot,
+    executionRecord.session,
+    executionRecord.executionId,
+  );
+  await fs.mkdir(path.dirname(executionPath), { recursive: true });
+  await fs.writeFile(executionPath, `${JSON.stringify(executionRecord, null, 2)}\n`);
+  return { path: executionPath, record: executionRecord };
 }
 
 export async function acknowledgeWorkerSessionApplyResetAudit(
@@ -867,6 +928,17 @@ function workerSessionApplyPath(projectRoot: string, sessionName: string, applyI
   return path.join(workerSessionApplyDir(projectRoot, sessionName), `${applyId}.json`);
 }
 
+function workerSessionApplyActionExecutionDir(projectRoot: string, sessionName: string): string {
+  assertSafeWorkerSessionName(sessionName);
+  return path.join(projectRoot, ".threadbeat", "worker-sessions", "apply-action-executions", sessionName);
+}
+
+function workerSessionApplyActionExecutionPath(projectRoot: string, sessionName: string, executionId: string): string {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(executionId);
+  return path.join(workerSessionApplyActionExecutionDir(projectRoot, sessionName), `${executionId}.json`);
+}
+
 function workerSessionDrainContinuationDir(projectRoot: string, sessionName: string): string {
   assertSafeWorkerSessionName(sessionName);
   return path.join(projectRoot, ".threadbeat", "worker-sessions", "drain-continuations", sessionName);
@@ -879,6 +951,10 @@ function workerSessionDrainContinuationPath(projectRoot: string, sessionName: st
 }
 
 function createDrainContinuationId(observedAt: string): string {
+  return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function createApplyActionExecutionId(observedAt: string): string {
   return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
