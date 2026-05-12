@@ -4169,10 +4169,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-branches") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
     if (options.server !== "1") {
       throw new Error("runs session-branches requires --server");
     }
-    await printJson(await fetchWorkerSessionBranches(
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-branches --format must be json or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-branches --format shell requires --commands-only");
+    }
+    const response = await fetchWorkerSessionBranches(
       required(sessionName, "runs session-branches <session> --server"),
       {
         ...(options.status ? { status: options.status } : {}),
@@ -4180,7 +4187,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ...(options["checkout-dir"] ? { checkoutDir: options["checkout-dir"] } : {}),
         resumable: options.resumable === "1",
       },
-    ));
+    );
+    if (options["commands-only"] === "1") {
+      const commands = response.nextSteps.map((step) => ({
+        action: step.action,
+        reason: step.reason,
+        agentId: step.agentId,
+        runId: step.runId,
+        status: step.status,
+        state: step.state,
+        command: step.command,
+      }));
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        const { agents, nextSteps, ...rest } = response;
+        await printJson({ ...rest, commands });
+      }
+      return;
+    }
+    await printJson(response);
     return;
   }
   if (subcommandName === "stop-apply-action-workers") {
@@ -6119,7 +6145,26 @@ async function fetchWorkerSessionControlPlaneStatus(
 async function fetchWorkerSessionBranches(
   sessionName: string,
   options: { status?: string; workerId?: string; checkoutDir?: string; resumable: boolean },
-): Promise<unknown> {
+): Promise<{
+  ok: true;
+  observedAt: string;
+  session: string;
+  checkoutDir: string;
+  filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+  summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number };
+  resultCommits: unknown[];
+  resumableBranches: unknown[];
+  nextSteps: Array<{
+    action: string;
+    reason: string;
+    agentId: string;
+    runId: string;
+    status: string;
+    state: string;
+    command: string[];
+  }>;
+  agents: unknown[];
+}> {
   const params = new URLSearchParams();
   if (options.status) params.set("status", options.status);
   if (options.workerId) params.set("workerId", options.workerId);
@@ -6128,7 +6173,26 @@ async function fetchWorkerSessionBranches(
   return await requestJson(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/branches`, params),
-  );
+  ) as {
+    ok: true;
+    observedAt: string;
+    session: string;
+    checkoutDir: string;
+    filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+    summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number };
+    resultCommits: unknown[];
+    resumableBranches: unknown[];
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      agentId: string;
+      runId: string;
+      status: string;
+      state: string;
+      command: string[];
+    }>;
+    agents: unknown[];
+  };
 }
 
 async function stopWorkerSessionDrainWorkersViaServer(
@@ -9357,7 +9421,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]
-  runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches]
+  runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]

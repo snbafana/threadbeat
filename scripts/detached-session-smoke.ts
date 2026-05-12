@@ -422,6 +422,19 @@ try {
     run.runId === stoppedPlan.run.id
     && run.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
   )));
+  const cliBranchCommands = await cliText(baseUrl, [
+    "runs",
+    "session-branches",
+    sessionName,
+    "--server",
+    "--resumable",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(cliBranchCommands.split("\n").filter(Boolean).includes(
+    `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`,
+  ));
 
   const stopped = await cliJson<{
     session: string;
