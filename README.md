@@ -290,6 +290,7 @@ npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --checkout-dir ./checkouts/overnight-watch
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --action-queue --checkout-dir ./checkouts/overnight-watch
+npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --action-queue --until-empty --max-polls 60 --interval-ms 10000 --checkout-dir ./checkouts/overnight-watch
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --action-queue --commands-only --format shell --checkout-dir ./checkouts/overnight-watch
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs recover-session overnight --dry-run
@@ -590,9 +591,12 @@ worker session is still available. Add
 `--action-queue` to `runs session-watch <name>` to include the same apply queue
 inside live watch snapshots; with `--next`, the compact watch summary includes
 apply action counts alongside worker and branch recovery counts, and generated
-result-review commands use the watch checkout directory. Add
-`--commands-only --format shell` to print the watch queue as runnable commands,
-including recovery, branch resume, and apply action-queue commands.
+result-review commands use the watch checkout directory. Add `--until-empty`
+with `--next` to keep polling until the watch queue has no recovery, branch
+resume, or apply actions left, or until `--max-polls` is reached; this is a
+bounded wait and does not execute queued commands. Add `--commands-only
+--format shell` to print the watch queue as runnable commands, including
+recovery, branch resume, and apply action-queue commands.
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

@@ -3211,9 +3211,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-watch --format shell requires --commands-only");
     }
+    const untilEmpty = options["until-empty"] === "1";
+    if (untilEmpty && options.next !== "1") {
+      throw new Error("runs session-watch --until-empty requires --next");
+    }
+    if (untilEmpty && outputFormat === "shell") {
+      throw new Error("runs session-watch --until-empty requires json output");
+    }
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
-    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : outputFormat === "shell" ? 1 : null;
+    const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : outputFormat === "shell" ? 1 : untilEmpty ? 60 : null;
     if (outputFormat === "shell" && maxPolls !== 1) {
       throw new Error("runs session-watch --format shell supports one poll");
     }
@@ -3221,6 +3228,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const actionQueueOptions = { ...options, "checkout-dir": branchCheckoutDir };
     let polls = 0;
     while (true) {
+      let commandQueueLength: number | null = null;
       const status = await workerSessionStatus(requiredSessionName, statusFilter);
       const recoveryPreview = options.recoverable === "1"
         ? await recoverableSessionRuns(status, options)
@@ -3368,6 +3376,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             command: step.command,
           })),
         ];
+        commandQueueLength = commandQueue.length;
         const output = {
           observedAt,
           session: {
@@ -3390,6 +3399,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
           },
           checkoutDir: branchCheckoutDir,
+          ...(untilEmpty ? {
+            untilEmpty: {
+              done: commandQueue.length === 0,
+              remaining: commandQueue.length,
+              poll: polls + 1,
+              maxPolls,
+            },
+          } : {}),
           ...(options["commands-only"] === "1" ? { commands: commandQueue } : {
             nextSteps,
             branchNextSteps,
@@ -3410,6 +3427,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         }));
       }
       polls += 1;
+      if (untilEmpty && commandQueueLength === 0) return;
       if (maxPolls !== null && polls >= maxPolls) return;
       await sleep(intervalMs);
     }
@@ -5665,7 +5683,7 @@ Commands:
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|--branch-action resume_branch|review_branch) [--source review|status] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
-  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
+  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]

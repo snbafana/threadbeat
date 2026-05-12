@@ -2891,6 +2891,24 @@ try {
     && action.action === "retry_failed"
     && action.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")
   )));
+  const retryWatchUntilEmpty = await cliJson<{
+    untilEmpty: { done: boolean; remaining: number; poll: number; maxPolls: number };
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--action-queue",
+    "--until-empty",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(retryWatchUntilEmpty.untilEmpty.done, false);
+  assert.ok(retryWatchUntilEmpty.untilEmpty.remaining >= 1);
+  assert.equal(retryWatchUntilEmpty.untilEmpty.poll, 1);
+  assert.equal(retryWatchUntilEmpty.untilEmpty.maxPolls, 1);
   const retryWatchActionQueueShell = await cliRaw(baseUrl, [
     "runs",
     "session-watch",
