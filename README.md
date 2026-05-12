@@ -286,6 +286,7 @@ npm run cli -- runs session-applies overnight --summary-group ready-to-review --
 npm run cli -- runs session-applies overnight --summary-group drain-prefixes --format shell
 npm run cli -- runs session-applies overnight --continue-drains --drain-prefix overnight-drain --max-polls 5
 npm run cli -- runs session-drains overnight --format shell
+npm run cli -- runs session-drain-continuations overnight --queue --drain-prefix overnight-drain --dry-run --max-polls 5
 npm run cli -- runs session-drain-continuations overnight
 npm run cli -- runs session-applies overnight --ready-results --format shell
 npm run cli -- runs session-applies overnight --ready-results --format shell --checkout-dir ./checkouts/overnight-results --changed-only
@@ -597,7 +598,8 @@ same durable watch-drain continuation readiness through the server API;
 nested continuation previews without mutating apply records. Each continuation
 batch is written under `.threadbeat/worker-sessions/drain-continuations/<name>`;
 `runs session-drain-continuations <name>` reads those durable attempt records
-back through the server.
+back through the server, and `--queue` creates a server-owned queued attempt
+record without executing it yet.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a

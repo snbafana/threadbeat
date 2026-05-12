@@ -3364,6 +3364,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         continuationId: createDrainContinuationId(observedAt),
         session: requiredSessionName,
         observedAt,
+        status: "executed",
         dryRun: options["dry-run"] === "1",
         filter: {
           ...(options["drain-prefix"] ? { drainPrefix: parseList(options["drain-prefix"]) } : {}),
@@ -3466,6 +3467,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const outputFormat = options.format ?? "json";
     if (outputFormat !== "json") {
       throw new Error("runs session-drain-continuations only supports --format json");
+    }
+    if (options.queue === "1") {
+      await printJson(await queueWorkerSessionDrainContinuations(requiredSessionName, {
+        ...(options["drain-prefix"] ? { drainPrefix: parseList(options["drain-prefix"]) } : {}),
+        dryRun: options["dry-run"] === "1",
+        ...(options["max-polls"] ? { maxPolls: parsePositiveInteger(options["max-polls"], "--max-polls") } : {}),
+        ...(options["interval-ms"] ? { intervalMs: parsePositiveInteger(options["interval-ms"], "--interval-ms") } : {}),
+      }));
+      return;
     }
     const response = await fetchWorkerSessionDrainContinuations(requiredSessionName, options.limit);
     await printJson(response);
@@ -4630,7 +4640,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -4779,6 +4789,7 @@ type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
   observedAt: string;
+  status?: "queued" | "executed";
   dryRun: boolean;
   filter: Record<string, unknown>;
   readinessSource: "server";
@@ -4806,6 +4817,13 @@ type WorkerSessionDrainContinuationsResponse = {
   continuations: WorkerSessionDrainContinuationRecord[];
 };
 
+type QueueWorkerSessionDrainContinuationsResponse = {
+  ok: true;
+  session: string;
+  continuationPath: string;
+  continuation: WorkerSessionDrainContinuationRecord;
+};
+
 async function fetchWorkerSessionApplyDrains(
   sessionName: string,
   drainPrefix?: string,
@@ -4816,6 +4834,22 @@ async function fetchWorkerSessionApplyDrains(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drains`, params),
   ) as WorkerSessionApplyDrainsResponse;
+}
+
+async function queueWorkerSessionDrainContinuations(
+  sessionName: string,
+  options: { drainPrefix?: string[]; dryRun: boolean; maxPolls?: number; intervalMs?: number },
+): Promise<QueueWorkerSessionDrainContinuationsResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drain-continuations`,
+    {
+      ...(options.drainPrefix ? { drainPrefix: options.drainPrefix } : {}),
+      dryRun: options.dryRun,
+      ...(options.maxPolls ? { maxPolls: options.maxPolls } : {}),
+      ...(options.intervalMs ? { intervalMs: options.intervalMs } : {}),
+    },
+  ) as QueueWorkerSessionDrainContinuationsResponse;
 }
 
 async function fetchWorkerSessionDrainContinuations(
@@ -6172,7 +6206,7 @@ Commands:
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
-  runs session-drain-continuations <name> [--limit 20] [--format json]
+  runs session-drain-continuations <name> [--queue] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

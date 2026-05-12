@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -44,6 +45,7 @@ type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
   observedAt: string;
+  status?: "queued" | "executed";
   dryRun: boolean;
   filter: Record<string, unknown>;
   readinessSource?: string;
@@ -67,6 +69,13 @@ type WorkerSessionDrainContinuationRecord = {
     output?: unknown;
     stderr?: string;
   }>;
+};
+
+type QueueWorkerSessionDrainContinuationsOptions = {
+  drainPrefix?: string[];
+  dryRun?: boolean;
+  maxPolls?: number;
+  intervalMs?: number;
 };
 
 export async function listWorkerSessionApplyRecords(projectRoot: string, sessionName: string): Promise<SessionApplyRecord[]> {
@@ -109,6 +118,72 @@ export async function listWorkerSessionDrainContinuationRecords(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+export async function queueWorkerSessionDrainContinuations(
+  projectRoot: string,
+  sessionName: string,
+  options: QueueWorkerSessionDrainContinuationsOptions = {},
+): Promise<{ path: string; record: WorkerSessionDrainContinuationRecord }> {
+  assertSafeWorkerSessionName(sessionName);
+  const records = await listWorkerSessionApplyRecords(projectRoot, sessionName);
+  const summary = summarizeWorkerSessionApplyDrains(records);
+  const prefixFilter = options.drainPrefix && options.drainPrefix.length > 0
+    ? new Set(options.drainPrefix)
+    : null;
+  const drains = summary.drains
+    .filter((drain) => drain.continueCommand)
+    .filter((drain) => !prefixFilter || prefixFilter.has(drain.prefix));
+  const readinessCounts = {
+    total: drains.length,
+    needsContinuation: drains.filter((drain) => drain.needsContinuation).length,
+    done: drains.filter((drain) => drain.done).length,
+    stoppedOnFailure: drains.filter((drain) => drain.stoppedOnFailure).length,
+  };
+  const observedAt = new Date().toISOString();
+  const record: WorkerSessionDrainContinuationRecord = {
+    continuationId: createDrainContinuationId(observedAt),
+    session: sessionName,
+    observedAt,
+    status: "queued",
+    dryRun: options.dryRun === true,
+    filter: {
+      ...(prefixFilter ? { drainPrefix: [...prefixFilter] } : {}),
+      ...(options.maxPolls ? { maxPolls: options.maxPolls } : {}),
+      ...(options.intervalMs ? { intervalMs: options.intervalMs } : {}),
+    },
+    readinessSource: "server",
+    readinessCounts,
+    continueDrains: {
+      dryRun: options.dryRun === true,
+      selected: drains.length,
+      succeeded: 0,
+      failed: 0,
+    },
+    drains: drains.map((drain) => ({
+      prefix: drain.prefix,
+      nextApplyId: drain.nextApplyId,
+      command: sessionApplyDrainContinueCommandWithOptions(drain.continueCommand as string[], {
+        dryRun: options.dryRun === true,
+        maxPolls: options.maxPolls ?? null,
+        intervalMs: options.intervalMs ?? null,
+      }),
+      exitCode: null,
+    })),
+  };
+  return await writeWorkerSessionDrainContinuationRecord(projectRoot, record);
+}
+
+export async function writeWorkerSessionDrainContinuationRecord(
+  projectRoot: string,
+  record: WorkerSessionDrainContinuationRecord,
+): Promise<{ path: string; record: WorkerSessionDrainContinuationRecord }> {
+  assertSafeWorkerSessionName(record.session);
+  assertSafeWorkerSessionName(record.continuationId);
+  const continuationPath = workerSessionDrainContinuationPath(projectRoot, record.session, record.continuationId);
+  await fs.mkdir(path.dirname(continuationPath), { recursive: true });
+  await fs.writeFile(continuationPath, `${JSON.stringify(record, null, 2)}\n`);
+  return { path: continuationPath, record };
 }
 
 export function summarizeWorkerSessionApplyDrains(records: SessionApplyRecord[]): {
@@ -225,6 +300,18 @@ function sessionApplyDrainContinueCommand(
   return command;
 }
 
+function sessionApplyDrainContinueCommandWithOptions(
+  command: string[],
+  options: { dryRun: boolean; maxPolls: number | null; intervalMs: number | null },
+): string[] {
+  return [
+    ...command,
+    ...(options.maxPolls ? ["--max-polls", String(options.maxPolls)] : []),
+    ...(options.intervalMs ? ["--interval-ms", String(options.intervalMs)] : []),
+    ...(options.dryRun ? ["--dry-run"] : []),
+  ];
+}
+
 function sessionApplyResumeCommand(record: SessionApplyRecord): string[] {
   const command = ["npm", "run", "cli", "--", "runs", "session-apply", record.session];
   if (record.source && record.source !== "review") command.push("--source", record.source);
@@ -274,6 +361,16 @@ function workerSessionApplyDir(projectRoot: string, sessionName: string): string
 function workerSessionDrainContinuationDir(projectRoot: string, sessionName: string): string {
   assertSafeWorkerSessionName(sessionName);
   return path.join(projectRoot, ".threadbeat", "worker-sessions", "drain-continuations", sessionName);
+}
+
+function workerSessionDrainContinuationPath(projectRoot: string, sessionName: string, continuationId: string): string {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(continuationId);
+  return path.join(workerSessionDrainContinuationDir(projectRoot, sessionName), `${continuationId}.json`);
+}
+
+function createDrainContinuationId(observedAt: string): string {
+  return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${crypto.randomBytes(4).toString("hex")}`;
 }
 
 function assertSafeWorkerSessionName(value: string): void {

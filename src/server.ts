@@ -16,6 +16,7 @@ import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
 import {
   listWorkerSessionApplyRecords,
   listWorkerSessionDrainContinuationRecords,
+  queueWorkerSessionDrainContinuations,
   summarizeWorkerSessionApplyDrains,
 } from "./workerSessionDrains.js";
 import type { Settings } from "./config.js";
@@ -213,6 +214,27 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         count: continuations.length,
         continuations,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-drain-continuations", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const queued = await queueWorkerSessionDrainContinuations(settings.projectRoot, name, {
+        drainPrefix: parseOptionalList(body.drainPrefix),
+        dryRun: parseBoolean(body.dryRun, false),
+        maxPolls: parseOptionalInteger(body.maxPolls),
+        intervalMs: parseOptionalInteger(body.intervalMs),
+      });
+      return {
+        ok: true,
+        session: name,
+        continuationPath: queued.path,
+        continuation: queued.record,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
