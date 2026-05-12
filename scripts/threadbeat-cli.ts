@@ -3704,6 +3704,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           if (outputFormat !== "json") {
             throw new Error("runs session-applies --server --action-queue --execute-queued requires json output");
           }
+          if (options.detach === "1") {
+            const worker = await startDetachedApplyActionWorker(requiredSessionName, {
+              workerId: options["worker-id"],
+              applyId: options["apply-id"],
+              source: options.source,
+              action: options["apply-action"],
+              limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+              maxActions: options["max-actions"] ? parsePositiveInteger(options["max-actions"], "--max-actions") : null,
+              stopOnFailure: options["continue-on-failure"] !== "1",
+            });
+            await printJson({ ok: true, session: requiredSessionName, worker });
+            return;
+          }
           const response = await executeQueuedWorkerSessionApplyActions(requiredSessionName, {
             applyId: options["apply-id"],
             source: options.source,
@@ -3715,6 +3728,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           if (response.executions.some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
           await printJson(response);
           return;
+        }
+        if (options.detach === "1") {
+          throw new Error("runs session-applies --server --action-queue --detach requires --execute-queued");
         }
         if (options["execute-next"] === "1") {
           if (outputFormat !== "json") {
@@ -4060,6 +4076,46 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     const response = await restartDrainContinuationWorkers(required(sessionName, "runs restart-drain-workers <session>"), {
       workerId: required(options["worker-id"], "runs restart-drain-workers <session> --worker-id <id>"),
+      includeRetired: options["include-retired"] === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    });
+    await printJson(response);
+    return;
+  }
+  if (subcommandName === "session-apply-action-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const workers = await listApplyActionWorkers(
+      {
+        ...(sessionName ? { sessionName } : {}),
+        ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+        includeRetired: options["include-retired"] === "1",
+      },
+      parsePositiveInteger(options.lines ?? "20", "--lines"),
+    );
+    await printJson({
+      session: sessionName ?? null,
+      count: workers.length,
+      workers,
+    });
+    return;
+  }
+  if (subcommandName === "stop-apply-action-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const response = await stopApplyActionWorkers(required(sessionName, "runs stop-apply-action-workers <session>"), {
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+      retire: options.retire === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    });
+    await printJson(response);
+    return;
+  }
+  if (subcommandName === "restart-apply-action-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const response = await restartApplyActionWorkers(required(sessionName, "runs restart-apply-action-workers <session>"), {
+      workerId: required(options["worker-id"], "runs restart-apply-action-workers <session> --worker-id <id>"),
       includeRetired: options["include-retired"] === "1",
       lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
     });
@@ -6169,6 +6225,23 @@ type DrainContinuationWorker = {
   previousPid?: number | null;
 };
 
+type ApplyActionWorker = {
+  session: string;
+  workerId: string;
+  baseUrl: string;
+  startedAt: string;
+  command: string[];
+  pid: number | null;
+  stdoutPath: string;
+  stderrPath: string;
+  stoppedAt?: string;
+  stopResult?: StopProcessGroupResult & { aliveBefore: boolean };
+  retiredAt?: string;
+  restartedAt?: string;
+  restartCount?: number;
+  previousPid?: number | null;
+};
+
 type SessionWatchWorker = {
   session: string;
   workerId: string;
@@ -6433,6 +6506,70 @@ async function startDetachedDrainContinuationWorker(
   }
 }
 
+async function startDetachedApplyActionWorker(
+  sessionName: string,
+  options: {
+    workerId?: string;
+    applyId?: string;
+    source?: string;
+    action?: string;
+    limit?: number | null;
+    maxActions?: number | null;
+    stopOnFailure: boolean;
+  },
+): Promise<ApplyActionWorker & { alive: boolean }> {
+  assertSafeSessionName(sessionName);
+  const workerId = options.workerId ?? createApplyActionWorkerId();
+  assertSafeSessionName(workerId);
+  const workerDir = applyActionWorkerDir(sessionName);
+  await fs.mkdir(workerDir, { recursive: true });
+  const stdoutPath = path.join(workerDir, `${workerId}.out.log`);
+  const stderrPath = path.join(workerDir, `${workerId}.err.log`);
+  const recordPath = applyActionWorkerPath(sessionName, workerId);
+  if (await pathExists(recordPath)) {
+    throw new Error(`apply action worker '${workerId}' already exists for session '${sessionName}'`);
+  }
+  const command = [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-queued",
+    ...(options.applyId ? ["--apply-id", options.applyId] : []),
+    ...(options.source ? ["--source", options.source] : []),
+    ...(options.action ? ["--apply-action", options.action] : []),
+    ...(options.limit ? ["--limit", String(options.limit)] : []),
+    ...(options.maxActions ? ["--max-actions", String(options.maxActions)] : []),
+    ...(options.stopOnFailure ? [] : ["--continue-on-failure"]),
+  ];
+  const stdout = await fs.open(stdoutPath, "a");
+  const stderr = await fs.open(stderrPath, "a");
+  try {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const worker: ApplyActionWorker = {
+      session: sessionName,
+      workerId,
+      baseUrl,
+      startedAt: new Date().toISOString(),
+      command,
+      pid: child.pid ?? null,
+      stdoutPath,
+      stderrPath,
+    };
+    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    return { ...worker, alive: processIsAlive(worker.pid) };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
+}
+
 async function startDetachedSessionWatchWorker(
   sessionName: string,
   options: {
@@ -6537,6 +6674,39 @@ async function listDrainContinuationWorkers(
   return workers.flat().filter((worker): worker is NonNullable<typeof worker> => worker !== null).sort((left, right) => right.startedAt.localeCompare(left.startedAt));
 }
 
+async function listApplyActionWorkers(
+  options: { sessionName?: string; workerId?: string; includeRetired?: boolean },
+  lines: number,
+): Promise<Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
+  const sessionNames = options.sessionName ? [options.sessionName] : await listApplyActionWorkerSessionNames();
+  const workers = await Promise.all(sessionNames.map(async (sessionName) => {
+    assertSafeSessionName(sessionName);
+    try {
+      const entries = await fs.readdir(applyActionWorkerDir(sessionName), { withFileTypes: true });
+      return await Promise.all(entries
+        .filter((entry) => (
+          entry.isFile()
+          && entry.name.endsWith(".json")
+          && (!options.workerId || entry.name === `${options.workerId}.json`)
+        ))
+        .map(async (entry) => {
+          const worker = await readApplyActionWorker(sessionName, entry.name.replace(/\.json$/, ""));
+          if (worker.retiredAt && !options.includeRetired) return null;
+          return {
+            ...worker,
+            alive: processIsAlive(worker.pid),
+            stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
+            stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
+          };
+        }));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+  }));
+  return workers.flat().filter((worker): worker is NonNullable<typeof worker> => worker !== null).sort((left, right) => right.startedAt.localeCompare(left.startedAt));
+}
+
 async function listSessionWatchWorkers(
   options: { sessionName?: string; workerId?: string; includeRetired?: boolean },
   lines: number,
@@ -6573,6 +6743,16 @@ async function listSessionWatchWorkers(
 async function listDrainContinuationWorkerSessionNames(): Promise<string[]> {
   try {
     const entries = await fs.readdir(drainContinuationWorkerRootDir(), { withFileTypes: true });
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function listApplyActionWorkerSessionNames(): Promise<string[]> {
+  try {
+    const entries = await fs.readdir(applyActionWorkerRootDir(), { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -6648,6 +6828,71 @@ async function stopDrainContinuationWorkers(
     count: stopped.length,
     stopped,
     workers: await listDrainContinuationWorkers({
+      sessionName,
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      includeRetired: true,
+    }, options.lines),
+  };
+}
+
+async function stopApplyActionWorkers(
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  stopped: Array<{
+    workerId: string;
+    pid: number | null;
+    aliveBefore: boolean;
+    stopped: boolean;
+    signalSent: boolean;
+    forced: boolean;
+    alive: boolean;
+    stoppedAt: string;
+    retiredAt?: string;
+  }>;
+  workers: Awaited<ReturnType<typeof listApplyActionWorkers>>;
+}> {
+  assertSafeSessionName(sessionName);
+  if (options.workerId) assertSafeSessionName(options.workerId);
+  const workers = await listApplyActionWorkers({
+    sessionName,
+    ...(options.workerId ? { workerId: options.workerId } : {}),
+    includeRetired: true,
+  }, 0);
+  if (options.workerId && workers.length === 0) {
+    throw new Error(`apply action worker '${options.workerId}' not found for session '${sessionName}'`);
+  }
+  const stopped = [];
+  for (const worker of workers) {
+    const aliveBefore = processIsAlive(worker.pid);
+    const result = await stopProcessGroup(worker.pid);
+    const stoppedAt = new Date().toISOString();
+    const updated: ApplyActionWorker = {
+      ...worker,
+      stoppedAt,
+      stopResult: { ...result, aliveBefore },
+      ...(options.retire ? { retiredAt: stoppedAt } : {}),
+    };
+    await writeApplyActionWorker(updated);
+    stopped.push({
+      workerId: worker.workerId,
+      pid: worker.pid,
+      aliveBefore,
+      stopped: !result.alive,
+      signalSent: result.signalSent,
+      forced: result.forced,
+      alive: result.alive,
+      stoppedAt,
+      ...(updated.retiredAt ? { retiredAt: updated.retiredAt } : {}),
+    });
+  }
+  return {
+    session: sessionName,
+    count: stopped.length,
+    stopped,
+    workers: await listApplyActionWorkers({
       sessionName,
       ...(options.workerId ? { workerId: options.workerId } : {}),
       includeRetired: true,
@@ -6888,6 +7133,88 @@ async function restartDrainContinuationWorkers(
   }
 }
 
+async function restartApplyActionWorkers(
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  restarted: Array<{
+    workerId: string;
+    previousPid: number | null;
+    pid: number | null;
+    restartedAt: string;
+    restartCount: number;
+    command: string[];
+  }>;
+  workers: Awaited<ReturnType<typeof listApplyActionWorkers>>;
+}> {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(options.workerId);
+  let worker: ApplyActionWorker;
+  try {
+    worker = await readApplyActionWorker(sessionName, options.workerId);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`apply action worker '${options.workerId}' not found for session '${sessionName}'`);
+    }
+    throw error;
+  }
+  if (worker.retiredAt && !options.includeRetired) {
+    throw new Error(`apply action worker '${options.workerId}' is retired; pass --include-retired to restart it`);
+  }
+  if (processIsAlive(worker.pid)) {
+    throw new Error(`apply action worker '${options.workerId}' is already alive with pid ${worker.pid}`);
+  }
+  if (worker.session !== sessionName || worker.workerId !== options.workerId) {
+    throw new Error(`apply action worker record mismatch for '${options.workerId}'`);
+  }
+  const stdout = await fs.open(worker.stdoutPath, "a");
+  const stderr = await fs.open(worker.stderrPath, "a");
+  try {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const restartedAt = new Date().toISOString();
+    const updated: ApplyActionWorker = {
+      ...worker,
+      baseUrl,
+      startedAt: restartedAt,
+      pid: child.pid ?? null,
+      stoppedAt: undefined,
+      stopResult: undefined,
+      retiredAt: undefined,
+      restartedAt,
+      restartCount: (worker.restartCount ?? 0) + 1,
+      previousPid: worker.pid,
+    };
+    await writeApplyActionWorker(updated);
+    return {
+      session: sessionName,
+      count: 1,
+      restarted: [{
+        workerId: updated.workerId,
+        previousPid: updated.previousPid ?? null,
+        pid: updated.pid,
+        restartedAt,
+        restartCount: updated.restartCount ?? 1,
+        command: updated.command,
+      }],
+      workers: await listApplyActionWorkers({
+        sessionName,
+        workerId: options.workerId,
+        includeRetired: true,
+      }, options.lines),
+    };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
+}
+
 async function drainContinuationWorkerNextSteps(sessionName: string): Promise<Array<{
   action: "restart_drain_worker";
   reason: "stopped_drain_worker" | "queued_drain_continuations_without_worker";
@@ -7074,6 +7401,15 @@ async function readDrainContinuationWorker(sessionName: string, workerId: string
 
 async function writeDrainContinuationWorker(worker: DrainContinuationWorker): Promise<void> {
   await fs.writeFile(drainContinuationWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+}
+
+async function readApplyActionWorker(sessionName: string, workerId: string): Promise<ApplyActionWorker> {
+  const text = await fs.readFile(applyActionWorkerPath(sessionName, workerId), "utf8");
+  return JSON.parse(text) as ApplyActionWorker;
+}
+
+async function writeApplyActionWorker(worker: ApplyActionWorker): Promise<void> {
+  await fs.writeFile(applyActionWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
 }
 
 async function listWorkerSessions(
@@ -8032,6 +8368,21 @@ function drainContinuationWorkerPath(sessionName: string, workerId: string): str
   return path.join(drainContinuationWorkerDir(sessionName), `${workerId}.json`);
 }
 
+function applyActionWorkerRootDir(): string {
+  return path.join(workerSessionDir, "apply-action-workers");
+}
+
+function applyActionWorkerDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(applyActionWorkerRootDir(), sessionName);
+}
+
+function applyActionWorkerPath(sessionName: string, workerId: string): string {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(workerId);
+  return path.join(applyActionWorkerDir(sessionName), `${workerId}.json`);
+}
+
 function sessionWatchWorkerRootDir(): string {
   return path.join(workerSessionDir, "watch-workers");
 }
@@ -8049,6 +8400,10 @@ function sessionWatchWorkerPath(sessionName: string, workerId: string): string {
 
 function createDrainContinuationWorkerId(): string {
   return `drain-worker-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 17)}`;
+}
+
+function createApplyActionWorkerId(): string {
+  return `apply-action-worker-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 17)}`;
 }
 
 function createSessionWatchWorkerId(): string {
@@ -8300,12 +8655,15 @@ Commands:
   runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
-  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--execute-next|--execute-queued] [--max-actions 10] [--continue-on-failure] [--action-executions] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--execute-next|--execute-queued] [--max-actions 10] [--continue-on-failure] [--detach] [--worker-id id] [--action-executions] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
+  runs session-apply-action-workers [name] [--worker-id id] [--include-retired] [--lines 20]
+  runs stop-apply-action-workers <name> [--worker-id id] [--retire] [--lines 20]
+  runs restart-apply-action-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-watches <name> [--watch-id id] [--limit 20]
   runs start-session-watch-worker <name> [--worker-id id] [--watch-id id] [--recoverable] [--include-stopped] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--max-polls 60] [--interval-ms 2000]

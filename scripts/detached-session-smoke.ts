@@ -785,6 +785,90 @@ try {
     && execution.status === "executed"
     && execution.exitCode === 0
   )));
+  const applyActionWorker = await cliJson<{
+    ok: true;
+    worker: { workerId: string; alive: boolean; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-queued",
+    "--detach",
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+    "--max-actions",
+    "1",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+  ]);
+  assert.equal(applyActionWorker.ok, true);
+  assert.equal(applyActionWorker.worker.workerId, "detached-smoke-apply-action-worker");
+  assert.deepEqual(applyActionWorker.worker.command, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-queued",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--max-actions",
+    "1",
+  ]);
+  let serverApplyActionExecutionsAfterWorker = serverApplyActionExecutionsAfterBatch;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    serverApplyActionExecutionsAfterWorker = await cliJson<{
+      count: number;
+      executions: Array<{ applyId: string; action: string; status: string; exitCode: number }>;
+    }>(baseUrl, [
+      "runs",
+      "session-applies",
+      sessionName,
+      "--server",
+      "--action-executions",
+      "--apply-id",
+      "detached-session-api-backed-reset",
+      "--apply-action",
+      "inspect_drain_continuation_resets",
+    ]);
+    if (serverApplyActionExecutionsAfterWorker.count >= 3) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(serverApplyActionExecutionsAfterWorker.count >= 3);
+  const applyActionWorkers = await cliJson<{
+    count: number;
+    workers: Array<{ workerId: string; command: string[]; stdout: { path: string }; stderr: { path: string } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply-action-workers",
+    sessionName,
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+  ]);
+  assert.equal(applyActionWorkers.count, 1);
+  assert.equal(applyActionWorkers.workers[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.match(applyActionWorkers.workers[0]?.stdout.path ?? "", /apply-action-workers/);
+  assert.match(applyActionWorkers.workers[0]?.stderr.path ?? "", /apply-action-workers/);
+  const stoppedApplyActionWorkers = await cliJson<{
+    count: number;
+    stopped: Array<{ workerId: string; retiredAt?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "stop-apply-action-workers",
+    sessionName,
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+    "--retire",
+  ]);
+  assert.equal(stoppedApplyActionWorkers.count, 1);
+  assert.equal(stoppedApplyActionWorkers.stopped[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.equal(typeof stoppedApplyActionWorkers.stopped[0]?.retiredAt, "string");
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;
@@ -1031,6 +1115,8 @@ async function cleanupSession(session: string): Promise<void> {
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${session}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-executions", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-workers", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuations", session), { recursive: true, force: true });
 }
 
