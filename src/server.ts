@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import path from "node:path";
 import Fastify, { type FastifyInstance } from "fastify";
 
@@ -14,6 +15,7 @@ import { buildPreflightReport } from "./preflight.js";
 import { runPlanFromRow } from "./runPlanning.js";
 import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
 import {
+  executeWorkerSessionDrainContinuationRecord,
   listWorkerSessionApplyRecords,
   listWorkerSessionDrainContinuationRecords,
   queueWorkerSessionDrainContinuations,
@@ -235,6 +237,35 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         continuationPath: queued.path,
         continuation: queued.record,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-drain-continuations/:continuationId/execute", async (request, reply) => {
+    try {
+      const { name, continuationId } = request.params as { name: string; continuationId: string };
+      const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
+      const executed = await executeWorkerSessionDrainContinuationRecord(
+        settings.projectRoot,
+        name,
+        continuationId,
+        async (drain) => {
+          const result = await runCliContinuationCommand(settings.projectRoot, baseUrl, drain.command);
+          return {
+            ...drain,
+            exitCode: result.exitCode,
+            output: parseJsonMaybe(result.stdout),
+            ...(result.stderr ? { stderr: result.stderr } : {}),
+          };
+        },
+      );
+      return {
+        ok: true,
+        session: name,
+        continuationPath: executed.path,
+        continuation: executed.record,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -826,6 +857,53 @@ const parseCommand = (value: unknown): string[] => {
   }
   if (typeof value === "string" && value.trim()) return ["bash", "-lc", value.trim()];
   throw new Error("command must be a string or string[]");
+};
+
+const cliCommandArgs = (command: string[]): string[] => {
+  const prefix = ["npm", "run", "cli", "--"];
+  if (prefix.some((part, index) => command[index] !== part)) {
+    throw new Error(`expected npm run cli command, got: ${command.join(" ")}`);
+  }
+  return command.slice(prefix.length);
+};
+
+const requestBaseUrl = (host: string | undefined, forwardedProto: string | string[] | undefined): string => {
+  if (!host) throw new Error("request host is required to execute drain continuations");
+  const protocolHeader = Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto;
+  const protocol = protocolHeader ? protocolHeader.split(",")[0].trim() : "http";
+  return `${protocol}://${host}`;
+};
+
+const runCliContinuationCommand = async (
+  cwd: string,
+  baseUrl: string,
+  command: string[],
+): Promise<{ exitCode: number | null; stdout: string; stderr: string }> => {
+  const args = cliCommandArgs(command);
+  return await new Promise((resolve, reject) => {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...args], {
+      cwd,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+    child.stderr.on("data", (chunk) => { stderr += String(chunk); });
+    child.on("error", reject);
+    child.on("close", (exitCode) => {
+      resolve({ exitCode, stdout: stdout.trim(), stderr: stderr.trim() });
+    });
+  });
+};
+
+const parseJsonMaybe = (value: string): unknown => {
+  if (!value.trim()) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 };
 
 const nextId = (prefix: string): string => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;

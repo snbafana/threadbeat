@@ -46,6 +46,8 @@ type WorkerSessionDrainContinuationRecord = {
   session: string;
   observedAt: string;
   status?: "queued" | "executed";
+  startedAt?: string;
+  completedAt?: string;
   dryRun: boolean;
   filter: Record<string, unknown>;
   readinessSource?: string;
@@ -76,6 +78,11 @@ type QueueWorkerSessionDrainContinuationsOptions = {
   dryRun?: boolean;
   maxPolls?: number;
   intervalMs?: number;
+};
+
+type WorkerSessionDrainContinuationExecution = WorkerSessionDrainContinuationRecord["drains"][number] & {
+  output?: unknown;
+  stderr?: string;
 };
 
 export async function listWorkerSessionApplyRecords(projectRoot: string, sessionName: string): Promise<SessionApplyRecord[]> {
@@ -172,6 +179,52 @@ export async function queueWorkerSessionDrainContinuations(
     })),
   };
   return await writeWorkerSessionDrainContinuationRecord(projectRoot, record);
+}
+
+export async function executeWorkerSessionDrainContinuationRecord(
+  projectRoot: string,
+  sessionName: string,
+  continuationId: string,
+  runCommand: (drain: WorkerSessionDrainContinuationRecord["drains"][number]) => Promise<WorkerSessionDrainContinuationExecution>,
+): Promise<{ path: string; record: WorkerSessionDrainContinuationRecord }> {
+  const existing = await readWorkerSessionDrainContinuationRecord(projectRoot, sessionName, continuationId);
+  if (!existing) throw new Error(`drain continuation ${continuationId} does not exist for ${sessionName}`);
+  if (existing.status === "executed") throw new Error(`drain continuation ${continuationId} is already executed`);
+  if (existing.status && existing.status !== "queued") throw new Error(`drain continuation ${continuationId} is ${existing.status}`);
+  const startedAt = new Date().toISOString();
+  const drains: WorkerSessionDrainContinuationExecution[] = [];
+  for (const drain of existing.drains) {
+    drains.push(await runCommand(drain));
+  }
+  const record: WorkerSessionDrainContinuationRecord = {
+    ...existing,
+    status: "executed",
+    startedAt,
+    completedAt: new Date().toISOString(),
+    continueDrains: {
+      ...existing.continueDrains,
+      succeeded: drains.filter((drain) => drain.exitCode === 0).length,
+      failed: drains.filter((drain) => drain.exitCode !== 0).length,
+    },
+    drains,
+  };
+  return await writeWorkerSessionDrainContinuationRecord(projectRoot, record);
+}
+
+export async function readWorkerSessionDrainContinuationRecord(
+  projectRoot: string,
+  sessionName: string,
+  continuationId: string,
+): Promise<WorkerSessionDrainContinuationRecord | null> {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(continuationId);
+  try {
+    const text = await fs.readFile(workerSessionDrainContinuationPath(projectRoot, sessionName, continuationId), "utf8");
+    return JSON.parse(text) as WorkerSessionDrainContinuationRecord;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 export async function writeWorkerSessionDrainContinuationRecord(
