@@ -5030,6 +5030,72 @@ try {
   assert.ok(resetOnlyWatchApplyPreview.commandsToRun.some((command) => command.command.join(" ") === failedResetInspectionCommand.join(" ")));
   assert.ok(resetOnlyWatchApplyPreview.commandsToRun.some((command) => command.command.join(" ") === runningResetInspectionCommand.join(" ")));
   assert.ok(!resetOnlyWatchApplyPreview.commandsToRun.some((command) => command.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")));
+  const resetAuditWatchDrainPrefix = "reset-audit-watch-drain";
+  const resetAuditWatchDrain = await cliJson<{
+    source: string;
+    applyIdPrefix: string;
+    untilEmpty: { done: boolean; remaining: number; stoppedReason: string; polls: number };
+    polls: Array<{ poll: number; applyId: string; selected: number; failed: number }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "watch",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--limit",
+    "1",
+    "--apply-id",
+    resetAuditWatchDrainPrefix,
+    "--until-empty",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(resetAuditWatchDrain.source, "watch");
+  assert.equal(resetAuditWatchDrain.applyIdPrefix, resetAuditWatchDrainPrefix);
+  assert.equal(resetAuditWatchDrain.untilEmpty.done, false);
+  assert.equal(resetAuditWatchDrain.untilEmpty.remaining, 1);
+  assert.equal(resetAuditWatchDrain.untilEmpty.stoppedReason, "max_polls");
+  assert.equal(resetAuditWatchDrain.untilEmpty.polls, 1);
+  assert.equal(resetAuditWatchDrain.polls[0].poll, 1);
+  assert.equal(resetAuditWatchDrain.polls[0].applyId, `${resetAuditWatchDrainPrefix}-001`);
+  assert.equal(resetAuditWatchDrain.polls[0].selected, 1);
+  assert.equal(resetAuditWatchDrain.polls[0].failed, 0);
+  const resetAuditWatchDrainInspection = await cliJson<{
+    summary: {
+      source: string;
+      filter: { applyAction?: string[] };
+      actions: { resumeApply: string[] };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--apply-id",
+    `${resetAuditWatchDrainPrefix}-001`,
+  ]);
+  assert.equal(resetAuditWatchDrainInspection.summary.source, "watch");
+  assert.deepEqual(resetAuditWatchDrainInspection.summary.filter.applyAction, ["inspect_drain_continuation_resets"]);
+  assert.ok(resetAuditWatchDrainInspection.summary.actions.resumeApply.includes("--apply-action"));
+  assert.ok(resetAuditWatchDrainInspection.summary.actions.resumeApply.includes("inspect_drain_continuation_resets"));
+  assert.ok(!resetAuditWatchDrainInspection.summary.actions.resumeApply.includes("--action"));
+  const resetAuditWatchDrainSummary = await cliJson<{
+    summary: {
+      groups: {
+        drainPrefixes: Array<{ prefix: string; continueCommand: string[] | null }>;
+      };
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--summary"]);
+  const resetAuditWatchDrainGroup = resetAuditWatchDrainSummary.summary.groups.drainPrefixes.find((drain) => drain.prefix === resetAuditWatchDrainPrefix);
+  assert.ok(resetAuditWatchDrainGroup);
+  assert.ok(resetAuditWatchDrainGroup.continueCommand);
+  assert.ok(resetAuditWatchDrainGroup.continueCommand.includes("--apply-action"));
+  assert.ok(resetAuditWatchDrainGroup.continueCommand.includes("inspect_drain_continuation_resets"));
+  assert.ok(resetAuditWatchDrainGroup.continueCommand.includes("--continue-prefix"));
+  assert.ok(!resetAuditWatchDrainGroup.continueCommand.includes("--action"));
   const retryWatchApplyPreview = await cliJson<{
     source: string;
     selected: number;

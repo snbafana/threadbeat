@@ -3445,6 +3445,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       filter: {
         ...(queue.filter ?? {}),
         ...(actionFilter ? { action: [...actionFilter] } : {}),
+        ...(applyActionFilter ? { applyAction: [...applyActionFilter] } : {}),
         ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
         ...(options["include-stopped"] === "1" ? { includeStopped: true } : {}),
         ...(options.status ? { status: parseList(options.status) } : {}),
@@ -6824,7 +6825,7 @@ function sessionApplyDrainContinueCommand(prefix: string, latest: SessionApplySu
   const applyIdIndex = latest.actions.resumeApply.indexOf("--apply-id");
   if (applyIdIndex < 0) return null;
   const command = latest.actions.resumeApply.slice(0, applyIdIndex);
-  if (!command.includes("--action") && !command.includes("--branch-action")) return null;
+  if (!command.includes("--action") && !command.includes("--apply-action") && !command.includes("--branch-action")) return null;
   if (latest.filter.includeStopped === true) command.push("--include-stopped");
   const status = stringListFromUnknown(latest.filter.status);
   if (status.length > 0) command.push("--status", status.join(","));
@@ -6986,15 +6987,21 @@ function sessionApplyResumeCommand(record: SessionApplyRecord, resumeFilter?: Ar
     command.push("--source", record.source);
   }
   const branchAction = stringListFromUnknown(record.filter.branchAction);
+  const applyAction = stringListFromUnknown(record.filter.applyAction);
   const action = stringListFromUnknown(record.filter.action);
   const fallbackActions = [...new Set(record.commands.map((item) => item.action))];
   const hasBranchCommands = record.commands.some((item) => item.scope === "branch");
+  const hasApplyCommands = record.commands.some((item) => item.scope === "apply");
   if (branchAction.length > 0) {
     command.push("--branch-action", branchAction.join(","));
+  } else if (applyAction.length > 0) {
+    command.push("--apply-action", applyAction.join(","));
   } else if (action.length > 0) {
     command.push("--action", action.join(","));
   } else if (hasBranchCommands && fallbackActions.length > 0) {
     command.push("--branch-action", fallbackActions.join(","));
+  } else if (hasApplyCommands && fallbackActions.length > 0) {
+    command.push("--apply-action", fallbackActions.join(","));
   } else if (fallbackActions.length > 0) {
     command.push("--action", fallbackActions.join(","));
   }
