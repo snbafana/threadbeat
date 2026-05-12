@@ -671,6 +671,38 @@ try {
     serverApplyActionQueueShell.trim(),
     `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset`,
   );
+  const serverExecutedApplyAction = await cliJson<{
+    executed: boolean;
+    action: { applyId: string; action: string };
+    exitCode: number;
+    output: {
+      count: number;
+      returned: number;
+      summary: { counts: { succeeded: number; failed: number; pending: number } };
+      applies: Array<{ applyId: string }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-next",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+  ]);
+  assert.equal(serverExecutedApplyAction.executed, true);
+  assert.equal(serverExecutedApplyAction.action.applyId, "detached-session-api-backed-reset");
+  assert.equal(serverExecutedApplyAction.action.action, "inspect_drain_continuation_resets");
+  assert.equal(serverExecutedApplyAction.exitCode, 0);
+  assert.ok(serverExecutedApplyAction.output.count >= 1);
+  assert.equal(serverExecutedApplyAction.output.returned, 1);
+  assert.equal(serverExecutedApplyAction.output.applies[0]?.applyId, "detached-session-api-backed-reset");
+  assert.equal(serverExecutedApplyAction.output.summary.counts.succeeded, 1);
+  assert.equal(serverExecutedApplyAction.output.summary.counts.failed, 0);
+  assert.equal(serverExecutedApplyAction.output.summary.counts.pending, 0);
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;

@@ -3682,6 +3682,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         return;
       }
       if (options["action-queue"] === "1") {
+        if (options["execute-next"] === "1") {
+          if (outputFormat !== "json") {
+            throw new Error("runs session-applies --server --action-queue --execute-next requires json output");
+          }
+          await printJson(await executeNextWorkerSessionApplyAction(requiredSessionName, {
+            applyId: options["apply-id"],
+            source: options.source,
+            action: options["apply-action"],
+            limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+          }));
+          return;
+        }
         const actionQueue = await fetchWorkerSessionApplyActions(requiredSessionName, {
           applyId: options["apply-id"],
           source: options.source,
@@ -5515,6 +5527,19 @@ type WorkerSessionApplyActionsResponse = {
   };
 };
 
+type ExecuteNextWorkerSessionApplyActionResponse = {
+  ok: true;
+  session: string;
+  executed: boolean;
+  filter: Record<string, unknown>;
+  action?: WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number];
+  actionQueue?: WorkerSessionApplyActionsResponse["actionQueue"];
+  exitCode?: number | null;
+  stdout?: string;
+  stderr?: string;
+  output?: unknown;
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -5648,6 +5673,22 @@ async function fetchWorkerSessionApplyActions(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-actions`, params),
   ) as WorkerSessionApplyActionsResponse;
+}
+
+async function executeNextWorkerSessionApplyAction(
+  sessionName: string,
+  options: { applyId?: string; source?: string; action?: string; limit?: number | null },
+): Promise<ExecuteNextWorkerSessionApplyActionResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-actions/execute-next`,
+    {
+      ...(options.applyId ? { applyId: options.applyId } : {}),
+      ...(options.source ? { source: options.source } : {}),
+      ...(options.action ? { action: options.action } : {}),
+      ...(options.limit ? { limit: options.limit } : {}),
+    },
+  ) as ExecuteNextWorkerSessionApplyActionResponse;
 }
 
 async function queueWorkerSessionDrainContinuations(

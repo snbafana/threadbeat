@@ -279,6 +279,54 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/worker-sessions/:name/apply-actions/execute-next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const applyIds = [
+        ...parseOptionalList(body.applyIds),
+        ...parseOptionalList(body.applyId),
+      ];
+      const applyIdFilter = applyIds.length > 0 ? new Set(applyIds) : null;
+      const sourceFilter = body.source ? new Set(parseOptionalList(body.source)) : null;
+      const actionFilter = body.action ? new Set(parseOptionalApplyActions(body.action)) : null;
+      const limit = parseOptionalInteger(body.limit) ?? null;
+      const records = await listWorkerSessionApplyRecords(settings.projectRoot, name);
+      const filtered = records
+        .filter((record) => !applyIdFilter || applyIdFilter.has(record.applyId))
+        .filter((record) => !sourceFilter || sourceFilter.has(record.source))
+        .slice(0, limit ?? undefined);
+      const actionQueue = summarizeWorkerSessionApplyActionQueue(filtered);
+      const nextAction = actionQueue.actions
+        .filter((action) => !actionFilter || actionFilter.has(action.action))
+        .at(0);
+      if (!nextAction) {
+        return {
+          ok: true,
+          session: name,
+          executed: false,
+          filter: { applyIds, source: sourceFilter ? [...sourceFilter] : [], action: actionFilter ? [...actionFilter] : [], limit },
+          actionQueue,
+        };
+      }
+      const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
+      const result = await runCliContinuationCommand(settings.projectRoot, baseUrl, nextAction.command);
+      return {
+        ok: true,
+        session: name,
+        executed: true,
+        filter: { applyIds, source: sourceFilter ? [...sourceFilter] : [], action: actionFilter ? [...actionFilter] : [], limit },
+        action: nextAction,
+        exitCode: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        output: parseJsonMaybe(result.stdout),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/applies/:applyId/reset-audit/ack", async (request, reply) => {
     try {
       const { name, applyId } = request.params as { name: string; applyId: string };
@@ -1575,6 +1623,17 @@ const parseOptionalDrainContinuationStatuses = (value: unknown): Array<"queued" 
     if (!allowed.has(status)) throw new Error(`unknown drain continuation status: ${status}`);
   }
   return statuses as Array<"queued" | "running" | "executed" | "failed">;
+};
+
+const parseOptionalApplyActions = (
+  value: unknown,
+): Array<"retry_failed" | "resume_pending" | "inspect_drain_continuation_resets"> => {
+  const actions = parseOptionalList(value);
+  const allowed = new Set(["retry_failed", "resume_pending", "inspect_drain_continuation_resets"]);
+  for (const action of actions) {
+    if (!allowed.has(action)) throw new Error(`unknown apply action: ${action}`);
+  }
+  return actions as Array<"retry_failed" | "resume_pending" | "inspect_drain_continuation_resets">;
 };
 
 const parseCommand = (value: unknown): string[] => {
