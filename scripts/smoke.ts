@@ -2665,6 +2665,170 @@ try {
   assert.match(apiWatchWorkerStop.stopped[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(apiWatchWorkerStop.workers[0]?.workerId, apiWatchWorkerId);
   assert.match(apiWatchWorkerStop.workers[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  const watchRestartWatchWorkerId = "smoke-watch-worker-watch-restart";
+  const watchRestartWatchWorkerWatchId = "smoke-watch-worker-watch-restart-record";
+  const watchRestartWatchWorkerDir = path.join(".threadbeat", "worker-sessions", "watch-workers", detachedWorkerSessionName);
+  const watchRestartWatchWorkerStdoutPath = path.join(watchRestartWatchWorkerDir, `${watchRestartWatchWorkerId}.out.log`);
+  const watchRestartWatchWorkerStderrPath = path.join(watchRestartWatchWorkerDir, `${watchRestartWatchWorkerId}.err.log`);
+  await fs.mkdir(watchRestartWatchWorkerDir, { recursive: true });
+  await fs.writeFile(watchRestartWatchWorkerStdoutPath, "watch restart worker stdout\n");
+  await fs.writeFile(watchRestartWatchWorkerStderrPath, "");
+  await fs.writeFile(path.join(watchRestartWatchWorkerDir, `${watchRestartWatchWorkerId}.json`), `${JSON.stringify({
+    session: detachedWorkerSessionName,
+    workerId: watchRestartWatchWorkerId,
+    watchId: watchRestartWatchWorkerWatchId,
+    baseUrl,
+    startedAt: new Date().toISOString(),
+    command: [
+      "runs",
+      "session-watch",
+      detachedWorkerSessionName,
+      "--next",
+      "--until-empty",
+      "--watch-id",
+      watchRestartWatchWorkerWatchId,
+      "--max-polls",
+      "1",
+      "--interval-ms",
+      "1",
+    ],
+    pid: null,
+    stdoutPath: watchRestartWatchWorkerStdoutPath,
+    stderrPath: watchRestartWatchWorkerStderrPath,
+    stoppedAt: new Date().toISOString(),
+  }, null, 2)}\n`);
+  const watchWorkerWatchNext = await cliJson<{
+    summary: { watchWorkerRestarts: number };
+    watchWorkerNextSteps: Array<{
+      action: string;
+      reason: string;
+      workerId: string;
+      watchId: string;
+      pid: number | null;
+      stoppedAt?: string;
+      command: string[];
+      commands: { inspectSessionWatchWorkers: string[]; restartSessionWatchWorker: string[]; retireSessionWatchWorker: string[] };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(watchWorkerWatchNext.summary.watchWorkerRestarts >= 1);
+  assert.ok(watchWorkerWatchNext.watchWorkerNextSteps.some((step) => (
+    step.action === "restart_session_watch_worker"
+    && step.reason === "stopped_session_watch_worker"
+    && step.workerId === watchRestartWatchWorkerId
+    && step.watchId === watchRestartWatchWorkerWatchId
+    && step.pid === null
+    && typeof step.stoppedAt === "string"
+    && step.command.join(" ") === `npm run cli -- runs restart-session-watch-workers ${detachedWorkerSessionName} --worker-id ${watchRestartWatchWorkerId}`
+    && step.commands.restartSessionWatchWorker.join(" ") === step.command.join(" ")
+    && step.commands.inspectSessionWatchWorkers.join(" ") === `npm run cli -- runs session-watch-workers ${detachedWorkerSessionName} --worker-id ${watchRestartWatchWorkerId}`
+    && step.commands.retireSessionWatchWorker.join(" ") === `npm run cli -- runs stop-session-watch-workers ${detachedWorkerSessionName} --worker-id ${watchRestartWatchWorkerId} --retire`
+  )));
+  const watchWorkerWatchShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(watchWorkerWatchShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs restart-session-watch-workers ${detachedWorkerSessionName} --worker-id ${watchRestartWatchWorkerId}`,
+  ));
+  const watchWorkerStatusNext = await cliJson<{
+    watchWorkerActions: { restart_session_watch_worker?: number };
+    watchWorkerNextSteps: Array<{
+      action: string;
+      reason: string;
+      workerId: string;
+      command: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+  ]);
+  assert.ok((watchWorkerStatusNext.watchWorkerActions.restart_session_watch_worker ?? 0) >= 1);
+  assert.ok(watchWorkerStatusNext.watchWorkerNextSteps.some((step) => (
+    step.action === "restart_session_watch_worker"
+    && step.reason === "stopped_session_watch_worker"
+    && step.workerId === watchRestartWatchWorkerId
+    && step.command.join(" ") === `npm run cli -- runs restart-session-watch-workers ${detachedWorkerSessionName} --worker-id ${watchRestartWatchWorkerId}`
+  )));
+  const watchWorkerStatusShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(watchWorkerStatusShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs restart-session-watch-workers ${detachedWorkerSessionName} --worker-id ${watchRestartWatchWorkerId}`,
+  ));
+  const restartedWatchWorker = await cliJson<{
+    session: string;
+    count: number;
+    restarted: Array<{
+      workerId: string;
+      watchId: string;
+      previousPid: number | null;
+      pid: number | null;
+      restartedAt: string;
+      restartCount: number;
+      command: string[];
+    }>;
+    workers: Array<{
+      workerId: string;
+      watchId: string;
+      previousPid?: number | null;
+      restartCount?: number;
+      stoppedAt?: string;
+      retiredAt?: string;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "restart-session-watch-workers",
+    detachedWorkerSessionName,
+    "--worker-id",
+    watchRestartWatchWorkerId,
+    "--lines",
+    "5",
+  ]);
+  assert.equal(restartedWatchWorker.session, detachedWorkerSessionName);
+  assert.equal(restartedWatchWorker.count, 1);
+  assert.equal(restartedWatchWorker.restarted[0]?.workerId, watchRestartWatchWorkerId);
+  assert.equal(restartedWatchWorker.restarted[0]?.watchId, watchRestartWatchWorkerWatchId);
+  assert.equal(restartedWatchWorker.restarted[0]?.previousPid, null);
+  assert.equal(typeof restartedWatchWorker.restarted[0]?.pid, "number");
+  assert.equal(typeof restartedWatchWorker.restarted[0]?.restartedAt, "string");
+  assert.equal(restartedWatchWorker.restarted[0]?.restartCount, 1);
+  assert.equal(restartedWatchWorker.restarted[0]?.command.join(" "), `runs session-watch ${detachedWorkerSessionName} --next --until-empty --watch-id ${watchRestartWatchWorkerWatchId} --max-polls 1 --interval-ms 1`);
+  assert.equal(restartedWatchWorker.workers[0]?.workerId, watchRestartWatchWorkerId);
+  assert.equal(restartedWatchWorker.workers[0]?.watchId, watchRestartWatchWorkerWatchId);
+  assert.equal(restartedWatchWorker.workers[0]?.previousPid, null);
+  assert.equal(restartedWatchWorker.workers[0]?.restartCount, 1);
+  assert.equal(restartedWatchWorker.workers[0]?.stoppedAt, undefined);
+  assert.equal(restartedWatchWorker.workers[0]?.retiredAt, undefined);
   const detachedWorkerLogs = await cliJson<{
     session: string;
     workers: Array<{

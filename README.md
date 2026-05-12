@@ -721,8 +721,10 @@ with `runs session-watches <name> [--watch-id <id>]`. Use
 `runs start-session-watch-worker <name> --watch-id <id>` for a detached bounded
 watch loop that keeps the same durable watch record plus stdout/stderr worker
 logs, and inspect or stop it with `runs session-watch-workers` and
-`runs stop-session-watch-workers`. The server exposes the same durable worker
-lifecycle at `POST /api/worker-sessions/:name/watch-workers`,
+`runs stop-session-watch-workers`. If a watch worker is stopped without being
+retired, `runs session-watch <name> --next` and `runs session-status <name>
+--next` include a `restart-session-watch-workers` next step. The server exposes
+the same durable worker lifecycle at `POST /api/worker-sessions/:name/watch-workers`,
 `GET /api/worker-sessions/:name/watch-workers`, and
 `POST /api/worker-sessions/:name/watch-workers/stop`. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including

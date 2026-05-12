@@ -2194,10 +2194,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       counts[item.action] = (counts[item.action] ?? 0) + 1;
       return counts;
     }, {} as Record<string, number>);
-    const drainWorkerNextSteps = options.next === "1" && !branchActionFilter
-      ? await drainContinuationWorkerNextSteps(status.session.session)
-      : [];
+    const [drainWorkerNextSteps, watchWorkerNextSteps] = options.next === "1" && !branchActionFilter
+      ? await Promise.all([
+        drainContinuationWorkerNextSteps(status.session.session),
+        sessionWatchWorkerNextSteps(status.session.session),
+      ])
+      : [[], []];
     const drainWorkerActions = drainWorkerNextSteps.reduce((counts, item) => {
+      counts[item.action] = (counts[item.action] ?? 0) + 1;
+      return counts;
+    }, {} as Record<string, number>);
+    const watchWorkerActions = watchWorkerNextSteps.reduce((counts, item) => {
       counts[item.action] = (counts[item.action] ?? 0) + 1;
       return counts;
     }, {} as Record<string, number>);
@@ -2240,6 +2247,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       queuedContinuations: item.queuedContinuations,
       command: item.command,
     })));
+    commandQueue.push(...watchWorkerNextSteps.map((item) => ({
+      scope: "watch_worker",
+      session: status.session.session,
+      action: item.action,
+      reason: item.reason,
+      workerId: item.workerId,
+      watchId: item.watchId,
+      pid: item.pid,
+      stoppedAt: item.stoppedAt,
+      command: item.command,
+    })));
     commandQueue.push(...drainContinuationResetNextSteps.map((item) => ({
       scope: "drain_continuation",
       session: status.session.session,
@@ -2257,11 +2275,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       ...(recoveryPreview ? { recoveryPreview } : {}),
       ...(branchNextSteps && options["commands-only"] !== "1" ? { branchNextSteps: visibleBranchNextSteps } : {}),
       ...(options.next === "1" && options["commands-only"] !== "1" && !branchActionFilter ? { drainWorkerNextSteps } : {}),
+      ...(options.next === "1" && options["commands-only"] !== "1" && !branchActionFilter ? { watchWorkerNextSteps } : {}),
       ...(options.next === "1" && options["commands-only"] !== "1" && !branchActionFilter ? { drainContinuationResetNextSteps } : {}),
       ...(options.next === "1" ? {
         branchActions,
         branchActionQueue,
-        ...(branchActionFilter ? {} : { drainWorkerActions, drainContinuationResetActions }),
+        ...(branchActionFilter ? {} : { drainWorkerActions, watchWorkerActions, drainContinuationResetActions }),
       } : {}),
       ...(options["commands-only"] === "1" ? { commands: commandQueue } : {}),
     };
@@ -3922,6 +3941,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "restart-session-watch-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const response = await restartSessionWatchWorkers(required(sessionName, "runs restart-session-watch-workers <session>"), {
+      workerId: required(options["worker-id"], "runs restart-session-watch-workers <session> --worker-id <id>"),
+      includeRetired: options["include-retired"] === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    });
+    await printJson(response);
+    return;
+  }
   if (subcommandName === "session-watches") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -4129,7 +4159,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           count: number;
           command: string[];
         } => step.command !== null);
-        const drainWorkerNextSteps = await drainContinuationWorkerNextSteps(status.session.session);
+        const [drainWorkerNextSteps, watchWorkerNextSteps] = await Promise.all([
+          drainContinuationWorkerNextSteps(status.session.session),
+          sessionWatchWorkerNextSteps(status.session.session),
+        ]);
         const drainContinuationResetNextSteps = await workerSessionDrainContinuationResetNextSteps(status.session.session);
         const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
         const applyQueueActions = applyActionFilter
@@ -4167,6 +4200,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             workerId: step.workerId,
             pid: step.pid,
             queuedContinuations: step.queuedContinuations,
+            command: step.command,
+          })),
+          ...watchWorkerNextSteps.map((step) => ({
+            scope: "watch_worker",
+            session: status.session.session,
+            action: step.action,
+            reason: step.reason,
+            workerId: step.workerId,
+            watchId: step.watchId,
+            pid: step.pid,
+            stoppedAt: step.stoppedAt,
             command: step.command,
           })),
           ...drainContinuationResetNextSteps.map((step) => ({
@@ -4222,6 +4266,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             recoveryCandidates: recoverableActive + recoverableStopped,
             branchNextSteps: branchNextSteps.length,
             drainWorkerRestarts: drainWorkerNextSteps.length,
+            watchWorkerRestarts: watchWorkerNextSteps.length,
             drainContinuationResets,
             applyActions: applyActionQueue?.counts.actionable ?? 0,
             applyResumeNeeded: applyActionQueue?.counts.resumeNeeded ?? 0,
@@ -4244,6 +4289,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             nextSteps,
             branchNextSteps,
             drainWorkerNextSteps,
+            watchWorkerNextSteps,
             drainContinuationResetNextSteps,
             ...(applyActionQueue ? { actionQueue: applyActionQueue } : {}),
           }),
@@ -5828,6 +5874,9 @@ type SessionWatchWorker = {
   stoppedAt?: string;
   stopResult?: StopProcessGroupResult & { aliveBefore: boolean };
   retiredAt?: string;
+  restartedAt?: string;
+  restartCount?: number;
+  previousPid?: number | null;
 };
 
 type SessionApplyCommand = {
@@ -6362,6 +6411,90 @@ async function stopSessionWatchWorkers(
   };
 }
 
+async function restartSessionWatchWorkers(
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  restarted: Array<{
+    workerId: string;
+    watchId: string;
+    previousPid: number | null;
+    pid: number | null;
+    restartedAt: string;
+    restartCount: number;
+    command: string[];
+  }>;
+  workers: Awaited<ReturnType<typeof listSessionWatchWorkers>>;
+}> {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(options.workerId);
+  let worker: SessionWatchWorker;
+  try {
+    worker = await readSessionWatchWorker(sessionName, options.workerId);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`session watch worker '${options.workerId}' not found for session '${sessionName}'`);
+    }
+    throw error;
+  }
+  if (worker.retiredAt && !options.includeRetired) {
+    throw new Error(`session watch worker '${options.workerId}' is retired; pass --include-retired to restart it`);
+  }
+  if (processIsAlive(worker.pid)) {
+    throw new Error(`session watch worker '${options.workerId}' is already alive with pid ${worker.pid}`);
+  }
+  if (worker.session !== sessionName || worker.workerId !== options.workerId) {
+    throw new Error(`session watch worker record mismatch for '${options.workerId}'`);
+  }
+  const stdout = await fs.open(worker.stdoutPath, "a");
+  const stderr = await fs.open(worker.stderrPath, "a");
+  try {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const restartedAt = new Date().toISOString();
+    const updated: SessionWatchWorker = {
+      ...worker,
+      baseUrl,
+      startedAt: restartedAt,
+      pid: child.pid ?? null,
+      stoppedAt: undefined,
+      stopResult: undefined,
+      retiredAt: undefined,
+      restartedAt,
+      restartCount: (worker.restartCount ?? 0) + 1,
+      previousPid: worker.pid,
+    };
+    await writeSessionWatchWorker(updated);
+    return {
+      session: sessionName,
+      count: 1,
+      restarted: [{
+        workerId: updated.workerId,
+        watchId: updated.watchId,
+        previousPid: updated.previousPid ?? null,
+        pid: updated.pid,
+        restartedAt,
+        restartCount: updated.restartCount ?? 1,
+        command: updated.command,
+      }],
+      workers: await listSessionWatchWorkers({
+        sessionName,
+        workerId: options.workerId,
+        includeRetired: true,
+      }, options.lines),
+    };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
+}
+
 async function restartDrainContinuationWorkers(
   sessionName: string,
   options: { workerId: string; includeRetired: boolean; lines: number },
@@ -6478,6 +6611,43 @@ async function drainContinuationWorkerNextSteps(sessionName: string): Promise<Ar
         commands: {
           restartDrainWorker,
           inspectDrainWorkers: ["npm", "run", "cli", "--", "runs", "session-drain-workers", sessionName, "--worker-id", worker.workerId],
+        },
+      };
+    });
+}
+
+async function sessionWatchWorkerNextSteps(sessionName: string): Promise<Array<{
+  action: "restart_session_watch_worker";
+  reason: "stopped_session_watch_worker";
+  workerId: string;
+  watchId: string;
+  pid: number | null;
+  stoppedAt: string;
+  command: string[];
+  commands: {
+    restartSessionWatchWorker: string[];
+    inspectSessionWatchWorkers: string[];
+    retireSessionWatchWorker: string[];
+  };
+}>> {
+  assertSafeSessionName(sessionName);
+  const workers = await listSessionWatchWorkers({ sessionName }, 1);
+  return workers
+    .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
+    .map((worker) => {
+      const restartSessionWatchWorker = ["npm", "run", "cli", "--", "runs", "restart-session-watch-workers", sessionName, "--worker-id", worker.workerId];
+      return {
+        action: "restart_session_watch_worker" as const,
+        reason: "stopped_session_watch_worker" as const,
+        workerId: worker.workerId,
+        watchId: worker.watchId,
+        pid: worker.pid,
+        stoppedAt: worker.stoppedAt as string,
+        command: restartSessionWatchWorker,
+        commands: {
+          restartSessionWatchWorker,
+          inspectSessionWatchWorkers: ["npm", "run", "cli", "--", "runs", "session-watch-workers", sessionName, "--worker-id", worker.workerId],
+          retireSessionWatchWorker: ["npm", "run", "cli", "--", "runs", "stop-session-watch-workers", sessionName, "--worker-id", worker.workerId, "--retire"],
         },
       };
     });
@@ -7830,6 +8000,7 @@ Commands:
   runs start-session-watch-worker <name> [--worker-id id] [--watch-id id] [--recoverable] [--include-stopped] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--max-polls 60] [--interval-ms 2000]
   runs session-watch-workers [name] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-session-watch-workers <name> [--worker-id id] [--retire] [--lines 20]
+  runs restart-session-watch-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
