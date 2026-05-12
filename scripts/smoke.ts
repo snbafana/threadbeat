@@ -2947,6 +2947,72 @@ try {
   assert.equal(drainGroup.done, true);
   assert.equal(drainGroup.stoppedOnFailure, false);
   assert.equal(drainGroup.nextApplyId, `${drainPrefix}-003`);
+  const openDrainPrefix = "smoke-watch-drain-open";
+  const openDrainApplyPath = path.join(path.dirname(sessionApplyResumed.applyPath), `${openDrainPrefix}-001.json`);
+  await fs.writeFile(openDrainApplyPath, `${JSON.stringify({
+    observedAt: "2026-01-01T00:00:06.000Z",
+    session: detachedWorkerSessionName,
+    source: "watch",
+    applyId: `${openDrainPrefix}-001`,
+    applyPath: openDrainApplyPath,
+    dryRun: false,
+    resume: false,
+    filter: { action: ["retry_failed"], limit: 1 },
+    selected: 1,
+    skippedCompleted: 0,
+    commands: [drainCommand],
+    startedAt: "2026-01-01T00:00:06.000Z",
+    updatedAt: "2026-01-01T00:00:07.000Z",
+    executions: [{
+      ...drainCommand,
+      runId: null,
+      exitCode: 0,
+      stdout: "{}",
+      stderr: "",
+      output: {},
+    }],
+  }, null, 2)}\n`);
+  const retryWatchApplyDrainContinuePreview = await cliJson<{
+    source: string;
+    dryRun: boolean;
+    applyIdPrefix: string;
+    continuePrefix: string;
+    untilEmpty: { done: boolean; remaining: number; polls: number; startPoll: number; maxPolls: number };
+    polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; exitCode: number | null; failed: number }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "watch",
+    "--action",
+    "retry_failed",
+    "--limit",
+    "1",
+    "--continue-prefix",
+    openDrainPrefix,
+    "--until-empty",
+    "--max-polls",
+    "3",
+    "--interval-ms",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(retryWatchApplyDrainContinuePreview.source, "watch");
+  assert.equal(retryWatchApplyDrainContinuePreview.dryRun, true);
+  assert.equal(retryWatchApplyDrainContinuePreview.applyIdPrefix, openDrainPrefix);
+  assert.equal(retryWatchApplyDrainContinuePreview.continuePrefix, openDrainPrefix);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.done, false);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.remaining, 1);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.polls, 1);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.startPoll, 2);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.maxPolls, 3);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].poll, 2);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].applyId, `${openDrainPrefix}-002`);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].selected, 1);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].commandsToRun, 1);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].exitCode, 0);
+  assert.equal(retryWatchApplyDrainContinuePreview.polls[0].failed, 0);
   const retryWatchActionQueue = await cliJson<{
     summary: { applyActions: number; applyResumeNeeded: number; applyReadyToReview: number };
     actionQueue: {

@@ -2949,10 +2949,35 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (options.resume === "1") {
         throw new Error("runs session-apply --until-empty cannot be combined with --resume");
       }
-      const applyIdPrefix = options["apply-id"] ?? new Date().toISOString().replace(/[:.]/g, "-");
+      if (options["continue-prefix"] && options["apply-id"]) {
+        throw new Error("runs session-apply --continue-prefix cannot be combined with --apply-id");
+      }
+      const continuePrefix = options["continue-prefix"] ?? null;
+      const applyIdPrefix = continuePrefix ?? options["apply-id"] ?? new Date().toISOString().replace(/[:.]/g, "-");
       assertSafeSessionName(applyIdPrefix);
       const maxPolls = parsePositiveInteger(options["max-polls"] ?? "10", "--max-polls");
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+      let startPoll = 1;
+      if (continuePrefix) {
+        const applyRecords = await listSessionApplyRecords(requiredSessionName);
+        const matchingRecords = applyRecords
+          .map((record) => ({ record, parts: sessionApplyDrainParts(record.applyId) }))
+          .filter((entry): entry is { record: SessionApplyRecord; parts: { prefix: string; poll: number } } => (
+            entry.record.source === "watch" && entry.parts?.prefix === continuePrefix
+          ));
+        if (matchingRecords.length === 0) {
+          throw new Error(`watch drain prefix ${continuePrefix} has no recorded apply polls`);
+        }
+        const doneRecord = matchingRecords.find((entry) => entry.record.selected === 0);
+        if (doneRecord) {
+          throw new Error(`watch drain prefix ${continuePrefix} is already done at ${doneRecord.record.applyId}`);
+        }
+        const failedRecord = matchingRecords.find((entry) => entry.record.executions.some((execution) => execution.exitCode !== 0));
+        if (failedRecord) {
+          throw new Error(`watch drain prefix ${continuePrefix} stopped on failure at ${failedRecord.record.applyId}; resume that apply before continuing`);
+        }
+        startPoll = Math.max(...matchingRecords.map((entry) => entry.parts.poll)) + 1;
+      }
       const polls: Array<{
         poll: number;
         applyId: string;
@@ -2964,7 +2989,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }> = [];
       let done = false;
       let remaining = 0;
-      for (let poll = 1; poll <= maxPolls; poll += 1) {
+      const finalPoll = startPoll + maxPolls - 1;
+      for (let poll = startPoll; poll <= finalPoll; poll += 1) {
         const pollApplyId = `${applyIdPrefix}-${String(poll).padStart(3, "0")}`;
         const pollResult = await runCliWorker([
           "runs",
@@ -3016,7 +3042,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           process.exitCode = 1;
           break;
         }
-        if (poll < maxPolls) await sleep(intervalMs);
+        if (poll < finalPoll) await sleep(intervalMs);
       }
       await printJson({
         observedAt: new Date().toISOString(),
@@ -3024,10 +3050,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         source: queueSource,
         dryRun: options["dry-run"] === "1",
         applyIdPrefix,
+        ...(continuePrefix ? { continuePrefix } : {}),
         untilEmpty: {
           done,
           remaining,
           polls: polls.length,
+          startPoll,
           maxPolls,
         },
         polls,
@@ -5881,7 +5909,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]

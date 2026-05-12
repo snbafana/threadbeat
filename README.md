@@ -289,6 +289,7 @@ npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./
 npm run cli -- runs session-apply overnight --source watch --action retry_failed --limit 1 --dry-run
 npm run cli -- runs session-apply overnight --source watch --branch-action resume_branch --include-stopped --limit 1 --dry-run
 npm run cli -- runs session-apply overnight --source watch --action retry_failed --limit 1 --until-empty --max-polls 5
+npm run cli -- runs session-apply overnight --source watch --action retry_failed --limit 1 --continue-prefix overnight-drain --until-empty --max-polls 5
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --checkout-dir ./checkouts/overnight-watch
@@ -606,7 +607,10 @@ recovery, branch resume, and apply action-queue commands. Use
 `--branch-action` to execute a filtered slice of that watch queue through the
 durable apply ledger. Add `--until-empty --max-polls <n>` to repeatedly take a
 bounded watch snapshot and write one apply record per poll until the filtered
-queue is empty.
+queue is empty. Add `--continue-prefix <prefix>` with `--until-empty` to keep
+draining from the next recorded `<prefix>-NNN` apply ID; it refuses completed
+prefixes and prefixes that stopped on failed executions so the durable ledger
+stays explicit.
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to
