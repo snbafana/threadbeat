@@ -15,6 +15,7 @@ import { buildPreflightReport } from "./preflight.js";
 import { runPlanFromRow } from "./runPlanning.js";
 import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
 import {
+  executeNextWorkerSessionDrainContinuationRecord,
   executeWorkerSessionDrainContinuationRecord,
   listWorkerSessionApplyRecords,
   listWorkerSessionDrainContinuationRecords,
@@ -266,6 +267,35 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         continuationPath: executed.path,
         continuation: executed.record,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-drain-continuations/execute-next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
+      const executed = await executeNextWorkerSessionDrainContinuationRecord(
+        settings.projectRoot,
+        name,
+        async (drain) => {
+          const result = await runCliContinuationCommand(settings.projectRoot, baseUrl, drain.command);
+          return {
+            ...drain,
+            exitCode: result.exitCode,
+            output: parseJsonMaybe(result.stdout),
+            ...(result.stderr ? { stderr: result.stderr } : {}),
+          };
+        },
+      );
+      return {
+        ok: true,
+        session: name,
+        executed: executed !== null,
+        continuationPath: executed?.path ?? null,
+        continuation: executed?.record ?? null,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

@@ -211,6 +211,20 @@ export async function executeWorkerSessionDrainContinuationRecord(
   return await writeWorkerSessionDrainContinuationRecord(projectRoot, record);
 }
 
+export async function executeNextWorkerSessionDrainContinuationRecord(
+  projectRoot: string,
+  sessionName: string,
+  runCommand: (drain: WorkerSessionDrainContinuationRecord["drains"][number]) => Promise<WorkerSessionDrainContinuationExecution>,
+): Promise<{ path: string; record: WorkerSessionDrainContinuationRecord } | null> {
+  const records = await listWorkerSessionDrainContinuationRecords(projectRoot, sessionName, Number.MAX_SAFE_INTEGER);
+  const next = records
+    .filter((record) => record.status === "queued")
+    .sort((left, right) => left.observedAt.localeCompare(right.observedAt))
+    .at(0);
+  if (!next) return null;
+  return await executeWorkerSessionDrainContinuationRecord(projectRoot, sessionName, next.continuationId, runCommand);
+}
+
 export async function readWorkerSessionDrainContinuationRecord(
   projectRoot: string,
   sessionName: string,

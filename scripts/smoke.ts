@@ -3111,6 +3111,7 @@ try {
   ]);
   const openDrainExecutedQueuedContinuation = await cliJson<{
     session: string;
+    executed: boolean;
     continuationPath: string;
     continuation: {
       continuationId: string;
@@ -3138,10 +3139,10 @@ try {
     "runs",
     "session-drain-continuations",
     detachedWorkerSessionName,
-    "--execute",
-    openDrainQueuedContinuation.continuation.continuationId,
+    "--execute-next",
   ]);
   assert.equal(openDrainExecutedQueuedContinuation.session, detachedWorkerSessionName);
+  assert.equal(openDrainExecutedQueuedContinuation.executed, true);
   assert.equal(openDrainExecutedQueuedContinuation.continuationPath, openDrainQueuedContinuation.continuationPath);
   assert.equal(openDrainExecutedQueuedContinuation.continuation.continuationId, openDrainQueuedContinuation.continuation.continuationId);
   assert.equal(openDrainExecutedQueuedContinuation.continuation.status, "executed");
