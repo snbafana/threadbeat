@@ -3021,6 +3021,46 @@ try {
     "shell",
   ]);
   assert.ok(openDrainShell.stdout.trim().split("\n").includes(openDrainGroup.continueCommand.join(" ")));
+  const openDrainApiResponse = await app.inject({
+    method: "GET",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/apply-drains?drainPrefix=${openDrainPrefix}`,
+  });
+  assert.equal(openDrainApiResponse.statusCode, 200);
+  const openDrainApi = JSON.parse(openDrainApiResponse.body) as {
+    session: string;
+    applyRecords: number;
+    counts: { total: number; needsContinuation: number; done: number; stoppedOnFailure: number };
+    drains: Array<{
+      prefix: string;
+      latestApplyId: string;
+      nextApplyId: string;
+      needsContinuation: boolean;
+      continueCommand: string[] | null;
+    }>;
+  };
+  assert.equal(openDrainApi.session, detachedWorkerSessionName);
+  assert.ok(openDrainApi.applyRecords >= 1);
+  assert.deepEqual(openDrainApi.counts, {
+    total: 1,
+    needsContinuation: 1,
+    done: 0,
+    stoppedOnFailure: 0,
+  });
+  assert.equal(openDrainApi.drains[0].prefix, openDrainPrefix);
+  assert.equal(openDrainApi.drains[0].latestApplyId, `${openDrainPrefix}-001`);
+  assert.equal(openDrainApi.drains[0].nextApplyId, `${openDrainPrefix}-002`);
+  assert.equal(openDrainApi.drains[0].needsContinuation, true);
+  assert.deepEqual(openDrainApi.drains[0].continueCommand, openDrainGroup.continueCommand);
+  const openDrainApiShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-drains",
+    detachedWorkerSessionName,
+    "--drain-prefix",
+    openDrainPrefix,
+    "--format",
+    "shell",
+  ]);
+  assert.equal(openDrainApiShell.stdout.trim(), openDrainGroup.continueCommand.join(" "));
   const openDrainContinueDrainsPreview = await cliJson<{
     continueDrains: { dryRun: boolean; selected: number; succeeded: number; failed: number };
     drains: Array<{

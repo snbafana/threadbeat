@@ -3418,6 +3418,31 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "session-drains") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-drains <session>");
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("--format must be json or shell");
+    }
+    const params = new URLSearchParams();
+    if (options["drain-prefix"]) params.set("drainPrefix", options["drain-prefix"]);
+    const response = await requestJson(
+      "GET",
+      withQuery(`/api/worker-sessions/${encodeURIComponent(requiredSessionName)}/apply-drains`, params),
+    ) as {
+      drains: Array<{ continueCommand: string[] | null }>;
+    };
+    if (outputFormat === "shell") {
+      for (const drain of response.drains) {
+        if (drain.continueCommand) console.log(drain.continueCommand.map(shellArg).join(" "));
+      }
+      return;
+    }
+    await printJson(response);
+    return;
+  }
   if (subcommandName === "session-watch") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6025,6 +6050,7 @@ Commands:
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

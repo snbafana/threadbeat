@@ -285,6 +285,7 @@ npm run cli -- runs session-applies overnight --summary-group resume-needed --fo
 npm run cli -- runs session-applies overnight --summary-group ready-to-review --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-applies overnight --summary-group drain-prefixes --format shell
 npm run cli -- runs session-applies overnight --continue-drains --drain-prefix overnight-drain --max-polls 5
+npm run cli -- runs session-drains overnight --format shell
 npm run cli -- runs session-applies overnight --ready-results --format shell
 npm run cli -- runs session-applies overnight --ready-results --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
@@ -590,7 +591,9 @@ Use `--summary-group drain-prefixes --format shell` to print only incomplete
 watch-drain continuation commands. Use `--continue-drains` to execute those
 continuations directly; add `--drain-prefix <prefix[,prefix]>` to target a
 subset and `--dry-run` to run the nested continuation previews without mutating
-apply records.
+apply records. Use `runs session-drains <name>` to fetch the same durable
+watch-drain continuation readiness through the server API; `--format shell`
+prints only the runnable continuation commands.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a

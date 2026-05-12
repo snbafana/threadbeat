@@ -13,6 +13,7 @@ import { MessageBus } from "./messageBus.js";
 import { buildPreflightReport } from "./preflight.js";
 import { runPlanFromRow } from "./runPlanning.js";
 import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
+import { listWorkerSessionApplyRecords, summarizeWorkerSessionApplyDrains } from "./workerSessionDrains.js";
 import type { Settings } from "./config.js";
 
 type AppParts = {
@@ -167,6 +168,35 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     ok: true,
     hostedGitRepos: await db.listHostedGitRepos(),
   }));
+
+  app.get("/api/worker-sessions/:name/apply-drains", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const prefixFilter = query.drainPrefix
+        ? new Set(parseOptionalList(query.drainPrefix))
+        : null;
+      const records = await listWorkerSessionApplyRecords(settings.projectRoot, name);
+      const summary = summarizeWorkerSessionApplyDrains(records);
+      const drains = prefixFilter
+        ? summary.drains.filter((drain) => prefixFilter.has(drain.prefix))
+        : summary.drains;
+      return {
+        ok: true,
+        session: name,
+        applyRecords: records.length,
+        counts: {
+          total: drains.length,
+          needsContinuation: drains.filter((drain) => drain.needsContinuation).length,
+          done: drains.filter((drain) => drain.done).length,
+          stoppedOnFailure: drains.filter((drain) => drain.stoppedOnFailure).length,
+        },
+        drains,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
 
   app.get("/api/agents/:id/runs", async (request, reply) => {
     try {
@@ -734,6 +764,15 @@ const parseOptionalStatusList = (value: unknown): string[] | undefined => {
   for (const status of values) {
     if (!allowed.has(status)) throw new Error(`unknown run status: ${status}`);
   }
+  return values;
+};
+
+const parseOptionalList = (value: unknown): string[] => {
+  if (value === undefined || value === null || value === "") return [];
+  const values = (Array.isArray(value) ? value : String(value).split(","))
+    .map((item) => String(item).trim())
+    .filter(Boolean);
+  if (values.length === 0) throw new Error("expected at least one value");
   return values;
 };
 
