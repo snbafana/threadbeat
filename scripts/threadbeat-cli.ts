@@ -1556,7 +1556,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
             const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
             const drainContinuationResetNextSteps = options.next === "1"
-              ? await staleDrainContinuationResetNextSteps(listedSessionName, drainContinuationOlderThanMs)
+              ? await workerSessionDrainContinuationResetNextSteps(listedSessionName, drainContinuationOlderThanMs)
               : [];
             const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
             const commands = {
@@ -2202,7 +2202,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       return counts;
     }, {} as Record<string, number>);
     const drainContinuationResetNextSteps = options.next === "1" && !branchActionFilter
-      ? await staleDrainContinuationResetNextSteps(status.session.session)
+      ? await workerSessionDrainContinuationResetNextSteps(status.session.session)
       : [];
     const drainContinuationResetActions = drainContinuationResetNextSteps.reduce((counts, item) => {
       counts[item.action] = (counts[item.action] ?? 0) + item.count;
@@ -2402,7 +2402,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
       const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
       const drainContinuationResetNextSteps = options.next === "1"
-        ? await staleDrainContinuationResetNextSteps(requiredSessionName, drainContinuationOlderThanMs)
+        ? await workerSessionDrainContinuationResetNextSteps(requiredSessionName, drainContinuationOlderThanMs)
         : [];
       const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
       const commands = options.next === "1"
@@ -3948,7 +3948,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           command: string[];
         } => step.command !== null);
         const drainWorkerNextSteps = await drainContinuationWorkerNextSteps(status.session.session);
-        const drainContinuationResetNextSteps = await staleDrainContinuationResetNextSteps(status.session.session);
+        const drainContinuationResetNextSteps = await workerSessionDrainContinuationResetNextSteps(status.session.session);
         const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
         const commandQueue = [
           ...nextSteps.map((step) => ({
@@ -6019,26 +6019,58 @@ async function drainContinuationWorkerNextSteps(sessionName: string): Promise<Ar
     });
 }
 
-async function staleDrainContinuationResetNextSteps(sessionName: string, olderThanMs = STALE_RUNNING_DRAIN_CONTINUATION_MS): Promise<Array<{
-  action: "reset_running_drain_continuations";
-  reason: "stale_running_drain_continuations";
+type DrainContinuationResetNextStep = {
+  action: "reset_failed_drain_continuations" | "reset_running_drain_continuations";
+  reason: "failed_drain_continuations" | "stale_running_drain_continuations";
   count: number;
   continuationIds: string[];
-  olderThanMs: number;
+  olderThanMs?: number;
   command: string[];
-  commands: {
-    inspectDrainContinuations: string[];
-    resetRunningDrainContinuations: string[];
-  };
-}>> {
+  commands: Record<string, string[]>;
+};
+
+async function workerSessionDrainContinuationResetNextSteps(
+  sessionName: string,
+  olderThanMs = STALE_RUNNING_DRAIN_CONTINUATION_MS,
+): Promise<DrainContinuationResetNextStep[]> {
   assertSafeSessionName(sessionName);
-  const running = await readWorkerSessionDrainContinuationRecords(sessionName, ["running"]);
+  const [failed, running] = await Promise.all([
+    readWorkerSessionDrainContinuationRecords(sessionName, ["failed"]),
+    readWorkerSessionDrainContinuationRecords(sessionName, ["running"]),
+  ]);
   const nowMs = Date.now();
   const stale = running.filter((record) => {
     const startedAtMs = Date.parse(record.startedAt ?? record.observedAt);
     return Number.isFinite(startedAtMs) && nowMs - startedAtMs >= olderThanMs;
   });
-  if (stale.length === 0) return [];
+  const steps: DrainContinuationResetNextStep[] = [];
+  if (failed.length > 0) {
+    const failedContinuationIds = failed.map((record) => record.continuationId);
+    const resetFailedDrainContinuations = [
+      "npm",
+      "run",
+      "cli",
+      "--",
+      "runs",
+      "session-drain-continuations",
+      sessionName,
+      "--reset-failed",
+      "--continuation",
+      failedContinuationIds.join(","),
+    ];
+    steps.push({
+      action: "reset_failed_drain_continuations",
+      reason: "failed_drain_continuations",
+      count: failed.length,
+      continuationIds: failedContinuationIds,
+      command: resetFailedDrainContinuations,
+      commands: {
+        inspectDrainContinuations: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName, "--status", "failed"],
+        resetFailedDrainContinuations,
+      },
+    });
+  }
+  if (stale.length === 0) return steps;
   const resetRunningDrainContinuations = [
     "npm",
     "run",
@@ -6051,7 +6083,7 @@ async function staleDrainContinuationResetNextSteps(sessionName: string, olderTh
     "--older-than-ms",
     String(olderThanMs),
   ];
-  return [{
+  steps.push({
     action: "reset_running_drain_continuations",
     reason: "stale_running_drain_continuations",
     count: stale.length,
@@ -6062,7 +6094,8 @@ async function staleDrainContinuationResetNextSteps(sessionName: string, olderTh
       inspectDrainContinuations: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName, "--status", "running"],
       resetRunningDrainContinuations,
     },
-  }];
+  });
+  return steps;
 }
 
 async function readWorkerSessionDrainContinuationRecords(

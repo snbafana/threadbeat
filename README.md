@@ -512,9 +512,10 @@ across sessions. With `--next`, fleet snapshots also include top-level
 `nextActions` counts and an `actionQueue` of runnable per-session next-action
 commands, plus `branchActions` counts and a `branchActionQueue` of runnable
 resume/review commands for durable run branches across sessions. Sessions with
-stale `running` drain continuations surface `reset_running_drain_continuations`
-as the session next action before ordinary watch/recover guidance; add
-`--older-than-ms` to tune when those running continuation records count as stale.
+failed drain continuations surface `reset_failed_drain_continuations`, and stale
+`running` drain continuations surface `reset_running_drain_continuations`, as
+the session next action before ordinary watch/recover guidance; add
+`--older-than-ms` to tune when running continuation records count as stale.
 The summary reads the durable local continuation records directly, so fleet
 triage does not need one server request per session just to detect stuck drains.
 Add `--limit <n>` to scan only the most recently touched local session records,
@@ -553,10 +554,11 @@ a dry-run recovery preview in the live session snapshot; combine it with
 also includes `branchNextSteps` with checkout/resume/recover commands when the
 recoverable preview is enabled. With `--next`, `session-status` also includes
 restartable `drainWorkerNextSteps` for stopped drain-continuation workers and
-`drainContinuationResetNextSteps` for stale `running` drain continuations. Add
+`drainContinuationResetNextSteps` for failed or stale `running` drain
+continuations. Add
 `--next --commands-only --format shell` to `runs session-status --recoverable`
-to print copyable branch-resume, drain-worker restart, and stale-continuation
-reset commands; use
+to print copyable branch-resume, drain-worker restart, and continuation-reset
+commands; use
 `--branch-action resume_branch` to keep the queue explicitly scoped to branch
 resumes. Add `--next` to `runs session-watch` to stream only
 the compact restart/recover/resume command
@@ -566,7 +568,8 @@ worker ownership, checkout/review/inspect/watch/resume commands, and
 recoverability when available. It also includes `drainWorkerNextSteps` when a
 stopped drain-continuation worker can be restarted or queued drain continuations
 are waiting without a live worker, plus `drainContinuationResetNextSteps` when
-stale `running` drain continuations should be reset before execution resumes.
+failed or stale `running` drain continuations should be reset before execution
+resumes.
 Pass `--checkout-dir` to choose where those branch commands materialize local
 checkouts.
 `runs session-summary <name>` rolls up worker liveness, run statuses, completed
@@ -579,9 +582,10 @@ payload includes a top-level `resultCommits` list with run ids, branch names,
 commit SHAs, worker ownership, and checkout/review/inspect commands for
 branch-native result inspection, plus a top-level `resumableBranches` list with
 checkout/review/inspect/resume commands for stopped branches that do not have a
-result commit yet. Stale `running` drain continuations appear as
+result commit yet. Failed and stale `running` drain continuations appear as
 `drainContinuationResetNextSteps` and become the session `nextStep` until reset;
-add `--older-than-ms` to choose the age threshold used by that reset command.
+add `--older-than-ms` to choose the age threshold used by running-continuation
+reset commands.
 The reset detection scans local continuation records, while the emitted reset
 command still performs the server-owned mutation.
 Add `--commands-only` with `--next` to emit only the runnable session and branch

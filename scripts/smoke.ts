@@ -3541,6 +3541,183 @@ try {
   ]);
   assert.ok(!failedDrainStatusAfterReset.continuations.some((item) => item.continuationId === failedDrainContinuationId));
   await fs.rm(failedDrainContinuationPath);
+  const failedDrainNextStepContinuationId = "smoke-failed-drain-next-step";
+  const failedDrainNextStepContinuationPath = path.join(
+    path.dirname(openDrainQueuedContinuation.continuationPath),
+    `${failedDrainNextStepContinuationId}.json`,
+  );
+  await fs.writeFile(failedDrainNextStepContinuationPath, `${JSON.stringify({
+    ...openDrainQueuedContinuation.continuation,
+    continuationId: failedDrainNextStepContinuationId,
+    observedAt: new Date().toISOString(),
+    status: "failed",
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    completedAt: new Date().toISOString(),
+    resetAt: undefined,
+    resetReason: undefined,
+    error: "smoke failed drain next-step probe",
+    continueDrains: {
+      ...openDrainQueuedContinuation.continuation.continueDrains,
+      succeeded: 0,
+      failed: 1,
+    },
+    drains: [{
+      ...openDrainQueuedContinuation.continuation.drains[0],
+      prefix: "smoke-failed-drain-next-step",
+      nextApplyId: "smoke-failed-drain-next-step-002",
+      exitCode: 1,
+      stderr: "smoke failed drain next-step probe",
+    }],
+  }, null, 2)}\n`);
+  const resetFailedCommand = `npm run cli -- runs session-drain-continuations ${detachedWorkerSessionName} --reset-failed --continuation ${failedDrainNextStepContinuationId}`;
+  const failedDrainWatchNext = await cliJson<{
+    summary: { drainContinuationResets: number };
+    drainContinuationResetNextSteps: Array<{
+      action: string;
+      reason: string;
+      count: number;
+      continuationIds: string[];
+      command: string[];
+      commands: {
+        inspectDrainContinuations: string[];
+        resetFailedDrainContinuations?: string[];
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(failedDrainWatchNext.summary.drainContinuationResets, 1);
+  assert.ok(failedDrainWatchNext.drainContinuationResetNextSteps.some((step) => (
+    step.action === "reset_failed_drain_continuations"
+    && step.reason === "failed_drain_continuations"
+    && step.count === 1
+    && step.continuationIds.includes(failedDrainNextStepContinuationId)
+    && step.command.join(" ") === resetFailedCommand
+    && step.commands.resetFailedDrainContinuations?.join(" ") === resetFailedCommand
+    && step.commands.inspectDrainContinuations.join(" ") === `npm run cli -- runs session-drain-continuations ${detachedWorkerSessionName} --status failed`
+  )));
+  const failedDrainWatchShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(failedDrainWatchShell.stdout.trim().split("\n").includes(resetFailedCommand));
+  const failedDrainStatusNext = await cliJson<{
+    drainContinuationResetActions: { reset_failed_drain_continuations?: number };
+    drainContinuationResetNextSteps: Array<{
+      action: string;
+      reason: string;
+      count: number;
+      continuationIds: string[];
+      command: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+  ]);
+  assert.equal(failedDrainStatusNext.drainContinuationResetActions.reset_failed_drain_continuations, 1);
+  assert.ok(failedDrainStatusNext.drainContinuationResetNextSteps.some((step) => (
+    step.action === "reset_failed_drain_continuations"
+    && step.reason === "failed_drain_continuations"
+    && step.count === 1
+    && step.continuationIds.includes(failedDrainNextStepContinuationId)
+    && step.command.join(" ") === resetFailedCommand
+  )));
+  const failedDrainSummaryNext = await cliJson<{
+    drainContinuationResets: number;
+    nextStep: { action: string; reason: string; count: number; command: string[] };
+    nextActions: { reset_failed_drain_continuations?: number };
+    actionQueue: Array<{ session: string; action: string; reason: string; count?: number; command: string[] }>;
+    drainContinuationResetNextSteps: Array<{ action: string; count: number; continuationIds: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-summary",
+    detachedWorkerSessionName,
+    "--next",
+  ]);
+  assert.equal(failedDrainSummaryNext.drainContinuationResets, 1);
+  assert.equal(failedDrainSummaryNext.nextStep.action, "reset_failed_drain_continuations");
+  assert.equal(failedDrainSummaryNext.nextStep.reason, "failed_drain_continuations");
+  assert.equal(failedDrainSummaryNext.nextStep.count, 1);
+  assert.equal(failedDrainSummaryNext.nextStep.command.join(" "), resetFailedCommand);
+  assert.equal(failedDrainSummaryNext.nextActions.reset_failed_drain_continuations, 1);
+  assert.ok(failedDrainSummaryNext.actionQueue.some((item) => (
+    item.session === detachedWorkerSessionName
+    && item.action === "reset_failed_drain_continuations"
+    && item.reason === "failed_drain_continuations"
+    && item.count === 1
+    && item.command.join(" ") === resetFailedCommand
+  )));
+  assert.ok(failedDrainSummaryNext.drainContinuationResetNextSteps.some((step) => (
+    step.action === "reset_failed_drain_continuations"
+    && step.count === 1
+    && step.continuationIds.includes(failedDrainNextStepContinuationId)
+    && step.command.join(" ") === resetFailedCommand
+  )));
+  const failedDrainFleetNext = await cliJson<{
+    totals: { drainContinuationResets: number };
+    nextActions: { reset_failed_drain_continuations?: number };
+    actionQueue: Array<{ session: string; action: string; reason: string; count?: number; command: string[] }>;
+    sessions: Array<{
+      session: { session: string };
+      nextStep?: { action: string; count?: number; command: string[] };
+      drainContinuationResets?: number;
+      drainContinuationResetNextSteps?: Array<{ continuationIds: string[]; command: string[] }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "sessions",
+    "--session",
+    detachedWorkerSessionName,
+    "--summary",
+    "--next",
+  ]);
+  assert.equal(failedDrainFleetNext.totals.drainContinuationResets, 1);
+  assert.equal(failedDrainFleetNext.nextActions.reset_failed_drain_continuations, 1);
+  assert.ok(failedDrainFleetNext.actionQueue.some((item) => (
+    item.session === detachedWorkerSessionName
+    && item.action === "reset_failed_drain_continuations"
+    && item.reason === "failed_drain_continuations"
+    && item.count === 1
+    && item.command.join(" ") === resetFailedCommand
+  )));
+  const failedDrainFleetSession = failedDrainFleetNext.sessions.find((session) => session.session.session === detachedWorkerSessionName);
+  assert.equal(failedDrainFleetSession?.drainContinuationResets, 1);
+  assert.equal(failedDrainFleetSession?.nextStep?.action, "reset_failed_drain_continuations");
+  assert.equal(failedDrainFleetSession?.nextStep?.count, 1);
+  assert.equal(failedDrainFleetSession?.nextStep?.command.join(" "), resetFailedCommand);
+  assert.ok(failedDrainFleetSession?.drainContinuationResetNextSteps?.some((step) => (
+    step.continuationIds.includes(failedDrainNextStepContinuationId)
+    && step.command.join(" ") === resetFailedCommand
+  )));
+  await cliJson(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--reset-failed",
+    "--continuation",
+    failedDrainNextStepContinuationId,
+  ]);
+  await fs.rm(failedDrainNextStepContinuationPath);
   const staleRunningContinuation = await cliJson<typeof openDrainQueuedContinuation>(baseUrl, [
     "runs",
     "session-drain-continuations",
