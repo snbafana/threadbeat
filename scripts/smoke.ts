@@ -2577,6 +2577,94 @@ try {
   assert.match(stoppedWatchWorkers.stopped[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(stoppedWatchWorkers.workers[0]?.workerId, watchWorkerId);
   assert.match(stoppedWatchWorkers.workers[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  const apiWatchWorkerId = "smoke-api-session-watch-worker";
+  const apiWatchWorkerWatchId = "smoke-api-session-watch-worker-record";
+  const apiWatchWorkerStartResponse = await app.inject({
+    method: "POST",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers`,
+    headers: { host: new URL(baseUrl).host },
+    payload: {
+      workerId: apiWatchWorkerId,
+      watchId: apiWatchWorkerWatchId,
+      recoverable: true,
+      includeStopped: true,
+      actionQueue: true,
+      maxPolls: 1,
+      intervalMs: 1,
+    },
+  });
+  assert.equal(apiWatchWorkerStartResponse.statusCode, 200);
+  const apiWatchWorkerStart = JSON.parse(apiWatchWorkerStartResponse.body) as {
+    session: string;
+    worker: {
+      workerId: string;
+      watchId: string;
+      command: string[];
+      stdoutPath: string;
+      stderrPath: string;
+    };
+  };
+  assert.equal(apiWatchWorkerStart.session, detachedWorkerSessionName);
+  assert.equal(apiWatchWorkerStart.worker.workerId, apiWatchWorkerId);
+  assert.equal(apiWatchWorkerStart.worker.watchId, apiWatchWorkerWatchId);
+  assert.equal(apiWatchWorkerStart.worker.command.join(" "), `runs session-watch ${detachedWorkerSessionName} --next --until-empty --watch-id ${apiWatchWorkerWatchId} --max-polls 1 --interval-ms 1 --recoverable --include-stopped --action-queue`);
+  assert.match(apiWatchWorkerStart.worker.stdoutPath, /watch-workers/);
+  assert.match(apiWatchWorkerStart.worker.stderrPath, /watch-workers/);
+  let apiWatchRecord: { status?: string } | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const records = await cliJson<{ watches: Array<{ status: string }> }>(baseUrl, [
+      "runs",
+      "session-watches",
+      detachedWorkerSessionName,
+      "--watch-id",
+      apiWatchWorkerWatchId,
+    ]);
+    apiWatchRecord = records.watches[0] ?? null;
+    if (apiWatchRecord?.status === "completed") break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(apiWatchRecord?.status, "completed");
+  const apiWatchWorkerListResponse = await app.inject({
+    method: "GET",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers?workerId=${apiWatchWorkerId}&lines=5`,
+  });
+  assert.equal(apiWatchWorkerListResponse.statusCode, 200);
+  const apiWatchWorkerList = JSON.parse(apiWatchWorkerListResponse.body) as {
+    session: string;
+    count: number;
+    workers: Array<{ workerId: string; watchId: string; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+  assert.equal(apiWatchWorkerList.session, detachedWorkerSessionName);
+  assert.equal(apiWatchWorkerList.count, 1);
+  assert.equal(apiWatchWorkerList.workers[0]?.workerId, apiWatchWorkerId);
+  assert.equal(apiWatchWorkerList.workers[0]?.watchId, apiWatchWorkerWatchId);
+  assert.match(apiWatchWorkerList.workers[0]?.stdout.path ?? "", /watch-workers/);
+  assert.match(apiWatchWorkerList.workers[0]?.stderr.path ?? "", /watch-workers/);
+  assert.ok(Array.isArray(apiWatchWorkerList.workers[0]?.stdout.lines));
+  const apiWatchWorkerStopResponse = await app.inject({
+    method: "POST",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/watch-workers/stop`,
+    payload: {
+      workerId: apiWatchWorkerId,
+      retire: true,
+      lines: 5,
+    },
+  });
+  assert.equal(apiWatchWorkerStopResponse.statusCode, 200);
+  const apiWatchWorkerStop = JSON.parse(apiWatchWorkerStopResponse.body) as {
+    session: string;
+    count: number;
+    stopped: Array<{ workerId: string; watchId: string; alive: boolean; retiredAt?: string }>;
+    workers: Array<{ workerId: string; retiredAt?: string }>;
+  };
+  assert.equal(apiWatchWorkerStop.session, detachedWorkerSessionName);
+  assert.equal(apiWatchWorkerStop.count, 1);
+  assert.equal(apiWatchWorkerStop.stopped[0]?.workerId, apiWatchWorkerId);
+  assert.equal(apiWatchWorkerStop.stopped[0]?.watchId, apiWatchWorkerWatchId);
+  assert.equal(apiWatchWorkerStop.stopped[0]?.alive, false);
+  assert.match(apiWatchWorkerStop.stopped[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(apiWatchWorkerStop.workers[0]?.workerId, apiWatchWorkerId);
+  assert.match(apiWatchWorkerStop.workers[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   const detachedWorkerLogs = await cliJson<{
     session: string;
     workers: Array<{

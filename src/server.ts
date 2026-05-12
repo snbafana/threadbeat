@@ -25,6 +25,11 @@ import {
   resetRunningWorkerSessionDrainContinuationRecords,
   summarizeWorkerSessionApplyDrains,
 } from "./workerSessionDrains.js";
+import {
+  listWorkerSessionWatchWorkers,
+  startWorkerSessionWatchWorker,
+  stopWorkerSessionWatchWorkers,
+} from "./workerSessionWatchWorkers.js";
 import type { Settings } from "./config.js";
 
 type AppParts = {
@@ -354,6 +359,72 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         ...reset,
         continuations: reset.reset.map((item) => item.record),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/watch-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const workers = await listWorkerSessionWatchWorkers(
+        settings.projectRoot,
+        {
+          sessionName: name,
+          ...(query.workerId ? { workerId: query.workerId } : {}),
+          includeRetired: parseBoolean(query.includeRetired, false),
+        },
+        parseOptionalInteger(query.lines) ?? 20,
+      );
+      return {
+        ok: true,
+        session: name,
+        count: workers.length,
+        workers,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/watch-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const worker = await startWorkerSessionWatchWorker(
+        settings.projectRoot,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          ...(parseOptionalString(body.watchId) ? { watchId: parseOptionalString(body.watchId) } : {}),
+          maxPolls: parseOptionalInteger(body.maxPolls) ?? 60,
+          intervalMs: parseOptionalInteger(body.intervalMs) ?? 2000,
+          recoverable: parseBoolean(body.recoverable, false),
+          includeStopped: parseBoolean(body.includeStopped, false),
+          actionQueue: parseBoolean(body.actionQueue, false),
+          ...(parseOptionalString(body.applyAction) ? { applyAction: parseOptionalString(body.applyAction) } : {}),
+        },
+      );
+      return { ok: true, session: name, worker };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/watch-workers/stop", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await stopWorkerSessionWatchWorkers(settings.projectRoot, name, {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          retire: parseBoolean(body.retire, false),
+          lines: parseOptionalInteger(body.lines) ?? 20,
+        }),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
