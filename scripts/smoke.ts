@@ -3396,6 +3396,95 @@ try {
     "shell",
   ]);
   assert.ok(drainResetStatusShell.stdout.trim().split("\n").includes(resetRunningCommand));
+  const drainResetSummaryNext = await cliJson<{
+    drainContinuationResets: number;
+    nextStep: { action: string; reason: string; count: number; command: string[] };
+    nextActions: { reset_running_drain_continuations?: number };
+    actionQueue: Array<{ session: string; action: string; reason: string; count?: number; command: string[] }>;
+    drainContinuationResetNextSteps: Array<{ action: string; count: number; continuationIds: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-summary",
+    detachedWorkerSessionName,
+    "--next",
+  ]);
+  assert.equal(drainResetSummaryNext.drainContinuationResets, 1);
+  assert.equal(drainResetSummaryNext.nextStep.action, "reset_running_drain_continuations");
+  assert.equal(drainResetSummaryNext.nextStep.reason, "stale_running_drain_continuations");
+  assert.equal(drainResetSummaryNext.nextStep.count, 1);
+  assert.equal(drainResetSummaryNext.nextStep.command.join(" "), resetRunningCommand);
+  assert.equal(drainResetSummaryNext.nextActions.reset_running_drain_continuations, 1);
+  assert.ok(drainResetSummaryNext.actionQueue.some((item) => (
+    item.session === detachedWorkerSessionName
+    && item.action === "reset_running_drain_continuations"
+    && item.reason === "stale_running_drain_continuations"
+    && item.count === 1
+    && item.command.join(" ") === resetRunningCommand
+  )));
+  assert.ok(drainResetSummaryNext.drainContinuationResetNextSteps.some((step) => (
+    step.action === "reset_running_drain_continuations"
+    && step.count === 1
+    && step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
+    && step.command.join(" ") === resetRunningCommand
+  )));
+  const drainResetSummaryShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-summary",
+    detachedWorkerSessionName,
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(drainResetSummaryShell.stdout.trim().split("\n").includes(resetRunningCommand));
+  const drainResetFleetNext = await cliJson<{
+    totals: { drainContinuationResets: number };
+    nextActions: { reset_running_drain_continuations?: number };
+    actionQueue: Array<{ session: string; action: string; reason: string; count?: number; command: string[] }>;
+    sessions: Array<{
+      session: { session: string };
+      nextStep?: { action: string; count?: number; command: string[] };
+      drainContinuationResets?: number;
+      drainContinuationResetNextSteps?: Array<{ continuationIds: string[]; command: string[] }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "sessions",
+    "--session",
+    detachedWorkerSessionName,
+    "--summary",
+    "--next",
+  ]);
+  assert.equal(drainResetFleetNext.totals.drainContinuationResets, 1);
+  assert.equal(drainResetFleetNext.nextActions.reset_running_drain_continuations, 1);
+  assert.ok(drainResetFleetNext.actionQueue.some((item) => (
+    item.session === detachedWorkerSessionName
+    && item.action === "reset_running_drain_continuations"
+    && item.reason === "stale_running_drain_continuations"
+    && item.count === 1
+    && item.command.join(" ") === resetRunningCommand
+  )));
+  const drainResetFleetSession = drainResetFleetNext.sessions.find((session) => session.session.session === detachedWorkerSessionName);
+  assert.equal(drainResetFleetSession?.drainContinuationResets, 1);
+  assert.equal(drainResetFleetSession?.nextStep?.action, "reset_running_drain_continuations");
+  assert.equal(drainResetFleetSession?.nextStep?.count, 1);
+  assert.equal(drainResetFleetSession?.nextStep?.command.join(" "), resetRunningCommand);
+  assert.ok(drainResetFleetSession?.drainContinuationResetNextSteps?.some((step) => (
+    step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
+    && step.command.join(" ") === resetRunningCommand
+  )));
+  const drainResetFleetShell = await cliRaw(baseUrl, [
+    "runs",
+    "sessions",
+    "--session",
+    detachedWorkerSessionName,
+    "--summary",
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(drainResetFleetShell.stdout.trim().split("\n").includes(resetRunningCommand));
   const staleRunningReset = await cliJson<{
     session: string;
     inspected: number;

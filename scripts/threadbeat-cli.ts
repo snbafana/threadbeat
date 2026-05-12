@@ -1511,6 +1511,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             }
             const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
             const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
+            const drainContinuationResetNextSteps = options.next === "1"
+              ? await staleDrainContinuationResetNextSteps(listedSessionName)
+              : [];
+            const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
             const commands = {
               sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", listedSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
               sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", listedSessionName, "--include-stopped"],
@@ -1523,7 +1527,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               archiveSessionPreview: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName, "--dry-run"],
               archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", listedSessionName],
             };
-            const nextStep = aliveWorkers > 0
+            const drainContinuationResetNextStep = drainContinuationResetNextSteps[0]
+              ? {
+                action: drainContinuationResetNextSteps[0].action,
+                reason: drainContinuationResetNextSteps[0].reason,
+                count: drainContinuationResetNextSteps[0].count,
+                command: drainContinuationResetNextSteps[0].command,
+              }
+              : null;
+            const nextStep = drainContinuationResetNextStep ?? (aliveWorkers > 0
               ? {
                 action: "continue_watch",
                 reason: "workers_still_alive",
@@ -1563,7 +1575,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                           action: "review_session",
                           reason: "no_active_work",
                           command: commands.sessionReview,
-                        };
+                        });
             return {
               session: {
                 session: status.session.session,
@@ -1581,7 +1593,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               resumableBranches,
               resultCommits,
               agents: summaryAgents,
-              ...(options.next === "1" ? { commands, nextStep } : {}),
+              ...(options.next === "1" ? { commands, nextStep, drainContinuationResets, drainContinuationResetNextSteps } : {}),
             };
           } catch (error) {
             const commands = {
@@ -1626,6 +1638,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           runs: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.runs : 0), 0),
           resultCommits: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resultCommits : 0), 0),
           resumableStopped: visibleSessions.reduce((sum, session) => sum + ("totals" in session ? session.totals.resumableStopped : 0), 0),
+          drainContinuationResets: visibleSessions.reduce((sum, session) => sum + ("drainContinuationResets" in session ? session.drainContinuationResets ?? 0 : 0), 0),
           statuses: {} as Record<string, number>,
         };
         for (const session of visibleSessions) {
@@ -1687,6 +1700,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             session: session.session.session,
             action: session.nextStep!.action,
             reason: session.nextStep!.reason,
+            ...("count" in session.nextStep! ? { count: session.nextStep!.count } : {}),
             command: session.nextStep!.command,
           }));
         const nextActions = actionQueue.reduce((counts, item) => {
@@ -1709,6 +1723,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             session: item.session,
             action: item.action,
             reason: item.reason,
+            ...("count" in item ? { count: item.count } : {}),
             command: item.command,
           })),
           ...branchActionQueue.map((item) => ({
@@ -2304,6 +2319,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
       const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
+      const drainContinuationResetNextSteps = options.next === "1"
+        ? await staleDrainContinuationResetNextSteps(requiredSessionName)
+        : [];
+      const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
       const commands = options.next === "1"
         ? {
           sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
@@ -2333,8 +2352,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           archiveSession: ["npm", "run", "cli", "--", "runs", "archive-sessions", "--session", requiredSessionName],
         }
         : null;
+      const drainContinuationResetNextStep = drainContinuationResetNextSteps[0]
+        ? {
+          action: drainContinuationResetNextSteps[0].action,
+          reason: drainContinuationResetNextSteps[0].reason,
+          count: drainContinuationResetNextSteps[0].count,
+          command: drainContinuationResetNextSteps[0].command,
+        }
+        : null;
       const nextStep = commands
-        ? aliveWorkers > 0
+        ? drainContinuationResetNextStep ?? (aliveWorkers > 0
           ? {
             action: "continue_watch",
             reason: "workers_still_alive",
@@ -2370,17 +2397,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
                       reason: "dead_session_without_runs",
                       command: commands.archiveSessionPreview,
                     }
-                  : {
-                    action: "review_session",
-                    reason: "no_active_work",
-                    command: commands.sessionReview,
-                  }
+                    : {
+                      action: "review_session",
+                      reason: "no_active_work",
+                      command: commands.sessionReview,
+                    })
         : null;
       const allActionQueue = nextStep
         ? [{
           session: requiredSessionName,
           action: nextStep.action,
           reason: nextStep.reason,
+          ...("count" in nextStep ? { count: nextStep.count } : {}),
           command: nextStep.command,
         }]
         : [];
@@ -2450,6 +2478,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           session: item.session,
           action: item.action,
           reason: item.reason,
+          ...("count" in item ? { count: item.count } : {}),
           command: item.command,
         })),
         ...branchActionQueue.map((item) => ({
@@ -2484,11 +2513,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           },
         },
         totals,
+        ...(commands ? { drainContinuationResets } : {}),
         ...(options["commands-only"] === "1"
           ? {}
           : {
             resumableBranches: visibleResumableBranches,
             resultCommits: visibleResultCommits,
+            ...(commands ? { drainContinuationResetNextSteps } : {}),
           }),
         agents: summaryAgents,
         ...(commands ? {
