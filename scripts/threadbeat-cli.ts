@@ -3829,6 +3829,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-watch --format shell requires --commands-only");
     }
+    const applyActionFilter = options["apply-action"] ? new Set(parseList(options["apply-action"])) : null;
+    if (applyActionFilter && (options.next !== "1" || options["action-queue"] !== "1")) {
+      throw new Error("runs session-watch --apply-action requires --next --action-queue");
+    }
+    if (
+      applyActionFilter
+      && [...applyActionFilter].some((action) => (
+        action !== "retry_failed"
+        && action !== "resume_pending"
+        && action !== "review_ready_results"
+        && action !== "inspect_drain_continuation_resets"
+      ))
+    ) {
+      throw new Error("runs session-watch --apply-action must be retry_failed, resume_pending, review_ready_results, or inspect_drain_continuation_resets");
+    }
     const untilEmpty = options["until-empty"] === "1";
     if (untilEmpty && options.next !== "1") {
       throw new Error("runs session-watch --until-empty requires --next");
@@ -3961,6 +3976,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const drainWorkerNextSteps = await drainContinuationWorkerNextSteps(status.session.session);
         const drainContinuationResetNextSteps = await workerSessionDrainContinuationResetNextSteps(status.session.session);
         const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
+        const applyQueueActions = applyActionFilter
+          ? (applyActionQueue?.actions ?? []).filter((step) => applyActionFilter.has(step.action))
+          : applyActionQueue?.actions ?? [];
         const commandQueue = [
           ...nextSteps.map((step) => ({
             scope: "session",
@@ -4005,7 +4023,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             olderThanMs: step.olderThanMs,
             command: step.command,
           })),
-          ...(applyActionQueue?.actions ?? []).map((step) => ({
+          ...applyQueueActions.map((step) => ({
             scope: "apply",
             session: status.session.session,
             action: step.action,
@@ -4031,6 +4049,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         commandQueueLength = commandQueue.length;
         const output = {
           observedAt,
+          ...(applyActionFilter ? { filter: { applyAction: [...applyActionFilter] } } : {}),
           session: {
             session: status.session.session,
             workers: {
@@ -4052,6 +4071,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             applyResumeNeeded: applyActionQueue?.counts.resumeNeeded ?? 0,
             applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
             applyResetAudits: applyActionQueue?.counts.resetAudits ?? 0,
+            ...(applyActionFilter ? { filteredApplyActions: applyQueueActions.length } : {}),
           },
           checkoutDir: branchCheckoutDir,
           ...(untilEmpty ? {
@@ -7296,7 +7316,7 @@ Commands:
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
-  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
+  runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]

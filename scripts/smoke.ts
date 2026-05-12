@@ -4980,6 +4980,26 @@ try {
   assert.ok(retryWatchActionQueueShell.stdout.trim().split("\n").includes(
     retryInspection.summary.actions.retryFailed.join(" "),
   ));
+  const resetOnlyWatchActionQueueShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--action-queue",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  const resetOnlyWatchActionQueueShellLines = resetOnlyWatchActionQueueShell.stdout.trim().split("\n");
+  assert.ok(resetOnlyWatchActionQueueShellLines.includes(failedResetInspectionCommand.join(" ")));
+  assert.ok(resetOnlyWatchActionQueueShellLines.includes(runningResetInspectionCommand.join(" ")));
+  assert.ok(!resetOnlyWatchActionQueueShellLines.includes(retryInspection.summary.actions.retryFailed.join(" ")));
   const retryWatchApplyPreview = await cliJson<{
     source: string;
     selected: number;

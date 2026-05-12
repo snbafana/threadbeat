@@ -716,7 +716,9 @@ with `--next` to keep polling until the watch queue has no recovery, branch
 resume, or apply actions left, or until `--max-polls` is reached; this is a
 bounded wait and does not execute queued commands. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including
-recovery, branch resume, and apply action-queue commands. Use
+recovery, branch resume, and apply action-queue commands. Add
+`--apply-action inspect_drain_continuation_resets` with `--action-queue` to
+print only reset-audit apply inspection commands from the watch queue. Use
 `runs session-apply <name> --source watch` with an explicit `--action` or
 `--branch-action` to execute a filtered slice of that watch queue through the
 durable apply ledger. Add `--until-empty --max-polls <n>` to repeatedly take a
