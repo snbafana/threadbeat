@@ -3062,6 +3062,8 @@ try {
   ]);
   assert.equal(openDrainApiShell.stdout.trim(), openDrainGroup.continueCommand.join(" "));
   const openDrainContinueDrainsPreview = await cliJson<{
+    continuationId: string;
+    continuationPath: string;
     readinessSource: string;
     readinessCounts: { total: number; needsContinuation: number; done: number; stoppedOnFailure: number };
     continueDrains: { dryRun: boolean; selected: number; succeeded: number; failed: number };
@@ -3116,6 +3118,42 @@ try {
   assert.equal(openDrainContinueDrainsPreview.drains[0].output?.untilEmpty?.polls, 1);
   assert.equal(openDrainContinueDrainsPreview.drains[0].output?.polls?.[0]?.poll, 2);
   assert.equal(openDrainContinueDrainsPreview.drains[0].output?.polls?.[0]?.applyId, `${openDrainPrefix}-002`);
+  assert.equal(await fileExists(openDrainContinueDrainsPreview.continuationPath), true);
+  const openDrainContinuationsResponse = await app.inject({
+    method: "GET",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/apply-drain-continuations?limit=1`,
+  });
+  assert.equal(openDrainContinuationsResponse.statusCode, 200);
+  const openDrainContinuations = JSON.parse(openDrainContinuationsResponse.body) as {
+    session: string;
+    count: number;
+    continuations: Array<{
+      continuationId: string;
+      dryRun: boolean;
+      readinessSource: string;
+      readinessCounts: { total: number; needsContinuation: number; done: number; stoppedOnFailure: number };
+      continueDrains: { dryRun: boolean; selected: number; succeeded: number; failed: number };
+      drains: Array<{ prefix: string; nextApplyId: string; exitCode: number | null }>;
+    }>;
+  };
+  assert.equal(openDrainContinuations.session, detachedWorkerSessionName);
+  assert.equal(openDrainContinuations.count, 1);
+  assert.equal(openDrainContinuations.continuations[0].continuationId, openDrainContinueDrainsPreview.continuationId);
+  assert.equal(openDrainContinuations.continuations[0].dryRun, true);
+  assert.equal(openDrainContinuations.continuations[0].readinessSource, "server");
+  assert.deepEqual(openDrainContinuations.continuations[0].readinessCounts, openDrainApi.counts);
+  assert.deepEqual(openDrainContinuations.continuations[0].continueDrains, openDrainContinueDrainsPreview.continueDrains);
+  assert.equal(openDrainContinuations.continuations[0].drains[0].prefix, openDrainPrefix);
+  assert.equal(openDrainContinuations.continuations[0].drains[0].nextApplyId, `${openDrainPrefix}-002`);
+  assert.equal(openDrainContinuations.continuations[0].drains[0].exitCode, 0);
+  const openDrainContinuationsCli = await cliJson<{
+    session: string;
+    count: number;
+    continuations: Array<{ continuationId: string }>;
+  }>(baseUrl, ["runs", "session-drain-continuations", detachedWorkerSessionName, "--limit", "1"]);
+  assert.equal(openDrainContinuationsCli.session, detachedWorkerSessionName);
+  assert.equal(openDrainContinuationsCli.count, 1);
+  assert.equal(openDrainContinuationsCli.continuations[0].continuationId, openDrainContinueDrainsPreview.continuationId);
   const retryWatchApplyDrainContinuePreview = await cliJson<{
     source: string;
     dryRun: boolean;

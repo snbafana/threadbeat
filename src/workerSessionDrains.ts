@@ -40,6 +40,35 @@ type WorkerSessionApplyDrain = {
   continueCommand: string[] | null;
 };
 
+type WorkerSessionDrainContinuationRecord = {
+  continuationId: string;
+  session: string;
+  observedAt: string;
+  dryRun: boolean;
+  filter: Record<string, unknown>;
+  readinessSource?: string;
+  readinessCounts: {
+    total: number;
+    needsContinuation: number;
+    done: number;
+    stoppedOnFailure: number;
+  };
+  continueDrains: {
+    dryRun: boolean;
+    selected: number;
+    succeeded: number;
+    failed: number;
+  };
+  drains: Array<{
+    prefix: string;
+    nextApplyId: string;
+    command: string[];
+    exitCode: number | null;
+    output?: unknown;
+    stderr?: string;
+  }>;
+};
+
 export async function listWorkerSessionApplyRecords(projectRoot: string, sessionName: string): Promise<SessionApplyRecord[]> {
   assertSafeWorkerSessionName(sessionName);
   const applyDir = workerSessionApplyDir(projectRoot, sessionName);
@@ -52,6 +81,30 @@ export async function listWorkerSessionApplyRecords(projectRoot: string, session
         return JSON.parse(text) as SessionApplyRecord;
       }));
     return records.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+export async function listWorkerSessionDrainContinuationRecords(
+  projectRoot: string,
+  sessionName: string,
+  limit = 20,
+): Promise<WorkerSessionDrainContinuationRecord[]> {
+  assertSafeWorkerSessionName(sessionName);
+  const continuationDir = workerSessionDrainContinuationDir(projectRoot, sessionName);
+  try {
+    const entries = await fs.readdir(continuationDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(continuationDir, entry.name), "utf8");
+        return JSON.parse(text) as WorkerSessionDrainContinuationRecord;
+      }));
+    return records
+      .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+      .slice(0, limit);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
@@ -216,6 +269,11 @@ function stringListFromUnknown(value: unknown): string[] {
 function workerSessionApplyDir(projectRoot: string, sessionName: string): string {
   assertSafeWorkerSessionName(sessionName);
   return path.join(projectRoot, ".threadbeat", "worker-sessions", "apply", sessionName);
+}
+
+function workerSessionDrainContinuationDir(projectRoot: string, sessionName: string): string {
+  assertSafeWorkerSessionName(sessionName);
+  return path.join(projectRoot, ".threadbeat", "worker-sessions", "drain-continuations", sessionName);
 }
 
 function assertSafeWorkerSessionName(value: string): void {

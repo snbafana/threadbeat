@@ -3359,10 +3359,34 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           };
         },
       );
+      const observedAt = new Date().toISOString();
+      const continuation = await writeWorkerSessionDrainContinuationRecord({
+        continuationId: createDrainContinuationId(observedAt),
+        session: requiredSessionName,
+        observedAt,
+        dryRun: options["dry-run"] === "1",
+        filter: {
+          ...(options["drain-prefix"] ? { drainPrefix: parseList(options["drain-prefix"]) } : {}),
+          ...(maxPolls ? { maxPolls } : {}),
+          ...(intervalMs ? { intervalMs } : {}),
+          concurrency: parsePositiveInteger(options.concurrency ?? "1", "--concurrency"),
+        },
+        readinessSource: "server",
+        readinessCounts: readiness.counts,
+        continueDrains: {
+          dryRun: options["dry-run"] === "1",
+          selected: commands.length,
+          succeeded: results.filter((result) => result.exitCode === 0).length,
+          failed: results.filter((result) => result.exitCode !== 0).length,
+        },
+        drains: results,
+      });
       if (results.some((result) => result.exitCode !== 0)) process.exitCode = 1;
       await printJson({
-        observedAt: new Date().toISOString(),
+        observedAt,
         session: requiredSessionName,
+        continuationId: continuation.record.continuationId,
+        continuationPath: continuation.path,
         readinessSource: "server",
         readinessCounts: readiness.counts,
         continueDrains: {
@@ -3432,6 +3456,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       return;
     }
+    await printJson(response);
+    return;
+  }
+  if (subcommandName === "session-drain-continuations") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs session-drain-continuations <session>");
+    const outputFormat = options.format ?? "json";
+    if (outputFormat !== "json") {
+      throw new Error("runs session-drain-continuations only supports --format json");
+    }
+    const response = await fetchWorkerSessionDrainContinuations(requiredSessionName, options.limit);
     await printJson(response);
     return;
   }
@@ -4739,6 +4775,37 @@ type WorkerSessionApplyDrainsResponse = {
   }>;
 };
 
+type WorkerSessionDrainContinuationRecord = {
+  continuationId: string;
+  session: string;
+  observedAt: string;
+  dryRun: boolean;
+  filter: Record<string, unknown>;
+  readinessSource: "server";
+  readinessCounts: WorkerSessionApplyDrainsResponse["counts"];
+  continueDrains: {
+    dryRun: boolean;
+    selected: number;
+    succeeded: number;
+    failed: number;
+  };
+  drains: Array<{
+    prefix: string;
+    nextApplyId: string;
+    command: string[];
+    exitCode: number | null;
+    output: unknown;
+    stderr?: string;
+  }>;
+};
+
+type WorkerSessionDrainContinuationsResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  continuations: WorkerSessionDrainContinuationRecord[];
+};
+
 async function fetchWorkerSessionApplyDrains(
   sessionName: string,
   drainPrefix?: string,
@@ -4749,6 +4816,31 @@ async function fetchWorkerSessionApplyDrains(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drains`, params),
   ) as WorkerSessionApplyDrainsResponse;
+}
+
+async function fetchWorkerSessionDrainContinuations(
+  sessionName: string,
+  limit?: string,
+): Promise<WorkerSessionDrainContinuationsResponse> {
+  const params = new URLSearchParams();
+  if (limit) params.set("limit", limit);
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drain-continuations`, params),
+  ) as WorkerSessionDrainContinuationsResponse;
+}
+
+async function writeWorkerSessionDrainContinuationRecord(
+  record: WorkerSessionDrainContinuationRecord,
+): Promise<{ path: string; record: WorkerSessionDrainContinuationRecord }> {
+  const continuationPath = workerSessionDrainContinuationPath(record.session, record.continuationId);
+  await fs.mkdir(path.dirname(continuationPath), { recursive: true });
+  await fs.writeFile(continuationPath, `${JSON.stringify(record, null, 2)}\n`);
+  return { path: continuationPath, record };
+}
+
+function createDrainContinuationId(observedAt: string): string {
+  return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 async function git(args: string[], cwd = process.cwd()): Promise<string> {
@@ -5822,6 +5914,17 @@ function workerSessionApplyPath(sessionName: string, applyId: string): string {
   return path.join(workerSessionApplyDir(sessionName), `${applyId}.json`);
 }
 
+function workerSessionDrainContinuationDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, "drain-continuations", sessionName);
+}
+
+function workerSessionDrainContinuationPath(sessionName: string, continuationId: string): string {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(continuationId);
+  return path.join(workerSessionDrainContinuationDir(sessionName), `${continuationId}.json`);
+}
+
 function assertSafeSessionName(value: string): void {
   if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
     throw new Error("session names may only contain letters, numbers, '.', '_', and '-'");
@@ -6069,6 +6172,7 @@ Commands:
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
+  runs session-drain-continuations <name> [--limit 20] [--format json]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

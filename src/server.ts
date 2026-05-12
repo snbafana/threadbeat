@@ -13,7 +13,11 @@ import { MessageBus } from "./messageBus.js";
 import { buildPreflightReport } from "./preflight.js";
 import { runPlanFromRow } from "./runPlanning.js";
 import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
-import { listWorkerSessionApplyRecords, summarizeWorkerSessionApplyDrains } from "./workerSessionDrains.js";
+import {
+  listWorkerSessionApplyRecords,
+  listWorkerSessionDrainContinuationRecords,
+  summarizeWorkerSessionApplyDrains,
+} from "./workerSessionDrains.js";
 import type { Settings } from "./config.js";
 
 type AppParts = {
@@ -192,6 +196,23 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           stoppedOnFailure: drains.filter((drain) => drain.stoppedOnFailure).length,
         },
         drains,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/apply-drain-continuations", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const limit = parseOptionalInteger(query.limit) ?? 20;
+      const continuations = await listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, limit);
+      return {
+        ok: true,
+        session: name,
+        count: continuations.length,
+        continuations,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
