@@ -2110,6 +2110,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       counts[item.action] = (counts[item.action] ?? 0) + 1;
       return counts;
     }, {} as Record<string, number>);
+    const drainWorkerNextSteps = options.next === "1" && !branchActionFilter
+      ? await drainContinuationWorkerNextSteps(status.session.session)
+      : [];
+    const drainWorkerActions = drainWorkerNextSteps.reduce((counts, item) => {
+      counts[item.action] = (counts[item.action] ?? 0) + 1;
+      return counts;
+    }, {} as Record<string, number>);
     const visibleBranchNextSteps = branchActionFilter && !branchActionFilter.has("resume_branch")
       ? []
       : branchNextSteps;
@@ -2117,7 +2124,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
       ...(branchActionFilter ? { totalBranchNextSteps: branchNextSteps?.length ?? 0 } : {}),
     };
-    const commandQueue = branchActionQueue.map((item) => ({
+    const commandQueue: Array<Record<string, unknown> & { command: string[] }> = branchActionQueue.map((item) => ({
       scope: "branch",
       session: status.session.session,
       action: item.action,
@@ -2132,15 +2139,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       resultCommit: item.resultCommit,
       command: item.command,
     }));
+    commandQueue.push(...drainWorkerNextSteps.map((item) => ({
+      scope: "drain_worker",
+      session: status.session.session,
+      action: item.action,
+      reason: item.reason,
+      workerId: item.workerId,
+      pid: item.pid,
+      queuedContinuations: item.queuedContinuations,
+      command: item.command,
+    })));
     const output = {
       observedAt: new Date().toISOString(),
       ...status,
       ...(Object.keys(filter).length > 0 ? { filter } : {}),
       ...(recoveryPreview ? { recoveryPreview } : {}),
       ...(branchNextSteps && options["commands-only"] !== "1" ? { branchNextSteps: visibleBranchNextSteps } : {}),
+      ...(options.next === "1" && options["commands-only"] !== "1" && !branchActionFilter ? { drainWorkerNextSteps } : {}),
       ...(options.next === "1" ? {
         branchActions,
         branchActionQueue,
+        ...(branchActionFilter ? {} : { drainWorkerActions }),
       } : {}),
       ...(options["commands-only"] === "1" ? { commands: commandQueue } : {}),
     };

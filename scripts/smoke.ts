@@ -3441,6 +3441,43 @@ try {
   assert.ok(drainWorkerWatchShell.stdout.trim().split("\n").includes(
     `npm run cli -- runs restart-drain-workers ${detachedWorkerSessionName} --worker-id ${watchRestartDrainWorkerId}`,
   ));
+  const drainWorkerStatusNext = await cliJson<{
+    drainWorkerActions: { restart_drain_worker?: number };
+    drainWorkerNextSteps: Array<{
+      action: string;
+      reason: string;
+      workerId: string;
+      command: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+  ]);
+  assert.ok((drainWorkerStatusNext.drainWorkerActions.restart_drain_worker ?? 0) >= 1);
+  assert.ok(drainWorkerStatusNext.drainWorkerNextSteps.some((step) => (
+    step.action === "restart_drain_worker"
+    && step.reason === "stopped_drain_worker"
+    && step.workerId === watchRestartDrainWorkerId
+    && step.command.join(" ") === `npm run cli -- runs restart-drain-workers ${detachedWorkerSessionName} --worker-id ${watchRestartDrainWorkerId}`
+  )));
+  const drainWorkerStatusShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-status",
+    detachedWorkerSessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(drainWorkerStatusShell.stdout.trim().split("\n").includes(
+    `npm run cli -- runs restart-drain-workers ${detachedWorkerSessionName} --worker-id ${watchRestartDrainWorkerId}`,
+  ));
   const stopDrainWorkerSessionName = `${detachedWorkerSessionName}-stop`;
   const stopDrainWorkerId = "smoke-drain-worker-stop";
   const stopDrainWorkerDir = path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", stopDrainWorkerSessionName);

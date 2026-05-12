@@ -525,10 +525,12 @@ Add `--recoverable` to `runs session-status` or `runs session-watch` to include
 a dry-run recovery preview in the live session snapshot; combine it with
 `--include-stopped` to surface unfinished stopped branches too. `session-status`
 also includes `branchNextSteps` with checkout/resume/recover commands when the
-recoverable preview is enabled. Add `--next --commands-only --format shell` to
-`runs session-status --recoverable` to print only copyable stopped-branch resume
-commands; use `--branch-action resume_branch` to keep the queue explicitly
-scoped to branch resumes. Add `--next` to `runs session-watch` to stream only
+recoverable preview is enabled. With `--next`, `session-status` also includes
+restartable `drainWorkerNextSteps` for stopped drain-continuation workers. Add
+`--next --commands-only --format shell` to `runs session-status --recoverable`
+to print copyable branch-resume and drain-worker restart commands; use
+`--branch-action resume_branch` to keep the queue explicitly scoped to branch
+resumes. Add `--next` to `runs session-watch` to stream only
 the compact restart/recover/resume command
 queue for each poll instead of the full session snapshot. The compact watch
 payload also includes `branchNextSteps` for stopped branch rows, with objective,
