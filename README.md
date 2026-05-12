@@ -421,7 +421,9 @@ Run planning is intentionally server-side and Pi-free for now:
   to return the compact ordered review/resume commands for the visible result
   rows. Add `--limit <n>` with `--next` to bound top-level result commit and
   review/resume queues while preserving exact summary counts, and combine it
-  with `--offset <n>` to page through the queue. Add
+  with `--offset <n>` to page through the queue. Paged JSON includes
+  `filter.hasMore` and `filter.nextOffset` so automation can continue the queue
+  without recomputing totals. Add
   `--run <run-id[,run-id]>` to narrow a result snapshot or command
   queue to specific branch runs from a session/apply queue. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
@@ -518,7 +520,8 @@ triage does not need one server request per session just to detect stuck drains.
 Add `--limit <n>` to scan only the most recently touched local session records,
 and combine it with `--offset <n>` to page through older records. This keeps
 fleet snapshots bounded in long-lived checkouts with large
-`.threadbeat/worker-sessions/` history.
+`.threadbeat/worker-sessions/` history. Paged output includes
+`filter.hasMore` and `filter.nextOffset` for CLI loops over local session pages.
 Add `--max-polls` and `--interval-ms` to stream newline-delimited fleet snapshots while long
 worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
 next action is only `continue_watch`, `--action <name>` to show only matching
@@ -587,7 +590,7 @@ use `--action <name>` or `--branch-action resume_branch|review_branch` to narrow
 that queue without mutating any branch. Add `--limit <n>` to keep the
 per-session result/resume rows and branch command queue bounded, and combine it
 with `--offset <n>` to page later rows while preserving exact total counts in
-the summary.
+the summary; `filter.hasMore` and `filter.nextOffset` identify the next page.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete
@@ -613,7 +616,8 @@ inspection, or branch resume commands without touching the branch state. Add
 `--limit <n>` with `--next` to bound session-level and branch-level queue rows,
 and combine it with `--offset <n>` to page through later rows; with
 `--commands-only`, the same page bounds the combined runnable command stream
-while the filter metadata preserves exact unbounded totals. Add
+while the filter metadata preserves exact unbounded totals and exposes
+`filter.hasMore` plus `filter.nextOffset`. Add
 `runs session-apply <name> --action ...` or `--branch-action ...` to execute an
 explicitly filtered queue; use `--dry-run`, `--run <id>`, `--limit`, and
 `--concurrency` to preview or bound that execution before changing run state.

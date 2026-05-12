@@ -2104,6 +2104,8 @@ try {
       visibleBranchNextSteps: number;
       totalCommands: number;
       visibleCommands: number;
+      hasMore: boolean;
+      nextOffset: number | null;
     };
     nextSteps: Array<{ action: string }>;
     branchNextSteps: Array<{ runId: string }>;
@@ -2116,6 +2118,12 @@ try {
   assert.equal(detachedLimitedNextOnly.filter.visibleBranchNextSteps, 1);
   assert.equal(detachedLimitedNextOnly.nextSteps.length, 1);
   assert.equal(detachedLimitedNextOnly.branchNextSteps.length, 1);
+  assert.equal(detachedLimitedNextOnly.filter.hasMore, Math.max(
+    detachedLimitedNextOnly.filter.totalNextSteps,
+    detachedLimitedNextOnly.filter.totalBranchNextSteps,
+    detachedLimitedNextOnly.filter.totalCommands,
+  ) > 1);
+  assert.equal(detachedLimitedNextOnly.filter.nextOffset, detachedLimitedNextOnly.filter.hasMore ? 1 : null);
   assert.equal(detachedLimitedNextOnly.nextSteps[0]?.action, detachedWorkerReview.nextSteps[0]?.action);
   assert.equal(detachedLimitedNextOnly.branchNextSteps[0]?.runId, detachedWorkerReview.branchNextSteps[0]?.runId);
   const detachedOffsetNextOnly = await cliJson<{
@@ -2126,6 +2134,8 @@ try {
       visibleNextSteps: number;
       totalBranchNextSteps: number;
       visibleBranchNextSteps: number;
+      hasMore: boolean;
+      nextOffset: number | null;
     };
     nextSteps: Array<{ action: string }>;
     branchNextSteps: Array<{ runId: string }>;
@@ -2136,6 +2146,11 @@ try {
   assert.equal(detachedOffsetNextOnly.filter.visibleNextSteps, Math.min(1, Math.max(0, detachedWorkerReview.nextSteps.length - 1)));
   assert.equal(detachedOffsetNextOnly.filter.totalBranchNextSteps, detachedWorkerReview.branchNextSteps.length);
   assert.equal(detachedOffsetNextOnly.filter.visibleBranchNextSteps, Math.min(1, Math.max(0, detachedWorkerReview.branchNextSteps.length - 1)));
+  assert.equal(detachedOffsetNextOnly.filter.hasMore, Math.max(
+    detachedOffsetNextOnly.filter.totalNextSteps,
+    detachedOffsetNextOnly.filter.totalBranchNextSteps,
+  ) > 2);
+  assert.equal(detachedOffsetNextOnly.filter.nextOffset, detachedOffsetNextOnly.filter.hasMore ? 2 : null);
   assert.equal(detachedOffsetNextOnly.nextSteps[0]?.action, detachedWorkerReview.nextSteps[1]?.action);
   assert.equal(detachedOffsetNextOnly.branchNextSteps[0]?.runId, detachedWorkerReview.branchNextSteps[1]?.runId);
   const detachedReviewCommands = await cliJson<{
@@ -2163,6 +2178,8 @@ try {
       visibleCommands: number;
       totalNextSteps: number;
       totalBranchNextSteps: number;
+      hasMore: boolean;
+      nextOffset: number | null;
     };
     commands: Array<{ scope: string; action: string; command: string[] }>;
     nextSteps?: unknown;
@@ -2174,6 +2191,8 @@ try {
   assert.equal(detachedLimitedReviewCommands.filter.visibleCommands, 1);
   assert.equal(detachedLimitedReviewCommands.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
   assert.equal(detachedLimitedReviewCommands.filter.totalBranchNextSteps, detachedWorkerReview.branchNextSteps.length);
+  assert.equal(detachedLimitedReviewCommands.filter.hasMore, detachedReviewCommands.commands.length > 1);
+  assert.equal(detachedLimitedReviewCommands.filter.nextOffset, detachedLimitedReviewCommands.filter.hasMore ? 1 : null);
   assert.equal(detachedLimitedReviewCommands.commands.length, 1);
   assert.equal(detachedLimitedReviewCommands.nextSteps, undefined);
   assert.equal(detachedLimitedReviewCommands.branchNextSteps, undefined);
@@ -5101,6 +5120,8 @@ try {
       visibleResultCommits: number;
       totalNextSteps: number;
       visibleNextSteps: number;
+      hasMore: boolean;
+      nextOffset: number | null;
     };
     summary: { total: number; resultCommits: number };
     resultCommits: Array<{ runId: string; resultCommit: string | null }>;
@@ -5114,6 +5135,8 @@ try {
   assert.equal(limitedRunResults.nextSteps.length, 1);
   assert.ok(limitedRunResults.filter.visibleResultCommits <= 1);
   assert.ok(limitedRunResults.resultCommits.length <= 1);
+  assert.equal(limitedRunResults.filter.hasMore, Math.max(limitedRunResults.filter.totalNextSteps, limitedRunResults.filter.totalResultCommits) > 1);
+  assert.equal(limitedRunResults.filter.nextOffset, limitedRunResults.filter.hasMore ? 1 : null);
   const offsetRunResults = await cliJson<{
     filter: {
       limit: number;
@@ -5122,6 +5145,8 @@ try {
       visibleNextSteps: number;
       totalResultCommits: number;
       visibleResultCommits: number;
+      hasMore: boolean;
+      nextOffset: number | null;
     };
     nextSteps: Array<{ runId: string }>;
     resultCommits: Array<{ runId: string }>;
@@ -5134,6 +5159,8 @@ try {
   assert.equal(offsetRunResults.nextSteps.length, offsetRunResults.filter.visibleNextSteps);
   assert.equal(offsetRunResults.filter.visibleResultCommits, Math.min(1, Math.max(0, limitedRunResults.filter.totalResultCommits - 1)));
   assert.equal(offsetRunResults.resultCommits.length, offsetRunResults.filter.visibleResultCommits);
+  assert.equal(offsetRunResults.filter.hasMore, Math.max(offsetRunResults.filter.totalNextSteps, offsetRunResults.filter.totalResultCommits) > 2);
+  assert.equal(offsetRunResults.filter.nextOffset, offsetRunResults.filter.hasMore ? 2 : null);
   const watchedResults = await cliRaw(baseUrl, [
     "runs",
     "results",
@@ -6056,6 +6083,8 @@ try {
       visibleResumableBranches: number;
       totalQueuedBranchActions: number;
       visibleBranchActions: number;
+      hasMore: boolean;
+      nextOffset: number | null;
     };
     totals: { resultCommits: number };
     branchActions: Record<string, number>;
@@ -6070,6 +6099,8 @@ try {
   assert.equal(limitedSessionResultSummary.filter.visibleResumableBranches, 0);
   assert.equal(limitedSessionResultSummary.filter.totalQueuedBranchActions, 1);
   assert.equal(limitedSessionResultSummary.filter.visibleBranchActions, 1);
+  assert.equal(limitedSessionResultSummary.filter.hasMore, false);
+  assert.equal(limitedSessionResultSummary.filter.nextOffset, null);
   assert.equal(limitedSessionResultSummary.totals.resultCommits, 1);
   assert.equal(limitedSessionResultSummary.branchActions.review_branch, 1);
   assert.deepEqual(limitedSessionResultSummary.branchActionQueue.map((item) => item.runId), [cliWorkFinalizePlan.run.id]);
@@ -6084,6 +6115,8 @@ try {
       visibleResumableBranches: number;
       totalQueuedBranchActions: number;
       visibleBranchActions: number;
+      hasMore: boolean;
+      nextOffset: number | null;
     };
     branchActionQueue: Array<{ runId: string }>;
     resultCommits: Array<{ runId: string }>;
@@ -6096,6 +6129,8 @@ try {
   assert.equal(offsetSessionResultSummary.filter.visibleResumableBranches, 0);
   assert.equal(offsetSessionResultSummary.filter.totalQueuedBranchActions, 1);
   assert.equal(offsetSessionResultSummary.filter.visibleBranchActions, 0);
+  assert.equal(offsetSessionResultSummary.filter.hasMore, false);
+  assert.equal(offsetSessionResultSummary.filter.nextOffset, null);
   assert.deepEqual(offsetSessionResultSummary.branchActionQueue, []);
   assert.deepEqual(offsetSessionResultSummary.resultCommits, []);
   const resultApplyId = "smoke-result-apply-review";
@@ -6399,31 +6434,37 @@ try {
   await fs.utimes(fleetPageOlderPath, new Date(fleetPageTime + 1000), new Date(fleetPageTime + 1000));
   await fs.utimes(fleetPageNewerPath, new Date(fleetPageTime + 2000), new Date(fleetPageTime + 2000));
   const firstFleetPage = await cliJson<{
-    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number };
+    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number; hasMore: boolean; nextOffset: number | null };
     sessions: Array<{ session: { session: string } }>;
   }>(baseUrl, ["runs", "sessions", "--summary", "--next", "--limit", "1"]);
   assert.equal(firstFleetPage.filter.limit, 1);
   assert.equal(firstFleetPage.filter.offset, 0);
   assert.ok(firstFleetPage.filter.totalSessionRecords >= 2);
   assert.equal(firstFleetPage.filter.scannedSessions, 1);
+  assert.equal(firstFleetPage.filter.hasMore, true);
+  assert.equal(firstFleetPage.filter.nextOffset, 1);
   assert.deepEqual(firstFleetPage.sessions.map((session) => session.session.session), [fleetPageNewerSessionName]);
   const secondFleetPage = await cliJson<{
-    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number };
+    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number; hasMore: boolean; nextOffset: number | null };
     sessions: Array<{ session: { session: string } }>;
   }>(baseUrl, ["runs", "sessions", "--summary", "--next", "--limit", "1", "--offset", "1"]);
   assert.equal(secondFleetPage.filter.limit, 1);
   assert.equal(secondFleetPage.filter.offset, 1);
   assert.equal(secondFleetPage.filter.totalSessionRecords, firstFleetPage.filter.totalSessionRecords);
   assert.equal(secondFleetPage.filter.scannedSessions, 1);
+  assert.equal(secondFleetPage.filter.hasMore, secondFleetPage.filter.totalSessionRecords > 2);
+  assert.equal(secondFleetPage.filter.nextOffset, secondFleetPage.filter.hasMore ? 2 : null);
   assert.deepEqual(secondFleetPage.sessions.map((session) => session.session.session), [fleetPageOlderSessionName]);
   const plainSecondFleetPage = await cliJson<{
-    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number };
+    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number; hasMore: boolean; nextOffset: number | null };
     sessions: Array<{ session: string }>;
   }>(baseUrl, ["runs", "sessions", "--limit", "1", "--offset", "1"]);
   assert.equal(plainSecondFleetPage.filter.limit, 1);
   assert.equal(plainSecondFleetPage.filter.offset, 1);
   assert.equal(plainSecondFleetPage.filter.totalSessionRecords, firstFleetPage.filter.totalSessionRecords);
   assert.equal(plainSecondFleetPage.filter.scannedSessions, 1);
+  assert.equal(plainSecondFleetPage.filter.hasMore, plainSecondFleetPage.filter.totalSessionRecords > 2);
+  assert.equal(plainSecondFleetPage.filter.nextOffset, plainSecondFleetPage.filter.hasMore ? 2 : null);
   assert.deepEqual(plainSecondFleetPage.sessions.map((session) => session.session), [fleetPageOlderSessionName]);
   const resultFleetInspectOnly = await cliJson<{
     filter: { action: string[]; totalSessions: number };

@@ -1033,6 +1033,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           visibleResultCommits: visibleResultCommits.length,
           totalNextSteps: nextSteps.length,
           visibleNextSteps: visibleNextSteps.length,
+          ...pageCursor(rowLimit, rowOffset, Math.max(resultCommits.length, nextSteps.length)),
         }
         : null;
       const output = options.next === "1"
@@ -1759,6 +1760,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             offset: sessionOffset,
             totalSessionRecords: allSessionNames.length,
             scannedSessions: sessions.length,
+            ...pageCursor(sessionLimit, sessionOffset, allSessionNames.length),
           } : {}),
           ...(
             options["needs-action"] === "1" || actionFilter || branchActionFilter
@@ -1837,6 +1839,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           offset: sessionOffset,
           totalSessionRecords: allSessionNames.length,
           scannedSessions: sessions.length,
+          ...pageCursor(sessionLimit, sessionOffset, allSessionNames.length),
         },
       } : {}),
       sessions,
@@ -2563,6 +2566,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           visibleResumableBranches: visibleResumableBranches.length,
           totalQueuedBranchActions: branchActionQueue.length,
           visibleBranchActions: limitedBranchActionQueue.length,
+          ...pageCursor(rowLimit, rowOffset, Math.max(resultCommits.length, resumableBranches.length, branchActionQueue.length)),
         } : {}),
         ...(actionFilter || branchActionFilter ? {
           totalActions: allActionQueue.length,
@@ -3020,6 +3024,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         visibleBranchNextSteps: limitedBranchNextSteps.length,
         totalCommands: commandQueue.length,
         visibleCommands: limitedCommandQueue.length,
+        ...pageCursor(rowLimit, rowOffset, Math.max(filteredNextSteps.length, filteredBranchNextSteps.length, commandQueue.length)),
       } : {}),
     };
     const statuses: Record<string, number> = {};
@@ -5005,6 +5010,12 @@ function parseNonNegativeInteger(value: string, flag: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${flag} must be a non-negative integer`);
   return parsed;
+}
+
+function pageCursor(limit: number | null, offset: number, total: number): { hasMore: boolean; nextOffset: number | null } {
+  const nextOffset = limit ? offset + limit : null;
+  const hasMore = nextOffset !== null && nextOffset < total;
+  return { hasMore, nextOffset: hasMore ? nextOffset : null };
 }
 
 async function mapConcurrent<T, R>(
