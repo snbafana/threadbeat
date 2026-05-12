@@ -435,6 +435,49 @@ try {
   assert.ok(cliBranchCommands.split("\n").filter(Boolean).includes(
     `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`,
   ));
+  const serverResults = await cliJson<{
+    session: string;
+    checkoutDir: string;
+    runFilter: string[];
+    summary: { total: number; resultCommits: number; resumable: number };
+    commands: Array<{ scope: string; action: string; runId: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "results",
+    "--session",
+    sessionName,
+    "--server",
+    "--run",
+    stoppedPlan.run.id,
+    "--next",
+    "--commands-only",
+  ]);
+  assert.equal(serverResults.session, sessionName);
+  assert.equal(serverResults.checkoutDir, `./checkouts/${sessionName}-results`);
+  assert.deepEqual(serverResults.runFilter, [stoppedPlan.run.id]);
+  assert.equal(serverResults.summary.total, 1);
+  assert.equal(serverResults.summary.resultCommits, 0);
+  assert.equal(serverResults.summary.resumable, 1);
+  assert.equal(serverResults.commands[0].scope, "branch");
+  assert.equal(serverResults.commands[0].action, "resume_branch");
+  assert.equal(serverResults.commands[0].runId, stoppedPlan.run.id);
+  assert.equal(serverResults.commands[0].command.join(" "), `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`);
+  const serverResultsShell = await cliText(baseUrl, [
+    "runs",
+    "results",
+    "--session",
+    sessionName,
+    "--server",
+    "--run",
+    stoppedPlan.run.id,
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.deepEqual(serverResultsShell.split("\n").filter(Boolean), [
+    `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`,
+  ]);
 
   const stopped = await cliJson<{
     session: string;

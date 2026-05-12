@@ -177,6 +177,7 @@ npm run cli -- runs session-watch overnight --recoverable --include-stopped --ne
 npm run cli -- runs session-actions overnight
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
+npm run cli -- runs results --session overnight --server --next --commands-only
 npm run cli -- runs checkout-session overnight --dir ./checkouts/overnight
 npm run cli -- runs stop-session overnight --recover
 ```
@@ -253,6 +254,8 @@ npm run cli -- runs results --session overnight --run <run-id> --next
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
+npm run cli -- runs results --session overnight --server --next --commands-only
+npm run cli -- runs results --session overnight --server --run <run-id> --next
 npm run cli -- runs results --session overnight --next --commands-only --format shell
 npm run cli -- runs results --session overnight --next --limit 20
 npm run cli -- runs results --session overnight --next --limit 20 --offset 20
@@ -439,7 +442,12 @@ Run planning is intentionally server-side and Pi-free for now:
   `--run <run-id[,run-id]>` to narrow a result snapshot or command
   queue to specific branch runs from a session/apply queue. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
-  long session runs.
+  long session runs. Add `--server` with `--session` to read the durable
+  worker-session branch index from `GET /api/worker-sessions/:name/branches`
+  instead of requiring the local session record. The server-backed results view
+  supports `--run`, `--next`, `--commands-only`, `--limit`, `--offset`, and
+  `--format shell` for branch-native result/resume inspection; checkout diff
+  filters still require the local checkout-backed results path.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to
   `running`. Workers use this before starting a sandbox so competing workers do
   not process the same planned run.

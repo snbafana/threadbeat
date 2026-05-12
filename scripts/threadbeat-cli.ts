@@ -705,6 +705,156 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs results --format shell requires --commands-only");
     }
+    if (options.server === "1") {
+      if (!options.session) {
+        throw new Error("runs results --server requires --session");
+      }
+      if (options["changed-only"] === "1" || options["changed-path"]) {
+        throw new Error("runs results --server does not support changed checkout filters");
+      }
+      const statusList = parseList(options.status ?? "completed,stopped");
+      const runFilter = options.run ? new Set(parseList(options.run)) : null;
+      const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+      const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+      if (outputFormat === "shell" && maxPolls !== 1) {
+        throw new Error("runs results --format shell supports one poll");
+      }
+      const rowLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
+      const rowOffset = options.offset ? parseNonNegativeInteger(options.offset, "--offset") : 0;
+      const checkoutCommandRootDir = options["checkout-dir"] ?? `./checkouts/${options.session}-results`;
+      type ServerResultCommit = {
+        agentId: string;
+        runId: string;
+        status: string;
+        state: string;
+        objective: string;
+        workerId: string | null;
+        location: string | null;
+        branchName: string;
+        resultCommit: string | null;
+        links: Record<string, unknown>;
+        commands: Record<string, unknown>;
+      };
+      type ServerBranchStep = {
+        action: string;
+        reason: string;
+        agentId: string;
+        runId: string;
+        status: string;
+        state: string;
+        warning?: string | null;
+        objective: string;
+        workerId: string | null;
+        location: string | null;
+        branchName: string;
+        resultCommit: string | null;
+        command: string[];
+        commands: Record<string, unknown>;
+      };
+      type ServerBranchesResponse = {
+        ok: true;
+        observedAt: string;
+        session: string;
+        checkoutDir: string;
+        filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+        summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number };
+        resultCommits: ServerResultCommit[];
+        resumableBranches: unknown[];
+        nextSteps: ServerBranchStep[];
+        agents: unknown[];
+      };
+      for (let poll = 0; poll < maxPolls; poll += 1) {
+        const params = new URLSearchParams();
+        params.set("status", statusList.join(","));
+        params.set("checkoutDir", checkoutCommandRootDir);
+        if (options["worker-id"]) params.set("workerId", options["worker-id"]);
+        const response = await requestJson(
+          "GET",
+          withQuery(`/api/worker-sessions/${encodeURIComponent(options.session)}/branches`, params),
+        ) as ServerBranchesResponse;
+        const resultCommits = response.resultCommits.filter((run: ServerResultCommit) => !runFilter || runFilter.has(run.runId));
+        const nextSteps = response.nextSteps.filter((step: ServerBranchStep) => !runFilter || runFilter.has(step.runId));
+        const nextCommandQueue = nextSteps.map((step) => ({
+          scope: "branch",
+          action: step.action,
+          reason: step.reason,
+          agentId: step.agentId,
+          runId: step.runId,
+          status: step.status,
+          state: step.state,
+          workerId: step.workerId,
+          location: step.location,
+          branchName: step.branchName,
+          resultCommit: step.resultCommit,
+          command: step.command,
+        }));
+        const pageEnd = rowLimit ? rowOffset + rowLimit : undefined;
+        const visibleResultCommits = rowOffset > 0 || rowLimit
+          ? resultCommits.slice(rowOffset, pageEnd)
+          : resultCommits;
+        const visibleNextSteps = rowOffset > 0 || rowLimit
+          ? nextSteps.slice(rowOffset, pageEnd)
+          : nextSteps;
+        const visibleNextCommandQueue = rowOffset > 0 || rowLimit
+          ? nextCommandQueue.slice(rowOffset, pageEnd)
+          : nextCommandQueue;
+        const pageFilter = rowOffset > 0 || rowLimit
+          ? {
+            ...(rowLimit ? { limit: rowLimit } : {}),
+            offset: rowOffset,
+            totalResultCommits: resultCommits.length,
+            visibleResultCommits: visibleResultCommits.length,
+            totalNextSteps: nextSteps.length,
+            visibleNextSteps: visibleNextSteps.length,
+            ...pageCursor(rowLimit, rowOffset, Math.max(resultCommits.length, nextSteps.length)),
+          }
+          : null;
+        const summary = {
+          ...response.summary,
+          total: nextSteps.length,
+          resultCommits: resultCommits.length,
+          resumable: nextSteps.filter((step) => step.state === "resumable").length,
+          warnings: nextSteps.filter((step) => step.warning).length,
+          changed: null,
+          changedFiles: null,
+        };
+        const output = options.next === "1"
+          ? {
+            observedAt: response.observedAt,
+            session: response.session,
+            ...(runFilter ? { runFilter: Array.from(runFilter) } : {}),
+            checkoutDir: response.checkoutDir,
+            filter: {
+              ...response.filter,
+              ...(pageFilter ?? {}),
+            },
+            summary,
+            ...(options["commands-only"] === "1"
+              ? { commands: visibleNextCommandQueue }
+              : { resultCommits: visibleResultCommits, nextSteps: visibleNextSteps }),
+          }
+          : {
+            observedAt: response.observedAt,
+            session: response.session,
+            ...(runFilter ? { runFilter: Array.from(runFilter) } : {}),
+            checkoutDir: response.checkoutDir,
+            filter: response.filter,
+            summary,
+            resultCommits,
+            resumableBranches: response.resumableBranches,
+            agents: response.agents,
+          };
+        if (outputFormat === "shell") {
+          printCommandQueueShell(visibleNextCommandQueue);
+        } else if (maxPolls === 1) {
+          await printJson(output);
+        } else {
+          console.log(JSON.stringify(output));
+          if (poll + 1 < maxPolls) await sleep(intervalMs);
+        }
+      }
+      return;
+    }
     const session = options.session ? await readWorkerSession(options.session) : null;
     const sessionWorkerIds = session ? new Set(session.workers.map((worker) => worker.workerId)) : null;
     const workerIdFilter = options["worker-id"] ?? null;
@@ -9429,7 +9579,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--server] [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next] [--limit 10] [--offset 10] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
