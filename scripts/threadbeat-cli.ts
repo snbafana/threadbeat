@@ -1411,6 +1411,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs sessions --format shell requires --commands-only");
     }
+    const sessionLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
     if (options.summary === "1" || options.next === "1") {
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
@@ -1426,7 +1427,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const actionFilter = options.action ? new Set(parseList(options.action)) : null;
       const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
       const collectFleetSummary = async () => {
-        const sessionNames = options.session ? [options.session] : await listWorkerSessionNames();
+        const allSessionNames = options.session ? [options.session] : await listWorkerSessionNames();
+        const sessionNames = sessionLimit && !options.session
+          ? await listWorkerSessionNames(sessionLimit)
+          : allSessionNames;
         const sessions = await mapConcurrent(sessionNames, 4, async (listedSessionName) => {
           try {
             const status = await workerSessionStatus(listedSessionName, new Set(["planned", "running", "stopped"]));
@@ -1720,6 +1724,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...(options["needs-action"] === "1" ? { needsAction: true } : {}),
           ...(actionFilter ? { action: [...actionFilter] } : {}),
           ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+          ...(sessionLimit ? {
+            limit: sessionLimit,
+            totalSessionRecords: allSessionNames.length,
+            scannedSessions: sessions.length,
+          } : {}),
           ...(
             options["needs-action"] === "1" || actionFilter || branchActionFilter
               ? { totalSessions: sessions.length }
@@ -1784,7 +1793,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       return;
     }
-    await printJson({ sessions: await listWorkerSessions(options.session) });
+    const allSessionNames = options.session ? [options.session] : await listWorkerSessionNames();
+    const sessions = await listWorkerSessions(options.session, sessionLimit && !options.session ? sessionLimit : null);
+    await printJson({
+      ...(sessionLimit ? {
+        filter: {
+          limit: sessionLimit,
+          totalSessionRecords: allSessionNames.length,
+          scannedSessions: sessions.length,
+        },
+      } : {}),
+      sessions,
+    });
     return;
   }
   if (subcommandName === "archive-sessions") {
@@ -5912,8 +5932,8 @@ async function writeDrainContinuationWorker(worker: DrainContinuationWorker): Pr
   await fs.writeFile(drainContinuationWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
 }
 
-async function listWorkerSessions(sessionName?: string): Promise<Array<WorkerSession & { workers: Array<WorkerSession["workers"][number] & { alive: boolean }> }>> {
-  const names = sessionName ? [sessionName] : await listWorkerSessionNames();
+async function listWorkerSessions(sessionName?: string, limit?: number | null): Promise<Array<WorkerSession & { workers: Array<WorkerSession["workers"][number] & { alive: boolean }> }>> {
+  const names = sessionName ? [sessionName] : await listWorkerSessionNames(limit ?? undefined);
   return await Promise.all(names.map(async (name) => {
     const session = await readWorkerSession(name);
     return {
@@ -6022,13 +6042,22 @@ function workerSessionAgentIds(session: WorkerSession): string[] {
   return parseList(options.agents ?? required(options.agent, "recorded session --agent or --agents"));
 }
 
-async function listWorkerSessionNames(): Promise<string[]> {
+async function listWorkerSessionNames(limit?: number): Promise<string[]> {
   try {
     const entries = await fs.readdir(workerSessionDir);
-    return entries
+    const names = entries
       .filter((entry) => entry.endsWith(".json"))
       .map((entry) => entry.slice(0, -".json".length))
       .sort();
+    if (!limit) return names;
+    const sessionsWithStats = await Promise.all(names.map(async (name) => {
+      const stat = await fs.stat(workerSessionPath(name));
+      return { name, mtimeMs: stat.mtimeMs };
+    }));
+    return sessionsWithStats
+      .sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))
+      .slice(0, limit)
+      .map((session) => session.name);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
@@ -6866,7 +6895,7 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
+  runs sessions [--session <name>] [--summary] [--next] [--limit 10] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>

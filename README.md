@@ -258,6 +258,7 @@ npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overn
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
+npm run cli -- runs sessions --summary --next --limit 10
 npm run cli -- runs sessions --summary --next --max-polls 30 --interval-ms 10000
 npm run cli -- runs sessions --summary --next --needs-action
 npm run cli -- runs sessions --summary --next --older-than-ms 120000 --commands-only --format shell
@@ -504,6 +505,9 @@ as the session next action before ordinary watch/recover guidance; add
 `--older-than-ms` to tune when those running continuation records count as stale.
 The summary reads the durable local continuation records directly, so fleet
 triage does not need one server request per session just to detect stuck drains.
+Add `--limit <n>` to scan only the most recently touched local session records,
+which keeps fleet snapshots bounded in long-lived checkouts with large
+`.threadbeat/worker-sessions/` history.
 Add `--max-polls` and `--interval-ms` to stream newline-delimited fleet snapshots while long
 worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
 next action is only `continue_watch`, `--action <name>` to show only matching

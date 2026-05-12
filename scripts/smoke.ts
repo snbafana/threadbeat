@@ -1655,6 +1655,26 @@ try {
   assert.equal(detachedFleetSession?.nextStep?.reason, "workers_still_alive");
   assert.equal(detachedFleetSession?.nextStep?.command.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
   assert.equal(detachedFleetSession?.commands?.sessionSummaryWatch.join(" "), `npm run cli -- runs session-summary ${detachedWorkerSessionName} --next --max-polls 30 --interval-ms 10000`);
+  await fs.utimes(
+    path.join(".threadbeat", "worker-sessions", `${detachedWorkerSessionName}.json`),
+    new Date(),
+    new Date(),
+  );
+  const limitedWorkerFleetSummary = await cliJson<{
+    filter: { limit: number; totalSessionRecords: number; scannedSessions: number };
+    totals: { sessions: number };
+    actionQueue: Array<{ session: string }>;
+    branchActionQueue: Array<{ session: string }>;
+    sessions: Array<{ session: { session: string } }>;
+  }>(baseUrl, ["runs", "sessions", "--summary", "--next", "--limit", "1"]);
+  assert.equal(limitedWorkerFleetSummary.filter.limit, 1);
+  assert.ok(limitedWorkerFleetSummary.filter.totalSessionRecords >= 1);
+  assert.equal(limitedWorkerFleetSummary.filter.scannedSessions, 1);
+  assert.equal(limitedWorkerFleetSummary.totals.sessions, 1);
+  assert.equal(limitedWorkerFleetSummary.sessions.length, 1);
+  assert.equal(limitedWorkerFleetSummary.sessions[0].session.session, detachedWorkerSessionName);
+  assert.ok(limitedWorkerFleetSummary.actionQueue.every((item) => item.session === detachedWorkerSessionName));
+  assert.ok(limitedWorkerFleetSummary.branchActionQueue.every((item) => item.session === detachedWorkerSessionName));
   const workerFleetSummaryPoll = await cliRaw(baseUrl, [
     "runs",
     "sessions",
