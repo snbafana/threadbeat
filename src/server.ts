@@ -880,6 +880,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const workerIdFilter = parseOptionalString(query.workerId) ?? null;
       const resumableOnly = parseBoolean(query.resumable, false);
       const checkoutDir = parseOptionalString(query.checkoutDir) ?? `./checkouts/${name}-branches`;
+      const branchActions = parseOptionalBranchActions(query.branchAction);
+      const branchActionFilter = branchActions.length > 0 ? new Set(branchActions) : null;
       const runIds = [
         ...parseOptionalList(query.runId),
         ...parseOptionalList(query.runIds),
@@ -1005,37 +1007,49 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           commands: run.commands,
           links: run.links,
         }));
-      const nextSteps = visibleRuns.map(({ agentId, run }) => ({
-        action: run.state === "resumable" ? "resume_branch" : "review_branch",
-        reason: run.state === "resumable"
-          ? "stopped_branch_without_result_commit"
-          : run.warning ?? (run.resultCommit ? "result_commit_available" : "branch_available"),
-        agentId,
-        runId: run.id,
-        status: run.status,
-        state: run.state,
-        warning: run.warning,
-        objective: run.objective,
-        workerId: run.workerId,
-        location: run.location,
-        branchName: run.branchName,
-        resultCommit: run.resultCommit,
-        command: run.state === "resumable" && run.commands.resumeBranch
-          ? run.commands.resumeBranch
-          : run.commands.reviewRun,
-        commands: run.commands,
-      }));
+      const nextSteps = visibleRuns.map(({ agentId, run }) => {
+        const action: "resume_branch" | "review_branch" = run.state === "resumable" ? "resume_branch" : "review_branch";
+        return {
+          action,
+          reason: run.state === "resumable"
+            ? "stopped_branch_without_result_commit"
+            : run.warning ?? (run.resultCommit ? "result_commit_available" : "branch_available"),
+          agentId,
+          runId: run.id,
+          status: run.status,
+          state: run.state,
+          warning: run.warning,
+          objective: run.objective,
+          workerId: run.workerId,
+          location: run.location,
+          branchName: run.branchName,
+          resultCommit: run.resultCommit,
+          command: run.state === "resumable" && run.commands.resumeBranch
+            ? run.commands.resumeBranch
+            : run.commands.reviewRun,
+          commands: run.commands,
+        };
+      });
+      const filteredResultCommits = branchActionFilter && !branchActionFilter.has("review_branch")
+        ? []
+        : resultCommits;
+      const filteredResumableBranches = branchActionFilter && !branchActionFilter.has("resume_branch")
+        ? []
+        : resumableBranches;
+      const filteredNextSteps = branchActionFilter
+        ? nextSteps.filter((step) => branchActionFilter.has(step.action))
+        : nextSteps;
       const pageEnd = limit ? offset + limit : undefined;
       const limitedResultCommits = offset > 0 || limit
-        ? resultCommits.slice(offset, pageEnd)
-        : resultCommits;
+        ? filteredResultCommits.slice(offset, pageEnd)
+        : filteredResultCommits;
       const limitedResumableBranches = offset > 0 || limit
-        ? resumableBranches.slice(offset, pageEnd)
-        : resumableBranches;
+        ? filteredResumableBranches.slice(offset, pageEnd)
+        : filteredResumableBranches;
       const limitedNextSteps = offset > 0 || limit
-        ? nextSteps.slice(offset, pageEnd)
-        : nextSteps;
-      const pageTotal = Math.max(resultCommits.length, resumableBranches.length, nextSteps.length);
+        ? filteredNextSteps.slice(offset, pageEnd)
+        : filteredNextSteps;
+      const pageTotal = Math.max(filteredResultCommits.length, filteredResumableBranches.length, filteredNextSteps.length);
       const nextOffset = limit ? offset + limit : null;
       const hasMore = nextOffset !== null && nextOffset < pageTotal;
       return {
@@ -1047,24 +1061,25 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           statuses: statusList,
           resumable: resumableOnly,
           workerId: workerIdFilter,
+          branchAction: branchActions,
           runIds,
           limit,
           offset,
-          totalResultCommits: resultCommits.length,
+          totalResultCommits: filteredResultCommits.length,
           visibleResultCommits: limitedResultCommits.length,
-          totalResumableBranches: resumableBranches.length,
+          totalResumableBranches: filteredResumableBranches.length,
           visibleResumableBranches: limitedResumableBranches.length,
-          totalNextSteps: nextSteps.length,
+          totalNextSteps: filteredNextSteps.length,
           visibleNextSteps: limitedNextSteps.length,
           hasMore,
           nextOffset: hasMore ? nextOffset : null,
         },
         summary: {
           agents: agents.length,
-          total: visibleRuns.length,
-          resultCommits: resultCommits.length,
-          resumable: resumableBranches.length,
-          warnings: visibleRuns.filter(({ run }) => run.warning).length,
+          total: filteredNextSteps.length,
+          resultCommits: filteredResultCommits.length,
+          resumable: filteredResumableBranches.length,
+          warnings: filteredNextSteps.filter((step) => step.warning).length,
         },
         resultCommits: limitedResultCommits,
         resumableBranches: limitedResumableBranches,
@@ -1981,6 +1996,15 @@ const parseOptionalList = (value: unknown): string[] => {
     .filter(Boolean);
   if (values.length === 0) throw new Error("expected at least one value");
   return values;
+};
+
+const parseOptionalBranchActions = (value: unknown): Array<"resume_branch" | "review_branch"> => {
+  const actions = parseOptionalList(value);
+  const allowed = new Set(["resume_branch", "review_branch"]);
+  for (const action of actions) {
+    if (!allowed.has(action)) throw new Error(`unknown branch action: ${action}`);
+  }
+  return actions as Array<"resume_branch" | "review_branch">;
 };
 
 const parseOptionalDrainContinuationStatuses = (value: unknown): Array<"queued" | "running" | "executed" | "failed"> => {

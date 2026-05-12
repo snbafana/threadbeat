@@ -255,6 +255,7 @@ npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overn
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
 npm run cli -- runs results --session overnight --server --next --commands-only
+npm run cli -- runs results --session overnight --server --branch-action review_branch --next --commands-only
 npm run cli -- runs results --session overnight --server --run <run-id> --next
 npm run cli -- runs results --session overnight --next --commands-only --format shell
 npm run cli -- runs results --session overnight --next --limit 20
@@ -446,9 +447,11 @@ Run planning is intentionally server-side and Pi-free for now:
   worker-session branch index from `GET /api/worker-sessions/:name/branches`
   instead of requiring the local session record. The server-backed results view
   supports `--run`, `--next`, `--commands-only`, `--limit`, `--offset`, and
-  `--format shell` for branch-native result/resume inspection; checkout diff
-  filters still require the local checkout-backed results path. The backing
-  branch endpoint accepts the same run and page filters, so large sessions can
+  `--format shell` for branch-native result/resume inspection; add
+  `--branch-action resume_branch|review_branch` to ask the server for only the
+  resume or review side of the branch queue. Checkout diff filters still
+  require the local checkout-backed results path. The backing branch endpoint
+  accepts the same run, branch-action, and page filters, so large sessions can
   ask the server for a bounded branch queue instead of materializing every run
   in the CLI first.
 - `POST /api/runs/:id/claim` atomically moves a run from `planned` to

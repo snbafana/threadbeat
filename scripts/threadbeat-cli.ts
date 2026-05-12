@@ -712,6 +712,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (options["changed-only"] === "1" || options["changed-path"]) {
         throw new Error("runs results --server does not support changed checkout filters");
       }
+      const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
+      if (branchActionFilter && [...branchActionFilter].some((action) => action !== "resume_branch" && action !== "review_branch")) {
+        throw new Error("runs results --server --branch-action must be resume_branch or review_branch");
+      }
       const statusList = parseList(options.status ?? "completed,stopped");
       const runFilter = options.run ? new Set(parseList(options.run)) : null;
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
@@ -760,6 +764,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           statuses: string[];
           resumable: boolean;
           workerId: string | null;
+          branchAction?: string[];
           runIds?: string[];
           limit?: number | null;
           offset?: number;
@@ -781,6 +786,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         params.set("status", statusList.join(","));
         params.set("checkoutDir", checkoutCommandRootDir);
         if (options["worker-id"]) params.set("workerId", options["worker-id"]);
+        if (options["branch-action"]) params.set("branchAction", options["branch-action"]);
         if (options.run) params.set("runId", options.run);
         if (rowLimit) params.set("limit", String(rowLimit));
         if (rowOffset > 0) params.set("offset", String(rowOffset));
@@ -9567,7 +9573,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--server] [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--server] [--status completed,stopped] [--worker-id worker-a] [--branch-action resume_branch|review_branch] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next] [--limit 10] [--offset 10] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
