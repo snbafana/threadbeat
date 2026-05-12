@@ -1615,7 +1615,7 @@ try {
       commands?: { sessionSummaryWatch: string[] };
       error?: string;
     }>;
-  }>(baseUrl, ["runs", "sessions", "--summary", "--next"]);
+  }>(baseUrl, ["runs", "sessions", "--session", detachedWorkerSessionName, "--summary", "--next"]);
   assert.ok(workerFleetSummary.totals.sessions >= 1);
   assert.ok(workerFleetSummary.totals.workers.alive >= 1);
   assert.ok(workerFleetSummary.totals.resumableStopped >= 1);
@@ -3535,6 +3535,41 @@ try {
     "shell",
   ]);
   assert.ok(drainResetFleetShell.stdout.trim().split("\n").includes(resetRunningCommand));
+  const bulkLocalDrainContinuationCount = 104;
+  const bulkLocalDrainContinuationPaths = await Promise.all(Array.from({ length: bulkLocalDrainContinuationCount }, async (_, index) => {
+    const continuationId = `smoke-local-scan-${String(index).padStart(3, "0")}`;
+    const continuationPath = path.join(path.dirname(staleRunningContinuation.continuationPath), `${continuationId}.json`);
+    await fs.writeFile(continuationPath, `${JSON.stringify({
+      ...staleRunningContinuation.continuation,
+      continuationId,
+      observedAt: new Date(Date.now() - 900_000 - index).toISOString(),
+      status: "running",
+      startedAt: staleNextStartedAt,
+    }, null, 2)}\n`);
+    return continuationPath;
+  }));
+  const bulkLocalDrainResetSummary = await cliJson<{
+    drainContinuationResets: number;
+    nextStep: { action: string; count: number; command: string[] };
+    drainContinuationResetNextSteps: Array<{ count: number; continuationIds: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-summary",
+    detachedWorkerSessionName,
+    "--next",
+  ]);
+  assert.equal(bulkLocalDrainResetSummary.drainContinuationResets, bulkLocalDrainContinuationCount + 1);
+  assert.equal(bulkLocalDrainResetSummary.nextStep.action, "reset_running_drain_continuations");
+  assert.equal(bulkLocalDrainResetSummary.nextStep.count, bulkLocalDrainContinuationCount + 1);
+  assert.equal(bulkLocalDrainResetSummary.nextStep.command.join(" "), resetRunningCommand);
+  assert.ok(bulkLocalDrainResetSummary.drainContinuationResetNextSteps.some((step) => (
+    step.count === bulkLocalDrainContinuationCount + 1
+    && step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
+    && step.continuationIds.includes("smoke-local-scan-000")
+    && step.continuationIds.includes("smoke-local-scan-103")
+    && step.command.join(" ") === resetRunningCommand
+  )));
+  await Promise.all(bulkLocalDrainContinuationPaths.map((continuationPath) => fs.rm(continuationPath)));
   const staleRunningReset = await cliJson<{
     session: string;
     inspected: number;
