@@ -794,6 +794,53 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     return { ok: true, run };
   });
 
+  app.post("/api/runs/:id/resume-branch", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = requestBody(request.body);
+    const workerId = parseOptionalString(body.workerId);
+    const dryRun = parseBoolean(body.dryRun, false);
+    const existing = await db.getAgentRun(id);
+    if (!existing) return reply.code(404).send({ ok: false, error: "run not found" });
+    if (existing.status !== "stopped" || existing.result_commit !== null) {
+      return reply.code(409).send({
+        ok: false,
+        error: `resume-branch requires a stopped run without a result commit; ${existing.id} is ${existing.status}`,
+      });
+    }
+    const hasRunningSandbox = (await db.listSandboxes({ runId: existing.id }))
+      .some((sandbox) => sandbox.state === "running");
+    if (hasRunningSandbox) {
+      return reply.code(409).send({ ok: false, error: "run has a running sandbox" });
+    }
+    const branch = {
+      agentId: existing.agent_id,
+      runId: existing.id,
+      objective: existing.objective,
+      branchName: existing.run_branch,
+      resultCommit: existing.result_commit,
+      workerId: existing.worker_id,
+      currentStatus: existing.status,
+    };
+    if (dryRun) return { ok: true, resumable: branch, dryRun: true };
+    const run = await db.requeueAgentRun(id);
+    if (!run) return reply.code(409).send({ ok: false, error: "run could not be resumed" });
+    await db.appendMessage({
+      agentId: run.agent_id,
+      runId: run.id,
+      type: "agent_run_requeued",
+      text: workerId ? `Requeued run by ${workerId}` : "Requeued run",
+    });
+    return {
+      ok: true,
+      resumed: {
+        ...branch,
+        status: run.status,
+        workerId: run.worker_id,
+      },
+      run,
+    };
+  });
+
   app.post("/api/runs/:id/sandbox", async (request, reply) => {
     let runId: string | undefined;
     try {

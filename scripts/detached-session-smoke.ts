@@ -93,6 +93,67 @@ try {
   ]);
   await cliJson(baseUrl, ["runs", "stop", workerStoppedPlan.run.id]);
 
+  const apiResumeAgent = await cliJson<{ agent: { id: string } }>(baseUrl, [
+    "agents",
+    "create",
+    "--name",
+    "detached-session-api-resume-agent",
+    "--repo",
+    "https://github.com/example/api-resume-agent.git",
+    "--ref",
+    "main",
+  ]);
+  const apiResumePlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    apiResumeAgent.agent.id,
+    "--objective",
+    "detached session api resume branch",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", apiResumePlan.run.id]);
+  const apiResumePreviewResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${apiResumePlan.run.id}/resume-branch`,
+    payload: { dryRun: true },
+  });
+  assert.equal(apiResumePreviewResponse.statusCode, 200);
+  const apiResumePreview = JSON.parse(apiResumePreviewResponse.body) as {
+    resumable: { runId: string; branchName: string; resultCommit: string | null; currentStatus: string };
+    dryRun: boolean;
+  };
+  assert.equal(apiResumePreview.resumable.runId, apiResumePlan.run.id);
+  assert.equal(apiResumePreview.resumable.branchName, apiResumePlan.plan.branchName);
+  assert.equal(apiResumePreview.resumable.resultCommit, null);
+  assert.equal(apiResumePreview.resumable.currentStatus, "stopped");
+  assert.equal(apiResumePreview.dryRun, true);
+  const apiResumeResponse = await app.inject({
+    method: "POST",
+    url: `/api/runs/${apiResumePlan.run.id}/resume-branch`,
+    payload: { workerId: "api-resumer" },
+  });
+  assert.equal(apiResumeResponse.statusCode, 200);
+  const apiResume = JSON.parse(apiResumeResponse.body) as {
+    resumed: { runId: string; branchName: string; status: string; workerId: string | null };
+    run: { id: string; status: string; worker_id: string | null };
+  };
+  assert.equal(apiResume.resumed.runId, apiResumePlan.run.id);
+  assert.equal(apiResume.resumed.branchName, apiResumePlan.plan.branchName);
+  assert.equal(apiResume.resumed.status, "planned");
+  assert.equal(apiResume.resumed.workerId, null);
+  assert.equal(apiResume.run.id, apiResumePlan.run.id);
+  assert.equal(apiResume.run.status, "planned");
+  assert.equal(apiResume.run.worker_id, null);
+  const apiResumeMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [
+    "messages",
+    "list",
+    "--run",
+    apiResumePlan.run.id,
+  ]);
+  assert.ok(apiResumeMessages.messages.some((message) => (
+    message.type === "agent_run_requeued" && message.text === "Requeued run by api-resumer"
+  )));
+
   const session = await cliJson<{
     session: {
       session: string;

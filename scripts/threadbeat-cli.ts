@@ -417,49 +417,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [id, ...optionArgs] = args;
     if (!id) throw new Error("runs resume-branch requires a run id");
     const options = parseOptions(optionArgs);
-    const status = await requestJson("GET", `/api/runs/${encodeURIComponent(id)}/status?limit=1`) as {
-      run: {
-        id: string;
-        agent_id: string;
-        objective: string;
-        run_branch: string;
-        result_commit: string | null;
-        status: string;
-        worker_id: string | null;
-      };
-      sandboxes: Array<{ state: string }>;
-    };
-    const run = status.run;
-    if (run.status !== "stopped" || run.result_commit !== null) {
-      throw new Error(`runs resume-branch requires a stopped run without a result commit; ${run.id} is ${run.status}`);
-    }
-    if (status.sandboxes.some((sandbox) => sandbox.state === "running")) {
-      throw new Error(`runs resume-branch cannot resume ${run.id} while it has a running sandbox`);
-    }
-    const branch = {
-      agentId: run.agent_id,
-      runId: run.id,
-      objective: run.objective,
-      branchName: run.run_branch,
-      resultCommit: run.result_commit,
-      workerId: run.worker_id,
-      currentStatus: run.status,
-    };
-    if (options["dry-run"] === "1") {
-      await printJson({ resumable: branch, dryRun: true });
-      return;
-    }
-    const resumed = await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/requeue`, {
+    await printJson(await requestJson("POST", `/api/runs/${encodeURIComponent(id)}/resume-branch`, {
+      dryRun: options["dry-run"] === "1",
       ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
-    }) as { run: typeof run };
-    await printJson({
-      resumed: {
-        ...branch,
-        status: resumed.run.status,
-        workerId: resumed.run.worker_id,
-      },
-      run: resumed.run,
-    });
+    }));
     return;
   }
   if (subcommandName === "watch") {
