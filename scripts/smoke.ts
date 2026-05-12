@@ -3778,6 +3778,40 @@ try {
   assert.equal(failedDrainStatusApply.executions[0]?.output.continuations[0]?.continuationId, failedDrainNextStepContinuationId);
   assert.equal(failedDrainStatusApply.executions[0]?.output.continuations[0]?.status, "queued");
   assert.equal(failedDrainStatusApply.executions[0]?.output.continuations[0]?.resetReason, "operator_reset_failed");
+  const failedDrainApplyInspection = await cliJson<{
+    summary: {
+      affectedRuns: unknown[];
+      drainContinuationResetExecutions: Array<{
+        action: string;
+        state: string;
+        inspected: number;
+        failed: number;
+        resetCount: number;
+        skippedFailed: number;
+        continuationIds: string[];
+        resetReasons: string[];
+        command: string[];
+      }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--apply-id",
+    "smoke-reset-failed-status",
+  ]);
+  assert.deepEqual(failedDrainApplyInspection.summary.affectedRuns, []);
+  assert.deepEqual(failedDrainApplyInspection.summary.drainContinuationResetExecutions, [{
+    action: "reset_failed_drain_continuations",
+    state: "succeeded",
+    inspected: 4,
+    failed: 1,
+    resetCount: 1,
+    skippedFailed: 0,
+    continuationIds: [failedDrainNextStepContinuationId],
+    resetReasons: ["operator_reset_failed"],
+    command: resetFailedCommand.split(" "),
+  }]);
   const failedDrainQueuedAfterApply = await cliJson<{
     continuations: Array<{ continuationId: string; status: string; resetReason?: string }>;
   }>(baseUrl, [
@@ -4150,6 +4184,40 @@ try {
   assert.equal(staleRunningStatusApply.executions[0]?.command.join(" "), resetRunningCommand);
   const staleRunningReset = staleRunningStatusApply.executions[0]?.output;
   assert.ok(staleRunningReset);
+  const staleRunningApplyInspection = await cliJson<{
+    summary: {
+      affectedRuns: unknown[];
+      drainContinuationResetExecutions: Array<{
+        action: string;
+        state: string;
+        inspected: number;
+        running: number;
+        resetCount: number;
+        skippedRunning: number;
+        continuationIds: string[];
+        resetReasons: string[];
+        command: string[];
+      }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--apply-id",
+    "smoke-reset-running-status",
+  ]);
+  assert.deepEqual(staleRunningApplyInspection.summary.affectedRuns, []);
+  assert.deepEqual(staleRunningApplyInspection.summary.drainContinuationResetExecutions, [{
+    action: "reset_running_drain_continuations",
+    state: "succeeded",
+    inspected: 4,
+    running: 1,
+    resetCount: 1,
+    skippedRunning: 0,
+    continuationIds: [staleRunningContinuation.continuation.continuationId],
+    resetReasons: ["operator_reset_running"],
+    command: resetRunningCommand.split(" "),
+  }]);
   assert.equal(staleRunningReset.session, detachedWorkerSessionName);
   assert.equal(staleRunningReset.running, 1);
   assert.equal(staleRunningReset.resetCount, 1);

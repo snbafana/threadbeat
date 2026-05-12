@@ -641,8 +641,9 @@ exited cleanly in that recorded apply. Add `--resume-filter failed`, `pending`,
 or `failed,pending` to retry only the failed commands, only commands that never
 started, or both. Use `runs session-applies <name>` to list those apply records,
 or `--apply-id <id>` to inspect the failed executions, pending commands,
-affected runs, exact resume commands, and branch-native inspect/checkout/review
-commands for one recorded apply. Add `--summary` to group recorded applies into
+affected runs, drain-continuation reset effects, exact resume commands, and
+branch-native inspect/checkout/review commands for one recorded apply. Add
+`--summary` to group recorded applies into
 resume-needed, ready-to-review, waiting, and watch-drain prefix buckets. Drain
 prefix summaries report poll apply IDs, whether the drain reached an empty
 queue, and the next apply ID that would continue the same prefix. Add

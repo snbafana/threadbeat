@@ -5692,6 +5692,19 @@ type SessionApplySummary = {
   };
   pendingCommands: SessionApplyCommand[];
   failedCommands: SessionApplyCommand[];
+  drainContinuationResetExecutions: Array<{
+    action: "reset_failed_drain_continuations" | "reset_running_drain_continuations";
+    state: "succeeded" | "failed";
+    resetCount: number;
+    inspected?: number;
+    failed?: number;
+    running?: number;
+    skippedFailed?: number;
+    skippedRunning?: number;
+    continuationIds: string[];
+    resetReasons: string[];
+    command: string[];
+  }>;
   affectedRuns: Array<{
     runId: string;
     action: string;
@@ -6334,6 +6347,7 @@ function summarizeSessionApplyRecord(
   });
   const pendingCommands = record.commands.filter((command) => !commandStates.has(commandKey(command.command)));
   const affectedRuns = sessionApplyAffectedRuns(record, commandStates, runStatusIndex);
+  const drainContinuationResetExecutions = sessionApplyDrainContinuationResetExecutions(record);
   const affectedRunIds = affectedRuns.map((run) => run.runId);
   const readyResultRunIds = affectedRuns
     .filter((run) => run.currentRun?.resultCommit)
@@ -6365,8 +6379,48 @@ function summarizeSessionApplyRecord(
     },
     pendingCommands,
     failedCommands,
+    drainContinuationResetExecutions,
     affectedRuns,
   };
+}
+
+function sessionApplyDrainContinuationResetExecutions(
+  record: SessionApplyRecord,
+): SessionApplySummary["drainContinuationResetExecutions"] {
+  return record.executions
+    .filter((execution): execution is SessionApplyExecution & {
+      action: "reset_failed_drain_continuations" | "reset_running_drain_continuations";
+    } => execution.action === "reset_failed_drain_continuations" || execution.action === "reset_running_drain_continuations")
+    .map((execution) => {
+      const output = plainRecord(execution.output);
+      const inspected = numberFromUnknown(output?.inspected);
+      const failed = numberFromUnknown(output?.failed);
+      const running = numberFromUnknown(output?.running);
+      const skippedFailed = numberFromUnknown(output?.skippedFailed);
+      const skippedRunning = numberFromUnknown(output?.skippedRunning);
+      const continuations = Array.isArray(output?.continuations)
+        ? output.continuations
+          .map((item) => plainRecord(item))
+          .filter((item): item is Record<string, unknown> => item !== null)
+        : [];
+      return {
+        action: execution.action,
+        state: execution.exitCode === 0 ? "succeeded" : "failed",
+        resetCount: numberFromUnknown(output?.resetCount) ?? 0,
+        ...(inspected !== null ? { inspected } : {}),
+        ...(failed !== null ? { failed } : {}),
+        ...(running !== null ? { running } : {}),
+        ...(skippedFailed !== null ? { skippedFailed } : {}),
+        ...(skippedRunning !== null ? { skippedRunning } : {}),
+        continuationIds: continuations
+          .map((continuation) => stringFromUnknown(continuation.continuationId))
+          .filter((continuationId): continuationId is string => continuationId !== null),
+        resetReasons: [...new Set(continuations
+          .map((continuation) => stringFromUnknown(continuation.resetReason))
+          .filter((resetReason): resetReason is string => resetReason !== null))],
+        command: execution.command,
+      };
+    });
 }
 
 function sessionApplyReadyResultsCommand(
@@ -6807,6 +6861,20 @@ function sessionApplyResumeCommand(record: SessionApplyRecord, resumeFilter?: Ar
 function stringListFromUnknown(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
   return typeof value === "string" ? [value] : [];
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 async function tailFileLines(filePath: string, lineCount: number): Promise<string[]> {
