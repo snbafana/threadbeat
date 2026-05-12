@@ -685,7 +685,9 @@ latest execution summary in `lastRun`, including exit counts, stop reason,
 remaining queued actions, and per-poll counts; use
 `runs session-apply-action-workers <name> --server` or
 `GET /api/worker-sessions/:name/apply-action-workers` to inspect the same
-summary through the server. Server-executed actions are also written to
+summary through the server. Use `runs stop-apply-action-workers <name> --server`
+or `POST /api/worker-sessions/:name/apply-action-workers/stop` to stop or retire
+those workers through the server. Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,
 `runs session-applies <name> --server --apply-id <id> --ack-reset-audit` to

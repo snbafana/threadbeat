@@ -4120,6 +4120,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "stop-apply-action-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    if (options.server === "1") {
+      const requiredSessionName = required(sessionName, "runs stop-apply-action-workers <session> --server");
+      await printJson(await stopWorkerSessionApplyActionWorkersViaServer(requiredSessionName, {
+        ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+        retire: options.retire === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      }));
+      return;
+    }
     const response = await stopApplyActionWorkers(required(sessionName, "runs stop-apply-action-workers <session>"), {
       ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
       retire: options.retire === "1",
@@ -5882,6 +5891,53 @@ async function fetchWorkerSessionApplyActionWorkers(
     ok: true;
     session: string;
     count: number;
+    workers: Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+}
+
+async function stopWorkerSessionApplyActionWorkersViaServer(
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  stopped: Array<{
+    workerId: string;
+    pid: number | null;
+    aliveBefore: boolean;
+    stopped: boolean;
+    signalSent: boolean;
+    forced: boolean;
+    alive: boolean;
+    stoppedAt: string;
+    retiredAt?: string;
+  }>;
+  workers: Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-action-workers/stop`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      retire: options.retire,
+      lines: options.lines,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    stopped: Array<{
+      workerId: string;
+      pid: number | null;
+      aliveBefore: boolean;
+      stopped: boolean;
+      signalSent: boolean;
+      forced: boolean;
+      alive: boolean;
+      stoppedAt: string;
+      retiredAt?: string;
+    }>;
     workers: Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
   };
 }
@@ -8934,7 +8990,7 @@ Commands:
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
-  runs stop-apply-action-workers <name> [--worker-id id] [--retire] [--lines 20]
+  runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-watches <name> [--watch-id id] [--limit 20]

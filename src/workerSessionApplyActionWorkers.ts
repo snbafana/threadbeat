@@ -46,6 +46,13 @@ export type ApplyActionWorker = {
   lastRun?: ApplyActionWorkerRunSummary;
 };
 
+type StopProcessGroupResult = {
+  stopped: boolean;
+  signalSent: boolean;
+  forced: boolean;
+  alive: boolean;
+};
+
 export async function listWorkerSessionApplyActionWorkers(
   projectRoot: string,
   options: { sessionName: string; workerId?: string; includeRetired?: boolean },
@@ -80,9 +87,101 @@ export async function listWorkerSessionApplyActionWorkers(
   }
 }
 
+export async function stopWorkerSessionApplyActionWorkers(
+  projectRoot: string,
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  stopped: Array<{
+    workerId: string;
+    pid: number | null;
+    aliveBefore: boolean;
+    stopped: boolean;
+    signalSent: boolean;
+    forced: boolean;
+    alive: boolean;
+    stoppedAt: string;
+    retiredAt?: string;
+  }>;
+  workers: Awaited<ReturnType<typeof listWorkerSessionApplyActionWorkers>>;
+}> {
+  assertSafeWorkerSessionName(sessionName);
+  if (options.workerId) assertSafeWorkerSessionName(options.workerId);
+  const workers = await listWorkerSessionApplyActionWorkers(projectRoot, {
+    sessionName,
+    ...(options.workerId ? { workerId: options.workerId } : {}),
+    includeRetired: true,
+  }, 0);
+  if (options.workerId && workers.length === 0) {
+    throw new Error(`apply action worker '${options.workerId}' not found for session '${sessionName}'`);
+  }
+  const stopped = [];
+  for (const worker of workers) {
+    const aliveBefore = processIsAlive(worker.pid);
+    const result = await stopProcessGroup(worker.pid);
+    const stoppedAt = new Date().toISOString();
+    const updated: ApplyActionWorker = {
+      ...worker,
+      stoppedAt,
+      stopResult: { ...result, aliveBefore },
+      ...(options.retire ? { retiredAt: stoppedAt } : {}),
+    };
+    await writeApplyActionWorker(projectRoot, updated);
+    stopped.push({
+      workerId: worker.workerId,
+      pid: worker.pid,
+      aliveBefore,
+      stopped: !result.alive,
+      signalSent: result.signalSent,
+      forced: result.forced,
+      alive: result.alive,
+      stoppedAt,
+      ...(updated.retiredAt ? { retiredAt: updated.retiredAt } : {}),
+    });
+  }
+  return {
+    session: sessionName,
+    count: stopped.length,
+    stopped,
+    workers: await listWorkerSessionApplyActionWorkers(projectRoot, {
+      sessionName,
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      includeRetired: true,
+    }, options.lines),
+  };
+}
+
 async function readApplyActionWorker(projectRoot: string, sessionName: string, workerId: string): Promise<ApplyActionWorker> {
   const text = await fs.readFile(applyActionWorkerPath(projectRoot, sessionName, workerId), "utf8");
   return JSON.parse(text) as ApplyActionWorker;
+}
+
+async function writeApplyActionWorker(projectRoot: string, worker: ApplyActionWorker): Promise<void> {
+  await fs.writeFile(applyActionWorkerPath(projectRoot, worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+}
+
+async function stopProcessGroup(pid: number | null): Promise<StopProcessGroupResult> {
+  if (!pid || !processIsAlive(pid)) return { stopped: false, signalSent: false, forced: false, alive: false };
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      process.kill(pid, "SIGTERM");
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  if (!processIsAlive(pid)) return { stopped: true, signalSent: true, forced: false, alive: false };
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      process.kill(pid, "SIGKILL");
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return { stopped: !processIsAlive(pid), signalSent: true, forced: true, alive: processIsAlive(pid) };
 }
 
 function processIsAlive(pid: number | null): boolean {

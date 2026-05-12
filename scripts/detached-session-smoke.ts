@@ -967,19 +967,26 @@ try {
     "detached-session-api-backed-reset:status:inspect_drain_continuation_resets",
   ]);
   const stoppedApplyActionWorkers = await cliJson<{
+    ok?: true;
     count: number;
     stopped: Array<{ workerId: string; retiredAt?: string }>;
+    workers: Array<{ workerId: string; retiredAt?: string; alive: boolean }>;
   }>(baseUrl, [
     "runs",
     "stop-apply-action-workers",
     sessionName,
+    "--server",
     "--worker-id",
     "detached-smoke-apply-action-worker",
     "--retire",
   ]);
+  assert.equal(stoppedApplyActionWorkers.ok, true);
   assert.equal(stoppedApplyActionWorkers.count, 1);
   assert.equal(stoppedApplyActionWorkers.stopped[0]?.workerId, "detached-smoke-apply-action-worker");
   assert.equal(typeof stoppedApplyActionWorkers.stopped[0]?.retiredAt, "string");
+  assert.equal(stoppedApplyActionWorkers.workers[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.equal(stoppedApplyActionWorkers.workers[0]?.alive, false);
+  assert.equal(typeof stoppedApplyActionWorkers.workers[0]?.retiredAt, "string");
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;
