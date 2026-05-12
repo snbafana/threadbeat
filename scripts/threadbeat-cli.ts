@@ -4117,6 +4117,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     return;
   }
+  if (subcommandName === "session-apply-action-workers-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-apply-action-workers-next requires --server");
+    }
+    await printJson(await fetchWorkerSessionApplyActionWorkerNextSteps(
+      required(sessionName, "runs session-apply-action-workers-next <session> --server"),
+    ));
+    return;
+  }
   if (subcommandName === "stop-apply-action-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -5901,6 +5912,61 @@ async function fetchWorkerSessionApplyActionWorkers(
     session: string;
     count: number;
     workers: Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+}
+
+async function fetchWorkerSessionApplyActionWorkerNextSteps(
+  sessionName: string,
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  nextSteps: Array<{
+    action: "restart_apply_action_worker";
+    reason: "stopped_apply_action_worker";
+    workerId: string;
+    pid: number | null;
+    stoppedAt: string;
+    command: string[];
+    commands: {
+      restartApplyActionWorker: string[];
+      inspectApplyActionWorkers: string[];
+      retireApplyActionWorker: string[];
+    };
+    api: {
+      restart: { method: "POST"; url: string; payload: { workerId: string } };
+      inspect: { method: "GET"; url: string };
+      retire: { method: "POST"; url: string; payload: { workerId: string; retire: true } };
+    };
+  }>;
+  actions: { restart_apply_action_worker: number };
+}> {
+  return await requestJson(
+    "GET",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-action-workers/next`,
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    nextSteps: Array<{
+      action: "restart_apply_action_worker";
+      reason: "stopped_apply_action_worker";
+      workerId: string;
+      pid: number | null;
+      stoppedAt: string;
+      command: string[];
+      commands: {
+        restartApplyActionWorker: string[];
+        inspectApplyActionWorkers: string[];
+        retireApplyActionWorker: string[];
+      };
+      api: {
+        restart: { method: "POST"; url: string; payload: { workerId: string } };
+        inspect: { method: "GET"; url: string };
+        retire: { method: "POST"; url: string; payload: { workerId: string; retire: true } };
+      };
+    }>;
+    actions: { restart_apply_action_worker: number };
   };
 }
 
@@ -9040,6 +9106,7 @@ Commands:
   runs stop-drain-workers <name> [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
+  runs session-apply-action-workers-next <name> --server
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]

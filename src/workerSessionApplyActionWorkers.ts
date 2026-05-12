@@ -54,6 +54,25 @@ type StopProcessGroupResult = {
   alive: boolean;
 };
 
+export type ApplyActionWorkerNextStep = {
+  action: "restart_apply_action_worker";
+  reason: "stopped_apply_action_worker";
+  workerId: string;
+  pid: number | null;
+  stoppedAt: string;
+  command: string[];
+  commands: {
+    restartApplyActionWorker: string[];
+    inspectApplyActionWorkers: string[];
+    retireApplyActionWorker: string[];
+  };
+  api: {
+    restart: { method: "POST"; url: string; payload: { workerId: string } };
+    inspect: { method: "GET"; url: string };
+    retire: { method: "POST"; url: string; payload: { workerId: string; retire: true } };
+  };
+};
+
 export async function listWorkerSessionApplyActionWorkers(
   projectRoot: string,
   options: { sessionName: string; workerId?: string; includeRetired?: boolean },
@@ -151,6 +170,61 @@ export async function stopWorkerSessionApplyActionWorkers(
       ...(options.workerId ? { workerId: options.workerId } : {}),
       includeRetired: true,
     }, options.lines),
+  };
+}
+
+export async function listWorkerSessionApplyActionWorkerNextSteps(
+  projectRoot: string,
+  sessionName: string,
+): Promise<{
+  session: string;
+  count: number;
+  nextSteps: ApplyActionWorkerNextStep[];
+  actions: { restart_apply_action_worker: number };
+}> {
+  assertSafeWorkerSessionName(sessionName);
+  const workers = await listWorkerSessionApplyActionWorkers(projectRoot, { sessionName }, 1);
+  const nextSteps = workers
+    .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
+    .map((worker): ApplyActionWorkerNextStep => {
+      const restartApplyActionWorker = ["npm", "run", "cli", "--", "runs", "restart-apply-action-workers", sessionName, "--server", "--worker-id", worker.workerId];
+      const encodedSession = encodeURIComponent(sessionName);
+      const encodedWorker = encodeURIComponent(worker.workerId);
+      return {
+        action: "restart_apply_action_worker",
+        reason: "stopped_apply_action_worker",
+        workerId: worker.workerId,
+        pid: worker.pid,
+        stoppedAt: worker.stoppedAt as string,
+        command: restartApplyActionWorker,
+        commands: {
+          restartApplyActionWorker,
+          inspectApplyActionWorkers: ["npm", "run", "cli", "--", "runs", "session-apply-action-workers", sessionName, "--server", "--worker-id", worker.workerId],
+          retireApplyActionWorker: ["npm", "run", "cli", "--", "runs", "stop-apply-action-workers", sessionName, "--server", "--worker-id", worker.workerId, "--retire"],
+        },
+        api: {
+          restart: {
+            method: "POST",
+            url: `/api/worker-sessions/${encodedSession}/apply-action-workers/restart`,
+            payload: { workerId: worker.workerId },
+          },
+          inspect: {
+            method: "GET",
+            url: `/api/worker-sessions/${encodedSession}/apply-action-workers?workerId=${encodedWorker}`,
+          },
+          retire: {
+            method: "POST",
+            url: `/api/worker-sessions/${encodedSession}/apply-action-workers/stop`,
+            payload: { workerId: worker.workerId, retire: true },
+          },
+        },
+      };
+    });
+  return {
+    session: sessionName,
+    count: nextSteps.length,
+    nextSteps,
+    actions: { restart_apply_action_worker: nextSteps.length },
   };
 }
 

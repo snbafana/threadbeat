@@ -969,8 +969,8 @@ try {
   const stoppedApplyActionWorkers = await cliJson<{
     ok?: true;
     count: number;
-    stopped: Array<{ workerId: string; retiredAt?: string }>;
-    workers: Array<{ workerId: string; retiredAt?: string; alive: boolean }>;
+    stopped: Array<{ workerId: string; stoppedAt?: string; retiredAt?: string }>;
+    workers: Array<{ workerId: string; stoppedAt?: string; retiredAt?: string; alive: boolean }>;
   }>(baseUrl, [
     "runs",
     "stop-apply-action-workers",
@@ -978,15 +978,67 @@ try {
     "--server",
     "--worker-id",
     "detached-smoke-apply-action-worker",
-    "--retire",
   ]);
   assert.equal(stoppedApplyActionWorkers.ok, true);
   assert.equal(stoppedApplyActionWorkers.count, 1);
   assert.equal(stoppedApplyActionWorkers.stopped[0]?.workerId, "detached-smoke-apply-action-worker");
-  assert.equal(typeof stoppedApplyActionWorkers.stopped[0]?.retiredAt, "string");
+  assert.equal(typeof stoppedApplyActionWorkers.stopped[0]?.stoppedAt, "string");
+  assert.equal(stoppedApplyActionWorkers.stopped[0]?.retiredAt, undefined);
   assert.equal(stoppedApplyActionWorkers.workers[0]?.workerId, "detached-smoke-apply-action-worker");
   assert.equal(stoppedApplyActionWorkers.workers[0]?.alive, false);
-  assert.equal(typeof stoppedApplyActionWorkers.workers[0]?.retiredAt, "string");
+  assert.equal(typeof stoppedApplyActionWorkers.workers[0]?.stoppedAt, "string");
+  assert.equal(stoppedApplyActionWorkers.workers[0]?.retiredAt, undefined);
+  const applyActionWorkerNext = await cliJson<{
+    ok?: true;
+    count: number;
+    actions: { restart_apply_action_worker: number };
+    nextSteps: Array<{
+      action: string;
+      reason: string;
+      workerId: string;
+      command: string[];
+      commands: { inspectApplyActionWorkers: string[]; retireApplyActionWorker: string[] };
+      api: { restart: { method: string; url: string; payload: { workerId: string } } };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply-action-workers-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(applyActionWorkerNext.ok, true);
+  assert.equal(applyActionWorkerNext.count, 1);
+  assert.equal(applyActionWorkerNext.actions.restart_apply_action_worker, 1);
+  assert.equal(applyActionWorkerNext.nextSteps[0]?.action, "restart_apply_action_worker");
+  assert.equal(applyActionWorkerNext.nextSteps[0]?.reason, "stopped_apply_action_worker");
+  assert.equal(applyActionWorkerNext.nextSteps[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.deepEqual(applyActionWorkerNext.nextSteps[0]?.command, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "restart-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+  ]);
+  assert.deepEqual(applyActionWorkerNext.nextSteps[0]?.commands.inspectApplyActionWorkers, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-apply-action-worker",
+  ]);
+  assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.method, "POST");
+  assert.match(applyActionWorkerNext.nextSteps[0]?.api.restart.url ?? "", /\/apply-action-workers\/restart$/);
+  assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.payload.workerId, "detached-smoke-apply-action-worker");
   const restartedApplyActionWorkers = await cliJson<{
     ok?: true;
     count: number;
@@ -999,7 +1051,6 @@ try {
     "--server",
     "--worker-id",
     "detached-smoke-apply-action-worker",
-    "--include-retired",
   ]);
   assert.equal(restartedApplyActionWorkers.ok, true);
   assert.equal(restartedApplyActionWorkers.count, 1);

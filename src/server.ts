@@ -32,6 +32,7 @@ import {
   writeWorkerSessionApplyActionExecutionRecord,
 } from "./workerSessionDrains.js";
 import {
+  listWorkerSessionApplyActionWorkerNextSteps,
   listWorkerSessionApplyActionWorkers,
   restartWorkerSessionApplyActionWorker,
   stopWorkerSessionApplyActionWorkers,
@@ -338,6 +339,18 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         count: workers.length,
         workers,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/apply-action-workers/next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      return {
+        ok: true,
+        ...await listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

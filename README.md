@@ -689,7 +689,10 @@ summary through the server. Use `runs stop-apply-action-workers <name> --server`
 `runs restart-apply-action-workers <name> --server`, or
 `POST /api/worker-sessions/:name/apply-action-workers/stop` and
 `POST /api/worker-sessions/:name/apply-action-workers/restart` to recover those
-workers through the server. Server-executed actions are also written to
+workers through the server. Use `runs session-apply-action-workers-next <name>
+--server` or `GET /api/worker-sessions/:name/apply-action-workers/next` to list
+stopped apply-action workers with exact restart, inspect, and retire commands.
+Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,
 `runs session-applies <name> --server --apply-id <id> --ack-reset-audit` to
