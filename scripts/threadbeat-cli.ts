@@ -3501,8 +3501,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       && options["summary-group"] !== "resume-needed"
       && options["summary-group"] !== "ready-to-review"
       && options["summary-group"] !== "drain-prefixes"
+      && options["summary-group"] !== "drain-resets"
     ) {
-      throw new Error("runs session-applies --summary-group must be resume-needed, ready-to-review, or drain-prefixes");
+      throw new Error("runs session-applies --summary-group must be resume-needed, ready-to-review, drain-prefixes, or drain-resets");
     }
     if (options["summary-group"] && options["ready-results"] === "1") {
       throw new Error("runs session-applies --summary-group cannot be combined with --ready-results");
@@ -6480,6 +6481,9 @@ function sessionApplyShellCommand(
     if (summary.pending > 0) return summary.actions.resumePending;
     return null;
   }
+  if (options["summary-group"] === "drain-resets") {
+    return sessionApplyResetInspectionCommand(summary);
+  }
   return summary.actions.resumeApply;
 }
 
@@ -7285,7 +7289,7 @@ Commands:
   runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
-  runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]

@@ -4312,6 +4312,18 @@ try {
   const resetActionQueueShellLines = resetApplyActionQueueShell.stdout.trim().split("\n");
   assert.ok(resetActionQueueShellLines.includes(failedResetInspectionCommand.join(" ")));
   assert.ok(resetActionQueueShellLines.includes(runningResetInspectionCommand.join(" ")));
+  const resetSummaryGroupShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--summary-group",
+    "drain-resets",
+    "--format",
+    "shell",
+  ]);
+  const resetSummaryGroupShellLines = resetSummaryGroupShell.stdout.trim().split("\n");
+  assert.ok(resetSummaryGroupShellLines.includes(failedResetInspectionCommand.join(" ")));
+  assert.ok(resetSummaryGroupShellLines.includes(runningResetInspectionCommand.join(" ")));
   assert.equal(staleRunningReset.session, detachedWorkerSessionName);
   assert.equal(staleRunningReset.running, 1);
   assert.equal(staleRunningReset.resetCount, 1);

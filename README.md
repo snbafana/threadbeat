@@ -660,9 +660,11 @@ commands for apply records that still need execution, or
 `--summary-group ready-to-review --format shell` to print only review-ready
 result commands from apply records whose affected runs now have result commits.
 Use `--summary-group drain-prefixes --format shell` to print only incomplete
-watch-drain continuation commands. Use `runs session-drains <name>` to fetch the
-same durable watch-drain continuation readiness through the server API;
-`--format shell` prints only the runnable continuation commands. Use
+watch-drain continuation commands, or
+`--summary-group drain-resets --format shell` to print only reset-audit
+inspection commands. Use `runs session-drains <name>` to fetch the same durable
+watch-drain continuation readiness through the server API; `--format shell`
+prints only the runnable continuation commands. Use
 `--continue-drains` to execute those server-backed continuations directly; add
 `--drain-prefix <prefix[,prefix]>` to target a subset and `--dry-run` to run the
 nested continuation previews without mutating apply records. Each continuation
