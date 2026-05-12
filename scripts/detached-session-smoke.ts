@@ -166,6 +166,49 @@ try {
   assert.equal(cliResumeInspection.recovery.reason, "stopped_branch_without_result_commit");
   assert.equal(cliResumeInspection.nextStep.action, "resume_branch");
   assert.equal(cliResumeInspection.nextStep.command.join(" "), `npm run cli -- runs resume-branch ${apiResumePlan.run.id}`);
+  const workerResumeInspectionAgent = await cliJson<{ agent: { id: string } }>(baseUrl, [
+    "agents",
+    "create",
+    "--name",
+    "detached-session-worker-resume-inspection-agent",
+    "--repo",
+    "https://github.com/example/worker-resume-inspection-agent.git",
+    "--ref",
+    "main",
+  ]);
+  const workerResumeInspectionPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    workerResumeInspectionAgent.agent.id,
+    "--objective",
+    "worker resume inspection before stopped branch pickup",
+  ]);
+  await cliJson(baseUrl, ["runs", "stop", workerResumeInspectionPlan.run.id]);
+  const workerResumeInspection = await cliJson<{
+    processed: Array<{
+      runId: string;
+      resumeInspection?: {
+        recovery: { ready: boolean; reason: string };
+        nextStep: { action: string; command: string[] };
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "work",
+    "--agent",
+    workerResumeInspectionAgent.agent.id,
+    "--resume-stopped",
+    "--no-bootstrap",
+    "--limit",
+    "1",
+  ]);
+  const inspectedPickup = workerResumeInspection.processed.find((item) => item.runId === workerResumeInspectionPlan.run.id);
+  assert.ok(inspectedPickup);
+  assert.equal(inspectedPickup.resumeInspection?.recovery.ready, true);
+  assert.equal(inspectedPickup.resumeInspection?.recovery.reason, "stopped_branch_without_result_commit");
+  assert.equal(inspectedPickup.resumeInspection?.nextStep.action, "resume_branch");
+  assert.equal(inspectedPickup.resumeInspection?.nextStep.command.join(" "), `npm run cli -- runs resume-branch ${workerResumeInspectionPlan.run.id}`);
   const apiResumeResponse = await app.inject({
     method: "POST",
     url: `/api/runs/${apiResumePlan.run.id}/resume-branch`,

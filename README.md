@@ -544,8 +544,12 @@ worker sessions. Add `--recover` to
 requeue unfinished running runs that no longer have a running sandbox before
 the worker claims new work. Add `--resume-stopped` to include stopped unfinished
 runs in the worker queue; those branches are bootstrapped by default unless
-`--no-bootstrap` is also passed. A worker only resumes stopped branches that are
-unassigned or already claimed by that worker id; use `--recover --include-stopped`
+`--no-bootstrap` is also passed. Before a worker picks up a stopped branch, it
+calls the same server-backed resume inspection used by
+`runs resume-branch --inspect`, includes that readiness payload in the processed
+row, and skips the branch with the server-provided reason if it is not ready.
+A worker only resumes stopped branches that are unassigned or already claimed by
+that worker id; use `--recover --include-stopped`
 when an operator needs to reclaim stopped branches first. Add `--worker-id` so
 claim and requeue lifecycle messages show which CLI worker touched a run;
 claimed runs also expose `worker_id` in run status/list/monitor responses. Add

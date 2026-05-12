@@ -5600,6 +5600,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       idlePasses = 0;
       const results = await mapConcurrent(work, concurrency, async (run) => {
         let agentId = run.agent_id;
+        let resumeInspection: {
+          recovery: { ready: boolean; reason: string };
+          nextStep: { action: string; command: string[] };
+        } | null = null;
         if (run.status === "planned") {
           const claimed = await requestJson("POST", `/api/runs/${encodeURIComponent(run.id)}/claim`, workerPayload, [409]) as {
             ok: boolean;
@@ -5614,6 +5618,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             };
           }
           agentId = claimed.run.agent_id;
+        }
+        if (run.status === "stopped") {
+          resumeInspection = await requestJson("GET", `/api/runs/${encodeURIComponent(run.id)}/resume-inspection`) as {
+            recovery: { ready: boolean; reason: string };
+            nextStep: { action: string; command: string[] };
+          };
+          if (!resumeInspection.recovery.ready) {
+            return {
+              agentId: run.agent_id,
+              runId: run.id,
+              skipped: resumeInspection.recovery.reason,
+              resumeInspection,
+            };
+          }
         }
         const sandboxed = await resumeRunSandbox(run.id, {
           bootstrap: options.bootstrap === "1" || (run.status === "stopped" && options["no-bootstrap"] !== "1"),
@@ -5652,6 +5670,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             status: status.run.status,
           },
           sandbox: sandboxed.sandbox,
+          ...(resumeInspection ? { resumeInspection } : {}),
           ...(sandboxed.bootstrap ? { bootstrap: sandboxed.bootstrap } : {}),
           ...(runtime ? { runtime } : {}),
           ...(booted ? { boot: booted } : {}),
