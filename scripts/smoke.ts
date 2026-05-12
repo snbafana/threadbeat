@@ -2930,6 +2930,7 @@ try {
           done: boolean;
           stoppedOnFailure: boolean;
           nextApplyId: string;
+          continueCommand: string[] | null;
         }>;
       };
     };
@@ -2947,6 +2948,7 @@ try {
   assert.equal(drainGroup.done, true);
   assert.equal(drainGroup.stoppedOnFailure, false);
   assert.equal(drainGroup.nextApplyId, `${drainPrefix}-003`);
+  assert.equal(drainGroup.continueCommand, null);
   const openDrainPrefix = "smoke-watch-drain-open";
   const openDrainApplyPath = path.join(path.dirname(sessionApplyResumed.applyPath), `${openDrainPrefix}-001.json`);
   await fs.writeFile(openDrainApplyPath, `${JSON.stringify({
@@ -2972,6 +2974,53 @@ try {
       output: {},
     }],
   }, null, 2)}\n`);
+  const openDrainSummary = await cliJson<{
+    summary: {
+      groups: {
+        drainPrefixes: Array<{
+          prefix: string;
+          done: boolean;
+          stoppedOnFailure: boolean;
+          nextApplyId: string;
+          continueCommand: string[] | null;
+        }>;
+      };
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--summary"]);
+  const openDrainGroup = openDrainSummary.summary.groups.drainPrefixes.find((group) => group.prefix === openDrainPrefix);
+  assert.ok(openDrainGroup);
+  assert.equal(openDrainGroup.done, false);
+  assert.equal(openDrainGroup.stoppedOnFailure, false);
+  assert.equal(openDrainGroup.nextApplyId, `${openDrainPrefix}-002`);
+  assert.ok(openDrainGroup.continueCommand);
+  assert.deepEqual(openDrainGroup.continueCommand, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "watch",
+    "--action",
+    "retry_failed",
+    "--limit",
+    "1",
+    "--continue-prefix",
+    openDrainPrefix,
+    "--until-empty",
+  ]);
+  const openDrainShell = await cliRaw(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--summary-group",
+    "drain-prefixes",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(openDrainShell.stdout.trim().split("\n").includes(openDrainGroup.continueCommand.join(" ")));
   const retryWatchApplyDrainContinuePreview = await cliJson<{
     source: string;
     dryRun: boolean;

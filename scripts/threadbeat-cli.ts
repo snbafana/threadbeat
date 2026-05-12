@@ -3185,8 +3185,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       resumeFilter: options.resume === "1" ? [...resumeFilter] : [],
       filter: {
         ...(queue.filter ?? {}),
+        ...(actionFilter ? { action: [...actionFilter] } : {}),
+        ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+        ...(options["include-stopped"] === "1" ? { includeStopped: true } : {}),
+        ...(options.status ? { status: parseList(options.status) } : {}),
         ...(runFilter ? { run: [...runFilter] } : {}),
         ...(limit ? { limit } : {}),
+        ...(options["checkout-dir"] ? { checkoutDir: options["checkout-dir"] } : {}),
+        ...(options["changed-only"] === "1" ? { changedOnly: true } : {}),
+        ...(options["changed-path"] ? { changedPath: parseList(options["changed-path"]) } : {}),
       },
       selected: selectedCommands.length,
       skippedCompleted,
@@ -3255,8 +3262,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       options["summary-group"]
       && options["summary-group"] !== "resume-needed"
       && options["summary-group"] !== "ready-to-review"
+      && options["summary-group"] !== "drain-prefixes"
     ) {
-      throw new Error("runs session-applies --summary-group must be resume-needed or ready-to-review");
+      throw new Error("runs session-applies --summary-group must be resume-needed, ready-to-review, or drain-prefixes");
     }
     if (options["summary-group"] && options["ready-results"] === "1") {
       throw new Error("runs session-applies --summary-group cannot be combined with --ready-results");
@@ -3313,6 +3321,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const records = await listSessionApplyRecords(requiredSessionName);
     if (outputFormat === "shell") {
+      if (options["summary-group"] === "drain-prefixes") {
+        const applies = records.map((record) => summarizeSessionApplyRecord(record));
+        for (const drain of summarizeSessionApplies(applies).groups.drainPrefixes) {
+          if (drain.continueCommand) console.log(drain.continueCommand.map(shellArg).join(" "));
+        }
+        return;
+      }
       const runStatusIndex = (
         options["ready-results"] === "1"
         || options["action-queue"] === "1"
@@ -4942,6 +4957,7 @@ type SessionApplySummary = {
   applyId: string;
   applyPath: string;
   source?: string;
+  filter: Record<string, unknown>;
   observedAt: string;
   startedAt: string;
   updatedAt: string;
@@ -5206,6 +5222,7 @@ function summarizeSessionApplyRecord(
     applyId: record.applyId,
     applyPath: record.applyPath,
     source: record.source,
+    filter: record.filter,
     observedAt: record.observedAt,
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
@@ -5379,6 +5396,7 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
       done: boolean;
       stoppedOnFailure: boolean;
       nextApplyId: string;
+      continueCommand: string[] | null;
     }>;
   };
 } {
@@ -5442,6 +5460,7 @@ function summarizeSessionApplyDrainPrefixes(applies: SessionApplySummary[]): Arr
   done: boolean;
   stoppedOnFailure: boolean;
   nextApplyId: string;
+  continueCommand: string[] | null;
 }> {
   const groups = new Map<string, Array<SessionApplySummary & { drainPoll: number }>>();
   for (const apply of applies) {
@@ -5456,7 +5475,10 @@ function summarizeSessionApplyDrainPrefixes(applies: SessionApplySummary[]): Arr
     .map(([prefix, entries]) => {
       const ordered = entries.sort((left, right) => left.drainPoll - right.drainPoll);
       const latest = ordered.reduce((left, right) => left.updatedAt >= right.updatedAt ? left : right);
+      const lastPollEntry = ordered.at(-1) as SessionApplySummary & { drainPoll: number };
       const nextPoll = Math.max(...ordered.map((entry) => entry.drainPoll)) + 1;
+      const done = ordered.some((entry) => entry.selected === 0);
+      const stoppedOnFailure = ordered.some((entry) => entry.failed > 0);
       return {
         prefix,
         polls: ordered.length,
@@ -5467,12 +5489,35 @@ function summarizeSessionApplyDrainPrefixes(applies: SessionApplySummary[]): Arr
         succeeded: ordered.reduce((sum, entry) => sum + entry.succeeded, 0),
         failed: ordered.reduce((sum, entry) => sum + entry.failed, 0),
         pending: ordered.reduce((sum, entry) => sum + entry.pending, 0),
-        done: ordered.some((entry) => entry.selected === 0),
-        stoppedOnFailure: ordered.some((entry) => entry.failed > 0),
+        done,
+        stoppedOnFailure,
         nextApplyId: `${prefix}-${String(nextPoll).padStart(3, "0")}`,
+        continueCommand: done || stoppedOnFailure ? null : sessionApplyDrainContinueCommand(prefix, lastPollEntry),
       };
     })
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function sessionApplyDrainContinueCommand(prefix: string, latest: SessionApplySummary): string[] | null {
+  if (latest.source !== "watch") return null;
+  const applyIdIndex = latest.actions.resumeApply.indexOf("--apply-id");
+  if (applyIdIndex < 0) return null;
+  const command = latest.actions.resumeApply.slice(0, applyIdIndex);
+  if (!command.includes("--action") && !command.includes("--branch-action")) return null;
+  if (latest.filter.includeStopped === true) command.push("--include-stopped");
+  const status = stringListFromUnknown(latest.filter.status);
+  if (status.length > 0) command.push("--status", status.join(","));
+  const run = stringListFromUnknown(latest.filter.run);
+  if (run.length > 0) command.push("--run", run.join(","));
+  if (typeof latest.filter.limit === "string" || typeof latest.filter.limit === "number") {
+    command.push("--limit", String(latest.filter.limit));
+  }
+  if (typeof latest.filter.checkoutDir === "string") command.push("--checkout-dir", latest.filter.checkoutDir);
+  if (latest.filter.changedOnly === true) command.push("--changed-only");
+  const changedPath = stringListFromUnknown(latest.filter.changedPath);
+  if (changedPath.length > 0) command.push("--changed-path", changedPath.join(","));
+  command.push("--continue-prefix", prefix, "--until-empty");
+  return command;
 }
 
 function sessionApplyCommandStates(record: SessionApplyRecord | null): Map<string, { succeeded: boolean; failed: boolean }> {
@@ -5910,7 +5955,7 @@ Commands:
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
-  runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

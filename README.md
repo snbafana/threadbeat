@@ -283,6 +283,7 @@ npm run cli -- runs session-applies overnight --action-queue --format shell
 npm run cli -- runs session-applies overnight --action-queue --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-applies overnight --summary-group resume-needed --format shell
 npm run cli -- runs session-applies overnight --summary-group ready-to-review --format shell --checkout-dir ./checkouts/overnight-results --changed-only
+npm run cli -- runs session-applies overnight --summary-group drain-prefixes --format shell
 npm run cli -- runs session-applies overnight --ready-results --format shell
 npm run cli -- runs session-applies overnight --ready-results --format shell --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
@@ -584,6 +585,8 @@ result review. Add
 commands for apply records that still need execution, or
 `--summary-group ready-to-review --format shell` to print only review-ready
 result commands from apply records whose affected runs now have result commits.
+Use `--summary-group drain-prefixes --format shell` to print only incomplete
+watch-drain continuation commands.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a
