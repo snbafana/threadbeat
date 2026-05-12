@@ -571,9 +571,11 @@ started, or both. Use `runs session-applies <name>` to list those apply records,
 or `--apply-id <id>` to inspect the failed executions, pending commands,
 affected runs, exact resume commands, and branch-native inspect/checkout/review
 commands for one recorded apply. Add `--summary` to group recorded applies into
-resume-needed, ready-to-review, and waiting buckets. Add `--action-queue` for a
-compact JSON preview of the next actionable command per apply record, or
-`--action-queue --format shell` to print that queue as runnable commands. The
+resume-needed, ready-to-review, waiting, and watch-drain prefix buckets. Drain
+prefix summaries report poll apply IDs, whether the drain reached an empty
+queue, and the next apply ID that would continue the same prefix. Add
+`--action-queue` for a compact JSON preview of the next actionable command per
+apply record, or `--action-queue --format shell` to print that queue as runnable commands. The
 queue prioritizes retry/resume commands before result-review commands; pass
 `--checkout-dir`, `--changed-only`, or `--changed-path` through when it includes
 result review. Add

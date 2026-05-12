@@ -2866,6 +2866,87 @@ try {
     && action.resultRuns.length === 0
     && action.command.join(" ") === retryInspection.summary.actions.retryFailed.join(" ")
   )));
+  const drainPrefix = "smoke-watch-drain";
+  const drainApplyOnePath = path.join(path.dirname(sessionApplyResumed.applyPath), `${drainPrefix}-001.json`);
+  const drainApplyTwoPath = path.join(path.dirname(sessionApplyResumed.applyPath), `${drainPrefix}-002.json`);
+  const drainCommand = {
+    scope: "apply",
+    action: "retry_failed",
+    reason: "session_apply_failed_commands",
+    command: retryInspection.summary.actions.retryFailed,
+  };
+  await fs.writeFile(drainApplyOnePath, `${JSON.stringify({
+    observedAt: "2026-01-01T00:00:02.000Z",
+    session: detachedWorkerSessionName,
+    source: "watch",
+    applyId: `${drainPrefix}-001`,
+    applyPath: drainApplyOnePath,
+    dryRun: false,
+    resume: false,
+    filter: { action: ["retry_failed"], limit: 1 },
+    selected: 1,
+    skippedCompleted: 0,
+    commands: [drainCommand],
+    startedAt: "2026-01-01T00:00:02.000Z",
+    updatedAt: "2026-01-01T00:00:03.000Z",
+    executions: [{
+      ...drainCommand,
+      runId: null,
+      exitCode: 0,
+      stdout: "{}",
+      stderr: "",
+      output: {},
+    }],
+  }, null, 2)}\n`);
+  await fs.writeFile(drainApplyTwoPath, `${JSON.stringify({
+    observedAt: "2026-01-01T00:00:04.000Z",
+    session: detachedWorkerSessionName,
+    source: "watch",
+    applyId: `${drainPrefix}-002`,
+    applyPath: drainApplyTwoPath,
+    dryRun: false,
+    resume: false,
+    filter: { action: ["retry_failed"], limit: 1 },
+    selected: 0,
+    skippedCompleted: 0,
+    commands: [],
+    startedAt: "2026-01-01T00:00:04.000Z",
+    updatedAt: "2026-01-01T00:00:05.000Z",
+    executions: [],
+  }, null, 2)}\n`);
+  const drainSummary = await cliJson<{
+    summary: {
+      counts: { drainPrefixes: number };
+      groups: {
+        drainPrefixes: Array<{
+          prefix: string;
+          polls: number;
+          applyIds: string[];
+          latestApplyId: string;
+          selected: number;
+          succeeded: number;
+          failed: number;
+          pending: number;
+          done: boolean;
+          stoppedOnFailure: boolean;
+          nextApplyId: string;
+        }>;
+      };
+    };
+  }>(baseUrl, ["runs", "session-applies", detachedWorkerSessionName, "--summary"]);
+  const drainGroup = drainSummary.summary.groups.drainPrefixes.find((group) => group.prefix === drainPrefix);
+  assert.ok(drainSummary.summary.counts.drainPrefixes >= 1);
+  assert.ok(drainGroup);
+  assert.equal(drainGroup.polls, 2);
+  assert.deepEqual(drainGroup.applyIds, [`${drainPrefix}-001`, `${drainPrefix}-002`]);
+  assert.equal(drainGroup.latestApplyId, `${drainPrefix}-002`);
+  assert.equal(drainGroup.selected, 1);
+  assert.equal(drainGroup.succeeded, 1);
+  assert.equal(drainGroup.failed, 0);
+  assert.equal(drainGroup.pending, 0);
+  assert.equal(drainGroup.done, true);
+  assert.equal(drainGroup.stoppedOnFailure, false);
+  assert.equal(drainGroup.nextApplyId, `${drainPrefix}-003`);
   const retryWatchActionQueue = await cliJson<{
     summary: { applyActions: number; applyResumeNeeded: number; applyReadyToReview: number };
     actionQueue: {

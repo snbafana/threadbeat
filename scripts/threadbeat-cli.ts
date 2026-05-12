@@ -4913,6 +4913,7 @@ type SessionApplyRunStatus = {
 type SessionApplySummary = {
   applyId: string;
   applyPath: string;
+  source?: string;
   observedAt: string;
   startedAt: string;
   updatedAt: string;
@@ -5176,6 +5177,7 @@ function summarizeSessionApplyRecord(
   return {
     applyId: record.applyId,
     applyPath: record.applyPath,
+    source: record.source,
     observedAt: record.observedAt,
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
@@ -5328,6 +5330,7 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
     resumeNeeded: number;
     readyToReview: number;
     waiting: number;
+    drainPrefixes: number;
     failed: number;
     pending: number;
   };
@@ -5335,6 +5338,20 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
     resumeNeeded: Array<Pick<SessionApplySummary, "applyId" | "failed" | "pending" | "selected"> & { command: string[] }>;
     readyToReview: Array<Pick<SessionApplySummary, "applyId" | "selected"> & { resultRuns: string[]; command: string[] }>;
     waiting: Array<Pick<SessionApplySummary, "applyId" | "selected"> & { affectedRuns: number }>;
+    drainPrefixes: Array<{
+      prefix: string;
+      polls: number;
+      applyIds: string[];
+      latestApplyId: string;
+      updatedAt: string;
+      selected: number;
+      succeeded: number;
+      failed: number;
+      pending: number;
+      done: boolean;
+      stoppedOnFailure: boolean;
+      nextApplyId: string;
+    }>;
   };
 } {
   const resumeNeeded = applies
@@ -5363,17 +5380,71 @@ function summarizeSessionApplies(applies: SessionApplySummary[]): {
       selected: apply.selected,
       affectedRuns: apply.affectedRuns.length,
     }));
+  const drainPrefixes = summarizeSessionApplyDrainPrefixes(applies);
   return {
     counts: {
       total: applies.length,
       resumeNeeded: resumeNeeded.length,
       readyToReview: readyToReview.length,
       waiting: waiting.length,
+      drainPrefixes: drainPrefixes.length,
       failed: applies.reduce((sum, apply) => sum + apply.failed, 0),
       pending: applies.reduce((sum, apply) => sum + apply.pending, 0),
     },
-    groups: { resumeNeeded, readyToReview, waiting },
+    groups: { resumeNeeded, readyToReview, waiting, drainPrefixes },
   };
+}
+
+function sessionApplyDrainParts(applyId: string): { prefix: string; poll: number } | null {
+  const match = /^(.*)-(\d{3})$/.exec(applyId);
+  if (!match) return null;
+  return { prefix: match[1], poll: Number(match[2]) };
+}
+
+function summarizeSessionApplyDrainPrefixes(applies: SessionApplySummary[]): Array<{
+  prefix: string;
+  polls: number;
+  applyIds: string[];
+  latestApplyId: string;
+  updatedAt: string;
+  selected: number;
+  succeeded: number;
+  failed: number;
+  pending: number;
+  done: boolean;
+  stoppedOnFailure: boolean;
+  nextApplyId: string;
+}> {
+  const groups = new Map<string, Array<SessionApplySummary & { drainPoll: number }>>();
+  for (const apply of applies) {
+    if (apply.source !== "watch") continue;
+    const parts = sessionApplyDrainParts(apply.applyId);
+    if (!parts) continue;
+    const entries = groups.get(parts.prefix) ?? [];
+    entries.push({ ...apply, drainPoll: parts.poll });
+    groups.set(parts.prefix, entries);
+  }
+  return [...groups.entries()]
+    .map(([prefix, entries]) => {
+      const ordered = entries.sort((left, right) => left.drainPoll - right.drainPoll);
+      const latest = ordered.reduce((left, right) => left.updatedAt >= right.updatedAt ? left : right);
+      const nextPoll = Math.max(...ordered.map((entry) => entry.drainPoll)) + 1;
+      return {
+        prefix,
+        polls: ordered.length,
+        applyIds: ordered.map((entry) => entry.applyId),
+        latestApplyId: latest.applyId,
+        updatedAt: latest.updatedAt,
+        selected: ordered.reduce((sum, entry) => sum + entry.selected, 0),
+        succeeded: ordered.reduce((sum, entry) => sum + entry.succeeded, 0),
+        failed: ordered.reduce((sum, entry) => sum + entry.failed, 0),
+        pending: ordered.reduce((sum, entry) => sum + entry.pending, 0),
+        done: ordered.some((entry) => entry.selected === 0),
+        stoppedOnFailure: ordered.some((entry) => entry.failed > 0),
+        nextApplyId: `${prefix}-${String(nextPoll).padStart(3, "0")}`,
+      };
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function sessionApplyCommandStates(record: SessionApplyRecord | null): Map<string, { succeeded: boolean; failed: boolean }> {
