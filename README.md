@@ -709,9 +709,9 @@ current status, result commit, worker location, and next branch action when the
 worker session is still available. Add
 `--action-queue` to `runs session-watch <name>` to include the same apply queue
 inside live watch snapshots; with `--next`, the compact watch summary includes
-apply action counts, including reset-audit apply counts, alongside worker and
-branch recovery counts, and generated result-review commands use the watch
-checkout directory. Add `--until-empty`
+apply action counts, including actionable, acknowledged, and total reset-audit
+apply counts, alongside worker and branch recovery counts, and generated
+result-review commands use the watch checkout directory. Add `--until-empty`
 with `--next` to keep polling until the watch queue has no recovery, branch
 resume, or apply actions left, or until `--max-polls` is reached; this is a
 bounded wait and does not execute queued commands. Add `--commands-only

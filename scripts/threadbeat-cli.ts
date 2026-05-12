@@ -4133,6 +4133,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             applyResumeNeeded: applyActionQueue?.counts.resumeNeeded ?? 0,
             applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
             applyResetAudits: applyActionQueue?.counts.resetAudits ?? 0,
+            applyResetAuditsAcknowledged: applyActionQueue?.counts.resetAuditsAcknowledged ?? 0,
+            applyResetAuditsTotal: applyActionQueue?.counts.resetAuditsTotal ?? 0,
             ...(applyActionFilter ? { filteredApplyActions: applyQueueActions.length } : {}),
           },
           checkoutDir: branchCheckoutDir,
@@ -6585,6 +6587,8 @@ function summarizeSessionApplyActionQueue(
     resumeNeeded: number;
     readyToReview: number;
     resetAudits: number;
+    resetAuditsAcknowledged: number;
+    resetAuditsTotal: number;
     waiting: number;
     failed: number;
     pending: number;
@@ -6683,6 +6687,10 @@ function summarizeSessionApplyActionQueue(
       resumeNeeded: actions.filter((action) => action.action === "retry_failed" || action.action === "resume_pending").length,
       readyToReview: actions.filter((action) => action.action === "review_ready_results").length,
       resetAudits: actions.filter((action) => action.action === "inspect_drain_continuation_resets").length,
+      resetAuditsAcknowledged: applies.filter((apply) => (
+        apply.drainContinuationResetExecutions.length > 0 && apply.resetAuditAcknowledgedAt
+      )).length,
+      resetAuditsTotal: applies.filter((apply) => apply.drainContinuationResetExecutions.length > 0).length,
       waiting: applies.length - actions.length,
       failed: applies.reduce((sum, apply) => sum + apply.failed, 0),
       pending: applies.reduce((sum, apply) => sum + apply.pending, 0),

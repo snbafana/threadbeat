@@ -4919,9 +4919,23 @@ try {
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].exitCode, 0);
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].failed, 0);
   const retryWatchActionQueue = await cliJson<{
-    summary: { applyActions: number; applyResumeNeeded: number; applyReadyToReview: number; applyResetAudits: number };
+    summary: {
+      applyActions: number;
+      applyResumeNeeded: number;
+      applyReadyToReview: number;
+      applyResetAudits: number;
+      applyResetAuditsAcknowledged: number;
+      applyResetAuditsTotal: number;
+    };
     actionQueue: {
-      counts: { actionable: number; resumeNeeded: number; readyToReview: number; resetAudits: number };
+      counts: {
+        actionable: number;
+        resumeNeeded: number;
+        readyToReview: number;
+        resetAudits: number;
+        resetAuditsAcknowledged: number;
+        resetAuditsTotal: number;
+      };
       actions: Array<{ applyId: string; action: string; command: string[] }>;
     };
   }>(baseUrl, [
@@ -4939,7 +4953,11 @@ try {
   assert.equal(retryWatchActionQueue.summary.applyResumeNeeded, retryWatchActionQueue.actionQueue.counts.resumeNeeded);
   assert.equal(retryWatchActionQueue.summary.applyReadyToReview, retryWatchActionQueue.actionQueue.counts.readyToReview);
   assert.equal(retryWatchActionQueue.summary.applyResetAudits, retryWatchActionQueue.actionQueue.counts.resetAudits);
+  assert.equal(retryWatchActionQueue.summary.applyResetAuditsAcknowledged, retryWatchActionQueue.actionQueue.counts.resetAuditsAcknowledged);
+  assert.equal(retryWatchActionQueue.summary.applyResetAuditsTotal, retryWatchActionQueue.actionQueue.counts.resetAuditsTotal);
   assert.ok(retryWatchActionQueue.summary.applyResetAudits >= 2);
+  assert.equal(retryWatchActionQueue.summary.applyResetAuditsAcknowledged, 0);
+  assert.equal(retryWatchActionQueue.summary.applyResetAuditsTotal, retryWatchActionQueue.summary.applyResetAudits);
   assert.ok(retryWatchActionQueue.actionQueue.actions.some((action) => (
     action.applyId === retryApplyId
     && action.action === "retry_failed"
@@ -5144,6 +5162,39 @@ try {
   const resetOnlyWatchAfterAckLines = resetOnlyWatchAfterAck.stdout.trim().split("\n").filter(Boolean);
   assert.ok(!resetOnlyWatchAfterAckLines.includes(failedResetInspectionCommand.join(" ")));
   assert.ok(resetOnlyWatchAfterAckLines.includes(runningResetInspectionCommand.join(" ")));
+  const resetOnlyWatchAfterAckSummary = await cliJson<{
+    summary: {
+      applyResetAudits: number;
+      applyResetAuditsAcknowledged: number;
+      applyResetAuditsTotal: number;
+      filteredApplyActions: number;
+    };
+    actionQueue: {
+      counts: { resetAudits: number; resetAuditsAcknowledged: number; resetAuditsTotal: number };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    detachedWorkerSessionName,
+    "--next",
+    "--action-queue",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(resetOnlyWatchAfterAckSummary.summary.applyResetAudits, resetOnlyWatchAfterAckSummary.actionQueue.counts.resetAudits);
+  assert.equal(resetOnlyWatchAfterAckSummary.summary.applyResetAuditsAcknowledged, resetOnlyWatchAfterAckSummary.actionQueue.counts.resetAuditsAcknowledged);
+  assert.equal(resetOnlyWatchAfterAckSummary.summary.applyResetAuditsTotal, resetOnlyWatchAfterAckSummary.actionQueue.counts.resetAuditsTotal);
+  assert.ok(resetOnlyWatchAfterAckSummary.summary.applyResetAudits >= 1);
+  assert.ok(resetOnlyWatchAfterAckSummary.summary.applyResetAuditsAcknowledged >= 1);
+  assert.equal(
+    resetOnlyWatchAfterAckSummary.summary.applyResetAuditsTotal,
+    resetOnlyWatchAfterAckSummary.summary.applyResetAudits + resetOnlyWatchAfterAckSummary.summary.applyResetAuditsAcknowledged,
+  );
+  assert.equal(resetOnlyWatchAfterAckSummary.summary.filteredApplyActions, resetOnlyWatchAfterAckSummary.summary.applyResetAudits);
   const resetSummaryGroupAfterAck = await cliRaw(baseUrl, [
     "runs",
     "session-applies",
