@@ -5930,6 +5930,32 @@ try {
   assert.equal(sessionResultSummary.totals.statuses.completed, 1);
   assert.equal(sessionResultSummary.totals.resultCommits, 1);
   assert.equal(sessionResultSummary.totals.resumableStopped, 0);
+  const limitedSessionResultSummary = await cliJson<{
+    filter: {
+      limit: number;
+      totalResultCommits: number;
+      visibleResultCommits: number;
+      totalResumableBranches: number;
+      visibleResumableBranches: number;
+      totalQueuedBranchActions: number;
+      visibleBranchActions: number;
+    };
+    totals: { resultCommits: number };
+    branchActions: Record<string, number>;
+    branchActionQueue: Array<{ action: string; runId: string; resultCommit: string | null }>;
+    resultCommits: Array<{ runId: string; resultCommit: string | null }>;
+  }>(baseUrl, ["runs", "session-summary", resultSummarySessionName, "--next", "--limit", "1"]);
+  assert.equal(limitedSessionResultSummary.filter.limit, 1);
+  assert.equal(limitedSessionResultSummary.filter.totalResultCommits, 1);
+  assert.equal(limitedSessionResultSummary.filter.visibleResultCommits, 1);
+  assert.equal(limitedSessionResultSummary.filter.totalResumableBranches, 0);
+  assert.equal(limitedSessionResultSummary.filter.visibleResumableBranches, 0);
+  assert.equal(limitedSessionResultSummary.filter.totalQueuedBranchActions, 1);
+  assert.equal(limitedSessionResultSummary.filter.visibleBranchActions, 1);
+  assert.equal(limitedSessionResultSummary.totals.resultCommits, 1);
+  assert.equal(limitedSessionResultSummary.branchActions.review_branch, 1);
+  assert.deepEqual(limitedSessionResultSummary.branchActionQueue.map((item) => item.runId), [cliWorkFinalizePlan.run.id]);
+  assert.deepEqual(limitedSessionResultSummary.resultCommits.map((item) => item.runId), [cliWorkFinalizePlan.run.id]);
   const resultApplyId = "smoke-result-apply-review";
   const resultApplyDir = path.join(".threadbeat", "worker-sessions", "apply", resultSummarySessionName);
   const resultApplyPath = path.join(resultApplyDir, `${resultApplyId}.json`);

@@ -2263,6 +2263,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const requiredSessionName = required(sessionName, "runs session-summary <session>");
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+    const rowLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
     const drainContinuationOlderThanMs = options["older-than-ms"]
       ? parsePositiveInteger(options["older-than-ms"], "--older-than-ms")
       : STALE_RUNNING_DRAIN_CONTINUATION_MS;
@@ -2492,19 +2493,33 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const branchActionQueue = branchActionFilter
         ? allBranchActionQueue.filter((item) => branchActionFilter.has(item.action))
         : allBranchActionQueue;
-      const branchActions = branchActionQueue.reduce((counts, item) => {
+      const limitedBranchActionQueue = rowLimit ? branchActionQueue.slice(0, rowLimit) : branchActionQueue;
+      const branchActions = limitedBranchActionQueue.reduce((counts, item) => {
         counts[item.action] = (counts[item.action] ?? 0) + 1;
         return counts;
       }, {} as Record<string, number>);
       const visibleResumableBranches = branchActionFilter && !branchActionFilter.has("resume_branch")
         ? []
-        : resumableBranches;
+        : rowLimit
+          ? resumableBranches.slice(0, rowLimit)
+          : resumableBranches;
       const visibleResultCommits = branchActionFilter && !branchActionFilter.has("review_branch")
         ? []
-        : resultCommits;
+        : rowLimit
+          ? resultCommits.slice(0, rowLimit)
+          : resultCommits;
       const filter = {
         ...(actionFilter ? { action: [...actionFilter] } : {}),
         ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+        ...(rowLimit ? {
+          limit: rowLimit,
+          totalResultCommits: resultCommits.length,
+          visibleResultCommits: visibleResultCommits.length,
+          totalResumableBranches: resumableBranches.length,
+          visibleResumableBranches: visibleResumableBranches.length,
+          totalQueuedBranchActions: branchActionQueue.length,
+          visibleBranchActions: limitedBranchActionQueue.length,
+        } : {}),
         ...(actionFilter || branchActionFilter ? {
           totalActions: allActionQueue.length,
           totalBranchActions: allBranchActionQueue.length,
@@ -2519,7 +2534,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...("count" in item ? { count: item.count } : {}),
           command: item.command,
         })),
-        ...branchActionQueue.map((item) => ({
+        ...limitedBranchActionQueue.map((item) => ({
           scope: "branch",
           session: item.session,
           action: item.action,
@@ -2566,7 +2581,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           nextActions,
           actionQueue,
           branchActions,
-          branchActionQueue,
+          branchActionQueue: limitedBranchActionQueue,
         } : {}),
         ...(options["commands-only"] === "1" ? { commands: commandQueue } : {}),
       };
@@ -6900,7 +6915,7 @@ Commands:
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
-  runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
+  runs session-summary <name> [--next] [--limit 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]

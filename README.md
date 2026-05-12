@@ -270,6 +270,7 @@ npm run cli -- runs session-status overnight
 npm run cli -- runs session-status overnight --recoverable --include-stopped --next --commands-only --format shell
 npm run cli -- runs session-summary overnight
 npm run cli -- runs session-summary overnight --next --max-polls 30 --interval-ms 10000
+npm run cli -- runs session-summary overnight --next --limit 20
 npm run cli -- runs session-summary overnight --next --older-than-ms 120000 --commands-only --format shell
 npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
@@ -573,7 +574,9 @@ command still performs the server-owned mutation.
 Add `--commands-only` with `--next` to emit only the runnable session and branch
 command queue, or `--format shell` to print copyable commands;
 use `--action <name>` or `--branch-action resume_branch|review_branch` to narrow
-that queue without mutating any branch.
+that queue without mutating any branch. Add `--limit <n>` to keep the
+per-session result/resume rows and branch command queue bounded while preserving
+exact total counts in the summary.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete
