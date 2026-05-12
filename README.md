@@ -288,6 +288,7 @@ npm run cli -- runs session-apply overnight --include-stopped --branch-action re
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --apply-id overnight-resume-1 --resume --resume-filter failed
 npm run cli -- runs session-applies overnight --apply-id overnight-resume-1
 npm run cli -- runs session-applies overnight --server --apply-id overnight-resume-1
+npm run cli -- runs session-applies overnight --server --action-queue
 npm run cli -- runs session-applies overnight --server --apply-id overnight-reset-1 --ack-reset-audit
 npm run cli -- runs session-applies overnight --summary
 npm run cli -- runs session-applies overnight --action-queue
@@ -657,9 +658,11 @@ exited cleanly in that recorded apply. Add `--resume-filter failed`, `pending`,
 or `failed,pending` to retry only the failed commands, only commands that never
 started, or both. Use `runs session-applies <name>` to list those apply records,
 `runs session-applies <name> --server` to inspect the same durable records
-through the server API, `runs session-applies <name> --server --apply-id <id>
---ack-reset-audit` to acknowledge a drain-continuation reset audit through the
-server API, or `--apply-id <id>` to inspect the failed executions, pending commands,
+through the server API, `runs session-applies <name> --server --action-queue`
+to read server-computed retry, resume, and reset-audit actions,
+`runs session-applies <name> --server --apply-id <id> --ack-reset-audit` to
+acknowledge a drain-continuation reset audit through the server API, or
+`--apply-id <id>` to inspect the failed executions, pending commands,
 affected runs, drain-continuation reset effects, exact resume commands, and
 branch-native inspect/checkout/review commands for one recorded apply. Add
 `--summary` to group recorded applies into resume-needed, ready-to-review,

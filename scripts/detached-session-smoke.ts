@@ -629,6 +629,33 @@ try {
   assert.equal(serverApplyRecords.applies[0].source, "status");
   assert.equal(serverApplyRecords.applies[0].executions[0].action, "reset_failed_drain_continuations");
   assert.equal(serverApplyRecords.applies[0].executions[0].exitCode, 0);
+  const serverApplyActionQueue = await cliJson<{
+    actionQueue: {
+      counts: { actionable: number; resetAudits: number; resetAuditsAcknowledged: number; resetAuditsTotal: number };
+      actions: Array<{ applyId: string; action: string; resetCount: number; command: string[]; ackCommand: string[] }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+  ]);
+  assert.equal(serverApplyActionQueue.actionQueue.counts.actionable, 1);
+  assert.equal(serverApplyActionQueue.actionQueue.counts.resetAudits, 1);
+  assert.equal(serverApplyActionQueue.actionQueue.counts.resetAuditsAcknowledged, 0);
+  assert.equal(serverApplyActionQueue.actionQueue.counts.resetAuditsTotal, 1);
+  assert.equal(serverApplyActionQueue.actionQueue.actions[0].applyId, "detached-session-api-backed-reset");
+  assert.equal(serverApplyActionQueue.actionQueue.actions[0].action, "inspect_drain_continuation_resets");
+  assert.equal(serverApplyActionQueue.actionQueue.actions[0].resetCount, 1);
+  assert.deepEqual(serverApplyActionQueue.actionQueue.actions[0].command, [
+    "npm", "run", "cli", "--", "runs", "session-applies", sessionName, "--server", "--apply-id", "detached-session-api-backed-reset",
+  ]);
+  assert.deepEqual(serverApplyActionQueue.actionQueue.actions[0].ackCommand, [
+    "npm", "run", "cli", "--", "runs", "session-applies", sessionName, "--server", "--apply-id", "detached-session-api-backed-reset", "--ack-reset-audit",
+  ]);
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;

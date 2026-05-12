@@ -48,6 +48,21 @@ type WorkerSessionApplyDrain = {
   continueCommand: string[] | null;
 };
 
+type WorkerSessionApplyAction = {
+  applyId: string;
+  source: string;
+  action: "retry_failed" | "resume_pending" | "inspect_drain_continuation_resets";
+  selected: number;
+  failed: number;
+  pending: number;
+  resetCount: number;
+  resetActions: Array<"reset_failed_drain_continuations" | "reset_running_drain_continuations">;
+  continuationIds: string[];
+  resetReasons: string[];
+  command: string[];
+  ackCommand?: string[];
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -188,6 +203,92 @@ export function summarizeWorkerSessionApplyRecords(records: SessionApplyRecord[]
       dryRun: records.filter((record) => record.dryRun === true).length,
     },
     applies,
+  };
+}
+
+export function summarizeWorkerSessionApplyActionQueue(records: SessionApplyRecord[]): {
+  counts: {
+    total: number;
+    actionable: number;
+    resumeNeeded: number;
+    resetAudits: number;
+    resetAuditsAcknowledged: number;
+    resetAuditsTotal: number;
+    waiting: number;
+    failed: number;
+    pending: number;
+  };
+  actions: WorkerSessionApplyAction[];
+} {
+  const actions: WorkerSessionApplyAction[] = [];
+  const applies = records.map((record) => ({ record, summary: summarizeApplyRecord(record) }));
+  for (const { record, summary } of applies) {
+    if (summary.failed > 0) {
+      actions.push({
+        applyId: record.applyId,
+        source: record.source,
+        action: "retry_failed",
+        selected: record.selected,
+        failed: summary.failed,
+        pending: summary.pending,
+        resetCount: 0,
+        resetActions: [],
+        continuationIds: [],
+        resetReasons: [],
+        command: sessionApplyResumeCommand(record, ["failed"]),
+      });
+      continue;
+    }
+    if (summary.pending > 0) {
+      actions.push({
+        applyId: record.applyId,
+        source: record.source,
+        action: "resume_pending",
+        selected: record.selected,
+        failed: summary.failed,
+        pending: summary.pending,
+        resetCount: 0,
+        resetActions: [],
+        continuationIds: [],
+        resetReasons: [],
+        command: sessionApplyResumeCommand(record, ["pending"]),
+      });
+      continue;
+    }
+    if (record.resetAuditAcknowledgedAt) continue;
+    const resetSummary = summarizeSessionApplyDrainContinuationResets(record);
+    if (resetSummary.resetActions.length === 0) continue;
+    actions.push({
+      applyId: record.applyId,
+      source: record.source,
+      action: "inspect_drain_continuation_resets",
+      selected: record.selected,
+      failed: summary.failed,
+      pending: summary.pending,
+      resetCount: resetSummary.resetCount,
+      resetActions: resetSummary.resetActions,
+      continuationIds: resetSummary.continuationIds,
+      resetReasons: resetSummary.resetReasons,
+      command: sessionApplyResetInspectionCommand(record),
+      ackCommand: sessionApplyResetAckCommand(record),
+    });
+  }
+  const resetAuditRecords = applies.filter(({ record }) => (
+    sessionApplyDrainContinuationResetExecutions(record).length > 0
+  ));
+  return {
+    counts: {
+      total: records.length,
+      actionable: actions.length,
+      resumeNeeded: actions.filter((action) => action.action === "retry_failed" || action.action === "resume_pending").length,
+      resetAudits: actions.filter((action) => action.action === "inspect_drain_continuation_resets").length,
+      resetAuditsAcknowledged: resetAuditRecords.filter(({ record }) => record.resetAuditAcknowledgedAt).length,
+      resetAuditsTotal: resetAuditRecords.length,
+      waiting: records.length - actions.length,
+      failed: applies.reduce((sum, apply) => sum + apply.summary.failed, 0),
+      pending: applies.reduce((sum, apply) => sum + apply.summary.pending, 0),
+    },
+    actions,
   };
 }
 
@@ -579,6 +680,40 @@ function sessionApplyDrainContinuationResetExecutions(record: SessionApplyRecord
     ));
 }
 
+function summarizeSessionApplyDrainContinuationResets(record: SessionApplyRecord): {
+  resetCount: number;
+  resetActions: Array<"reset_failed_drain_continuations" | "reset_running_drain_continuations">;
+  continuationIds: string[];
+  resetReasons: string[];
+} {
+  const executions = sessionApplyDrainContinuationResetExecutions(record);
+  const continuationIds = new Set<string>();
+  const resetReasons = new Set<string>();
+  let resetCount = 0;
+  for (const execution of executions) {
+    const output = plainRecord(execution.output);
+    resetCount += numberFromUnknown(output?.resetCount) ?? (execution.exitCode === 0 ? 1 : 0);
+    const continuations = Array.isArray(output?.continuations) ? output.continuations : [];
+    for (const item of continuations) {
+      const continuation = plainRecord(item);
+      const continuationId = stringFromUnknown(continuation?.continuationId);
+      const resetReason = stringFromUnknown(continuation?.resetReason);
+      if (continuationId) continuationIds.add(continuationId);
+      if (resetReason) resetReasons.add(resetReason);
+    }
+  }
+  return {
+    resetCount,
+    resetActions: [...new Set(executions
+      .map((execution) => execution.action)
+      .filter((action): action is "reset_failed_drain_continuations" | "reset_running_drain_continuations" => (
+        action === "reset_failed_drain_continuations" || action === "reset_running_drain_continuations"
+      )))],
+    continuationIds: [...continuationIds],
+    resetReasons: [...resetReasons],
+  };
+}
+
 function summarizeApplyRecord(record: SessionApplyRecord): {
   applyId: string;
   source: string;
@@ -647,7 +782,15 @@ function sessionApplyDrainContinueCommandWithOptions(
   ];
 }
 
-function sessionApplyResumeCommand(record: SessionApplyRecord): string[] {
+function sessionApplyResetInspectionCommand(record: SessionApplyRecord): string[] {
+  return ["npm", "run", "cli", "--", "runs", "session-applies", record.session, "--server", "--apply-id", record.applyId];
+}
+
+function sessionApplyResetAckCommand(record: SessionApplyRecord): string[] {
+  return [...sessionApplyResetInspectionCommand(record), "--ack-reset-audit"];
+}
+
+function sessionApplyResumeCommand(record: SessionApplyRecord, resumeFilter?: Array<"failed" | "pending">): string[] {
   const command = ["npm", "run", "cli", "--", "runs", "session-apply", record.session];
   if (record.source && record.source !== "review") command.push("--source", record.source);
   const branchAction = stringListFromUnknown(record.filter.branchAction);
@@ -670,6 +813,7 @@ function sessionApplyResumeCommand(record: SessionApplyRecord): string[] {
     command.push("--action", fallbackActions.join(","));
   }
   command.push("--apply-id", record.applyId, "--resume");
+  if (resumeFilter && resumeFilter.length > 0) command.push("--resume-filter", resumeFilter.join(","));
   return command;
 }
 
@@ -692,6 +836,24 @@ function commandKey(command: string[]): string {
 function stringListFromUnknown(value: unknown): string[] {
   if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
   return typeof value === "string" ? [value] : [];
+}
+
+function plainRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function numberFromUnknown(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 function workerSessionApplyDir(projectRoot: string, sessionName: string): string {

@@ -25,6 +25,7 @@ import {
   queueWorkerSessionDrainContinuations,
   resetFailedWorkerSessionDrainContinuationRecords,
   resetRunningWorkerSessionDrainContinuationRecords,
+  summarizeWorkerSessionApplyActionQueue,
   summarizeWorkerSessionApplyDrains,
   summarizeWorkerSessionApplyRecords,
 } from "./workerSessionDrains.js";
@@ -246,6 +247,32 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         filter: { applyIds, source: sourceFilter ? [...sourceFilter] : [], limit },
         summary: summarizeWorkerSessionApplyRecords(filtered),
         applies: filtered,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/apply-actions", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const applyIds = parseOptionalList(query.applyId);
+      const applyIdFilter = applyIds.length > 0 ? new Set(applyIds) : null;
+      const sourceFilter = query.source ? new Set(parseOptionalList(query.source)) : null;
+      const limit = parseOptionalInteger(query.limit) ?? null;
+      const records = await listWorkerSessionApplyRecords(settings.projectRoot, name);
+      const filtered = records
+        .filter((record) => !applyIdFilter || applyIdFilter.has(record.applyId))
+        .filter((record) => !sourceFilter || sourceFilter.has(record.source))
+        .slice(0, limit ?? undefined);
+      return {
+        ok: true,
+        session: name,
+        count: records.length,
+        returned: filtered.length,
+        filter: { applyIds, source: sourceFilter ? [...sourceFilter] : [], limit },
+        actionQueue: summarizeWorkerSessionApplyActionQueue(filtered),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

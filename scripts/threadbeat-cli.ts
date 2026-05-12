@@ -3681,9 +3681,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ));
         return;
       }
+      if (options["action-queue"] === "1") {
+        await printJson(await fetchWorkerSessionApplyActions(requiredSessionName, {
+          applyId: options["apply-id"],
+          source: options.source,
+          limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+        }));
+        return;
+      }
       if (
         options.summary === "1"
-        || options["action-queue"] === "1"
         || options["summary-group"]
         || options["ready-results"] === "1"
         || options["continue-drains"] === "1"
@@ -5466,6 +5473,41 @@ type WorkerSessionApplyResetAuditAckResponse = {
   record: SessionApplyRecord;
 };
 
+type WorkerSessionApplyActionsResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  returned: number;
+  filter: Record<string, unknown>;
+  actionQueue: {
+    counts: {
+      total: number;
+      actionable: number;
+      resumeNeeded: number;
+      resetAudits: number;
+      resetAuditsAcknowledged: number;
+      resetAuditsTotal: number;
+      waiting: number;
+      failed: number;
+      pending: number;
+    };
+    actions: Array<{
+      applyId: string;
+      source: string;
+      action: "retry_failed" | "resume_pending" | "inspect_drain_continuation_resets";
+      selected: number;
+      failed: number;
+      pending: number;
+      resetCount: number;
+      resetActions: Array<"reset_failed_drain_continuations" | "reset_running_drain_continuations">;
+      continuationIds: string[];
+      resetReasons: string[];
+      command: string[];
+      ackCommand?: string[];
+    }>;
+  };
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -5585,6 +5627,20 @@ async function acknowledgeWorkerSessionApplyResetAudit(
     `/api/worker-sessions/${encodeURIComponent(sessionName)}/applies/${encodeURIComponent(applyId)}/reset-audit/ack`,
     { dryRun: options.dryRun },
   ) as WorkerSessionApplyResetAuditAckResponse;
+}
+
+async function fetchWorkerSessionApplyActions(
+  sessionName: string,
+  options: { applyId?: string; source?: string; limit?: number | null },
+): Promise<WorkerSessionApplyActionsResponse> {
+  const params = new URLSearchParams();
+  if (options.applyId) params.set("applyId", options.applyId);
+  if (options.source) params.set("source", options.source);
+  if (options.limit) params.set("limit", String(options.limit));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-actions`, params),
+  ) as WorkerSessionApplyActionsResponse;
 }
 
 async function queueWorkerSessionDrainContinuations(
