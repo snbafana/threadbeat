@@ -3332,13 +3332,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       });
       return;
     }
-    const records = await listSessionApplyRecords(requiredSessionName);
     if (options["continue-drains"] === "1") {
-      const applies = records.map((record) => summarizeSessionApplyRecord(record));
-      const prefixFilter = options["drain-prefix"] ? new Set(parseList(options["drain-prefix"])) : null;
-      const drains = summarizeSessionApplies(applies).groups.drainPrefixes
-        .filter((drain) => drain.continueCommand)
-        .filter((drain) => !prefixFilter || prefixFilter.has(drain.prefix));
+      const readiness = await fetchWorkerSessionApplyDrains(requiredSessionName, options["drain-prefix"]);
+      const drains = readiness.drains.filter((drain) => drain.continueCommand);
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
       const intervalMs = options["interval-ms"] ? parsePositiveInteger(options["interval-ms"], "--interval-ms") : null;
       const commands = drains.map((drain) => ({
@@ -3367,6 +3363,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await printJson({
         observedAt: new Date().toISOString(),
         session: requiredSessionName,
+        readinessSource: "server",
+        readinessCounts: readiness.counts,
         continueDrains: {
           dryRun: options["dry-run"] === "1",
           selected: commands.length,
@@ -3377,6 +3375,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       });
       return;
     }
+    const records = await listSessionApplyRecords(requiredSessionName);
     if (outputFormat === "shell") {
       if (options["summary-group"] === "drain-prefixes") {
         const applies = records.map((record) => summarizeSessionApplyRecord(record));
@@ -3426,14 +3425,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat !== "json" && outputFormat !== "shell") {
       throw new Error("--format must be json or shell");
     }
-    const params = new URLSearchParams();
-    if (options["drain-prefix"]) params.set("drainPrefix", options["drain-prefix"]);
-    const response = await requestJson(
-      "GET",
-      withQuery(`/api/worker-sessions/${encodeURIComponent(requiredSessionName)}/apply-drains`, params),
-    ) as {
-      drains: Array<{ continueCommand: string[] | null }>;
-    };
+    const response = await fetchWorkerSessionApplyDrains(requiredSessionName, options["drain-prefix"]);
     if (outputFormat === "shell") {
       for (const drain of response.drains) {
         if (drain.continueCommand) console.log(drain.continueCommand.map(shellArg).join(" "));
@@ -4731,6 +4723,32 @@ async function runCliWorker(args: string[]): Promise<{ exitCode: number | null; 
       resolve({ exitCode, stdout: stdout.trim(), stderr: stderr.trim() });
     });
   });
+}
+
+type WorkerSessionApplyDrainsResponse = {
+  counts: {
+    total: number;
+    needsContinuation: number;
+    done: number;
+    stoppedOnFailure: number;
+  };
+  drains: Array<{
+    prefix: string;
+    nextApplyId: string;
+    continueCommand: string[] | null;
+  }>;
+};
+
+async function fetchWorkerSessionApplyDrains(
+  sessionName: string,
+  drainPrefix?: string,
+): Promise<WorkerSessionApplyDrainsResponse> {
+  const params = new URLSearchParams();
+  if (drainPrefix) params.set("drainPrefix", drainPrefix);
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drains`, params),
+  ) as WorkerSessionApplyDrainsResponse;
 }
 
 async function git(args: string[], cwd = process.cwd()): Promise<string> {

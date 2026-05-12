@@ -3062,6 +3062,8 @@ try {
   ]);
   assert.equal(openDrainApiShell.stdout.trim(), openDrainGroup.continueCommand.join(" "));
   const openDrainContinueDrainsPreview = await cliJson<{
+    readinessSource: string;
+    readinessCounts: { total: number; needsContinuation: number; done: number; stoppedOnFailure: number };
     continueDrains: { dryRun: boolean; selected: number; succeeded: number; failed: number };
     drains: Array<{
       prefix: string;
@@ -3094,6 +3096,8 @@ try {
     succeeded: 1,
     failed: 0,
   });
+  assert.equal(openDrainContinueDrainsPreview.readinessSource, "server");
+  assert.deepEqual(openDrainContinueDrainsPreview.readinessCounts, openDrainApi.counts);
   assert.equal(openDrainContinueDrainsPreview.drains[0].prefix, openDrainPrefix);
   assert.equal(openDrainContinueDrainsPreview.drains[0].nextApplyId, `${openDrainPrefix}-002`);
   assert.deepEqual(openDrainContinueDrainsPreview.drains[0].command, [
