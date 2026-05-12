@@ -707,7 +707,11 @@ draining from the next recorded `<prefix>-NNN` apply ID; it refuses completed
 prefixes and prefixes that stopped on failed executions so the durable ledger
 stays explicit. Each drain poll records the nested apply selection's
 `unselectedQueueCommands` and `hasMore` values, which keeps bounded drains
-inspectable when `--limit` leaves additional commands for a later poll.
+inspectable when `--limit` leaves additional commands for a later poll. The
+top-level `untilEmpty` summary mirrors the last poll's `unselectedQueueCommands`
+and `hasMore`, and adds `stoppedReason` so operators can distinguish an empty
+queue, dry-run preview, failure, or exhausted `--max-polls` without inspecting
+every poll record.
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

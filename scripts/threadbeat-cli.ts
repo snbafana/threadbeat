@@ -3249,6 +3249,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         }
         if (poll < finalPoll) await sleep(intervalMs);
       }
+      const lastPoll = polls.at(-1) ?? null;
+      const stoppedReason = done
+        ? "empty"
+        : options["dry-run"] === "1"
+          ? "dry_run"
+          : lastPoll && (lastPoll.exitCode !== 0 || lastPoll.failed > 0)
+            ? "failed"
+            : polls.length >= maxPolls
+              ? "max_polls"
+              : "stopped";
       await printJson({
         observedAt: new Date().toISOString(),
         session: requiredSessionName,
@@ -3259,6 +3269,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         untilEmpty: {
           done,
           remaining,
+          unselectedQueueCommands: lastPoll?.unselectedQueueCommands ?? 0,
+          hasMore: lastPoll?.hasMore ?? false,
+          stoppedReason,
           polls: polls.length,
           startPoll,
           maxPolls,

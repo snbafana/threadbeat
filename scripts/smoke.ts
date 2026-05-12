@@ -4279,7 +4279,16 @@ try {
     dryRun: boolean;
     applyIdPrefix: string;
     continuePrefix: string;
-    untilEmpty: { done: boolean; remaining: number; polls: number; startPoll: number; maxPolls: number };
+    untilEmpty: {
+      done: boolean;
+      remaining: number;
+      unselectedQueueCommands: number;
+      hasMore: boolean;
+      stoppedReason: string;
+      polls: number;
+      startPoll: number;
+      maxPolls: number;
+    };
     polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; unselectedQueueCommands: number; hasMore: boolean; exitCode: number | null; failed: number }>;
   }>(baseUrl, [
     "runs",
@@ -4306,6 +4315,9 @@ try {
   assert.equal(retryWatchApplyDrainContinuePreview.continuePrefix, openDrainPrefix);
   assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.done, false);
   assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.remaining, 1);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.unselectedQueueCommands, 0);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.hasMore, false);
+  assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.stoppedReason, "dry_run");
   assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.polls, 1);
   assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.startPoll, 2);
   assert.equal(retryWatchApplyDrainContinuePreview.untilEmpty.maxPolls, 3);
@@ -4414,7 +4426,15 @@ try {
     source: string;
     dryRun: boolean;
     applyIdPrefix: string;
-    untilEmpty: { done: boolean; remaining: number; polls: number; maxPolls: number };
+    untilEmpty: {
+      done: boolean;
+      remaining: number;
+      unselectedQueueCommands: number;
+      hasMore: boolean;
+      stoppedReason: string;
+      polls: number;
+      maxPolls: number;
+    };
     polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; unselectedQueueCommands: number; hasMore: boolean; exitCode: number | null; failed: number }>;
   }>(baseUrl, [
     "runs",
@@ -4440,6 +4460,9 @@ try {
   assert.equal(retryWatchApplyDrainPreview.applyIdPrefix, "retry-watch-drain-preview");
   assert.equal(retryWatchApplyDrainPreview.untilEmpty.done, false);
   assert.equal(retryWatchApplyDrainPreview.untilEmpty.remaining, 1);
+  assert.equal(retryWatchApplyDrainPreview.untilEmpty.unselectedQueueCommands, 0);
+  assert.equal(retryWatchApplyDrainPreview.untilEmpty.hasMore, false);
+  assert.equal(retryWatchApplyDrainPreview.untilEmpty.stoppedReason, "dry_run");
   assert.equal(retryWatchApplyDrainPreview.untilEmpty.polls, 1);
   assert.equal(retryWatchApplyDrainPreview.untilEmpty.maxPolls, 3);
   assert.equal(retryWatchApplyDrainPreview.polls[0].applyId, "retry-watch-drain-preview-001");
