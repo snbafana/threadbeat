@@ -571,6 +571,61 @@ try {
   assert.equal(apiBackedApplyResume.executions[0].output.run?.status, "planned");
   assert.equal(apiBackedApplyResume.executions[0].output.run?.worker_id, null);
 
+  const branchSourceApplyPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session branch source apply resume",
+  ]);
+  await cliJson(baseUrl, ["runs", "claim", branchSourceApplyPlan.run.id, "--worker-id", "detached-smoke-worker-1"]);
+  await cliJson(baseUrl, ["runs", "stop", branchSourceApplyPlan.run.id]);
+  const branchSourceApply = await cliJson<{
+    session: string;
+    source: string;
+    applyId: string;
+    selected: number;
+    commands: Array<{ scope: string; action: string; runId?: string }>;
+    executions: Array<{
+      scope: string;
+      action: string;
+      runId: string | null;
+      exitCode: number | null;
+      output: { resumed?: { runId: string; branchName: string; status: string }; run?: { status: string; worker_id: string | null } };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    sessionName,
+    "--source",
+    "branches",
+    "--branch-action",
+    "resume_branch",
+    "--run",
+    branchSourceApplyPlan.run.id,
+    "--limit",
+    "1",
+    "--apply-id",
+    "detached-session-branch-source-apply",
+  ]);
+  assert.equal(branchSourceApply.session, sessionName);
+  assert.equal(branchSourceApply.source, "branches");
+  assert.equal(branchSourceApply.applyId, "detached-session-branch-source-apply");
+  assert.equal(branchSourceApply.selected, 1);
+  assert.equal(branchSourceApply.commands[0].scope, "branch");
+  assert.equal(branchSourceApply.commands[0].action, "resume_branch");
+  assert.equal(branchSourceApply.commands[0].runId, branchSourceApplyPlan.run.id);
+  assert.equal(branchSourceApply.executions[0].scope, "branch");
+  assert.equal(branchSourceApply.executions[0].action, "resume_branch");
+  assert.equal(branchSourceApply.executions[0].runId, branchSourceApplyPlan.run.id);
+  assert.equal(branchSourceApply.executions[0].exitCode, 0);
+  assert.equal(branchSourceApply.executions[0].output.resumed?.runId, branchSourceApplyPlan.run.id);
+  assert.equal(branchSourceApply.executions[0].output.resumed?.branchName, branchSourceApplyPlan.plan.branchName);
+  assert.equal(branchSourceApply.executions[0].output.resumed?.status, "planned");
+  assert.equal(branchSourceApply.executions[0].output.run?.status, "planned");
+  assert.equal(branchSourceApply.executions[0].output.run?.worker_id, null);
+
   const apiBackedResetContinuationId = "detached-api-backed-reset-failed";
   const apiBackedResetContinuationPath = await writeDrainContinuation(sessionName, apiBackedResetContinuationId, {
     status: "failed",

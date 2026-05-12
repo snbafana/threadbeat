@@ -661,6 +661,11 @@ applies do not shell out per branch. The same status source also accepts
 drain-continuation records before resuming work. Status-source drain resets use
 the server drain-continuation reset APIs directly, so bounded reset applies do
 not spawn a nested CLI command just to mutate continuation records.
+Use `--source branches --branch-action resume_branch` to apply directly from the
+server-backed `runs session-branches <name> --server --resumable` queue. This
+keeps branch-native resume execution tied to the durable worker-session branch
+readout while still writing the same apply ledger and calling
+`POST /api/worker-sessions/:name/resume-branches` once for the selected run ids.
 Each non-dry apply writes `.threadbeat/worker-sessions/apply/<session>/<apply-id>.json`;
 set `--apply-id <id>` and rerun with `--resume` to skip commands that already
 exited cleanly in that recorded apply. Add `--resume-filter failed`, `pending`,
