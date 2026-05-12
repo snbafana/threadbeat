@@ -3704,28 +3704,33 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           if (outputFormat !== "json") {
             throw new Error("runs session-applies --server --action-queue --execute-queued requires json output");
           }
-          if (options.detach === "1") {
-            const worker = await startDetachedApplyActionWorker(requiredSessionName, {
-              workerId: options["worker-id"],
-              applyId: options["apply-id"],
-              source: options.source,
-              action: options["apply-action"],
-              limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
-              maxActions: options["max-actions"] ? parsePositiveInteger(options["max-actions"], "--max-actions") : null,
-              stopOnFailure: options["continue-on-failure"] !== "1",
-            });
-            await printJson({ ok: true, session: requiredSessionName, worker });
-            return;
-          }
-          const response = await executeQueuedWorkerSessionApplyActions(requiredSessionName, {
+          const executeOptions = {
             applyId: options["apply-id"],
             source: options.source,
             action: options["apply-action"],
             limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
             maxActions: options["max-actions"] ? parsePositiveInteger(options["max-actions"], "--max-actions") : null,
             stopOnFailure: options["continue-on-failure"] !== "1",
-          });
-          if (response.executions.some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
+          };
+          if (options.detach === "1") {
+            const worker = await startDetachedApplyActionWorker(requiredSessionName, {
+              workerId: options["worker-id"],
+              ...executeOptions,
+              untilEmpty: options["until-empty"] === "1",
+              maxPolls: options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null,
+              intervalMs: options["interval-ms"] ? parsePositiveInteger(options["interval-ms"], "--interval-ms") : null,
+            });
+            await printJson({ ok: true, session: requiredSessionName, worker });
+            return;
+          }
+          const response = options["until-empty"] === "1"
+            ? await executeQueuedWorkerSessionApplyActionLoop(requiredSessionName, {
+              ...executeOptions,
+              maxPolls: options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null,
+              intervalMs: options["interval-ms"] ? parsePositiveInteger(options["interval-ms"], "--interval-ms") : null,
+            })
+            : await executeQueuedWorkerSessionApplyActions(requiredSessionName, executeOptions);
+          if (applyActionExecutionResponses(response).some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
           await printJson(response);
           return;
         }
@@ -5651,6 +5656,25 @@ type ExecuteQueuedWorkerSessionApplyActionsResponse = {
   }>;
 };
 
+type ExecuteQueuedWorkerSessionApplyActionsLoopResponse = {
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  executed: number;
+  failed: number;
+  maxPolls: number;
+  intervalMs: number;
+  stoppedReason: "empty" | "failed_action" | "max_polls" | "repeated_action";
+  remainingQueued: number;
+  repeatedActions: string[];
+  filter: Record<string, unknown>;
+  polls: Array<ExecuteQueuedWorkerSessionApplyActionsResponse & {
+    poll: number;
+    observedAt: string;
+  }>;
+};
+
 type WorkerSessionApplyActionExecutionRecord = {
   executionId: string;
   session: string;
@@ -5865,6 +5889,100 @@ async function executeQueuedWorkerSessionApplyActions(
       stopOnFailure: options.stopOnFailure,
     },
   ) as ExecuteQueuedWorkerSessionApplyActionsResponse;
+}
+
+async function executeQueuedWorkerSessionApplyActionLoop(
+  sessionName: string,
+  options: {
+    applyId?: string;
+    source?: string;
+    action?: string;
+    limit?: number | null;
+    maxActions?: number | null;
+    stopOnFailure: boolean;
+    maxPolls?: number | null;
+    intervalMs?: number | null;
+  },
+): Promise<ExecuteQueuedWorkerSessionApplyActionsLoopResponse> {
+  const observedAt = new Date().toISOString();
+  const maxPolls = options.maxPolls ?? 10;
+  const intervalMs = options.intervalMs ?? 2000;
+  const seenActionKeys = new Set<string>();
+  const polls: ExecuteQueuedWorkerSessionApplyActionsLoopResponse["polls"] = [];
+  let stoppedReason: ExecuteQueuedWorkerSessionApplyActionsLoopResponse["stoppedReason"] = "max_polls";
+  let repeatedActions: string[] = [];
+  let remainingQueued = 0;
+  for (let poll = 1; poll <= maxPolls; poll += 1) {
+    const response = await executeQueuedWorkerSessionApplyActions(sessionName, options);
+    polls.push({ ...response, poll, observedAt: new Date().toISOString() });
+    for (const execution of response.executions) {
+      seenActionKeys.add(workerSessionApplyActionKey(execution.action));
+    }
+    if (response.stoppedOnFailure) {
+      stoppedReason = "failed_action";
+      remainingQueued = response.remainingQueued;
+      break;
+    }
+    const nextQueue = await fetchWorkerSessionApplyActions(sessionName, {
+      applyId: options.applyId,
+      source: options.source,
+      limit: options.limit,
+    });
+    const nextActions = nextQueue.actionQueue.actions
+      .filter((action) => !options.action || action.action === options.action);
+    remainingQueued = nextActions.length;
+    if (nextActions.length === 0) {
+      stoppedReason = "empty";
+      break;
+    }
+    repeatedActions = nextActions
+      .map(workerSessionApplyActionKey)
+      .filter((key) => seenActionKeys.has(key));
+    if (repeatedActions.length > 0) {
+      stoppedReason = "repeated_action";
+      break;
+    }
+    if (poll < maxPolls) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+  const executions = applyActionExecutionResponses({ polls });
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    executed: executions.length,
+    failed: executions.filter((execution) => execution.exitCode !== 0).length,
+    maxPolls,
+    intervalMs,
+    stoppedReason,
+    remainingQueued,
+    repeatedActions,
+    filter: {
+      ...(options.applyId ? { applyId: options.applyId } : {}),
+      ...(options.source ? { source: options.source } : {}),
+      ...(options.action ? { action: options.action } : {}),
+      ...(options.limit ? { limit: options.limit } : {}),
+      ...(options.maxActions ? { maxActions: options.maxActions } : {}),
+      stopOnFailure: options.stopOnFailure,
+    },
+    polls,
+  };
+}
+
+function applyActionExecutionResponses(
+  response: ExecuteQueuedWorkerSessionApplyActionsResponse | { polls: ExecuteQueuedWorkerSessionApplyActionsLoopResponse["polls"] },
+): ExecuteQueuedWorkerSessionApplyActionsResponse["executions"] {
+  return "polls" in response
+    ? response.polls.flatMap((poll) => poll.executions)
+    : response.executions;
+}
+
+function workerSessionApplyActionKey(
+  action: WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number],
+): string {
+  return `${action.applyId}:${action.source}:${action.action}`;
 }
 
 async function queueWorkerSessionDrainContinuations(
@@ -6516,6 +6634,9 @@ async function startDetachedApplyActionWorker(
     limit?: number | null;
     maxActions?: number | null;
     stopOnFailure: boolean;
+    untilEmpty: boolean;
+    maxPolls?: number | null;
+    intervalMs?: number | null;
   },
 ): Promise<ApplyActionWorker & { alive: boolean }> {
   assertSafeSessionName(sessionName);
@@ -6542,6 +6663,9 @@ async function startDetachedApplyActionWorker(
     ...(options.limit ? ["--limit", String(options.limit)] : []),
     ...(options.maxActions ? ["--max-actions", String(options.maxActions)] : []),
     ...(options.stopOnFailure ? [] : ["--continue-on-failure"]),
+    ...(options.untilEmpty ? ["--until-empty"] : []),
+    ...(options.maxPolls ? ["--max-polls", String(options.maxPolls)] : []),
+    ...(options.intervalMs ? ["--interval-ms", String(options.intervalMs)] : []),
   ];
   const stdout = await fs.open(stdoutPath, "a");
   const stderr = await fs.open(stderrPath, "a");
@@ -8655,7 +8779,7 @@ Commands:
   runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
-  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--execute-next|--execute-queued] [--max-actions 10] [--continue-on-failure] [--detach] [--worker-id id] [--action-executions] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--execute-next|--execute-queued] [--max-actions 10] [--until-empty] [--max-polls 10] [--interval-ms 2000] [--continue-on-failure] [--detach] [--worker-id id] [--action-executions] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-drain-workers [name] [--worker-id id] [--include-retired] [--lines 20]

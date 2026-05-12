@@ -785,6 +785,52 @@ try {
     && execution.status === "executed"
     && execution.exitCode === 0
   )));
+  const serverExecutedApplyActionLoop = await cliJson<{
+    executed: number;
+    stoppedReason: string;
+    repeatedActions: string[];
+    polls: Array<{ executed: number }>;
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-queued",
+    "--until-empty",
+    "--max-polls",
+    "3",
+    "--interval-ms",
+    "1",
+    "--max-actions",
+    "1",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+  ]);
+  assert.equal(serverExecutedApplyActionLoop.executed, 1);
+  assert.equal(serverExecutedApplyActionLoop.stoppedReason, "repeated_action");
+  assert.deepEqual(serverExecutedApplyActionLoop.repeatedActions, [
+    "detached-session-api-backed-reset:status:inspect_drain_continuation_resets",
+  ]);
+  assert.equal(serverExecutedApplyActionLoop.polls.length, 1);
+  assert.equal(serverExecutedApplyActionLoop.polls[0]?.executed, 1);
+  const serverApplyActionExecutionsAfterLoop = await cliJson<{
+    count: number;
+    executions: Array<{ applyId: string; action: string; status: string; exitCode: number }>;
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-executions",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+  ]);
+  assert.equal(serverApplyActionExecutionsAfterLoop.count, 3);
   const applyActionWorker = await cliJson<{
     ok: true;
     worker: { workerId: string; alive: boolean; command: string[] };
@@ -804,6 +850,11 @@ try {
     "detached-session-api-backed-reset",
     "--apply-action",
     "inspect_drain_continuation_resets",
+    "--until-empty",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
   ]);
   assert.equal(applyActionWorker.ok, true);
   assert.equal(applyActionWorker.worker.workerId, "detached-smoke-apply-action-worker");
@@ -820,8 +871,13 @@ try {
     "inspect_drain_continuation_resets",
     "--max-actions",
     "1",
+    "--until-empty",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
   ]);
-  let serverApplyActionExecutionsAfterWorker = serverApplyActionExecutionsAfterBatch;
+  let serverApplyActionExecutionsAfterWorker = serverApplyActionExecutionsAfterLoop;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     serverApplyActionExecutionsAfterWorker = await cliJson<{
       count: number;
@@ -837,10 +893,10 @@ try {
       "--apply-action",
       "inspect_drain_continuation_resets",
     ]);
-    if (serverApplyActionExecutionsAfterWorker.count >= 3) break;
+    if (serverApplyActionExecutionsAfterWorker.count >= 4) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.ok(serverApplyActionExecutionsAfterWorker.count >= 3);
+  assert.ok(serverApplyActionExecutionsAfterWorker.count >= 4);
   const applyActionWorkers = await cliJson<{
     count: number;
     workers: Array<{ workerId: string; command: string[]; stdout: { path: string }; stderr: { path: string } }>;
