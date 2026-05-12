@@ -357,6 +357,55 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.get("/api/worker-sessions/:name/control-plane-status", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const lines = parseOptionalInteger(query.lines) ?? 5;
+      const [
+        applyRecords,
+        drainContinuations,
+        watchWorkers,
+        watchWorkerNextSteps,
+        applyActionWorkers,
+        applyActionWorkerNextSteps,
+      ] = await Promise.all([
+        listWorkerSessionApplyRecords(settings.projectRoot, name),
+        listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
+        listWorkerSessionWatchWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+        listWorkerSessionWatchWorkerNextSteps(settings.projectRoot, name),
+        listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+        listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
+      ]);
+      const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
+      return {
+        ok: true,
+        session: name,
+        workers: {
+          watch: summarizeControlPlaneWorkers(watchWorkers),
+          applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
+        },
+        queues: {
+          applyActions: applyActionQueue.counts,
+          drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
+        },
+        recovery: {
+          count: watchWorkerNextSteps.count + applyActionWorkerNextSteps.count,
+          actions: {
+            ...watchWorkerNextSteps.actions,
+            ...applyActionWorkerNextSteps.actions,
+          },
+          nextSteps: {
+            watchWorkers: watchWorkerNextSteps.nextSteps,
+            applyActionWorkers: applyActionWorkerNextSteps.nextSteps,
+          },
+        },
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/apply-action-workers/stop", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -1847,6 +1896,32 @@ const parseCommand = (value: unknown): string[] => {
   if (typeof value === "string" && value.trim()) return ["bash", "-lc", value.trim()];
   throw new Error("command must be a string or string[]");
 };
+
+const summarizeControlPlaneWorkers = <T extends { alive: boolean; retiredAt?: string; stoppedAt?: string }>(workers: T[]): {
+  total: number;
+  alive: number;
+  stopped: number;
+  retired: number;
+} => ({
+  total: workers.length,
+  alive: workers.filter((worker) => worker.alive).length,
+  stopped: workers.filter((worker) => !worker.alive && Boolean(worker.stoppedAt) && !worker.retiredAt).length,
+  retired: workers.filter((worker) => Boolean(worker.retiredAt)).length,
+});
+
+const summarizeDrainContinuationStatuses = <T extends { status?: string }>(records: T[]): {
+  total: number;
+  queued: number;
+  running: number;
+  executed: number;
+  failed: number;
+} => ({
+  total: records.length,
+  queued: records.filter((record) => (record.status ?? "queued") === "queued").length,
+  running: records.filter((record) => record.status === "running").length,
+  executed: records.filter((record) => record.status === "executed").length,
+  failed: records.filter((record) => record.status === "failed").length,
+});
 
 const cliCommandArgs = (command: string[]): string[] => {
   const prefix = ["npm", "run", "cli", "--"];

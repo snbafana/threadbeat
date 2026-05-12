@@ -4128,6 +4128,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-status") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-status requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneStatus(
+      required(sessionName, "runs session-control-plane-status <session> --server"),
+      { lines: parsePositiveInteger(options.lines ?? "5", "--lines") },
+    ));
+    return;
+  }
   if (subcommandName === "stop-apply-action-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -5967,6 +5979,71 @@ async function fetchWorkerSessionApplyActionWorkerNextSteps(
       };
     }>;
     actions: { restart_apply_action_worker: number };
+  };
+}
+
+async function fetchWorkerSessionControlPlaneStatus(
+  sessionName: string,
+  options: { lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  workers: {
+    watch: { total: number; alive: number; stopped: number; retired: number };
+    applyAction: { total: number; alive: number; stopped: number; retired: number };
+  };
+  queues: {
+    applyActions: {
+      total: number;
+      actionable: number;
+      resumeNeeded: number;
+      resetAudits: number;
+      resetAuditsAcknowledged: number;
+      resetAuditsTotal: number;
+      waiting: number;
+      failed: number;
+      pending: number;
+    };
+    drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
+  };
+  recovery: {
+    count: number;
+    actions: { restart_session_watch_worker: number; restart_apply_action_worker: number };
+    nextSteps: { watchWorkers: unknown[]; applyActionWorkers: unknown[] };
+  };
+}> {
+  return await requestJson(
+    "GET",
+    withQuery(
+      `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-status`,
+      new URLSearchParams({ lines: String(options.lines) }),
+    ),
+  ) as {
+    ok: true;
+    session: string;
+    workers: {
+      watch: { total: number; alive: number; stopped: number; retired: number };
+      applyAction: { total: number; alive: number; stopped: number; retired: number };
+    };
+    queues: {
+      applyActions: {
+        total: number;
+        actionable: number;
+        resumeNeeded: number;
+        resetAudits: number;
+        resetAuditsAcknowledged: number;
+        resetAuditsTotal: number;
+        waiting: number;
+        failed: number;
+        pending: number;
+      };
+      drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
+    };
+    recovery: {
+      count: number;
+      actions: { restart_session_watch_worker: number; restart_apply_action_worker: number };
+      nextSteps: { watchWorkers: unknown[]; applyActionWorkers: unknown[] };
+    };
   };
 }
 
@@ -9107,6 +9184,7 @@ Commands:
   runs restart-drain-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
+  runs session-control-plane-status <name> --server [--lines 5]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]

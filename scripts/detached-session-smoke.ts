@@ -1039,6 +1039,45 @@ try {
   assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.method, "POST");
   assert.match(applyActionWorkerNext.nextSteps[0]?.api.restart.url ?? "", /\/apply-action-workers\/restart$/);
   assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.payload.workerId, "detached-smoke-apply-action-worker");
+  const controlPlaneStatus = await cliJson<{
+    ok?: true;
+    session: string;
+    workers: {
+      applyAction: { total: number; stopped: number; retired: number };
+    };
+    queues: {
+      applyActions: { actionable: number; resetAudits: number };
+      drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
+    };
+    recovery: {
+      count: number;
+      actions: { restart_apply_action_worker: number };
+      nextSteps: { applyActionWorkers: Array<{ workerId: string; action: string }> };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(controlPlaneStatus.ok, true);
+  assert.equal(controlPlaneStatus.session, sessionName);
+  assert.equal(controlPlaneStatus.workers.applyAction.total, 1);
+  assert.equal(controlPlaneStatus.workers.applyAction.stopped, 1);
+  assert.equal(controlPlaneStatus.workers.applyAction.retired, 0);
+  assert.ok(controlPlaneStatus.queues.applyActions.actionable >= 1);
+  assert.ok(controlPlaneStatus.queues.applyActions.resetAudits >= 1);
+  assert.ok(controlPlaneStatus.queues.drainContinuations.total >= 1);
+  assert.ok(
+    controlPlaneStatus.queues.drainContinuations.queued
+      + controlPlaneStatus.queues.drainContinuations.running
+      + controlPlaneStatus.queues.drainContinuations.executed
+      + controlPlaneStatus.queues.drainContinuations.failed
+      <= controlPlaneStatus.queues.drainContinuations.total,
+  );
+  assert.equal(controlPlaneStatus.recovery.actions.restart_apply_action_worker, 1);
+  assert.equal(controlPlaneStatus.recovery.nextSteps.applyActionWorkers[0]?.workerId, "detached-smoke-apply-action-worker");
+  assert.equal(controlPlaneStatus.recovery.nextSteps.applyActionWorkers[0]?.action, "restart_apply_action_worker");
   const restartedApplyActionWorkers = await cliJson<{
     ok?: true;
     count: number;
