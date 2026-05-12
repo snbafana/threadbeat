@@ -589,6 +589,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const session = await readWorkerSession(settings.projectRoot, name);
       const dryRun = parseBoolean(body.dryRun, false);
       const workerIdFilter = parseOptionalString(body.workerId) ?? null;
+      const runIds = [
+        ...parseOptionalList(body.runIds),
+        ...parseOptionalList(body.runId),
+      ];
+      const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
+      const limit = parseOptionalInteger(body.limit) ?? null;
       const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
       if (workerIdFilter && !sessionWorkerIds.has(workerIdFilter)) {
         return reply.code(400).send({
@@ -602,9 +608,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         const runs = await db.listAgentRuns(agentId, ["stopped"]);
         return runs
           .filter((run) => run.result_commit === null)
+          .filter((run) => !runIdFilter || runIdFilter.has(run.id))
           .filter((run) => run.worker_id === null ? includeUnassigned : selectedWorkerIds.has(run.worker_id))
           .map((run) => ({ agentId, run }));
-      }))).flat();
+      }))).flat().slice(0, limit ?? undefined);
       const resumed = [];
       for (const { agentId, run } of candidates) {
         const item = {
@@ -636,7 +643,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           type: "agent_run_requeued",
           text: `Requeued run by ${workerIdFilter ?? session.session}`,
         });
-        resumed.push({ ...item, status: requeued.status, workerId: requeued.worker_id });
+        resumed.push({ ...item, status: requeued.status, workerId: requeued.worker_id, run: requeued });
       }
       const resumeSession = ["npm", "run", "cli", "--", "runs", "resume-session", session.session];
       if (workerIdFilter) resumeSession.push("--worker-id", workerIdFilter);
@@ -653,6 +660,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           ok: true,
           session: session.session,
           resumed,
+          filter: { dryRun, workerId: workerIdFilter, runIds, limit },
           actions,
           nextStep: {
             action: "resume_session",
@@ -710,6 +718,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         ok: true,
         session: session.session,
         resumed,
+        filter: { dryRun, workerId: workerIdFilter, runIds, limit },
         actions,
         nextStep: changedRuns > 0 && aliveWorkers > 0
           ? {

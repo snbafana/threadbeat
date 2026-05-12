@@ -456,7 +456,8 @@ Run planning is intentionally server-side and Pi-free for now:
   session resume path. It reads the durable worker-session record, resumes
   stopped branches without result commits that belong to the session workers
   (plus unassigned stopped branches when no `workerId` is supplied), and accepts
-  `{ "dryRun": true, "workerId": "..." }` for guarded previews.
+  `{ "dryRun": true, "workerId": "...", "runIds": ["..."], "limit": 1 }` for
+  guarded previews or bounded action-queue execution.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts. Repeated calls return
@@ -640,7 +641,9 @@ bounded operators can tell when a `--limit` pass intentionally left more work in
 the queue.
 Use `--source status --branch-action resume_branch` when the apply should come
 from the lighter `session-status --recoverable --next` queue instead of the
-full session review snapshot. The same status source also accepts
+full session review snapshot; that resume path is executed through
+`POST /api/worker-sessions/:name/resume-branches`, so bounded status-source
+applies do not shell out per branch. The same status source also accepts
 `--action reset_failed_drain_continuations` or
 `--action reset_running_drain_continuations` when the next step is to clear
 drain-continuation records before resuming work.

@@ -3446,6 +3446,72 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await printJson(responseBase);
       return;
     }
+    if (queueSource === "status" && branchActionFilter?.has("resume_branch") && !actionFilter && !applyActionFilter) {
+      await writeSessionApplyRecord({
+        ...responseBase,
+        startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        executions: existingApply?.executions ?? [],
+      });
+      const resumeRunIds = pendingCommands.map((item) => required(item.runId, "resume_branch runId"));
+      const resumeOutput = await requestJson("POST", `/api/worker-sessions/${encodeURIComponent(requiredSessionName)}/resume-branches`, {
+        runIds: resumeRunIds,
+        limit: resumeRunIds.length,
+      }) as {
+        resumed: Array<{
+          runId: string;
+          branchName: string;
+          objective: string;
+          resultCommit: string | null;
+          workerId: string | null;
+          status?: string;
+          skipped?: string;
+          run?: { status: string; worker_id: string | null };
+        }>;
+      };
+      const resumedByRunId = new Map(resumeOutput.resumed.map((item) => [item.runId, item]));
+      const executions = pendingCommands.map((item) => {
+        const runId = required(item.runId, "resume_branch runId");
+        const resumed = resumedByRunId.get(runId);
+        const failed = !resumed || Boolean(resumed.skipped);
+        const output = failed
+          ? { ok: false, error: resumed?.skipped ?? "run was not resumed" }
+          : {
+            ok: true,
+            resumed: {
+              runId: resumed.runId,
+              branchName: resumed.branchName,
+              objective: resumed.objective,
+              resultCommit: resumed.resultCommit,
+              workerId: resumed.workerId,
+              status: resumed.status,
+            },
+            run: resumed.run,
+          };
+        return {
+          scope: item.scope,
+          action: item.action,
+          reason: item.reason,
+          runId,
+          command: item.command,
+          exitCode: failed ? 1 : 0,
+          stdout: JSON.stringify(output),
+          stderr: failed ? String(output.error) : "",
+          output,
+        };
+      });
+      const allExecutions = [...(existingApply?.executions ?? []), ...executions];
+      const record = {
+        ...responseBase,
+        startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        executions: allExecutions,
+      };
+      await writeSessionApplyRecord(record);
+      if (executions.some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
+      await printJson({ ...record, executions: allExecutions });
+      return;
+    }
     await writeSessionApplyRecord({
       ...responseBase,
       startedAt: existingApply?.startedAt ?? new Date().toISOString(),

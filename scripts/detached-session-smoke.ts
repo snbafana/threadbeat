@@ -483,6 +483,62 @@ try {
     message.type === "agent_run_requeued" && message.text === "Requeued run by detached-smoke-worker-1"
   )));
 
+  const apiSessionApplyPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session api backed apply resume",
+  ]);
+  await cliJson(baseUrl, ["runs", "claim", apiSessionApplyPlan.run.id, "--worker-id", "detached-smoke-worker-1"]);
+  await cliJson(baseUrl, ["runs", "stop", apiSessionApplyPlan.run.id]);
+  const apiSessionApplyId = "detached-session-api-backed-apply";
+  const apiBackedApplyResume = await cliJson<{
+    session: string;
+    source: string;
+    applyId: string;
+    dryRun: boolean;
+    selected: number;
+    commands: Array<{ action: string; runId?: string }>;
+    executions: Array<{
+      action: string;
+      runId: string | null;
+      exitCode: number | null;
+      output: { resumed?: { runId: string; branchName: string; status: string }; run?: { status: string; worker_id: string | null } };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    sessionName,
+    "--source",
+    "status",
+    "--include-stopped",
+    "--branch-action",
+    "resume_branch",
+    "--run",
+    apiSessionApplyPlan.run.id,
+    "--limit",
+    "1",
+    "--apply-id",
+    apiSessionApplyId,
+  ]);
+  assert.equal(apiBackedApplyResume.session, sessionName);
+  assert.equal(apiBackedApplyResume.source, "status");
+  assert.equal(apiBackedApplyResume.applyId, apiSessionApplyId);
+  assert.equal(apiBackedApplyResume.dryRun, false);
+  assert.equal(apiBackedApplyResume.selected, 1);
+  assert.equal(apiBackedApplyResume.commands[0].action, "resume_branch");
+  assert.equal(apiBackedApplyResume.commands[0].runId, apiSessionApplyPlan.run.id);
+  assert.equal(apiBackedApplyResume.executions[0].action, "resume_branch");
+  assert.equal(apiBackedApplyResume.executions[0].runId, apiSessionApplyPlan.run.id);
+  assert.equal(apiBackedApplyResume.executions[0].exitCode, 0);
+  assert.equal(apiBackedApplyResume.executions[0].output.resumed?.runId, apiSessionApplyPlan.run.id);
+  assert.equal(apiBackedApplyResume.executions[0].output.resumed?.branchName, apiSessionApplyPlan.plan.branchName);
+  assert.equal(apiBackedApplyResume.executions[0].output.resumed?.status, "planned");
+  assert.equal(apiBackedApplyResume.executions[0].output.run?.status, "planned");
+  assert.equal(apiBackedApplyResume.executions[0].output.run?.worker_id, null);
+
   const deadWorkerPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",
