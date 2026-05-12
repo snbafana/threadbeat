@@ -2629,6 +2629,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["branch-action"] && options.next !== "1") {
       throw new Error("runs session-review --branch-action requires --next");
     }
+    if (options.limit && options.next !== "1") {
+      throw new Error("runs session-review --limit requires --next");
+    }
     if (options.format && options.next !== "1") {
       throw new Error("runs session-review --format requires --next");
     }
@@ -2637,6 +2640,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const actionFilter = options.action ? new Set(parseList(options.action)) : null;
     const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
+    const rowLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
     const requiredSessionName = required(sessionName, "runs session-review <session>");
     const statusFilter = new Set(parseList(options.status ?? "planned,running,stopped"));
     const status = await workerSessionStatus(requiredSessionName, statusFilter);
@@ -2937,14 +2941,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const filteredBranchNextSteps = branchActionFilter
       ? branchNextSteps.filter((step) => branchActionFilter.has(step.action))
       : branchNextSteps;
-    const filter = {
-      ...(actionFilter ? { action: [...actionFilter] } : {}),
-      ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
-      ...(actionFilter || branchActionFilter ? {
-        totalNextSteps: nextSteps.length,
-        totalBranchNextSteps: branchNextSteps.length,
-      } : {}),
-    };
+    const limitedNextSteps = rowLimit ? filteredNextSteps.slice(0, rowLimit) : filteredNextSteps;
+    const limitedBranchNextSteps = rowLimit ? filteredBranchNextSteps.slice(0, rowLimit) : filteredBranchNextSteps;
     const commandQueue = [
       ...filteredNextSteps.map((step) => ({
         scope: "session",
@@ -2969,6 +2967,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         command: step.command,
       })),
     ];
+    const limitedCommandQueue = rowLimit ? commandQueue.slice(0, rowLimit) : commandQueue;
+    const filter = {
+      ...(actionFilter ? { action: [...actionFilter] } : {}),
+      ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
+      ...(actionFilter || branchActionFilter || rowLimit ? {
+        totalNextSteps: nextSteps.length,
+        totalBranchNextSteps: branchNextSteps.length,
+      } : {}),
+      ...(rowLimit ? {
+        limit: rowLimit,
+        visibleNextSteps: limitedNextSteps.length,
+        visibleBranchNextSteps: limitedBranchNextSteps.length,
+        totalCommands: commandQueue.length,
+        visibleCommands: limitedCommandQueue.length,
+      } : {}),
+    };
     const statuses: Record<string, number> = {};
     for (const agent of status.agents) {
       for (const [runStatus, count] of Object.entries(agent.statuses)) {
@@ -3054,7 +3068,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }))),
     };
     if (options.next === "1" && outputFormat === "shell") {
-      printCommandQueueShell(commandQueue);
+      printCommandQueueShell(limitedCommandQueue);
       return;
     }
     await printJson(options.next === "1"
@@ -3064,8 +3078,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         session: sessionReview.session,
         summary,
         ...(options["commands-only"] === "1"
-          ? { commands: commandQueue }
-          : { nextSteps: filteredNextSteps, branchNextSteps: filteredBranchNextSteps }),
+          ? { commands: limitedCommandQueue }
+          : { nextSteps: limitedNextSteps, branchNextSteps: limitedBranchNextSteps }),
       }
       : sessionReview);
     return;
@@ -6933,7 +6947,7 @@ Commands:
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--limit 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
-  runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
+  runs session-review <name> [--include-stopped] [--next] [--limit 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]

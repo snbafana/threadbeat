@@ -275,6 +275,7 @@ npm run cli -- runs session-summary overnight --next --limit 20
 npm run cli -- runs session-summary overnight --next --older-than-ms 120000 --commands-only --format shell
 npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
+npm run cli -- runs session-review overnight --include-stopped --next --limit 20
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --format shell
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --branch-action resume_branch --format shell
 npm run cli -- runs session-apply overnight --include-stopped --branch-action resume_branch --run <run-id> --dry-run
@@ -602,6 +603,9 @@ commands, or `--format shell` to print one copyable command per line. Use
 `--action <name>` or `--branch-action resume_branch|review_branch` with
 `--next` to narrow a session-review queue to one class of recovery, result
 inspection, or branch resume commands without touching the branch state. Add
+`--limit <n>` with `--next` to bound session-level and branch-level queue rows;
+with `--commands-only`, the same limit bounds the combined runnable command
+stream while the filter metadata preserves exact unbounded totals. Add
 `runs session-apply <name> --action ...` or `--branch-action ...` to execute an
 explicitly filtered queue; use `--dry-run`, `--run <id>`, `--limit`, and
 `--concurrency` to preview or bound that execution before changing run state.

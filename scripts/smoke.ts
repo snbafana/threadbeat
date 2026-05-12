@@ -2094,6 +2094,28 @@ try {
   );
   assert.equal(detachedNextOnly.agents, undefined);
   assert.equal(detachedNextOnly.logs, undefined);
+  const detachedLimitedNextOnly = await cliJson<{
+    filter: {
+      limit: number;
+      totalNextSteps: number;
+      visibleNextSteps: number;
+      totalBranchNextSteps: number;
+      visibleBranchNextSteps: number;
+      totalCommands: number;
+      visibleCommands: number;
+    };
+    nextSteps: Array<{ action: string }>;
+    branchNextSteps: Array<{ runId: string }>;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1"]);
+  assert.equal(detachedLimitedNextOnly.filter.limit, 1);
+  assert.equal(detachedLimitedNextOnly.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
+  assert.equal(detachedLimitedNextOnly.filter.visibleNextSteps, 1);
+  assert.equal(detachedLimitedNextOnly.filter.totalBranchNextSteps, detachedWorkerReview.branchNextSteps.length);
+  assert.equal(detachedLimitedNextOnly.filter.visibleBranchNextSteps, 1);
+  assert.equal(detachedLimitedNextOnly.nextSteps.length, 1);
+  assert.equal(detachedLimitedNextOnly.branchNextSteps.length, 1);
+  assert.equal(detachedLimitedNextOnly.nextSteps[0]?.action, detachedWorkerReview.nextSteps[0]?.action);
+  assert.equal(detachedLimitedNextOnly.branchNextSteps[0]?.runId, detachedWorkerReview.branchNextSteps[0]?.runId);
   const detachedReviewCommands = await cliJson<{
     session: { session: string };
     summary: { branchNextSteps: number };
@@ -2111,8 +2133,33 @@ try {
     && step.runId === detachedStoppedPlan.run.id
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`
   )));
+  const detachedLimitedReviewCommands = await cliJson<{
+    filter: {
+      limit: number;
+      totalCommands: number;
+      visibleCommands: number;
+      totalNextSteps: number;
+      totalBranchNextSteps: number;
+    };
+    commands: Array<{ scope: string; action: string; command: string[] }>;
+    nextSteps?: unknown;
+    branchNextSteps?: unknown;
+  }>(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1", "--commands-only"]);
+  assert.equal(detachedLimitedReviewCommands.filter.limit, 1);
+  assert.equal(detachedLimitedReviewCommands.filter.totalCommands, detachedReviewCommands.commands.length);
+  assert.equal(detachedLimitedReviewCommands.filter.visibleCommands, 1);
+  assert.equal(detachedLimitedReviewCommands.filter.totalNextSteps, detachedWorkerReview.nextSteps.length);
+  assert.equal(detachedLimitedReviewCommands.filter.totalBranchNextSteps, detachedWorkerReview.branchNextSteps.length);
+  assert.equal(detachedLimitedReviewCommands.commands.length, 1);
+  assert.equal(detachedLimitedReviewCommands.nextSteps, undefined);
+  assert.equal(detachedLimitedReviewCommands.branchNextSteps, undefined);
+  assert.deepEqual(detachedLimitedReviewCommands.commands[0]?.command, detachedReviewCommands.commands[0]?.command);
   const detachedReviewCommandsShell = await cliRaw(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--commands-only", "--format", "shell"]);
   assert.ok(detachedReviewCommandsShell.stdout.trim().split("\n").includes(`npm run cli -- runs resume-branch ${detachedStoppedPlan.run.id}`));
+  const detachedLimitedReviewCommandsShell = await cliRaw(baseUrl, ["runs", "session-review", detachedWorkerSessionName, "--include-stopped", "--next", "--limit", "1", "--commands-only", "--format", "shell"]);
+  assert.deepEqual(detachedLimitedReviewCommandsShell.stdout.trim().split("\n"), [
+    detachedReviewCommands.commands[0]?.command.join(" "),
+  ]);
   const detachedReviewResumeCommands = await cliJson<{
     filter: { branchAction: string[]; totalBranchNextSteps: number };
     commands: Array<{ scope: string; action: string; runId?: string; command: string[] }>;
