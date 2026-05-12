@@ -3021,6 +3021,57 @@ try {
     "shell",
   ]);
   assert.ok(openDrainShell.stdout.trim().split("\n").includes(openDrainGroup.continueCommand.join(" ")));
+  const openDrainContinueDrainsPreview = await cliJson<{
+    continueDrains: { dryRun: boolean; selected: number; succeeded: number; failed: number };
+    drains: Array<{
+      prefix: string;
+      nextApplyId: string;
+      command: string[];
+      exitCode: number | null;
+      output: {
+        applyIdPrefix?: string;
+        continuePrefix?: string;
+        untilEmpty?: { startPoll: number; maxPolls: number; polls: number };
+        polls?: Array<{ poll: number; applyId: string }>;
+      } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-applies",
+    detachedWorkerSessionName,
+    "--continue-drains",
+    "--drain-prefix",
+    openDrainPrefix,
+    "--max-polls",
+    "3",
+    "--interval-ms",
+    "1",
+    "--dry-run",
+  ]);
+  assert.deepEqual(openDrainContinueDrainsPreview.continueDrains, {
+    dryRun: true,
+    selected: 1,
+    succeeded: 1,
+    failed: 0,
+  });
+  assert.equal(openDrainContinueDrainsPreview.drains[0].prefix, openDrainPrefix);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].nextApplyId, `${openDrainPrefix}-002`);
+  assert.deepEqual(openDrainContinueDrainsPreview.drains[0].command, [
+    ...openDrainGroup.continueCommand,
+    "--max-polls",
+    "3",
+    "--interval-ms",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].exitCode, 0);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].output?.applyIdPrefix, openDrainPrefix);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].output?.continuePrefix, openDrainPrefix);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].output?.untilEmpty?.startPoll, 2);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].output?.untilEmpty?.maxPolls, 3);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].output?.untilEmpty?.polls, 1);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].output?.polls?.[0]?.poll, 2);
+  assert.equal(openDrainContinueDrainsPreview.drains[0].output?.polls?.[0]?.applyId, `${openDrainPrefix}-002`);
   const retryWatchApplyDrainContinuePreview = await cliJson<{
     source: string;
     dryRun: boolean;
