@@ -3189,6 +3189,29 @@ try {
     "1",
     "--dry-run",
   ]);
+  const openDrainQueuedStatus = await cliJson<{
+    session: string;
+    count: number;
+    continuations: Array<{ continuationId: string; status: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--status",
+    "queued",
+    "--limit",
+    "10",
+  ]);
+  assert.equal(openDrainQueuedStatus.session, detachedWorkerSessionName);
+  assert.equal(openDrainQueuedStatus.count, 2);
+  assert.deepEqual(
+    openDrainQueuedStatus.continuations.map((item) => item.continuationId).sort(),
+    [
+      openDrainQueuedBatchA.continuation.continuationId,
+      openDrainQueuedBatchB.continuation.continuationId,
+    ].sort(),
+  );
+  assert.ok(openDrainQueuedStatus.continuations.every((item) => item.status === "queued"));
   const openDrainExecutedQueuedBatch = await cliJson<{
     session: string;
     executed: number;
@@ -3220,6 +3243,27 @@ try {
   assert.ok(openDrainExecutedQueuedBatch.continuations.every((item) => item.status === "executed"));
   assert.ok(openDrainExecutedQueuedBatch.continuations.every((item) => item.continueDrains.succeeded === 1));
   assert.ok(openDrainExecutedQueuedBatch.continuations.every((item) => item.drains[0].exitCode === 0));
+  const openDrainExecutedStatus = await cliJson<{
+    session: string;
+    count: number;
+    continuations: Array<{ continuationId: string; status: string; startedAt?: string; completedAt?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--status",
+    "executed",
+    "--limit",
+    "10",
+  ]);
+  assert.equal(openDrainExecutedStatus.session, detachedWorkerSessionName);
+  assert.equal(openDrainExecutedStatus.count, 3);
+  assert.ok(openDrainExecutedStatus.continuations.some((item) => item.continuationId === openDrainQueuedContinuation.continuation.continuationId));
+  assert.ok(openDrainExecutedStatus.continuations.some((item) => item.continuationId === openDrainQueuedBatchA.continuation.continuationId));
+  assert.ok(openDrainExecutedStatus.continuations.some((item) => item.continuationId === openDrainQueuedBatchB.continuation.continuationId));
+  assert.ok(openDrainExecutedStatus.continuations.every((item) => item.status === "executed"));
+  assert.ok(openDrainExecutedStatus.continuations.every((item) => typeof item.startedAt === "string"));
+  assert.ok(openDrainExecutedStatus.continuations.every((item) => typeof item.completedAt === "string"));
   const openDrainContinueDrainsPreview = await cliJson<{
     continuationId: string;
     continuationPath: string;

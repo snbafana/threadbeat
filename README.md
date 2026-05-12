@@ -290,6 +290,7 @@ npm run cli -- runs session-drain-continuations overnight --queue --drain-prefix
 npm run cli -- runs session-drain-continuations overnight --execute-queued --max-continuations 5
 npm run cli -- runs session-drain-continuations overnight --execute-next
 npm run cli -- runs session-drain-continuations overnight --execute <continuation-id>
+npm run cli -- runs session-drain-continuations overnight --status queued,running,failed
 npm run cli -- runs session-drain-continuations overnight
 npm run cli -- runs session-applies overnight --ready-results --format shell
 npm run cli -- runs session-applies overnight --ready-results --format shell --checkout-dir ./checkouts/overnight-results --changed-only
@@ -607,7 +608,9 @@ server loop with `runs session-drain-continuations <name> --execute-queued
 --max-continuations 5`, drained one at a time with `--execute-next`, or a
 specific queued record can be executed with `--execute <continuation-id>`. All
 execution paths run the stored commands through the server and persist the same
-record as executed with command results.
+record as `running`, then `executed` or `failed` with command results. Add
+`--status queued,running,failed` to inspect pending, in-flight, or stuck
+continuation records without mixing in completed attempts.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a

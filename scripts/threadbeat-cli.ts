@@ -3497,7 +3497,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await printJson(response);
       return;
     }
-    const response = await fetchWorkerSessionDrainContinuations(requiredSessionName, options.limit);
+    const response = await fetchWorkerSessionDrainContinuations(
+      requiredSessionName,
+      options.limit,
+      options.status ? parseList(options.status) : undefined,
+    );
     await printJson(response);
     return;
   }
@@ -4809,9 +4813,10 @@ type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
   observedAt: string;
-  status?: "queued" | "executed";
+  status?: "queued" | "running" | "executed" | "failed";
   startedAt?: string;
   completedAt?: string;
+  error?: string;
   dryRun: boolean;
   filter: Record<string, unknown>;
   readinessSource: "server";
@@ -4927,9 +4932,11 @@ async function executeQueuedWorkerSessionDrainContinuations(
 async function fetchWorkerSessionDrainContinuations(
   sessionName: string,
   limit?: string,
+  status?: string[],
 ): Promise<WorkerSessionDrainContinuationsResponse> {
   const params = new URLSearchParams();
   if (limit) params.set("limit", limit);
+  if (status && status.length > 0) params.set("status", status.join(","));
   return await requestJson(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drain-continuations`, params),
@@ -6278,7 +6285,7 @@ Commands:
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
-  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued] [--max-continuations 10] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
+  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]

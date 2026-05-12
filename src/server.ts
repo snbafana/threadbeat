@@ -212,7 +212,15 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { name } = request.params as { name: string };
       const query = request.query as Record<string, string | undefined>;
       const limit = parseOptionalInteger(query.limit) ?? 20;
-      const continuations = await listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, limit);
+      const statuses = parseOptionalDrainContinuationStatuses(query.status);
+      const records = await listWorkerSessionDrainContinuationRecords(
+        settings.projectRoot,
+        name,
+        statuses.length > 0 ? Number.MAX_SAFE_INTEGER : limit,
+      );
+      const continuations = (statuses.length > 0
+        ? records.filter((record) => record.status && statuses.includes(record.status))
+        : records).slice(0, limit);
       return {
         ok: true,
         session: name,
@@ -886,6 +894,15 @@ const parseOptionalList = (value: unknown): string[] => {
     .filter(Boolean);
   if (values.length === 0) throw new Error("expected at least one value");
   return values;
+};
+
+const parseOptionalDrainContinuationStatuses = (value: unknown): Array<"queued" | "running" | "executed" | "failed"> => {
+  const statuses = parseOptionalList(value);
+  const allowed = new Set(["queued", "running", "executed", "failed"]);
+  for (const status of statuses) {
+    if (!allowed.has(status)) throw new Error(`unknown drain continuation status: ${status}`);
+  }
+  return statuses as Array<"queued" | "running" | "executed" | "failed">;
 };
 
 const parseCommand = (value: unknown): string[] => {

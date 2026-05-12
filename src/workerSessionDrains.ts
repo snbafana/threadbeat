@@ -45,9 +45,10 @@ type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
   observedAt: string;
-  status?: "queued" | "executed";
+  status?: "queued" | "running" | "executed" | "failed";
   startedAt?: string;
   completedAt?: string;
+  error?: string;
   dryRun: boolean;
   filter: Record<string, unknown>;
   readinessSource?: string;
@@ -194,16 +195,42 @@ export async function executeWorkerSessionDrainContinuationRecord(
   const existing = await readWorkerSessionDrainContinuationRecord(projectRoot, sessionName, continuationId);
   if (!existing) throw new Error(`drain continuation ${continuationId} does not exist for ${sessionName}`);
   if (existing.status === "executed") throw new Error(`drain continuation ${continuationId} is already executed`);
+  if (existing.status === "running") throw new Error(`drain continuation ${continuationId} is already running`);
+  if (existing.status === "failed") throw new Error(`drain continuation ${continuationId} has failed`);
   if (existing.status && existing.status !== "queued") throw new Error(`drain continuation ${continuationId} is ${existing.status}`);
   const startedAt = new Date().toISOString();
   const drains: WorkerSessionDrainContinuationExecution[] = [];
-  for (const drain of existing.drains) {
-    drains.push(await runCommand(drain));
+  const running: WorkerSessionDrainContinuationRecord = {
+    ...existing,
+    status: "running",
+    startedAt,
+  };
+  await writeWorkerSessionDrainContinuationRecord(projectRoot, running);
+  try {
+    for (const drain of existing.drains) {
+      drains.push(await runCommand(drain));
+    }
+  } catch (error) {
+    const succeeded = drains.filter((drain) => drain.exitCode === 0).length;
+    const remaining = existing.drains.slice(drains.length);
+    const record: WorkerSessionDrainContinuationRecord = {
+      ...running,
+      status: "failed",
+      completedAt: new Date().toISOString(),
+      error: error instanceof Error ? error.message : String(error),
+      continueDrains: {
+        ...existing.continueDrains,
+        succeeded,
+        failed: Math.max(drains.length - succeeded, remaining.length, 1),
+      },
+      drains: [...drains, ...remaining],
+    };
+    await writeWorkerSessionDrainContinuationRecord(projectRoot, record);
+    throw error;
   }
   const record: WorkerSessionDrainContinuationRecord = {
-    ...existing,
+    ...running,
     status: "executed",
-    startedAt,
     completedAt: new Date().toISOString(),
     continueDrains: {
       ...existing.continueDrains,
