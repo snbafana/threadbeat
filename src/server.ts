@@ -16,6 +16,7 @@ import { runPlanFromRow } from "./runPlanning.js";
 import { SANDBOX_WORKDIR, SandboxService } from "./sandboxService.js";
 import {
   executeNextWorkerSessionDrainContinuationRecord,
+  executeQueuedWorkerSessionDrainContinuationRecords,
   executeWorkerSessionDrainContinuationRecord,
   listWorkerSessionApplyRecords,
   listWorkerSessionDrainContinuationRecords,
@@ -252,21 +253,36 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         settings.projectRoot,
         name,
         continuationId,
-        async (drain) => {
-          const result = await runCliContinuationCommand(settings.projectRoot, baseUrl, drain.command);
-          return {
-            ...drain,
-            exitCode: result.exitCode,
-            output: parseJsonMaybe(result.stdout),
-            ...(result.stderr ? { stderr: result.stderr } : {}),
-          };
-        },
+        async (drain) => executeDrainContinuationCommand(settings.projectRoot, baseUrl, drain),
       );
       return {
         ok: true,
         session: name,
         continuationPath: executed.path,
         continuation: executed.record,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-drain-continuations/execute-queued", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
+      const drained = await executeQueuedWorkerSessionDrainContinuationRecords(
+        settings.projectRoot,
+        name,
+        async (drain) => executeDrainContinuationCommand(settings.projectRoot, baseUrl, drain),
+        { maxContinuations: parseOptionalInteger(body.maxContinuations) },
+      );
+      return {
+        ok: true,
+        session: name,
+        executed: drained.executed.length,
+        remainingQueued: drained.remainingQueued,
+        continuations: drained.executed.map((item) => item.record),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -280,15 +296,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const executed = await executeNextWorkerSessionDrainContinuationRecord(
         settings.projectRoot,
         name,
-        async (drain) => {
-          const result = await runCliContinuationCommand(settings.projectRoot, baseUrl, drain.command);
-          return {
-            ...drain,
-            exitCode: result.exitCode,
-            output: parseJsonMaybe(result.stdout),
-            ...(result.stderr ? { stderr: result.stderr } : {}),
-          };
-        },
+        async (drain) => executeDrainContinuationCommand(settings.projectRoot, baseUrl, drain),
       );
       return {
         ok: true,
@@ -925,6 +933,20 @@ const runCliContinuationCommand = async (
       resolve({ exitCode, stdout: stdout.trim(), stderr: stderr.trim() });
     });
   });
+};
+
+const executeDrainContinuationCommand = async <T extends { command: string[] }>(
+  cwd: string,
+  baseUrl: string,
+  drain: T,
+): Promise<T & { exitCode: number | null; output: unknown; stderr?: string }> => {
+  const result = await runCliContinuationCommand(cwd, baseUrl, drain.command);
+  return {
+    ...drain,
+    exitCode: result.exitCode,
+    output: parseJsonMaybe(result.stdout),
+    ...(result.stderr ? { stderr: result.stderr } : {}),
+  };
 };
 
 const parseJsonMaybe = (value: string): unknown => {

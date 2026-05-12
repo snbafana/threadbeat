@@ -80,6 +80,10 @@ type QueueWorkerSessionDrainContinuationsOptions = {
   intervalMs?: number;
 };
 
+type ExecuteQueuedWorkerSessionDrainContinuationsOptions = {
+  maxContinuations?: number;
+};
+
 type WorkerSessionDrainContinuationExecution = WorkerSessionDrainContinuationRecord["drains"][number] & {
   output?: unknown;
   stderr?: string;
@@ -223,6 +227,28 @@ export async function executeNextWorkerSessionDrainContinuationRecord(
     .at(0);
   if (!next) return null;
   return await executeWorkerSessionDrainContinuationRecord(projectRoot, sessionName, next.continuationId, runCommand);
+}
+
+export async function executeQueuedWorkerSessionDrainContinuationRecords(
+  projectRoot: string,
+  sessionName: string,
+  runCommand: (drain: WorkerSessionDrainContinuationRecord["drains"][number]) => Promise<WorkerSessionDrainContinuationExecution>,
+  options: ExecuteQueuedWorkerSessionDrainContinuationsOptions = {},
+): Promise<{
+  executed: Array<{ path: string; record: WorkerSessionDrainContinuationRecord }>;
+  remainingQueued: number;
+}> {
+  const maxContinuations = options.maxContinuations ?? 10;
+  const executed: Array<{ path: string; record: WorkerSessionDrainContinuationRecord }> = [];
+  for (let index = 0; index < maxContinuations; index += 1) {
+    const next = await executeNextWorkerSessionDrainContinuationRecord(projectRoot, sessionName, runCommand);
+    if (!next) break;
+    executed.push(next);
+  }
+  const remainingQueued = (await listWorkerSessionDrainContinuationRecords(projectRoot, sessionName, Number.MAX_SAFE_INTEGER))
+    .filter((record) => record.status === "queued")
+    .length;
+  return { executed, remainingQueued };
 }
 
 export async function readWorkerSessionDrainContinuationRecord(

@@ -3489,6 +3489,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       await printJson(response);
       return;
     }
+    if (options["execute-queued"] === "1") {
+      const response = await executeQueuedWorkerSessionDrainContinuations(requiredSessionName, {
+        ...(options["max-continuations"] ? { maxContinuations: parsePositiveInteger(options["max-continuations"], "--max-continuations") } : {}),
+      });
+      if (response.continuations.some((continuation) => continuation.continueDrains.failed > 0)) process.exitCode = 1;
+      await printJson(response);
+      return;
+    }
     const response = await fetchWorkerSessionDrainContinuations(requiredSessionName, options.limit);
     await printJson(response);
     return;
@@ -4652,7 +4660,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-stopped" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -4848,6 +4856,14 @@ type ExecuteNextWorkerSessionDrainContinuationResponse = {
   continuation: WorkerSessionDrainContinuationRecord | null;
 };
 
+type ExecuteQueuedWorkerSessionDrainContinuationsResponse = {
+  ok: true;
+  session: string;
+  executed: number;
+  remainingQueued: number;
+  continuations: WorkerSessionDrainContinuationRecord[];
+};
+
 async function fetchWorkerSessionApplyDrains(
   sessionName: string,
   drainPrefix?: string,
@@ -4893,6 +4909,19 @@ async function executeNextWorkerSessionDrainContinuation(
     "POST",
     `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drain-continuations/execute-next`,
   ) as ExecuteNextWorkerSessionDrainContinuationResponse;
+}
+
+async function executeQueuedWorkerSessionDrainContinuations(
+  sessionName: string,
+  options: { maxContinuations?: number },
+): Promise<ExecuteQueuedWorkerSessionDrainContinuationsResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-drain-continuations/execute-queued`,
+    {
+      ...(options.maxContinuations ? { maxContinuations: options.maxContinuations } : {}),
+    },
+  ) as ExecuteQueuedWorkerSessionDrainContinuationsResponse;
 }
 
 async function fetchWorkerSessionDrainContinuations(
@@ -6249,7 +6278,7 @@ Commands:
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
-  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
+  runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued] [--max-continuations 10] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
