@@ -254,6 +254,7 @@ npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overn
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-only --next
 npm run cli -- runs results --session overnight --next --commands-only --format shell
+npm run cli -- runs results --session overnight --next --limit 20
 npm run cli -- runs results --session overnight --checkout-dir ./checkouts/overnight-results --changed-path report.md
 npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 10000
 npm run cli -- runs workers --agents <agent>,<agent>
@@ -413,7 +414,9 @@ Run planning is intentionally server-side and Pi-free for now:
   `commands.reviewRun`, `commands.inspectRun`, and resumable
   `commands.resumeBranch` commands for branch-native inspection. Add `--next`
   to return the compact ordered review/resume commands for the visible result
-  rows. Add `--run <run-id[,run-id]>` to narrow a result snapshot or command
+  rows. Add `--limit <n>` with `--next` to bound top-level result commit and
+  review/resume queues while preserving exact summary counts. Add
+  `--run <run-id[,run-id]>` to narrow a result snapshot or command
   queue to specific branch runs from a session/apply queue. Add
   `--max-polls` and `--interval-ms` to keep emitting result snapshots while a
   long session runs.
@@ -709,8 +712,9 @@ runs without creating PRs: branch compare/tree links, result commit links when
 available, missing-result warnings, top-level result/resumable/changed counts,
 copyable checkout/review/inspect commands, and a `changedFiles` index when local
 checkouts are requested with `--checkout-dir`. Add `--next` to emit only the
-review/resume commands for the visible result rows. Add `--worker-id <id>` to
-review only branches claimed by one worker.
+review/resume commands for the visible result rows, or `--limit <n>` with
+`--next` to keep large session queues bounded. Add `--worker-id <id>` to review
+only branches claimed by one worker.
 `runs restart-session <name> --recover` respawns dead workers from the recorded
 session command and requeues stale claimed runs before the replacements start.
 Add `--wait` to poll the restarted session in the foreground and return the same

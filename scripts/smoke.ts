@@ -5018,6 +5018,25 @@ try {
     runFilteredCommands.commands[0]?.command.join(" "),
     `npm run cli -- runs review ${cliRunPlan.run.id} --checkout-dir ./checkouts/results/${cliRunPlan.run.id}`,
   );
+  const limitedRunResults = await cliJson<{
+    filter: {
+      limit: number;
+      totalResultCommits: number;
+      visibleResultCommits: number;
+      totalNextSteps: number;
+      visibleNextSteps: number;
+    };
+    summary: { total: number; resultCommits: number };
+    resultCommits: Array<{ runId: string; resultCommit: string | null }>;
+    nextSteps: Array<{ runId: string; resultCommit: string | null; command: string[] }>;
+  }>(baseUrl, ["runs", "results", "--agent", agentBody.agent.id, "--next", "--limit", "1"]);
+  assert.equal(limitedRunResults.filter.limit, 1);
+  assert.equal(limitedRunResults.filter.totalNextSteps, limitedRunResults.summary.total);
+  assert.equal(limitedRunResults.filter.totalResultCommits, limitedRunResults.summary.resultCommits);
+  assert.equal(limitedRunResults.filter.visibleNextSteps, 1);
+  assert.equal(limitedRunResults.nextSteps.length, 1);
+  assert.ok(limitedRunResults.filter.visibleResultCommits <= 1);
+  assert.ok(limitedRunResults.resultCommits.length <= 1);
   const watchedResults = await cliRaw(baseUrl, [
     "runs",
     "results",
@@ -6143,10 +6162,36 @@ try {
     && item.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
     && item.command.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
   )));
+  const limitedResultCommandsOnly = await cliJson<{
+    filter: {
+      limit: number;
+      totalResultCommits: number;
+      visibleResultCommits: number;
+      totalNextSteps: number;
+      visibleNextSteps: number;
+    };
+    summary: { resultCommits: number };
+    commands: Array<{ action: string; runId: string; resultCommit: string | null; command: string[] }>;
+    nextSteps?: unknown;
+    resultCommits?: unknown;
+  }>(baseUrl, ["runs", "results", "--session", resultSummarySessionName, "--next", "--limit", "1", "--commands-only"]);
+  assert.equal(limitedResultCommandsOnly.filter.limit, 1);
+  assert.equal(limitedResultCommandsOnly.filter.totalResultCommits, 1);
+  assert.equal(limitedResultCommandsOnly.filter.visibleResultCommits, 1);
+  assert.equal(limitedResultCommandsOnly.filter.totalNextSteps, 1);
+  assert.equal(limitedResultCommandsOnly.filter.visibleNextSteps, 1);
+  assert.equal(limitedResultCommandsOnly.summary.resultCommits, 1);
+  assert.equal(limitedResultCommandsOnly.nextSteps, undefined);
+  assert.equal(limitedResultCommandsOnly.resultCommits, undefined);
+  assert.deepEqual(limitedResultCommandsOnly.commands.map((item) => item.runId), [cliWorkFinalizePlan.run.id]);
   const resultCommandsShell = await cliRaw(baseUrl, ["runs", "results", "--session", resultSummarySessionName, "--next", "--commands-only", "--format", "shell"]);
   assert.ok(resultCommandsShell.stdout.trim().split("\n").includes(
     `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`,
   ));
+  const limitedResultCommandsShell = await cliRaw(baseUrl, ["runs", "results", "--session", resultSummarySessionName, "--next", "--limit", "1", "--commands-only", "--format", "shell"]);
+  assert.deepEqual(limitedResultCommandsShell.stdout.trim().split("\n"), [
+    `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`,
+  ]);
   const sessionResultSummaryPoll = await cliRaw(baseUrl, [
     "runs",
     "session-summary",

@@ -735,6 +735,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.format && options.next !== "1") {
       throw new Error("runs results --format requires --next");
     }
+    if (options.limit && options.next !== "1") {
+      throw new Error("runs results --limit requires --next");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs results --format shell requires --commands-only");
     }
@@ -752,6 +755,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && maxPolls !== 1) {
       throw new Error("runs results --format shell supports one poll");
     }
+    const rowLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
     const checkoutRootDir = options["checkout-dir"] ? path.resolve(options["checkout-dir"]) : null;
     const checkoutCommandRootDir = options["checkout-dir"]
       ?? (options.session ? `./checkouts/${options.session}-results` : "./checkouts/results");
@@ -1007,20 +1011,33 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         commits: step.commits,
         command: step.command,
       }));
+      const limitedResultCommits = rowLimit ? resultCommits.slice(0, rowLimit) : resultCommits;
+      const limitedNextSteps = rowLimit ? nextSteps.slice(0, rowLimit) : nextSteps;
+      const limitedNextCommandQueue = rowLimit ? nextCommandQueue.slice(0, rowLimit) : nextCommandQueue;
+      const limitFilter = rowLimit
+        ? {
+          limit: rowLimit,
+          totalResultCommits: resultCommits.length,
+          visibleResultCommits: limitedResultCommits.length,
+          totalNextSteps: nextSteps.length,
+          visibleNextSteps: limitedNextSteps.length,
+        }
+        : null;
       const output = options.next === "1"
         ? {
           observedAt: snapshot.observedAt,
           ...(options.session ? { session: options.session } : {}),
           ...(runFilter ? { runFilter: Array.from(runFilter) } : {}),
           ...(checkoutRootDir ? { checkoutDir: checkoutRootDir } : {}),
+          ...(limitFilter ? { filter: limitFilter } : {}),
           summary: snapshot.summary,
           ...(options["commands-only"] === "1"
-            ? { commands: nextCommandQueue }
-            : { resultCommits, nextSteps }),
+            ? { commands: limitedNextCommandQueue }
+            : { resultCommits: limitedResultCommits, nextSteps: limitedNextSteps }),
         }
         : snapshot;
       if (outputFormat === "shell") {
-        printCommandQueueShell(nextCommandQueue);
+        printCommandQueueShell(limitedNextCommandQueue);
       } else if (maxPolls === 1) {
         await printJson(output);
       } else {
@@ -6908,7 +6925,7 @@ Commands:
   runs watch <run> [--limit 20] [--interval-ms 2000] [--max-polls 10]
   runs backlog --agent <agent>|--agents <agent,agent>
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
-  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
+  runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
   runs sessions [--session <name>] [--summary] [--next] [--limit 10] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
