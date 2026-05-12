@@ -3281,10 +3281,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       return;
     }
     if (queueSource === "status") {
-      if (options.action) throw new Error("runs session-apply --source status supports --branch-action resume_branch only");
-      const branchActions = new Set(parseList(required(options["branch-action"], "--branch-action")));
-      if (branchActions.size !== 1 || !branchActions.has("resume_branch")) {
+      const statusBranchActions = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
+      const statusActions = options.action ? new Set(parseList(options.action)) : null;
+      const allowedStatusActions = new Set([
+        "reset_failed_drain_continuations",
+        "reset_running_drain_continuations",
+      ]);
+      if (statusActions && statusBranchActions) {
+        throw new Error("runs session-apply --source status cannot combine --action with --branch-action");
+      }
+      if (statusBranchActions && (statusBranchActions.size !== 1 || !statusBranchActions.has("resume_branch"))) {
         throw new Error("runs session-apply --source status supports --branch-action resume_branch only");
+      }
+      if (statusActions && [...statusActions].some((action) => !allowedStatusActions.has(action))) {
+        throw new Error("runs session-apply --source status supports --action reset_failed_drain_continuations,reset_running_drain_continuations only");
       }
       if (options["checkout-dir"] || options["changed-only"] === "1" || options["changed-path"] || options["result-status"]) {
         throw new Error("runs session-apply --source status does not support result checkout filters");
@@ -3365,7 +3375,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }));
     const actionFilter = options.action ? new Set(parseList(options.action)) : null;
     const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
-    const filteredQueueCommands = queueSource === "watch"
+    const filteredQueueCommands = queueSource === "watch" || queueSource === "status"
       ? queueCommands.filter((item) => (
         item.scope === "branch"
           ? branchActionFilter?.has(item.action)
@@ -7106,7 +7116,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]

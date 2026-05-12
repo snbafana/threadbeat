@@ -3709,14 +3709,91 @@ try {
     step.continuationIds.includes(failedDrainNextStepContinuationId)
     && step.command.join(" ") === resetFailedCommand
   )));
-  await cliJson(baseUrl, [
+  const failedDrainStatusApplyPreview = await cliJson<{
+    source: string;
+    dryRun: boolean;
+    selected: number;
+    commandsToRun: Array<{ scope: string; action: string; command: string[] }>;
+    applySelection: { filteredQueueCommands: number; selectedQueueCommands: number };
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "status",
+    "--action",
+    "reset_failed_drain_continuations",
+    "--apply-id",
+    "smoke-reset-failed-status-preview",
+    "--dry-run",
+  ]);
+  assert.equal(failedDrainStatusApplyPreview.source, "status");
+  assert.equal(failedDrainStatusApplyPreview.dryRun, true);
+  assert.equal(failedDrainStatusApplyPreview.selected, 1);
+  assert.equal(failedDrainStatusApplyPreview.commandsToRun.length, 1);
+  assert.equal(failedDrainStatusApplyPreview.commandsToRun[0]?.scope, "drain_continuation");
+  assert.equal(failedDrainStatusApplyPreview.commandsToRun[0]?.action, "reset_failed_drain_continuations");
+  assert.equal(failedDrainStatusApplyPreview.commandsToRun[0]?.command.join(" "), resetFailedCommand);
+  assert.equal(failedDrainStatusApplyPreview.applySelection.filteredQueueCommands, 1);
+  assert.equal(failedDrainStatusApplyPreview.applySelection.selectedQueueCommands, 1);
+  const failedDrainStatusApply = await cliJson<{
+    source: string;
+    selected: number;
+    commandsToRun: Array<{ action: string; command: string[] }>;
+    executions: Array<{
+      scope: string;
+      action: string;
+      exitCode: number;
+      command: string[];
+      output: {
+        session: string;
+        failed: number;
+        resetCount: number;
+        continuations: Array<{ continuationId: string; status: string; resetReason?: string }>;
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "status",
+    "--action",
+    "reset_failed_drain_continuations",
+    "--apply-id",
+    "smoke-reset-failed-status",
+  ]);
+  assert.equal(failedDrainStatusApply.source, "status");
+  assert.equal(failedDrainStatusApply.selected, 1);
+  assert.equal(failedDrainStatusApply.commandsToRun[0]?.action, "reset_failed_drain_continuations");
+  assert.equal(failedDrainStatusApply.commandsToRun[0]?.command.join(" "), resetFailedCommand);
+  assert.equal(failedDrainStatusApply.executions.length, 1);
+  assert.equal(failedDrainStatusApply.executions[0]?.scope, "drain_continuation");
+  assert.equal(failedDrainStatusApply.executions[0]?.action, "reset_failed_drain_continuations");
+  assert.equal(failedDrainStatusApply.executions[0]?.exitCode, 0);
+  assert.equal(failedDrainStatusApply.executions[0]?.command.join(" "), resetFailedCommand);
+  assert.equal(failedDrainStatusApply.executions[0]?.output.session, detachedWorkerSessionName);
+  assert.equal(failedDrainStatusApply.executions[0]?.output.failed, 1);
+  assert.equal(failedDrainStatusApply.executions[0]?.output.resetCount, 1);
+  assert.equal(failedDrainStatusApply.executions[0]?.output.continuations[0]?.continuationId, failedDrainNextStepContinuationId);
+  assert.equal(failedDrainStatusApply.executions[0]?.output.continuations[0]?.status, "queued");
+  assert.equal(failedDrainStatusApply.executions[0]?.output.continuations[0]?.resetReason, "operator_reset_failed");
+  const failedDrainQueuedAfterApply = await cliJson<{
+    continuations: Array<{ continuationId: string; status: string; resetReason?: string }>;
+  }>(baseUrl, [
     "runs",
     "session-drain-continuations",
     detachedWorkerSessionName,
-    "--reset-failed",
-    "--continuation",
-    failedDrainNextStepContinuationId,
+    "--status",
+    "queued",
+    "--limit",
+    "10",
   ]);
+  assert.ok(failedDrainQueuedAfterApply.continuations.some((item) => (
+    item.continuationId === failedDrainNextStepContinuationId
+    && item.status === "queued"
+    && item.resetReason === "operator_reset_failed"
+  )));
   await fs.rm(failedDrainNextStepContinuationPath);
   const staleRunningContinuation = await cliJson<typeof openDrainQueuedContinuation>(baseUrl, [
     "runs",
@@ -4024,30 +4101,55 @@ try {
     && step.command.join(" ") === resetRunningCommand
   )));
   await Promise.all(bulkLocalDrainContinuationPaths.map((continuationPath) => fs.rm(continuationPath)));
-  const staleRunningReset = await cliJson<{
-    session: string;
-    inspected: number;
-    running: number;
-    resetCount: number;
-    skippedRunning: number;
-    continuations: Array<{
-      continuationId: string;
-      status: string;
-      startedAt?: string;
-      resetAt?: string;
-      resetReason?: string;
-      previousStartedAt?: string;
-      continueDrains: { succeeded: number; failed: number };
-      drains: Array<{ exitCode: number | null }>;
+  const staleRunningStatusApply = await cliJson<{
+    source: string;
+    selected: number;
+    commandsToRun: Array<{ action: string; command: string[] }>;
+    executions: Array<{
+      scope: string;
+      action: string;
+      exitCode: number;
+      command: string[];
+      output: {
+        session: string;
+        inspected: number;
+        running: number;
+        resetCount: number;
+        skippedRunning: number;
+        continuations: Array<{
+          continuationId: string;
+          status: string;
+          startedAt?: string;
+          resetAt?: string;
+          resetReason?: string;
+          previousStartedAt?: string;
+          continueDrains: { succeeded: number; failed: number };
+          drains: Array<{ exitCode: number | null }>;
+        }>;
+      };
     }>;
   }>(baseUrl, [
     "runs",
-    "session-drain-continuations",
+    "session-apply",
     detachedWorkerSessionName,
-    "--reset-running",
-    "--older-than-ms",
-    "1",
+    "--source",
+    "status",
+    "--action",
+    "reset_running_drain_continuations",
+    "--apply-id",
+    "smoke-reset-running-status",
   ]);
+  assert.equal(staleRunningStatusApply.source, "status");
+  assert.equal(staleRunningStatusApply.selected, 1);
+  assert.equal(staleRunningStatusApply.commandsToRun[0]?.action, "reset_running_drain_continuations");
+  assert.equal(staleRunningStatusApply.commandsToRun[0]?.command.join(" "), resetRunningCommand);
+  assert.equal(staleRunningStatusApply.executions.length, 1);
+  assert.equal(staleRunningStatusApply.executions[0]?.scope, "drain_continuation");
+  assert.equal(staleRunningStatusApply.executions[0]?.action, "reset_running_drain_continuations");
+  assert.equal(staleRunningStatusApply.executions[0]?.exitCode, 0);
+  assert.equal(staleRunningStatusApply.executions[0]?.command.join(" "), resetRunningCommand);
+  const staleRunningReset = staleRunningStatusApply.executions[0]?.output;
+  assert.ok(staleRunningReset);
   assert.equal(staleRunningReset.session, detachedWorkerSessionName);
   assert.equal(staleRunningReset.running, 1);
   assert.equal(staleRunningReset.resetCount, 1);

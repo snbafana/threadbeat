@@ -631,7 +631,10 @@ bounded operators can tell when a `--limit` pass intentionally left more work in
 the queue.
 Use `--source status --branch-action resume_branch` when the apply should come
 from the lighter `session-status --recoverable --next` queue instead of the
-full session review snapshot.
+full session review snapshot. The same status source also accepts
+`--action reset_failed_drain_continuations` or
+`--action reset_running_drain_continuations` when the next step is to clear
+drain-continuation records before resuming work.
 Each non-dry apply writes `.threadbeat/worker-sessions/apply/<session>/<apply-id>.json`;
 set `--apply-id <id>` and rerun with `--resume` to skip commands that already
 exited cleanly in that recorded apply. Add `--resume-filter failed`, `pending`,
