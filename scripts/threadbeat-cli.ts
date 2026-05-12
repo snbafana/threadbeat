@@ -1441,6 +1441,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs sessions --format shell requires --commands-only");
     }
     const sessionLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
+    const sessionOffset = options.offset ? parseNonNegativeInteger(options.offset, "--offset") : 0;
     if (options.summary === "1" || options.next === "1") {
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
@@ -1457,8 +1458,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
       const collectFleetSummary = async () => {
         const allSessionNames = options.session ? [options.session] : await listWorkerSessionNames();
-        const sessionNames = sessionLimit && !options.session
-          ? await listWorkerSessionNames(sessionLimit)
+        const sessionNames = (sessionLimit || sessionOffset > 0) && !options.session
+          ? await listWorkerSessionNames(sessionLimit ?? undefined, sessionOffset)
           : allSessionNames;
         const sessions = await mapConcurrent(sessionNames, 4, async (listedSessionName) => {
           try {
@@ -1753,8 +1754,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...(options["needs-action"] === "1" ? { needsAction: true } : {}),
           ...(actionFilter ? { action: [...actionFilter] } : {}),
           ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
-          ...(sessionLimit ? {
-            limit: sessionLimit,
+          ...(sessionLimit || sessionOffset > 0 ? {
+            ...(sessionLimit ? { limit: sessionLimit } : {}),
+            offset: sessionOffset,
             totalSessionRecords: allSessionNames.length,
             scannedSessions: sessions.length,
           } : {}),
@@ -1823,11 +1825,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       return;
     }
     const allSessionNames = options.session ? [options.session] : await listWorkerSessionNames();
-    const sessions = await listWorkerSessions(options.session, sessionLimit && !options.session ? sessionLimit : null);
+    const sessions = await listWorkerSessions(
+      options.session,
+      sessionLimit && !options.session ? sessionLimit : null,
+      !options.session ? sessionOffset : 0,
+    );
     await printJson({
-      ...(sessionLimit ? {
+      ...(sessionLimit || sessionOffset > 0 ? {
         filter: {
-          limit: sessionLimit,
+          ...(sessionLimit ? { limit: sessionLimit } : {}),
+          offset: sessionOffset,
           totalSessionRecords: allSessionNames.length,
           scannedSessions: sessions.length,
         },
@@ -2284,6 +2291,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["older-than-ms"] && options.next !== "1") {
       throw new Error("runs session-summary --older-than-ms requires --next");
     }
+    if (options.offset && options.next !== "1") {
+      throw new Error("runs session-summary --offset requires --next");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-summary --format shell requires --commands-only");
     }
@@ -2293,6 +2303,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
     const rowLimit = options.limit ? parsePositiveInteger(options.limit, "--limit") : null;
+    const rowOffset = options.offset ? parseNonNegativeInteger(options.offset, "--offset") : 0;
     const drainContinuationOlderThanMs = options["older-than-ms"]
       ? parsePositiveInteger(options["older-than-ms"], "--older-than-ms")
       : STALE_RUNNING_DRAIN_CONTINUATION_MS;
@@ -2522,26 +2533,30 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const branchActionQueue = branchActionFilter
         ? allBranchActionQueue.filter((item) => branchActionFilter.has(item.action))
         : allBranchActionQueue;
-      const limitedBranchActionQueue = rowLimit ? branchActionQueue.slice(0, rowLimit) : branchActionQueue;
+      const pageEnd = rowLimit ? rowOffset + rowLimit : undefined;
+      const limitedBranchActionQueue = rowOffset > 0 || rowLimit
+        ? branchActionQueue.slice(rowOffset, pageEnd)
+        : branchActionQueue;
       const branchActions = limitedBranchActionQueue.reduce((counts, item) => {
         counts[item.action] = (counts[item.action] ?? 0) + 1;
         return counts;
       }, {} as Record<string, number>);
       const visibleResumableBranches = branchActionFilter && !branchActionFilter.has("resume_branch")
         ? []
-        : rowLimit
-          ? resumableBranches.slice(0, rowLimit)
+        : rowOffset > 0 || rowLimit
+          ? resumableBranches.slice(rowOffset, pageEnd)
           : resumableBranches;
       const visibleResultCommits = branchActionFilter && !branchActionFilter.has("review_branch")
         ? []
-        : rowLimit
-          ? resultCommits.slice(0, rowLimit)
+        : rowOffset > 0 || rowLimit
+          ? resultCommits.slice(rowOffset, pageEnd)
           : resultCommits;
       const filter = {
         ...(actionFilter ? { action: [...actionFilter] } : {}),
         ...(branchActionFilter ? { branchAction: [...branchActionFilter] } : {}),
-        ...(rowLimit ? {
-          limit: rowLimit,
+        ...(rowLimit || rowOffset > 0 ? {
+          ...(rowLimit ? { limit: rowLimit } : {}),
+          offset: rowOffset,
           totalResultCommits: resultCommits.length,
           visibleResultCommits: visibleResultCommits.length,
           totalResumableBranches: resumableBranches.length,
@@ -6008,8 +6023,12 @@ async function writeDrainContinuationWorker(worker: DrainContinuationWorker): Pr
   await fs.writeFile(drainContinuationWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
 }
 
-async function listWorkerSessions(sessionName?: string, limit?: number | null): Promise<Array<WorkerSession & { workers: Array<WorkerSession["workers"][number] & { alive: boolean }> }>> {
-  const names = sessionName ? [sessionName] : await listWorkerSessionNames(limit ?? undefined);
+async function listWorkerSessions(
+  sessionName?: string,
+  limit?: number | null,
+  offset = 0,
+): Promise<Array<WorkerSession & { workers: Array<WorkerSession["workers"][number] & { alive: boolean }> }>> {
+  const names = sessionName ? [sessionName] : await listWorkerSessionNames(limit ?? undefined, offset);
   return await Promise.all(names.map(async (name) => {
     const session = await readWorkerSession(name);
     return {
@@ -6118,21 +6137,22 @@ function workerSessionAgentIds(session: WorkerSession): string[] {
   return parseList(options.agents ?? required(options.agent, "recorded session --agent or --agents"));
 }
 
-async function listWorkerSessionNames(limit?: number): Promise<string[]> {
+async function listWorkerSessionNames(limit?: number, offset = 0): Promise<string[]> {
   try {
     const entries = await fs.readdir(workerSessionDir);
     const names = entries
       .filter((entry) => entry.endsWith(".json"))
       .map((entry) => entry.slice(0, -".json".length))
       .sort();
-    if (!limit) return names;
+    if (!limit && offset === 0) return names;
     const sessionsWithStats = await Promise.all(names.map(async (name) => {
       const stat = await fs.stat(workerSessionPath(name));
       return { name, mtimeMs: stat.mtimeMs };
     }));
+    const end = limit ? offset + limit : undefined;
     return sessionsWithStats
       .sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))
-      .slice(0, limit)
+      .slice(offset, end)
       .map((session) => session.name);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -6971,12 +6991,12 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next] [--limit 10] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
+  runs sessions [--session <name>] [--summary] [--next] [--limit 10] [--offset 10] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
-  runs session-summary <name> [--next] [--limit 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
+  runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]

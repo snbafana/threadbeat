@@ -261,6 +261,7 @@ npm run cli -- runs results --session overnight --max-polls 30 --interval-ms 100
 npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs sessions --summary --next --limit 10
+npm run cli -- runs sessions --summary --next --limit 10 --offset 10
 npm run cli -- runs sessions --summary --next --max-polls 30 --interval-ms 10000
 npm run cli -- runs sessions --summary --next --needs-action
 npm run cli -- runs sessions --summary --next --older-than-ms 120000 --commands-only --format shell
@@ -273,6 +274,7 @@ npm run cli -- runs session-status overnight --recoverable --include-stopped --n
 npm run cli -- runs session-summary overnight
 npm run cli -- runs session-summary overnight --next --max-polls 30 --interval-ms 10000
 npm run cli -- runs session-summary overnight --next --limit 20
+npm run cli -- runs session-summary overnight --next --limit 20 --offset 20
 npm run cli -- runs session-summary overnight --next --older-than-ms 120000 --commands-only --format shell
 npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
@@ -514,7 +516,8 @@ as the session next action before ordinary watch/recover guidance; add
 The summary reads the durable local continuation records directly, so fleet
 triage does not need one server request per session just to detect stuck drains.
 Add `--limit <n>` to scan only the most recently touched local session records,
-which keeps fleet snapshots bounded in long-lived checkouts with large
+and combine it with `--offset <n>` to page through older records. This keeps
+fleet snapshots bounded in long-lived checkouts with large
 `.threadbeat/worker-sessions/` history.
 Add `--max-polls` and `--interval-ms` to stream newline-delimited fleet snapshots while long
 worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
@@ -582,8 +585,9 @@ Add `--commands-only` with `--next` to emit only the runnable session and branch
 command queue, or `--format shell` to print copyable commands;
 use `--action <name>` or `--branch-action resume_branch|review_branch` to narrow
 that queue without mutating any branch. Add `--limit <n>` to keep the
-per-session result/resume rows and branch command queue bounded while preserving
-exact total counts in the summary.
+per-session result/resume rows and branch command queue bounded, and combine it
+with `--offset <n>` to page later rows while preserving exact total counts in
+the summary.
 `runs session-review <name> --include-stopped` is the read-only operator summary
 for a long-running session: worker liveness, agent run status, completed result
 branches with checkout/inspect commands, resumable branch list with concrete

@@ -6049,6 +6049,7 @@ try {
   const limitedSessionResultSummary = await cliJson<{
     filter: {
       limit: number;
+      offset: number;
       totalResultCommits: number;
       visibleResultCommits: number;
       totalResumableBranches: number;
@@ -6062,6 +6063,7 @@ try {
     resultCommits: Array<{ runId: string; resultCommit: string | null }>;
   }>(baseUrl, ["runs", "session-summary", resultSummarySessionName, "--next", "--limit", "1"]);
   assert.equal(limitedSessionResultSummary.filter.limit, 1);
+  assert.equal(limitedSessionResultSummary.filter.offset, 0);
   assert.equal(limitedSessionResultSummary.filter.totalResultCommits, 1);
   assert.equal(limitedSessionResultSummary.filter.visibleResultCommits, 1);
   assert.equal(limitedSessionResultSummary.filter.totalResumableBranches, 0);
@@ -6072,6 +6074,30 @@ try {
   assert.equal(limitedSessionResultSummary.branchActions.review_branch, 1);
   assert.deepEqual(limitedSessionResultSummary.branchActionQueue.map((item) => item.runId), [cliWorkFinalizePlan.run.id]);
   assert.deepEqual(limitedSessionResultSummary.resultCommits.map((item) => item.runId), [cliWorkFinalizePlan.run.id]);
+  const offsetSessionResultSummary = await cliJson<{
+    filter: {
+      limit: number;
+      offset: number;
+      totalResultCommits: number;
+      visibleResultCommits: number;
+      totalResumableBranches: number;
+      visibleResumableBranches: number;
+      totalQueuedBranchActions: number;
+      visibleBranchActions: number;
+    };
+    branchActionQueue: Array<{ runId: string }>;
+    resultCommits: Array<{ runId: string }>;
+  }>(baseUrl, ["runs", "session-summary", resultSummarySessionName, "--next", "--limit", "1", "--offset", "1"]);
+  assert.equal(offsetSessionResultSummary.filter.limit, 1);
+  assert.equal(offsetSessionResultSummary.filter.offset, 1);
+  assert.equal(offsetSessionResultSummary.filter.totalResultCommits, 1);
+  assert.equal(offsetSessionResultSummary.filter.visibleResultCommits, 0);
+  assert.equal(offsetSessionResultSummary.filter.totalResumableBranches, 0);
+  assert.equal(offsetSessionResultSummary.filter.visibleResumableBranches, 0);
+  assert.equal(offsetSessionResultSummary.filter.totalQueuedBranchActions, 1);
+  assert.equal(offsetSessionResultSummary.filter.visibleBranchActions, 0);
+  assert.deepEqual(offsetSessionResultSummary.branchActionQueue, []);
+  assert.deepEqual(offsetSessionResultSummary.resultCommits, []);
   const resultApplyId = "smoke-result-apply-review";
   const resultApplyDir = path.join(".threadbeat", "worker-sessions", "apply", resultSummarySessionName);
   const resultApplyPath = path.join(resultApplyDir, `${resultApplyId}.json`);
@@ -6353,6 +6379,52 @@ try {
     && commit.resultCommit === cliWorkFinalized.processed[0].finalized.result.commitSha
     && commit.command.join(" ") === `npm run cli -- runs review ${cliWorkFinalizePlan.run.id} --checkout-dir ./checkouts/${resultSummarySessionName}-results/${cliWorkFinalizePlan.run.id}`
   )));
+  const fleetPageOlderSessionName = `fleet-page-older-${process.pid}`;
+  const fleetPageNewerSessionName = `fleet-page-newer-${process.pid}`;
+  const fleetPageOlderPath = path.join(".threadbeat", "worker-sessions", `${fleetPageOlderSessionName}.json`);
+  const fleetPageNewerPath = path.join(".threadbeat", "worker-sessions", `${fleetPageNewerSessionName}.json`);
+  for (const [sessionName, sessionPath] of [
+    [fleetPageOlderSessionName, fleetPageOlderPath],
+    [fleetPageNewerSessionName, fleetPageNewerPath],
+  ] as const) {
+    await fs.writeFile(sessionPath, `${JSON.stringify({
+      session: sessionName,
+      baseUrl,
+      startedAt: new Date().toISOString(),
+      command: ["runs", "work", "--agent", cliWorkFinalizeAgent.agent.id],
+      workers: [],
+    })}\n`);
+  }
+  const fleetPageTime = Date.now();
+  await fs.utimes(fleetPageOlderPath, new Date(fleetPageTime + 1000), new Date(fleetPageTime + 1000));
+  await fs.utimes(fleetPageNewerPath, new Date(fleetPageTime + 2000), new Date(fleetPageTime + 2000));
+  const firstFleetPage = await cliJson<{
+    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number };
+    sessions: Array<{ session: { session: string } }>;
+  }>(baseUrl, ["runs", "sessions", "--summary", "--next", "--limit", "1"]);
+  assert.equal(firstFleetPage.filter.limit, 1);
+  assert.equal(firstFleetPage.filter.offset, 0);
+  assert.ok(firstFleetPage.filter.totalSessionRecords >= 2);
+  assert.equal(firstFleetPage.filter.scannedSessions, 1);
+  assert.deepEqual(firstFleetPage.sessions.map((session) => session.session.session), [fleetPageNewerSessionName]);
+  const secondFleetPage = await cliJson<{
+    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number };
+    sessions: Array<{ session: { session: string } }>;
+  }>(baseUrl, ["runs", "sessions", "--summary", "--next", "--limit", "1", "--offset", "1"]);
+  assert.equal(secondFleetPage.filter.limit, 1);
+  assert.equal(secondFleetPage.filter.offset, 1);
+  assert.equal(secondFleetPage.filter.totalSessionRecords, firstFleetPage.filter.totalSessionRecords);
+  assert.equal(secondFleetPage.filter.scannedSessions, 1);
+  assert.deepEqual(secondFleetPage.sessions.map((session) => session.session.session), [fleetPageOlderSessionName]);
+  const plainSecondFleetPage = await cliJson<{
+    filter: { limit: number; offset: number; totalSessionRecords: number; scannedSessions: number };
+    sessions: Array<{ session: string }>;
+  }>(baseUrl, ["runs", "sessions", "--limit", "1", "--offset", "1"]);
+  assert.equal(plainSecondFleetPage.filter.limit, 1);
+  assert.equal(plainSecondFleetPage.filter.offset, 1);
+  assert.equal(plainSecondFleetPage.filter.totalSessionRecords, firstFleetPage.filter.totalSessionRecords);
+  assert.equal(plainSecondFleetPage.filter.scannedSessions, 1);
+  assert.deepEqual(plainSecondFleetPage.sessions.map((session) => session.session), [fleetPageOlderSessionName]);
   const resultFleetInspectOnly = await cliJson<{
     filter: { action: string[]; totalSessions: number };
     totals: { sessions: number; resultCommits: number };
