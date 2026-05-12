@@ -3427,6 +3427,29 @@ try {
     && step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
     && step.command.join(" ") === resetRunningCommand
   )));
+  const customResetRunningCommand = `npm run cli -- runs session-drain-continuations ${detachedWorkerSessionName} --reset-running --older-than-ms 120000`;
+  const drainResetSummaryCustomThreshold = await cliJson<{
+    drainContinuationResets: number;
+    nextStep: { action: string; count: number; command: string[] };
+    drainContinuationResetNextSteps: Array<{ count: number; olderThanMs: number; continuationIds: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-summary",
+    detachedWorkerSessionName,
+    "--next",
+    "--older-than-ms",
+    "120000",
+  ]);
+  assert.equal(drainResetSummaryCustomThreshold.drainContinuationResets, 1);
+  assert.equal(drainResetSummaryCustomThreshold.nextStep.action, "reset_running_drain_continuations");
+  assert.equal(drainResetSummaryCustomThreshold.nextStep.count, 1);
+  assert.equal(drainResetSummaryCustomThreshold.nextStep.command.join(" "), customResetRunningCommand);
+  assert.ok(drainResetSummaryCustomThreshold.drainContinuationResetNextSteps.some((step) => (
+    step.count === 1
+    && step.olderThanMs === 120000
+    && step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
+    && step.command.join(" ") === customResetRunningCommand
+  )));
   const drainResetSummaryShell = await cliRaw(baseUrl, [
     "runs",
     "session-summary",
@@ -3472,6 +3495,33 @@ try {
   assert.ok(drainResetFleetSession?.drainContinuationResetNextSteps?.some((step) => (
     step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
     && step.command.join(" ") === resetRunningCommand
+  )));
+  const drainResetFleetCustomThreshold = await cliJson<{
+    totals: { drainContinuationResets: number };
+    sessions: Array<{
+      session: { session: string };
+      nextStep?: { action: string; count?: number; command: string[] };
+      drainContinuationResetNextSteps?: Array<{ olderThanMs: number; continuationIds: string[]; command: string[] }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "sessions",
+    "--session",
+    detachedWorkerSessionName,
+    "--summary",
+    "--next",
+    "--older-than-ms",
+    "120000",
+  ]);
+  assert.equal(drainResetFleetCustomThreshold.totals.drainContinuationResets, 1);
+  const customThresholdFleetSession = drainResetFleetCustomThreshold.sessions.find((session) => session.session.session === detachedWorkerSessionName);
+  assert.equal(customThresholdFleetSession?.nextStep?.action, "reset_running_drain_continuations");
+  assert.equal(customThresholdFleetSession?.nextStep?.count, 1);
+  assert.equal(customThresholdFleetSession?.nextStep?.command.join(" "), customResetRunningCommand);
+  assert.ok(customThresholdFleetSession?.drainContinuationResetNextSteps?.some((step) => (
+    step.olderThanMs === 120000
+    && step.continuationIds.includes(staleRunningContinuation.continuation.continuationId)
+    && step.command.join(" ") === customResetRunningCommand
   )));
   const drainResetFleetShell = await cliRaw(baseUrl, [
     "runs",

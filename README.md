@@ -260,6 +260,7 @@ npm run cli -- runs workers --agents <agent>,<agent>
 npm run cli -- runs sessions
 npm run cli -- runs sessions --summary --next --max-polls 30 --interval-ms 10000
 npm run cli -- runs sessions --summary --next --needs-action
+npm run cli -- runs sessions --summary --next --older-than-ms 120000 --commands-only --format shell
 npm run cli -- runs archive-sessions --dry-run
 npm run cli -- runs session-actions overnight
 npm run cli -- runs session-wait overnight --max-polls 30 --interval-ms 10000
@@ -268,6 +269,7 @@ npm run cli -- runs session-status overnight
 npm run cli -- runs session-status overnight --recoverable --include-stopped --next --commands-only --format shell
 npm run cli -- runs session-summary overnight
 npm run cli -- runs session-summary overnight --next --max-polls 30 --interval-ms 10000
+npm run cli -- runs session-summary overnight --next --older-than-ms 120000 --commands-only --format shell
 npm run cli -- runs session-review overnight --include-stopped --lines 40
 npm run cli -- runs session-review overnight --include-stopped --next
 npm run cli -- runs session-review overnight --include-stopped --next --commands-only --format shell
@@ -498,8 +500,9 @@ across sessions. With `--next`, fleet snapshots also include top-level
 commands, plus `branchActions` counts and a `branchActionQueue` of runnable
 resume/review commands for durable run branches across sessions. Sessions with
 stale `running` drain continuations surface `reset_running_drain_continuations`
-as the session next action before ordinary watch/recover guidance. Add `--max-polls`
-and `--interval-ms` to stream newline-delimited fleet snapshots while long
+as the session next action before ordinary watch/recover guidance; add
+`--older-than-ms` to tune when those running continuation records count as stale.
+Add `--max-polls` and `--interval-ms` to stream newline-delimited fleet snapshots while long
 worker sessions run. Add `--needs-action` with `--next` to hide sessions whose
 next action is only `continue_watch`, `--action <name>` to show only matching
 session next-actions, or `--branch-action resume_branch|review_branch` to narrow
@@ -557,7 +560,8 @@ commit SHAs, worker ownership, and checkout/review/inspect commands for
 branch-native result inspection, plus a top-level `resumableBranches` list with
 checkout/review/inspect/resume commands for stopped branches that do not have a
 result commit yet. Stale `running` drain continuations appear as
-`drainContinuationResetNextSteps` and become the session `nextStep` until reset.
+`drainContinuationResetNextSteps` and become the session `nextStep` until reset;
+add `--older-than-ms` to choose the age threshold used by that reset command.
 Add `--commands-only` with `--next` to emit only the runnable session and branch
 command queue, or `--format shell` to print copyable commands;
 use `--action <name>` or `--branch-action resume_branch|review_branch` to narrow

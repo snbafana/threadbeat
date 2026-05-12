@@ -1405,12 +1405,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.format && options.next !== "1") {
       throw new Error("runs sessions --format requires --next");
     }
+    if (options["older-than-ms"] && options.next !== "1") {
+      throw new Error("runs sessions --older-than-ms requires --next");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs sessions --format shell requires --commands-only");
     }
     if (options.summary === "1" || options.next === "1") {
       const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
       const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+      const drainContinuationOlderThanMs = options["older-than-ms"]
+        ? parsePositiveInteger(options["older-than-ms"], "--older-than-ms")
+        : STALE_RUNNING_DRAIN_CONTINUATION_MS;
+      const preserveOlderThanOption = options["older-than-ms"]
+        ? ["--older-than-ms", String(drainContinuationOlderThanMs)]
+        : [];
       if (outputFormat === "shell" && maxPolls !== 1) {
         throw new Error("runs sessions --format shell supports one poll");
       }
@@ -1512,11 +1521,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
             const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
             const drainContinuationResetNextSteps = options.next === "1"
-              ? await staleDrainContinuationResetNextSteps(listedSessionName)
+              ? await staleDrainContinuationResetNextSteps(listedSessionName, drainContinuationOlderThanMs)
               : [];
             const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
             const commands = {
-              sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", listedSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+              sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", listedSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000", ...preserveOlderThanOption],
               sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", listedSessionName, "--include-stopped"],
               resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", listedSessionName, "--next"],
               recoverSession: ["npm", "run", "cli", "--", "runs", "recover-session", listedSessionName],
@@ -2223,6 +2232,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.format && options.next !== "1") {
       throw new Error("runs session-summary --format requires --next");
     }
+    if (options["older-than-ms"] && options.next !== "1") {
+      throw new Error("runs session-summary --older-than-ms requires --next");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-summary --format shell requires --commands-only");
     }
@@ -2231,6 +2243,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const requiredSessionName = required(sessionName, "runs session-summary <session>");
     const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
     const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : 1;
+    const drainContinuationOlderThanMs = options["older-than-ms"]
+      ? parsePositiveInteger(options["older-than-ms"], "--older-than-ms")
+      : STALE_RUNNING_DRAIN_CONTINUATION_MS;
+    const preserveOlderThanOption = options["older-than-ms"]
+      ? ["--older-than-ms", String(drainContinuationOlderThanMs)]
+      : [];
     for (let poll = 0; poll < maxPolls; poll += 1) {
       const status = await workerSessionStatus(requiredSessionName, new Set(["planned", "running", "stopped"]));
       const sessionWorkerIds = new Set(status.session.workers.map((worker) => worker.workerId));
@@ -2320,13 +2338,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const sessionWorkers = status.session.workers as Array<WorkerSession["workers"][number] & { alive: boolean }>;
       const aliveWorkers = sessionWorkers.filter((worker) => worker.alive).length;
       const drainContinuationResetNextSteps = options.next === "1"
-        ? await staleDrainContinuationResetNextSteps(requiredSessionName)
+        ? await staleDrainContinuationResetNextSteps(requiredSessionName, drainContinuationOlderThanMs)
         : [];
       const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
       const commands = options.next === "1"
         ? {
           sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", requiredSessionName, "--recoverable", "--include-stopped", "--next"],
-          sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", requiredSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000"],
+          sessionSummaryWatch: ["npm", "run", "cli", "--", "runs", "session-summary", requiredSessionName, "--next", "--max-polls", "30", "--interval-ms", "10000", ...preserveOlderThanOption],
           sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", requiredSessionName, "--include-stopped"],
           results: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName],
           resultsNext: ["npm", "run", "cli", "--", "runs", "results", "--session", requiredSessionName, "--next"],
@@ -5815,7 +5833,7 @@ async function drainContinuationWorkerNextSteps(sessionName: string): Promise<Ar
     });
 }
 
-async function staleDrainContinuationResetNextSteps(sessionName: string): Promise<Array<{
+async function staleDrainContinuationResetNextSteps(sessionName: string, olderThanMs = STALE_RUNNING_DRAIN_CONTINUATION_MS): Promise<Array<{
   action: "reset_running_drain_continuations";
   reason: "stale_running_drain_continuations";
   count: number;
@@ -5832,7 +5850,7 @@ async function staleDrainContinuationResetNextSteps(sessionName: string): Promis
   const nowMs = Date.now();
   const stale = running.continuations.filter((record) => {
     const startedAtMs = Date.parse(record.startedAt ?? record.observedAt);
-    return Number.isFinite(startedAtMs) && nowMs - startedAtMs >= STALE_RUNNING_DRAIN_CONTINUATION_MS;
+    return Number.isFinite(startedAtMs) && nowMs - startedAtMs >= olderThanMs;
   });
   if (stale.length === 0) return [];
   const resetRunningDrainContinuations = [
@@ -5845,14 +5863,14 @@ async function staleDrainContinuationResetNextSteps(sessionName: string): Promis
     sessionName,
     "--reset-running",
     "--older-than-ms",
-    String(STALE_RUNNING_DRAIN_CONTINUATION_MS),
+    String(olderThanMs),
   ];
   return [{
     action: "reset_running_drain_continuations",
     reason: "stale_running_drain_continuations",
     count: stale.length,
     continuationIds: stale.map((record) => record.continuationId),
-    olderThanMs: STALE_RUNNING_DRAIN_CONTINUATION_MS,
+    olderThanMs,
     command: resetRunningDrainContinuations,
     commands: {
       inspectDrainContinuations: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName, "--status", "running"],
@@ -6824,12 +6842,12 @@ Commands:
   runs branches --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts] [--next] [--commands-only] [--format json|shell]
   runs results --agent <agent>|--agents <agent,agent>|--session <name> [--status completed,stopped] [--worker-id worker-a] [--run run_id[,run_id]] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--next] [--commands-only] [--format json|shell] [--interval-ms 2000] [--max-polls 1]
   runs workers --agent <agent>|--agents <agent,agent> [--status running]
-  runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--interval-ms 2000] [--max-polls 1]
+  runs sessions [--session <name>] [--summary] [--next] [--commands-only] [--format json|shell] [--needs-action] [--action continue_watch] [--branch-action review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs archive-sessions [--session <name>] [--dry-run]
   runs session-wait <name> [--recoverable] [--include-stopped] [--max-polls 60] [--interval-ms 2000]
   runs session-actions <name>
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
-  runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
+  runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review|drain-prefixes] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
