@@ -4051,6 +4051,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             applyActions: applyActionQueue?.counts.actionable ?? 0,
             applyResumeNeeded: applyActionQueue?.counts.resumeNeeded ?? 0,
             applyReadyToReview: applyActionQueue?.counts.readyToReview ?? 0,
+            applyResetAudits: applyActionQueue?.counts.resetAudits ?? 0,
           },
           checkoutDir: branchCheckoutDir,
           ...(untilEmpty ? {

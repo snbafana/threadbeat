@@ -4919,9 +4919,9 @@ try {
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].exitCode, 0);
   assert.equal(retryWatchApplyDrainContinuePreview.polls[0].failed, 0);
   const retryWatchActionQueue = await cliJson<{
-    summary: { applyActions: number; applyResumeNeeded: number; applyReadyToReview: number };
+    summary: { applyActions: number; applyResumeNeeded: number; applyReadyToReview: number; applyResetAudits: number };
     actionQueue: {
-      counts: { actionable: number; resumeNeeded: number; readyToReview: number };
+      counts: { actionable: number; resumeNeeded: number; readyToReview: number; resetAudits: number };
       actions: Array<{ applyId: string; action: string; command: string[] }>;
     };
   }>(baseUrl, [
@@ -4938,6 +4938,8 @@ try {
   assert.equal(retryWatchActionQueue.summary.applyActions, retryWatchActionQueue.actionQueue.counts.actionable);
   assert.equal(retryWatchActionQueue.summary.applyResumeNeeded, retryWatchActionQueue.actionQueue.counts.resumeNeeded);
   assert.equal(retryWatchActionQueue.summary.applyReadyToReview, retryWatchActionQueue.actionQueue.counts.readyToReview);
+  assert.equal(retryWatchActionQueue.summary.applyResetAudits, retryWatchActionQueue.actionQueue.counts.resetAudits);
+  assert.ok(retryWatchActionQueue.summary.applyResetAudits >= 2);
   assert.ok(retryWatchActionQueue.actionQueue.actions.some((action) => (
     action.applyId === retryApplyId
     && action.action === "retry_failed"
