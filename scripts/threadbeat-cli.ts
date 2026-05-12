@@ -3666,8 +3666,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs session-applies --ack-reset-audit cannot be combined with --action-queue");
     }
     if (options.server === "1") {
-      if (outputFormat !== "json") {
-        throw new Error("runs session-applies --server requires json output");
+      if (outputFormat !== "json" && !(outputFormat === "shell" && options["action-queue"] === "1")) {
+        throw new Error("runs session-applies --server requires json output unless --action-queue --format shell is used");
       }
       if (options["ack-reset-audit"] === "1") {
         const applyId = required(
@@ -3682,11 +3682,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         return;
       }
       if (options["action-queue"] === "1") {
-        await printJson(await fetchWorkerSessionApplyActions(requiredSessionName, {
+        const actionQueue = await fetchWorkerSessionApplyActions(requiredSessionName, {
           applyId: options["apply-id"],
           source: options.source,
           limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
-        }));
+        });
+        if (outputFormat === "shell") {
+          for (const action of actionQueue.actionQueue.actions) {
+            console.log(action.command.map(shellArg).join(" "));
+          }
+          return;
+        }
+        await printJson(actionQueue);
         return;
       }
       if (

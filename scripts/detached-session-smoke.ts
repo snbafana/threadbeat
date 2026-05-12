@@ -656,6 +656,21 @@ try {
   assert.deepEqual(serverApplyActionQueue.actionQueue.actions[0].ackCommand, [
     "npm", "run", "cli", "--", "runs", "session-applies", sessionName, "--server", "--apply-id", "detached-session-api-backed-reset", "--ack-reset-audit",
   ]);
+  const serverApplyActionQueueShell = await cliText(baseUrl, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+    "--format",
+    "shell",
+  ]);
+  assert.equal(
+    serverApplyActionQueueShell.trim(),
+    `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset`,
+  );
   const serverResetAuditAck = await cliJson<{
     session: string;
     applyId: string;
@@ -888,6 +903,14 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
   });
   return JSON.parse(stdout) as T;
+}
+
+async function cliText(baseUrl: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+  });
+  return stdout;
 }
 
 async function cleanupSession(session: string): Promise<void> {
