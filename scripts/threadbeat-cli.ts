@@ -2942,6 +2942,98 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (!options.action && !options["branch-action"]) {
       throw new Error("runs session-apply requires --action or --branch-action");
     }
+    if (options["until-empty"] === "1") {
+      if (queueSource !== "watch") {
+        throw new Error("runs session-apply --until-empty requires --source watch");
+      }
+      if (options.resume === "1") {
+        throw new Error("runs session-apply --until-empty cannot be combined with --resume");
+      }
+      const applyIdPrefix = options["apply-id"] ?? new Date().toISOString().replace(/[:.]/g, "-");
+      assertSafeSessionName(applyIdPrefix);
+      const maxPolls = parsePositiveInteger(options["max-polls"] ?? "10", "--max-polls");
+      const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+      const polls: Array<{
+        poll: number;
+        applyId: string;
+        applyPath: string;
+        selected: number;
+        commandsToRun: number;
+        exitCode: number | null;
+        failed: number;
+      }> = [];
+      let done = false;
+      let remaining = 0;
+      for (let poll = 1; poll <= maxPolls; poll += 1) {
+        const pollApplyId = `${applyIdPrefix}-${String(poll).padStart(3, "0")}`;
+        const pollResult = await runCliWorker([
+          "runs",
+          "session-apply",
+          requiredSessionName,
+          "--source",
+          "watch",
+          ...(options.action ? ["--action", options.action] : []),
+          ...(options["branch-action"] ? ["--branch-action", options["branch-action"]] : []),
+          ...(options["include-stopped"] === "1" ? ["--include-stopped"] : []),
+          ...(options.status ? ["--status", options.status] : []),
+          ...(options["checkout-dir"] ? ["--checkout-dir", options["checkout-dir"]] : []),
+          ...(options["changed-only"] === "1" ? ["--changed-only"] : []),
+          ...(options["changed-path"] ? ["--changed-path", options["changed-path"]] : []),
+          ...(options.limit ? ["--limit", options.limit] : []),
+          ...(options.concurrency ? ["--concurrency", options.concurrency] : []),
+          "--apply-id",
+          pollApplyId,
+          ...(options["dry-run"] === "1" ? ["--dry-run"] : []),
+        ]);
+        const pollOutput = parseJsonMaybe(pollResult.stdout) as {
+          applyId?: string;
+          applyPath?: string;
+          selected?: number;
+          commandsToRun?: unknown[];
+          executions?: Array<{ exitCode: number | null }>;
+        } | null;
+        if (!pollOutput) {
+          throw new Error(pollResult.stderr || pollResult.stdout || "runs session-apply --until-empty failed to parse poll output");
+        }
+        remaining = pollOutput.commandsToRun?.length ?? 0;
+        const failed = pollOutput.executions?.filter((execution) => execution.exitCode !== 0).length ?? 0;
+        polls.push({
+          poll,
+          applyId: pollOutput.applyId ?? pollApplyId,
+          applyPath: pollOutput.applyPath ?? workerSessionApplyPath(requiredSessionName, pollApplyId),
+          selected: pollOutput.selected ?? 0,
+          commandsToRun: remaining,
+          exitCode: pollResult.exitCode,
+          failed,
+        });
+        if ((pollOutput.selected ?? 0) === 0) {
+          done = true;
+          remaining = 0;
+          break;
+        }
+        if (options["dry-run"] === "1") break;
+        if (pollResult.exitCode !== 0) {
+          process.exitCode = 1;
+          break;
+        }
+        if (poll < maxPolls) await sleep(intervalMs);
+      }
+      await printJson({
+        observedAt: new Date().toISOString(),
+        session: requiredSessionName,
+        source: queueSource,
+        dryRun: options["dry-run"] === "1",
+        applyIdPrefix,
+        untilEmpty: {
+          done,
+          remaining,
+          polls: polls.length,
+          maxPolls,
+        },
+        polls,
+      });
+      return;
+    }
     if (queueSource === "status") {
       if (options.action) throw new Error("runs session-apply --source status supports --branch-action resume_branch only");
       const branchActions = new Set(parseList(required(options["branch-action"], "--branch-action")));
@@ -5718,7 +5810,7 @@ Commands:
   runs session-status <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--commands-only] [--branch-action resume_branch] [--format json|shell]
   runs session-summary <name> [--next] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
-  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--concurrency 1]
+  runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|--branch-action resume_branch|review_branch) [--source review|status|watch] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
   runs session-applies <name> [--apply-id id] [--summary] [--action-queue] [--summary-group resume-needed|ready-to-review] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--until-empty] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
   runs session-logs <name> [--lines 80]

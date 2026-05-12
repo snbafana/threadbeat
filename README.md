@@ -288,6 +288,7 @@ npm run cli -- runs session-applies overnight --ready-results --format shell --c
 npm run cli -- runs session-review overnight --include-stopped --checkout-dir ./checkouts/overnight-review
 npm run cli -- runs session-apply overnight --source watch --action retry_failed --limit 1 --dry-run
 npm run cli -- runs session-apply overnight --source watch --branch-action resume_branch --include-stopped --limit 1 --dry-run
+npm run cli -- runs session-apply overnight --source watch --action retry_failed --limit 1 --until-empty --max-polls 5
 npm run cli -- runs session-watch overnight --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --max-polls 5
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --checkout-dir ./checkouts/overnight-watch
@@ -601,7 +602,9 @@ bounded wait and does not execute queued commands. Add `--commands-only
 recovery, branch resume, and apply action-queue commands. Use
 `runs session-apply <name> --source watch` with an explicit `--action` or
 `--branch-action` to execute a filtered slice of that watch queue through the
-durable apply ledger.
+durable apply ledger. Add `--until-empty --max-polls <n>` to repeatedly take a
+bounded watch snapshot and write one apply record per poll until the filtered
+queue is empty.
 `--checkout-dir <path>` to include local checkouts for completed/stopped run
 branches plus a top-level `changedResults` list in the same snapshot. Add
 `--changed-only` or `--changed-path <path[,path]>` with `--checkout-dir` to

@@ -2949,6 +2949,43 @@ try {
   assert.equal(retryWatchApplyPreview.commandsToRun[0].action, "retry_failed");
   assert.equal(retryWatchApplyPreview.commandsToRun[0].reason, "session_apply_failed_commands");
   assert.equal(retryWatchApplyPreview.commandsToRun[0].command.join(" "), retryInspection.summary.actions.retryFailed.join(" "));
+  const retryWatchApplyDrainPreview = await cliJson<{
+    source: string;
+    dryRun: boolean;
+    applyIdPrefix: string;
+    untilEmpty: { done: boolean; remaining: number; polls: number; maxPolls: number };
+    polls: Array<{ poll: number; applyId: string; selected: number; commandsToRun: number; exitCode: number | null; failed: number }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    detachedWorkerSessionName,
+    "--source",
+    "watch",
+    "--action",
+    "retry_failed",
+    "--limit",
+    "1",
+    "--apply-id",
+    "retry-watch-drain-preview",
+    "--until-empty",
+    "--max-polls",
+    "3",
+    "--interval-ms",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(retryWatchApplyDrainPreview.source, "watch");
+  assert.equal(retryWatchApplyDrainPreview.dryRun, true);
+  assert.equal(retryWatchApplyDrainPreview.applyIdPrefix, "retry-watch-drain-preview");
+  assert.equal(retryWatchApplyDrainPreview.untilEmpty.done, false);
+  assert.equal(retryWatchApplyDrainPreview.untilEmpty.remaining, 1);
+  assert.equal(retryWatchApplyDrainPreview.untilEmpty.polls, 1);
+  assert.equal(retryWatchApplyDrainPreview.untilEmpty.maxPolls, 3);
+  assert.equal(retryWatchApplyDrainPreview.polls[0].applyId, "retry-watch-drain-preview-001");
+  assert.equal(retryWatchApplyDrainPreview.polls[0].selected, 1);
+  assert.equal(retryWatchApplyDrainPreview.polls[0].commandsToRun, 1);
+  assert.equal(retryWatchApplyDrainPreview.polls[0].exitCode, 0);
+  assert.equal(retryWatchApplyDrainPreview.polls[0].failed, 0);
   const retryFailedPreview = await cliJson<{
     resumeFilter: string[];
     selected: number;
