@@ -404,6 +404,25 @@ try {
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
   )));
 
+  const cliBranches = await cliJson<{
+    ok: true;
+    session: string;
+    filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+    summary: { resultCommits: number; resumable: number };
+    resumableBranches: Array<{ runId: string; commands: { resumeBranch: string[] | null } }>;
+  }>(baseUrl, ["runs", "session-branches", sessionName, "--server", "--resumable"]);
+  assert.equal(cliBranches.ok, true);
+  assert.equal(cliBranches.session, sessionName);
+  assert.deepEqual(cliBranches.filter.statuses, ["completed", "stopped"]);
+  assert.equal(cliBranches.filter.resumable, true);
+  assert.equal(cliBranches.filter.workerId, null);
+  assert.equal(cliBranches.summary.resultCommits, 0);
+  assert.ok(cliBranches.summary.resumable >= 1);
+  assert.ok(cliBranches.resumableBranches.some((run) => (
+    run.runId === stoppedPlan.run.id
+    && run.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
+  )));
+
   const stopped = await cliJson<{
     session: string;
     stopped: Array<{ workerId: string; pid: number | null; stopped: boolean; alive: boolean }>;

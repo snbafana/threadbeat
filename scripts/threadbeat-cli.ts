@@ -4166,6 +4166,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-branches") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-branches requires --server");
+    }
+    await printJson(await fetchWorkerSessionBranches(
+      required(sessionName, "runs session-branches <session> --server"),
+      {
+        ...(options.status ? { status: options.status } : {}),
+        ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+        ...(options["checkout-dir"] ? { checkoutDir: options["checkout-dir"] } : {}),
+        resumable: options.resumable === "1",
+      },
+    ));
+    return;
+  }
   if (subcommandName === "stop-apply-action-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6097,6 +6114,21 @@ async function fetchWorkerSessionControlPlaneStatus(
       nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
     };
   };
+}
+
+async function fetchWorkerSessionBranches(
+  sessionName: string,
+  options: { status?: string; workerId?: string; checkoutDir?: string; resumable: boolean },
+): Promise<unknown> {
+  const params = new URLSearchParams();
+  if (options.status) params.set("status", options.status);
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.checkoutDir) params.set("checkoutDir", options.checkoutDir);
+  if (options.resumable) params.set("resumable", "1");
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/branches`, params),
+  );
 }
 
 async function stopWorkerSessionDrainWorkersViaServer(
@@ -9325,6 +9357,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]
+  runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]

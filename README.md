@@ -797,7 +797,9 @@ record, worker liveness, worker log tails, and next diagnostic commands,
 watch-worker restart cues and a recommended next command,
 `GET /api/worker-sessions/:name/branches?resumable=true` to inspect
 branch-native result commits, resumable stopped branches, GitHub links, and
-review/resume commands through the server API, and use
+review/resume commands through the server API, or
+`runs session-branches <name> --server --resumable` for the same readout from
+the CLI, and use
 `GET /api/worker-sessions/:name/watch-workers/next` to surface stopped worker
 restart actions through the API. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including
