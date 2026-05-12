@@ -292,6 +292,7 @@ npm run cli -- runs session-drain-continuations overnight --execute-queued --det
 npm run cli -- runs session-drain-workers overnight --lines 40
 npm run cli -- runs stop-drain-workers overnight --worker-id overnight-drain-worker --retire
 npm run cli -- runs restart-drain-workers overnight --worker-id overnight-drain-worker --include-retired
+npm run cli -- runs session-drain-continuations overnight --reset-running --older-than-ms 600000
 npm run cli -- runs session-drain-continuations overnight --execute-next
 npm run cli -- runs session-drain-continuations overnight --execute <continuation-id>
 npm run cli -- runs session-drain-continuations overnight --status queued,running,failed
@@ -618,7 +619,10 @@ specific queued record can be executed with `--execute <continuation-id>`. All
 execution paths run the stored commands through the server and persist the same
 record as `running`, then `executed` or `failed` with command results. Add
 `--status queued,running,failed` to inspect pending, in-flight, or stuck
-continuation records without mixing in completed attempts. Add `--detach` with
+continuation records without mixing in completed attempts. If a host crash leaves
+a continuation stuck as `running`, use `--reset-running` to move it back to
+`queued`; add `--older-than-ms 600000` to only reset records whose `startedAt`
+timestamp is at least ten minutes old. Add `--detach` with
 `--execute-queued` to leave the bounded server drain running in the background;
 `runs session-drain-workers <name>` returns the durable worker PID, command, log
 paths, liveness, and recent stdout/stderr lines. Use

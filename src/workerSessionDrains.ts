@@ -48,6 +48,9 @@ type WorkerSessionDrainContinuationRecord = {
   status?: "queued" | "running" | "executed" | "failed";
   startedAt?: string;
   completedAt?: string;
+  resetAt?: string;
+  resetReason?: string;
+  previousStartedAt?: string;
   error?: string;
   dryRun: boolean;
   filter: Record<string, unknown>;
@@ -83,6 +86,10 @@ type QueueWorkerSessionDrainContinuationsOptions = {
 
 type ExecuteQueuedWorkerSessionDrainContinuationsOptions = {
   maxContinuations?: number;
+};
+
+type ResetRunningWorkerSessionDrainContinuationsOptions = {
+  olderThanMs?: number;
 };
 
 type WorkerSessionDrainContinuationExecution = WorkerSessionDrainContinuationRecord["drains"][number] & {
@@ -276,6 +283,58 @@ export async function executeQueuedWorkerSessionDrainContinuationRecords(
     .filter((record) => record.status === "queued")
     .length;
   return { executed, remainingQueued };
+}
+
+export async function resetRunningWorkerSessionDrainContinuationRecords(
+  projectRoot: string,
+  sessionName: string,
+  options: ResetRunningWorkerSessionDrainContinuationsOptions = {},
+): Promise<{
+  inspected: number;
+  running: number;
+  resetCount: number;
+  skippedRunning: number;
+  reset: Array<{ path: string; record: WorkerSessionDrainContinuationRecord }>;
+}> {
+  const records = await listWorkerSessionDrainContinuationRecords(projectRoot, sessionName, Number.MAX_SAFE_INTEGER);
+  const running = records.filter((record) => record.status === "running");
+  const nowMs = Date.now();
+  const reset: Array<{ path: string; record: WorkerSessionDrainContinuationRecord }> = [];
+  for (const record of running) {
+    if (options.olderThanMs !== undefined) {
+      const startedAtMs = Date.parse(record.startedAt ?? record.observedAt);
+      if (!Number.isFinite(startedAtMs) || nowMs - startedAtMs < options.olderThanMs) continue;
+    }
+    const resetAt = new Date().toISOString();
+    reset.push(await writeWorkerSessionDrainContinuationRecord(projectRoot, {
+      ...record,
+      status: "queued",
+      startedAt: undefined,
+      completedAt: undefined,
+      resetAt,
+      resetReason: "operator_reset_running",
+      previousStartedAt: record.startedAt,
+      error: undefined,
+      continueDrains: {
+        ...record.continueDrains,
+        succeeded: 0,
+        failed: 0,
+      },
+      drains: record.drains.map((drain) => ({
+        prefix: drain.prefix,
+        nextApplyId: drain.nextApplyId,
+        command: drain.command,
+        exitCode: null,
+      })),
+    }));
+  }
+  return {
+    inspected: records.length,
+    running: running.length,
+    resetCount: reset.length,
+    skippedRunning: running.length - reset.length,
+    reset,
+  };
 }
 
 export async function readWorkerSessionDrainContinuationRecord(

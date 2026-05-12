@@ -3264,6 +3264,91 @@ try {
   assert.ok(openDrainExecutedStatus.continuations.every((item) => item.status === "executed"));
   assert.ok(openDrainExecutedStatus.continuations.every((item) => typeof item.startedAt === "string"));
   assert.ok(openDrainExecutedStatus.continuations.every((item) => typeof item.completedAt === "string"));
+  const staleRunningContinuation = await cliJson<typeof openDrainQueuedContinuation>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--queue",
+    "--drain-prefix",
+    openDrainPrefix,
+    "--max-polls",
+    "3",
+    "--interval-ms",
+    "1",
+    "--dry-run",
+  ]);
+  const staleStartedAt = new Date(Date.now() - 60_000).toISOString();
+  await fs.writeFile(staleRunningContinuation.continuationPath, `${JSON.stringify({
+    ...staleRunningContinuation.continuation,
+    status: "running",
+    startedAt: staleStartedAt,
+  }, null, 2)}\n`);
+  const freshRunningReset = await cliJson<{
+    session: string;
+    inspected: number;
+    running: number;
+    resetCount: number;
+    skippedRunning: number;
+    continuations: Array<{ continuationId: string; status: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--reset-running",
+    "--older-than-ms",
+    "600000",
+  ]);
+  assert.equal(freshRunningReset.session, detachedWorkerSessionName);
+  assert.equal(freshRunningReset.running, 1);
+  assert.equal(freshRunningReset.resetCount, 0);
+  assert.equal(freshRunningReset.skippedRunning, 1);
+  assert.equal(freshRunningReset.continuations.length, 0);
+  const staleRunningReset = await cliJson<{
+    session: string;
+    inspected: number;
+    running: number;
+    resetCount: number;
+    skippedRunning: number;
+    continuations: Array<{
+      continuationId: string;
+      status: string;
+      startedAt?: string;
+      resetAt?: string;
+      resetReason?: string;
+      previousStartedAt?: string;
+      continueDrains: { succeeded: number; failed: number };
+      drains: Array<{ exitCode: number | null }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--reset-running",
+    "--older-than-ms",
+    "1",
+  ]);
+  assert.equal(staleRunningReset.session, detachedWorkerSessionName);
+  assert.equal(staleRunningReset.running, 1);
+  assert.equal(staleRunningReset.resetCount, 1);
+  assert.equal(staleRunningReset.skippedRunning, 0);
+  assert.equal(staleRunningReset.continuations[0]?.continuationId, staleRunningContinuation.continuation.continuationId);
+  assert.equal(staleRunningReset.continuations[0]?.status, "queued");
+  assert.equal(staleRunningReset.continuations[0]?.startedAt, undefined);
+  assert.equal(typeof staleRunningReset.continuations[0]?.resetAt, "string");
+  assert.equal(staleRunningReset.continuations[0]?.resetReason, "operator_reset_running");
+  assert.equal(staleRunningReset.continuations[0]?.previousStartedAt, staleStartedAt);
+  assert.equal(staleRunningReset.continuations[0]?.continueDrains.succeeded, 0);
+  assert.equal(staleRunningReset.continuations[0]?.continueDrains.failed, 0);
+  assert.equal(staleRunningReset.continuations[0]?.drains[0]?.exitCode, null);
+  const staleResetExecuted = await cliJson<typeof openDrainExecutedQueuedContinuation>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--execute-next",
+  ]);
+  assert.equal(staleResetExecuted.continuation.continuationId, staleRunningContinuation.continuation.continuationId);
+  assert.equal(staleResetExecuted.continuation.status, "executed");
+  assert.equal(staleResetExecuted.continuation.continueDrains.succeeded, 1);
   const openDrainQueuedDetached = await cliJson<typeof openDrainQueuedContinuation>(baseUrl, [
     "runs",
     "session-drain-continuations",
@@ -3724,7 +3809,7 @@ try {
   assert.equal(await fileExists(openDrainContinueDrainsPreview.continuationPath), true);
   const openDrainContinuationsResponse = await app.inject({
     method: "GET",
-    url: `/api/worker-sessions/${detachedWorkerSessionName}/apply-drain-continuations?limit=5`,
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/apply-drain-continuations?limit=10`,
   });
   assert.equal(openDrainContinuationsResponse.statusCode, 200);
   const openDrainContinuations = JSON.parse(openDrainContinuationsResponse.body) as {
@@ -3741,7 +3826,7 @@ try {
     }>;
   };
   assert.equal(openDrainContinuations.session, detachedWorkerSessionName);
-  assert.equal(openDrainContinuations.count, 5);
+  assert.ok(openDrainContinuations.count >= 5);
   const executedContinuation = openDrainContinuations.continuations.find((item) => item.continuationId === openDrainContinueDrainsPreview.continuationId);
   const serverExecutedContinuation = openDrainContinuations.continuations.find((item) => item.continuationId === openDrainQueuedContinuation.continuation.continuationId);
   const detachedExecutedContinuation = openDrainContinuations.continuations.find((item) => item.continuationId === openDrainQueuedDetached.continuation.continuationId);
@@ -3773,9 +3858,9 @@ try {
     session: string;
     count: number;
     continuations: Array<{ continuationId: string }>;
-  }>(baseUrl, ["runs", "session-drain-continuations", detachedWorkerSessionName, "--limit", "5"]);
+  }>(baseUrl, ["runs", "session-drain-continuations", detachedWorkerSessionName, "--limit", "10"]);
   assert.equal(openDrainContinuationsCli.session, detachedWorkerSessionName);
-  assert.equal(openDrainContinuationsCli.count, 5);
+  assert.ok(openDrainContinuationsCli.count >= 5);
   assert.ok(openDrainContinuationsCli.continuations.some((item) => item.continuationId === openDrainContinueDrainsPreview.continuationId));
   assert.ok(openDrainContinuationsCli.continuations.some((item) => item.continuationId === openDrainQueuedContinuation.continuation.continuationId));
   assert.ok(openDrainContinuationsCli.continuations.some((item) => item.continuationId === openDrainQueuedDetached.continuation.continuationId));
