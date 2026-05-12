@@ -3366,6 +3366,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         action: string;
         reason?: string;
         runId?: string;
+        count?: number;
+        continuationIds?: string[];
+        olderThanMs?: number;
         command: string[];
       }>;
     };
@@ -3500,6 +3503,57 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           output,
         };
       });
+      const allExecutions = [...(existingApply?.executions ?? []), ...executions];
+      const record = {
+        ...responseBase,
+        startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        executions: allExecutions,
+      };
+      await writeSessionApplyRecord(record);
+      if (executions.some((execution) => execution.exitCode !== 0)) process.exitCode = 1;
+      await printJson({ ...record, executions: allExecutions });
+      return;
+    }
+    if (queueSource === "status" && actionFilter && !branchActionFilter && !applyActionFilter) {
+      await writeSessionApplyRecord({
+        ...responseBase,
+        startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        executions: existingApply?.executions ?? [],
+      });
+      const executions = [];
+      for (const item of pendingCommands) {
+        try {
+          const output = item.action === "reset_failed_drain_continuations"
+            ? await resetFailedWorkerSessionDrainContinuations(requiredSessionName, { continuationIds: item.continuationIds })
+            : await resetRunningWorkerSessionDrainContinuations(requiredSessionName, { olderThanMs: item.olderThanMs });
+          executions.push({
+            scope: item.scope,
+            action: item.action,
+            reason: item.reason,
+            runId: item.runId ?? null,
+            command: item.command,
+            exitCode: 0,
+            stdout: JSON.stringify(output),
+            stderr: "",
+            output,
+          });
+        } catch (error) {
+          const output = { ok: false, error: error instanceof Error ? error.message : String(error) };
+          executions.push({
+            scope: item.scope,
+            action: item.action,
+            reason: item.reason,
+            runId: item.runId ?? null,
+            command: item.command,
+            exitCode: 1,
+            stdout: JSON.stringify(output),
+            stderr: output.error,
+            output,
+          });
+        }
+      }
       const allExecutions = [...(existingApply?.executions ?? []), ...executions];
       const record = {
         ...responseBase,
@@ -5808,6 +5862,9 @@ type SessionApplyCommand = {
   action: string;
   reason: string;
   runId?: string;
+  count?: number;
+  continuationIds?: string[];
+  olderThanMs?: number;
   command: string[];
 };
 

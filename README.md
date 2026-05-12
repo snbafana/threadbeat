@@ -646,7 +646,9 @@ full session review snapshot; that resume path is executed through
 applies do not shell out per branch. The same status source also accepts
 `--action reset_failed_drain_continuations` or
 `--action reset_running_drain_continuations` when the next step is to clear
-drain-continuation records before resuming work.
+drain-continuation records before resuming work. Status-source drain resets use
+the server drain-continuation reset APIs directly, so bounded reset applies do
+not spawn a nested CLI command just to mutate continuation records.
 Each non-dry apply writes `.threadbeat/worker-sessions/apply/<session>/<apply-id>.json`;
 set `--apply-id <id>` and rerun with `--resume` to skip commands that already
 exited cleanly in that recorded apply. Add `--resume-filter failed`, `pending`,

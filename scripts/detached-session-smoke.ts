@@ -539,6 +539,68 @@ try {
   assert.equal(apiBackedApplyResume.executions[0].output.run?.status, "planned");
   assert.equal(apiBackedApplyResume.executions[0].output.run?.worker_id, null);
 
+  const apiBackedResetContinuationId = "detached-api-backed-reset-failed";
+  const apiBackedResetContinuationPath = await writeDrainContinuation(sessionName, apiBackedResetContinuationId, {
+    status: "failed",
+    startedAt: new Date(Date.now() - 60_000).toISOString(),
+    completedAt: new Date().toISOString(),
+    error: "detached smoke failed reset probe",
+    continueDrains: { dryRun: false, selected: 1, succeeded: 0, failed: 1 },
+    drains: [{
+      prefix: "detached-api-backed-reset",
+      nextApplyId: "detached-api-backed-reset-002",
+      command: ["npm", "run", "cli", "--", "runs", "session-apply", sessionName, "--source", "watch"],
+      exitCode: 1,
+      stderr: "detached smoke failed reset probe",
+    }],
+  });
+  const apiBackedReset = await cliJson<{
+    session: string;
+    source: string;
+    applyId: string;
+    selected: number;
+    commands: Array<{ action: string; continuationIds?: string[] }>;
+    executions: Array<{
+      scope: string;
+      action: string;
+      exitCode: number;
+      output: {
+        ok: true;
+        session: string;
+        failed: number;
+        resetCount: number;
+        continuations: Array<{ continuationId: string; status: string; resetReason?: string }>;
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-apply",
+    sessionName,
+    "--source",
+    "status",
+    "--action",
+    "reset_failed_drain_continuations",
+    "--apply-id",
+    "detached-session-api-backed-reset",
+  ]);
+  assert.equal(apiBackedReset.session, sessionName);
+  assert.equal(apiBackedReset.source, "status");
+  assert.equal(apiBackedReset.applyId, "detached-session-api-backed-reset");
+  assert.equal(apiBackedReset.selected, 1);
+  assert.equal(apiBackedReset.commands[0].action, "reset_failed_drain_continuations");
+  assert.deepEqual(apiBackedReset.commands[0].continuationIds, [apiBackedResetContinuationId]);
+  assert.equal(apiBackedReset.executions[0].scope, "drain_continuation");
+  assert.equal(apiBackedReset.executions[0].action, "reset_failed_drain_continuations");
+  assert.equal(apiBackedReset.executions[0].exitCode, 0);
+  assert.equal(apiBackedReset.executions[0].output.ok, true);
+  assert.equal(apiBackedReset.executions[0].output.session, sessionName);
+  assert.equal(apiBackedReset.executions[0].output.failed, 1);
+  assert.equal(apiBackedReset.executions[0].output.resetCount, 1);
+  assert.equal(apiBackedReset.executions[0].output.continuations[0].continuationId, apiBackedResetContinuationId);
+  assert.equal(apiBackedReset.executions[0].output.continuations[0].status, "queued");
+  assert.equal(apiBackedReset.executions[0].output.continuations[0].resetReason, "operator_reset_failed");
+  await fs.rm(apiBackedResetContinuationPath, { force: true });
+
   const deadWorkerPlan = await cliJson<{ run: { id: string } }>(baseUrl, [
     "runs",
     "plan",
@@ -752,4 +814,32 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
 async function cleanupSession(session: string): Promise<void> {
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${session}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "apply", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuations", session), { recursive: true, force: true });
+}
+
+async function writeDrainContinuation(
+  session: string,
+  continuationId: string,
+  overrides: Record<string, unknown>,
+): Promise<string> {
+  const continuationDir = path.join(".threadbeat", "worker-sessions", "drain-continuations", session);
+  const continuationPath = path.join(continuationDir, `${continuationId}.json`);
+  await fs.mkdir(continuationDir, { recursive: true });
+  await fs.writeFile(continuationPath, `${JSON.stringify({
+    continuationId,
+    session,
+    observedAt: new Date().toISOString(),
+    dryRun: false,
+    filter: {},
+    readinessSource: "server",
+    readinessCounts: {
+      total: 1,
+      needsContinuation: 1,
+      done: 0,
+      stoppedOnFailure: 1,
+    },
+    ...overrides,
+  }, null, 2)}\n`);
+  return continuationPath;
 }
