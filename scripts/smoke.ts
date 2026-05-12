@@ -3405,6 +3405,86 @@ try {
   assert.ok(openDrainExecutedStatus.continuations.every((item) => item.status === "executed"));
   assert.ok(openDrainExecutedStatus.continuations.every((item) => typeof item.startedAt === "string"));
   assert.ok(openDrainExecutedStatus.continuations.every((item) => typeof item.completedAt === "string"));
+  const failedDrainContinuationId = "smoke-failed-drain-continuation";
+  const failedDrainContinuationPath = path.join(
+    path.dirname(openDrainQueuedContinuation.continuationPath),
+    `${failedDrainContinuationId}.json`,
+  );
+  await fs.writeFile(failedDrainContinuationPath, `${JSON.stringify({
+    ...openDrainQueuedContinuation.continuation,
+    continuationId: failedDrainContinuationId,
+    observedAt: new Date().toISOString(),
+    status: "queued",
+    startedAt: undefined,
+    completedAt: undefined,
+    error: undefined,
+    continueDrains: {
+      ...openDrainQueuedContinuation.continuation.continueDrains,
+      succeeded: 0,
+      failed: 0,
+    },
+    drains: [{
+      ...openDrainQueuedContinuation.continuation.drains[0],
+      prefix: "smoke-failed-drain",
+      nextApplyId: "smoke-failed-drain-002",
+      command: [
+        "npm",
+        "run",
+        "cli",
+        "--",
+        "runs",
+        "session-drain-continuations",
+        detachedWorkerSessionName,
+        "--execute",
+        "missing-continuation",
+      ],
+      exitCode: null,
+    }],
+  }, null, 2)}\n`);
+  const failedDrainExecuteResponse = await app.inject({
+    method: "POST",
+    url: `/api/worker-sessions/${detachedWorkerSessionName}/apply-drain-continuations/${failedDrainContinuationId}/execute`,
+    headers: { host: new URL(baseUrl).host },
+  });
+  assert.equal(failedDrainExecuteResponse.statusCode, 200);
+  const failedDrainExecute = JSON.parse(failedDrainExecuteResponse.body) as {
+    session: string;
+    continuation: {
+      continuationId: string;
+      status: string;
+      error?: string;
+      continueDrains: { succeeded: number; failed: number };
+      drains: Array<{ exitCode: number | null; stderr?: string }>;
+    };
+  };
+  assert.equal(failedDrainExecute.session, detachedWorkerSessionName);
+  assert.equal(failedDrainExecute.continuation.continuationId, failedDrainContinuationId);
+  assert.equal(failedDrainExecute.continuation.status, "failed");
+  assert.equal(failedDrainExecute.continuation.error, "drain continuation completed with 1 failed drain(s)");
+  assert.equal(failedDrainExecute.continuation.continueDrains.succeeded, 0);
+  assert.equal(failedDrainExecute.continuation.continueDrains.failed, 1);
+  assert.notEqual(failedDrainExecute.continuation.drains[0]?.exitCode, 0);
+  assert.match(failedDrainExecute.continuation.drains[0]?.stderr ?? "", /missing-continuation/);
+  const failedDrainStatus = await cliJson<{
+    session: string;
+    count: number;
+    continuations: Array<{ continuationId: string; status: string; error?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-drain-continuations",
+    detachedWorkerSessionName,
+    "--status",
+    "failed",
+    "--limit",
+    "10",
+  ]);
+  assert.equal(failedDrainStatus.session, detachedWorkerSessionName);
+  assert.ok(failedDrainStatus.count >= 1);
+  assert.ok(failedDrainStatus.continuations.some((item) => (
+    item.continuationId === failedDrainContinuationId
+    && item.status === "failed"
+    && item.error === "drain continuation completed with 1 failed drain(s)"
+  )));
   const staleRunningContinuation = await cliJson<typeof openDrainQueuedContinuation>(baseUrl, [
     "runs",
     "session-drain-continuations",

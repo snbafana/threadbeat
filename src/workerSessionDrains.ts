@@ -235,14 +235,17 @@ export async function executeWorkerSessionDrainContinuationRecord(
     await writeWorkerSessionDrainContinuationRecord(projectRoot, record);
     throw error;
   }
+  const succeeded = drains.filter((drain) => drain.exitCode === 0).length;
+  const failed = drains.filter((drain) => drain.exitCode !== 0).length;
   const record: WorkerSessionDrainContinuationRecord = {
     ...running,
-    status: "executed",
+    status: failed > 0 ? "failed" : "executed",
     completedAt: new Date().toISOString(),
+    ...(failed > 0 ? { error: `drain continuation completed with ${failed} failed drain(s)` } : {}),
     continueDrains: {
       ...existing.continueDrains,
-      succeeded: drains.filter((drain) => drain.exitCode === 0).length,
-      failed: drains.filter((drain) => drain.exitCode !== 0).length,
+      succeeded,
+      failed,
     },
     drains,
   };

@@ -663,8 +663,11 @@ server loop with `runs session-drain-continuations <name> --execute-queued
 --max-continuations 5`, drained one at a time with `--execute-next`, or a
 specific queued record can be executed with `--execute <continuation-id>`. All
 execution paths run the stored commands through the server and persist the same
-record as `running`, then `executed` or `failed` with command results. Add
-`--status queued,running,failed` to inspect pending, in-flight, or stuck
+record as `running`, then `executed` or `failed` with command results. A
+non-zero nested drain command marks the attempt `failed`, so
+`--status failed` finds drains that need operator attention without scanning
+`continueDrains.failed` inside executed records. Add
+`--status queued,running,failed` to inspect pending, in-flight, or failed
 continuation records without mixing in completed attempts. If a host crash leaves
 a continuation stuck as `running`, use `--reset-running` to move it back to
 `queued`; add `--older-than-ms 600000` to only reset records whose `startedAt`

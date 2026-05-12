@@ -3588,11 +3588,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         },
       );
       const observedAt = new Date().toISOString();
+      const succeeded = results.filter((result) => result.exitCode === 0).length;
+      const failed = results.filter((result) => result.exitCode !== 0).length;
       const continuation = await writeWorkerSessionDrainContinuationRecord({
         continuationId: createDrainContinuationId(observedAt),
         session: requiredSessionName,
         observedAt,
-        status: "executed",
+        status: failed > 0 ? "failed" : "executed",
         dryRun: options["dry-run"] === "1",
         filter: {
           ...(options["drain-prefix"] ? { drainPrefix: parseList(options["drain-prefix"]) } : {}),
@@ -3605,9 +3607,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         continueDrains: {
           dryRun: options["dry-run"] === "1",
           selected: commands.length,
-          succeeded: results.filter((result) => result.exitCode === 0).length,
-          failed: results.filter((result) => result.exitCode !== 0).length,
+          succeeded,
+          failed,
         },
+        ...(failed > 0 ? { error: `drain continuation completed with ${failed} failed drain(s)` } : {}),
         drains: results,
       });
       if (results.some((result) => result.exitCode !== 0)) process.exitCode = 1;
@@ -3621,8 +3624,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         continueDrains: {
           dryRun: options["dry-run"] === "1",
           selected: commands.length,
-          succeeded: results.filter((result) => result.exitCode === 0).length,
-          failed: results.filter((result) => result.exitCode !== 0).length,
+          succeeded,
+          failed,
         },
         drains: results,
       });
