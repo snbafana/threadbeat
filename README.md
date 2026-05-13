@@ -942,8 +942,11 @@ watch-worker restart cues and a recommended next command,
 branch-native result commits, resumable stopped branches, GitHub links, and
 review/resume commands through the server API, or
 `runs session-branches <name> --server --resumable` for the same readout from
-the CLI. Add `--commands-only --format shell` to print only the recommended
-review/resume commands from that server-backed branch queue, and use
+the CLI. Add `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
+and `--offset` to narrow or page the server-backed branch queue while preserving
+the exact branch name and result commit on each command row. Add
+`--commands-only --format shell` to print only the recommended review/resume
+commands from that server-backed branch queue, and use
 `GET /api/worker-sessions/:name/watch-workers/next` to surface stopped worker
 restart actions through the API. Add `--commands-only
 --format shell` to print the watch queue as runnable commands, including

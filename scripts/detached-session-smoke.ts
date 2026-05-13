@@ -706,6 +706,55 @@ try {
     run.runId === stoppedPlan.run.id
     && run.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`
   )));
+  const cliBranchResumeQueue = await cliJson<{
+    ok: true;
+    session: string;
+    filter: {
+      branchAction: string[];
+      runIds: string[];
+      limit: number;
+      offset: number;
+      totalNextSteps: number;
+      visibleNextSteps: number;
+      hasMore: boolean;
+    };
+    commands: Array<{
+      action: string;
+      runId: string;
+      state: string;
+      branchName: string;
+      resultCommit: string | null;
+      command: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branches",
+    sessionName,
+    "--server",
+    "--branch-action",
+    "resume_branch",
+    "--run",
+    stoppedPlan.run.id,
+    "--limit",
+    "1",
+    "--commands-only",
+  ]);
+  assert.equal(cliBranchResumeQueue.ok, true);
+  assert.equal(cliBranchResumeQueue.session, sessionName);
+  assert.deepEqual(cliBranchResumeQueue.filter.branchAction, ["resume_branch"]);
+  assert.deepEqual(cliBranchResumeQueue.filter.runIds, [stoppedPlan.run.id]);
+  assert.equal(cliBranchResumeQueue.filter.limit, 1);
+  assert.equal(cliBranchResumeQueue.filter.offset, 0);
+  assert.equal(cliBranchResumeQueue.filter.totalNextSteps, 1);
+  assert.equal(cliBranchResumeQueue.filter.visibleNextSteps, 1);
+  assert.equal(cliBranchResumeQueue.filter.hasMore, false);
+  assert.equal(cliBranchResumeQueue.commands.length, 1);
+  assert.equal(cliBranchResumeQueue.commands[0].action, "resume_branch");
+  assert.equal(cliBranchResumeQueue.commands[0].runId, stoppedPlan.run.id);
+  assert.equal(cliBranchResumeQueue.commands[0].state, "resumable");
+  assert.equal(cliBranchResumeQueue.commands[0].branchName, stoppedPlan.plan.branchName);
+  assert.equal(cliBranchResumeQueue.commands[0].resultCommit, null);
+  assert.equal(cliBranchResumeQueue.commands[0].command.join(" "), `npm run cli -- runs resume-branch ${stoppedPlan.run.id}`);
   const cliBranchCommands = await cliText(baseUrl, [
     "runs",
     "session-branches",

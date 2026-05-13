@@ -4859,12 +4859,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-branches --format shell requires --commands-only");
     }
+    const branchActionFilter = options["branch-action"] ? new Set(parseList(options["branch-action"])) : null;
+    if (branchActionFilter && [...branchActionFilter].some((action) => action !== "resume_branch" && action !== "review_branch")) {
+      throw new Error("runs session-branches --branch-action must be resume_branch or review_branch");
+    }
     const response = await fetchWorkerSessionBranches(
       required(sessionName, "runs session-branches <session> --server"),
       {
         ...(options.status ? { status: options.status } : {}),
         ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
         ...(options["checkout-dir"] ? { checkoutDir: options["checkout-dir"] } : {}),
+        ...(options["branch-action"] ? { branchAction: options["branch-action"] } : {}),
+        ...(options.run ? { runId: options.run } : {}),
+        ...(options.limit ? { limit: parsePositiveInteger(options.limit, "--limit") } : {}),
+        ...(options.offset ? { offset: parseNonNegativeInteger(options.offset, "--offset") } : {}),
         resumable: options.resumable === "1",
       },
     );
@@ -4877,6 +4885,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         runId: step.runId,
         status: step.status,
         state: step.state,
+        warning: step.warning,
+        workerId: step.workerId,
+        location: step.location,
+        branchName: step.branchName,
+        resultCommit: step.resultCommit,
         command: step.command,
       }));
       if (outputFormat === "shell") {
@@ -7869,13 +7882,34 @@ async function stopWorkerSessionControlPlaneTickWorkers(
 
 async function fetchWorkerSessionBranches(
   sessionName: string,
-  options: { status?: string; workerId?: string; checkoutDir?: string; resumable: boolean },
+  options: {
+    status?: string;
+    workerId?: string;
+    checkoutDir?: string;
+    branchAction?: string;
+    runId?: string;
+    limit?: number;
+    offset?: number;
+    resumable: boolean;
+  },
 ): Promise<{
   ok: true;
   observedAt: string;
   session: string;
   checkoutDir: string;
-  filter: { statuses: string[]; resumable: boolean; workerId: string | null };
+  filter: {
+    statuses: string[];
+    resumable: boolean;
+    workerId: string | null;
+    branchAction?: string[];
+    runIds?: string[];
+    limit?: number | null;
+    offset?: number;
+    totalNextSteps?: number;
+    visibleNextSteps?: number;
+    hasMore?: boolean;
+    nextOffset?: number | null;
+  };
   summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number };
   resultCommits: unknown[];
   resumableBranches: unknown[];
@@ -7886,6 +7920,11 @@ async function fetchWorkerSessionBranches(
     runId: string;
     status: string;
     state: string;
+    warning?: string | null;
+    workerId: string | null;
+    location: string | null;
+    branchName: string;
+    resultCommit: string | null;
     command: string[];
   }>;
   agents: unknown[];
@@ -7894,30 +7933,51 @@ async function fetchWorkerSessionBranches(
   if (options.status) params.set("status", options.status);
   if (options.workerId) params.set("workerId", options.workerId);
   if (options.checkoutDir) params.set("checkoutDir", options.checkoutDir);
+  if (options.branchAction) params.set("branchAction", options.branchAction);
+  if (options.runId) params.set("runId", options.runId);
+  if (options.limit) params.set("limit", String(options.limit));
+  if (options.offset && options.offset > 0) params.set("offset", String(options.offset));
   if (options.resumable) params.set("resumable", "1");
   return await requestJson(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/branches`, params),
-  ) as {
-    ok: true;
-    observedAt: string;
-    session: string;
-    checkoutDir: string;
-    filter: { statuses: string[]; resumable: boolean; workerId: string | null };
-    summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number };
-    resultCommits: unknown[];
-    resumableBranches: unknown[];
-    nextSteps: Array<{
-      action: string;
+	  ) as {
+	    ok: true;
+	    observedAt: string;
+	    session: string;
+	    checkoutDir: string;
+	    filter: {
+	      statuses: string[];
+	      resumable: boolean;
+	      workerId: string | null;
+	      branchAction?: string[];
+	      runIds?: string[];
+	      limit?: number | null;
+	      offset?: number;
+	      totalNextSteps?: number;
+	      visibleNextSteps?: number;
+	      hasMore?: boolean;
+	      nextOffset?: number | null;
+	    };
+	    summary: { agents: number; total: number; resultCommits: number; resumable: number; warnings: number };
+	    resultCommits: unknown[];
+	    resumableBranches: unknown[];
+	    nextSteps: Array<{
+	      action: string;
       reason: string;
       agentId: string;
-      runId: string;
-      status: string;
-      state: string;
-      command: string[];
-    }>;
-    agents: unknown[];
-  };
+	      runId: string;
+	      status: string;
+	      state: string;
+	      warning?: string | null;
+	      workerId: string | null;
+	      location: string | null;
+	      branchName: string;
+	      resultCommit: string | null;
+	      command: string[];
+	    }>;
+	    agents: unknown[];
+	  };
 }
 
 async function stopWorkerSessionDrainWorkersViaServer(
@@ -11174,7 +11234,7 @@ Commands:
   runs restart-control-plane-tick-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-tick-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
-  runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
+  runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--branch-action resume_branch|review_branch] [--run run_id[,run_id]] [--limit 20] [--offset 20] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
   runs session-watch <name> [--status planned,running,stopped] [--recoverable] [--include-stopped] [--next] [--action-queue] [--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets] [--until-empty] [--watch-id id] [--commands-only] [--format json|shell] [--checkout-dir ./checkouts] [--interval-ms 2000] [--max-polls 10]
