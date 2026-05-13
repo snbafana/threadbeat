@@ -717,9 +717,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/worker-sessions/:name/control-plane-advance-workers/next", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
       return {
         ok: true,
-        ...await listWorkerSessionControlPlaneAdvanceWorkerNextSteps(settings.projectRoot, name),
+        ...await listWorkerSessionControlPlaneAdvanceWorkerNextSteps(settings.projectRoot, name, {
+          ...(query.workerId ? { workerId: query.workerId } : {}),
+        }),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -1010,9 +1013,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   app.get("/api/worker-sessions/:name/control-plane-tick-workers/next", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
       return {
         ok: true,
-        ...await listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
+        ...await listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name, {
+          ...(query.workerId ? { workerId: query.workerId } : {}),
+        }),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

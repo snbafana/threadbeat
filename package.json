@@ -26,6 +26,7 @@
     "smoke:control-plane-ticks": "tsx scripts/control-plane-ticks-smoke.ts",
     "smoke:control-plane-advances": "tsx scripts/control-plane-advances-smoke.ts",
     "smoke:control-plane-alert-continuations": "tsx scripts/control-plane-alert-continuations-smoke.ts",
+    "smoke:control-plane-worker-next": "tsx scripts/control-plane-worker-next-smoke.ts",
     "smoke:apply-action-executions": "tsx scripts/apply-action-executions-smoke.ts",
     "smoke:worker-records": "tsx scripts/worker-record-sanitization-smoke.ts",
     "smoke:multi-agent-dispatch": "tsx scripts/multi-agent-dispatch-smoke.ts",

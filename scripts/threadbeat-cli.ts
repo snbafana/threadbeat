@@ -4951,6 +4951,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     await printJson(await fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(
       required(sessionName, "runs session-control-plane-advance-workers-next <session> --server"),
+      { workerId: options["worker-id"] },
     ));
     return;
   }
@@ -5138,6 +5139,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     await printJson(await fetchWorkerSessionControlPlaneTickWorkerNextSteps(
       required(sessionName, "runs session-control-plane-tick-workers-next <session> --server"),
+      { workerId: options["worker-id"] },
     ));
     return;
   }
@@ -8599,6 +8601,7 @@ async function fetchWorkerSessionControlPlaneAdvanceWorkers(
 
 async function fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(
   sessionName: string,
+  options: { workerId?: string } = {},
 ): Promise<{
   ok: true;
   session: string;
@@ -8606,9 +8609,11 @@ async function fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(
   nextSteps: unknown[];
   actions: { restart_control_plane_advance_worker: number };
 }> {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set("workerId", options.workerId);
   return await requestJson(
     "GET",
-    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers/next`,
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers/next`, params),
   ) as {
     ok: true;
     session: string;
@@ -8986,6 +8991,7 @@ async function fetchWorkerSessionControlPlaneTickWorkers(
 
 async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   sessionName: string,
+  options: { workerId?: string } = {},
 ): Promise<{
   ok: true;
   session: string;
@@ -8993,9 +8999,11 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   nextSteps: unknown[];
   actions: { restart_control_plane_tick_worker: number };
 }> {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set("workerId", options.workerId);
   return await requestJson(
     "GET",
-    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers/next`,
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers/next`, params),
   ) as {
     ok: true;
     session: string;
@@ -12449,7 +12457,7 @@ Commands:
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
-  runs session-control-plane-advance-workers-next <name> --server
+  runs session-control-plane-advance-workers-next <name> --server [--worker-id id]
   runs restart-control-plane-advance-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-advance-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
@@ -12459,7 +12467,7 @@ Commands:
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
-  runs session-control-plane-tick-workers-next <name> --server
+  runs session-control-plane-tick-workers-next <name> --server [--worker-id id]
   runs restart-control-plane-tick-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-tick-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-branch-recovery-executions <name> --server [--execution execution_id[,execution_id]] [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20] [--commands-only] [--checkout-dir ./checkouts/name-branch-recovery] [--format json|shell]

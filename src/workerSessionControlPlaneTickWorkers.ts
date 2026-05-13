@@ -230,6 +230,7 @@ export async function stopWorkerSessionControlPlaneTickWorkers(
 export async function listWorkerSessionControlPlaneTickWorkerNextSteps(
   projectRoot: string,
   sessionName: string,
+  options: { workerId?: string } = {},
 ): Promise<{
   session: string;
   count: number;
@@ -237,7 +238,11 @@ export async function listWorkerSessionControlPlaneTickWorkerNextSteps(
   actions: { restart_control_plane_tick_worker: number };
 }> {
   assertSafeWorkerSessionName(sessionName);
-  const workers = await listWorkerSessionControlPlaneTickWorkers(projectRoot, { sessionName }, 1);
+  if (options.workerId) assertSafeWorkerSessionName(options.workerId);
+  const workers = await listWorkerSessionControlPlaneTickWorkers(projectRoot, {
+    sessionName,
+    ...(options.workerId ? { workerId: options.workerId } : {}),
+  }, 1);
   const nextSteps = workers
     .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
     .map((worker): ControlPlaneTickWorkerNextStep => {

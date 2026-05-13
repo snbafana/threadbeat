@@ -255,6 +255,7 @@ export async function stopWorkerSessionControlPlaneAdvanceWorkers(
 export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
   projectRoot: string,
   sessionName: string,
+  options: { workerId?: string } = {},
 ): Promise<{
   session: string;
   count: number;
@@ -262,7 +263,11 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
   actions: { restart_control_plane_advance_worker: number };
 }> {
   assertSafeWorkerSessionName(sessionName);
-  const workers = await listWorkerSessionControlPlaneAdvanceWorkers(projectRoot, { sessionName }, 1);
+  if (options.workerId) assertSafeWorkerSessionName(options.workerId);
+  const workers = await listWorkerSessionControlPlaneAdvanceWorkers(projectRoot, {
+    sessionName,
+    ...(options.workerId ? { workerId: options.workerId } : {}),
+  }, 1);
   const nextSteps = workers
     .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
     .map((worker): ControlPlaneAdvanceWorkerNextStep => {
