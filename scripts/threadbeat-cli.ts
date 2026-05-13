@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveGitHubLinks } from "../src/gitLinks.js";
 import { listWorkerSessionBranchRecoveryExecutionRecords } from "../src/workerSessionBranchRecovery.js";
+import { writeWorkerSessionControlPlaneAdvanceRecord } from "../src/workerSessionControlPlaneAdvances.js";
 import { summarizeWorkerSessionControlPlaneTickDecision } from "../src/workerSessionControlPlaneTicks.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
@@ -4539,6 +4540,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const requiredSessionName = required(sessionName, "runs session-control-plane-recover-next <session> --server");
     const dryRun = options["dry-run"] === "1" || options.confirm !== "1";
     const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    const observedAt = new Date().toISOString();
+    const before = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
     const executeNextRecovery = async (): Promise<{
       ok: boolean;
       session: string;
@@ -4597,7 +4600,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           await new Promise((resolve) => setTimeout(resolve, intervalMs));
         }
       }
-      await printJson({
+      const after = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
+      const response = {
         ok: true,
         session: requiredSessionName,
         dryRun,
@@ -4607,14 +4611,40 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         executedSteps: cycles.filter((cycle) => cycle.selected).length,
         stoppedReason,
         cycles,
+      };
+      const written = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+        session: requiredSessionName,
+        observedAt,
+        completedAt: new Date().toISOString(),
+        dryRun,
+        selected: cycles.find((cycle) => cycle.selected)?.selected ?? null,
+        detailCommand: "recover_next_loop",
+        recovery: response,
+        executed: null,
+        before,
+        after,
       });
+      await printJson({ ...response, advanceId: written.record.advanceId, advancePath: written.path });
       return;
     }
     const response = await executeNextRecovery();
     if (!response.ok) {
       process.exitCode = 1;
     }
-    await printJson(response);
+    const after = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
+    const written = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+      session: requiredSessionName,
+      observedAt,
+      completedAt: new Date().toISOString(),
+      dryRun,
+      selected: response.selected,
+      detailCommand: "recover_next",
+      recovery: response,
+      executed: response.executed ?? null,
+      before,
+      after,
+    });
+    await printJson({ ...response, advanceId: written.record.advanceId, advancePath: written.path });
     return;
   }
   if (subcommandName === "session-control-plane-alerts") {
@@ -7757,6 +7787,24 @@ type WorkerSessionControlPlaneStatusResponse = {
       confirmed: boolean | null;
       command: string[];
     }>;
+    recoverNext: {
+      attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+      recent: Array<{
+        advanceId: string;
+        observedAt: string;
+        completedAt: string;
+        detailCommand: string | null;
+        dryRun: boolean;
+        untilEmpty: boolean;
+        stoppedReason: string | null;
+        executedSteps: number | null;
+        maxSteps: number | null;
+        intervalMs: number | null;
+        selectedAction: string | null;
+        selectedKind: string | null;
+        command: string[];
+      }>;
+    };
     nextSteps: {
       watchWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       drainWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
@@ -8738,6 +8786,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     actions: Record<string, number>;
     attempts: WorkerSessionControlPlaneStatusResponse["recovery"]["attempts"];
     recentAttempts: WorkerSessionControlPlaneStatusResponse["recovery"]["recentAttempts"];
+    recoverNext: WorkerSessionControlPlaneStatusResponse["recovery"]["recoverNext"];
   };
   nextRecovery: ReturnType<typeof selectWorkerSessionControlPlaneNextRecovery>;
   nextActions: WorkerSessionControlPlaneAdvanceAction[];
@@ -8792,6 +8841,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       actions: status.recovery.actions,
       attempts: status.recovery.attempts,
       recentAttempts: status.recovery.recentAttempts,
+      recoverNext: status.recovery.recoverNext,
     },
     nextRecovery,
     nextActions,

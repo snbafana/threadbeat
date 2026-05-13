@@ -398,6 +398,8 @@ try {
     ok: boolean;
     session: string;
     dryRun: boolean;
+    advanceId: string;
+    advancePath: string;
     selected: { kind: string; action: string; count: number } | null;
     command: string[] | null;
     result: {
@@ -415,6 +417,7 @@ try {
   assert.equal(recoverNextDryRun.ok, true);
   assert.equal(recoverNextDryRun.session, sessionName);
   assert.equal(recoverNextDryRun.dryRun, true);
+  assert.match(recoverNextDryRun.advancePath, /control-plane-advances/);
   assert.equal(recoverNextDryRun.selected?.kind, "confirmation_queue");
   assert.equal(recoverNextDryRun.selected?.action, "drain_control_plane_confirmations");
   assert.equal(recoverNextDryRun.selected?.count, 1);
@@ -432,6 +435,8 @@ try {
     session: string;
     dryRun: boolean;
     untilEmpty: boolean;
+    advanceId: string;
+    advancePath: string;
     maxSteps: number;
     intervalMs: number;
     executedSteps: number;
@@ -455,6 +460,7 @@ try {
   assert.equal(recoverNextLoopDryRun.ok, true);
   assert.equal(recoverNextLoopDryRun.session, sessionName);
   assert.equal(recoverNextLoopDryRun.dryRun, true);
+  assert.match(recoverNextLoopDryRun.advancePath, /control-plane-advances/);
   assert.equal(recoverNextLoopDryRun.untilEmpty, true);
   assert.equal(recoverNextLoopDryRun.maxSteps, 3);
   assert.equal(recoverNextLoopDryRun.intervalMs, 0);
@@ -466,6 +472,57 @@ try {
   assert.equal(recoverNextLoopDryRun.cycles[0]?.selected?.action, "drain_control_plane_confirmations");
   assert.equal(recoverNextLoopDryRun.cycles[0]?.result?.dryRun, true);
   assert.equal(recoverNextLoopDryRun.cycles[0]?.result?.attemptedConfirmations, 1);
+
+  const statusAfterRecoverNext = await cliJson<{
+    recovery: {
+      recoverNext: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number };
+        recent: Array<{
+          advanceId: string;
+          detailCommand: string | null;
+          dryRun: boolean;
+          untilEmpty: boolean;
+          stoppedReason: string | null;
+          executedSteps: number | null;
+          selectedAction: string | null;
+          selectedKind: string | null;
+          command: string[];
+        }>;
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.attempts.total, 2);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.attempts.dryRun, 2);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.attempts.executed, 1);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.attempts.failed, 0);
+  const recentRecoverLoop = statusAfterRecoverNext.recovery.recoverNext.recent.find((attempt) => (
+    attempt.advanceId === recoverNextLoopDryRun.advanceId
+  ));
+  assert.equal(recentRecoverLoop?.detailCommand, "recover_next_loop");
+  assert.equal(recentRecoverLoop?.dryRun, true);
+  assert.equal(recentRecoverLoop?.untilEmpty, true);
+  assert.equal(recentRecoverLoop?.stoppedReason, "dry_run");
+  assert.equal(recentRecoverLoop?.executedSteps, 1);
+  assert.equal(recentRecoverLoop?.selectedKind, "confirmation_queue");
+  assert.equal(recentRecoverLoop?.selectedAction, "drain_control_plane_confirmations");
+  assert.deepEqual(recentRecoverLoop?.command, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--advance",
+    recoverNextLoopDryRun.advanceId,
+  ]);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

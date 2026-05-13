@@ -138,6 +138,25 @@ type WorkerSessionControlPlaneConfirmationQueueStatus = {
   };
 };
 
+type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
+  attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
+  recent: Array<{
+    advanceId: string;
+    observedAt: string;
+    completedAt: string;
+    detailCommand: string | null;
+    dryRun: boolean;
+    untilEmpty: boolean;
+    stoppedReason: string | null;
+    executedSteps: number | null;
+    maxSteps: number | null;
+    intervalMs: number | null;
+    selectedAction: string | null;
+    selectedKind: string | null;
+    command: string[];
+  }>;
+};
+
 export const buildServer = async (settings: Settings): Promise<AppParts> => {
   const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
   await db.initSchema();
@@ -3609,6 +3628,7 @@ const readWorkerSessionControlPlaneStatus = async (
     actions: Record<string, number>;
     attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
     recentAttempts: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+    recoverNext: WorkerSessionControlPlaneRecoverNextHistoryStatus;
     nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
 }> => {
@@ -3632,6 +3652,7 @@ const readWorkerSessionControlPlaneStatus = async (
     applyActionExecutions,
     controlPlaneRecoveryAttempts,
     controlPlaneConfirmationAdvances,
+    recoverNextAttempts,
   ] = await Promise.all([
     listWorkerSessionApplyRecords(settings.projectRoot, name),
     listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
@@ -3657,6 +3678,10 @@ const readWorkerSessionControlPlaneStatus = async (
       limit: Number.MAX_SAFE_INTEGER,
       blocked: true,
       mutating: true,
+    }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      detailCommands: ["recover_next", "recover_next_loop"],
     }),
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
@@ -3701,6 +3726,7 @@ const readWorkerSessionControlPlaneStatus = async (
       recentAttempts: controlPlaneRecoveryAttempts
         .slice(0, lines)
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
+      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(name, recoverNextAttempts, lines),
       nextSteps: {
         watchWorkers: watchWorkerNextSteps.nextSteps,
         drainWorkers: drainWorkerNextSteps.nextSteps,
@@ -3834,6 +3860,35 @@ const summarizeWorkerSessionControlPlaneConfirmationQueue = (
   };
 };
 
+const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
+  sessionName: string,
+  records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  lines: number,
+): WorkerSessionControlPlaneRecoverNextHistoryStatus => {
+  return {
+    attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(records),
+    recent: records.slice(0, lines).map((record) => {
+      const recovery = objectRecord(record.recovery);
+      const selected = objectRecord(record.selected);
+      return {
+        advanceId: record.advanceId,
+        observedAt: record.observedAt,
+        completedAt: record.completedAt,
+        detailCommand: record.detailCommand ?? null,
+        dryRun: record.dryRun,
+        untilEmpty: booleanRecordField(recovery, "untilEmpty") ?? false,
+        stoppedReason: stringRecordField(recovery, "stoppedReason"),
+        executedSteps: numberRecordField(recovery, "executedSteps"),
+        maxSteps: numberRecordField(recovery, "maxSteps"),
+        intervalMs: numberRecordField(recovery, "intervalMs"),
+        selectedAction: stringRecordField(selected, "action"),
+        selectedKind: stringRecordField(selected, "kind"),
+        command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", record.advanceId],
+      };
+    }),
+  };
+};
+
 const objectRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -3847,6 +3902,11 @@ const stringRecordField = (record: Record<string, unknown> | null, key: string):
 const booleanRecordField = (record: Record<string, unknown> | null, key: string): boolean | null => {
   const value = record?.[key];
   return typeof value === "boolean" ? value : null;
+};
+
+const numberRecordField = (record: Record<string, unknown> | null, key: string): number | null => {
+  const value = record?.[key];
+  return typeof value === "number" ? value : null;
 };
 
 const stringArrayRecordField = (record: Record<string, unknown> | null, key: string): string[] | null => {

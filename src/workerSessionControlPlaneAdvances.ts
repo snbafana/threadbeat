@@ -12,6 +12,7 @@ export type WorkerSessionControlPlaneAdvanceRecord = {
   alert?: unknown | null;
   details?: unknown | null;
   detailCommand?: string;
+  recovery?: unknown;
   filter?: unknown;
   executed: unknown | null;
   executionSafety?: unknown;
