@@ -10,6 +10,7 @@ export type WorkerSessionControlPlaneAdvanceRecord = {
   dryRun: boolean;
   selected: unknown | null;
   executed: unknown | null;
+  executionSafety?: unknown;
   before: unknown;
   after: unknown;
 };

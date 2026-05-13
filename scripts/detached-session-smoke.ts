@@ -3419,6 +3419,7 @@ try {
     } | null;
     alert: ControlPlaneAlertPreviewResponse["alert"];
     executed: { command: string[]; exitCode: number | null; stdout?: string; stderr?: string } | null;
+    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null };
     filter: ControlPlaneAlertPreviewResponse["filter"];
   }>(baseUrl, [
     "runs",
@@ -3446,6 +3447,8 @@ try {
   assert.equal(applyActionAlertDetailExecute.session, sessionName);
   assert.equal(applyActionAlertDetailExecute.dryRun, false);
   assert.equal(applyActionAlertDetailExecute.detailCommand, "inspect_apply");
+  assert.equal(applyActionAlertDetailExecute.executionSafety.blocked, false);
+  assert.equal(applyActionAlertDetailExecute.executionSafety.mutating, false);
   assert.match(applyActionAlertDetailExecute.advancePath, /control-plane-advances/);
   assert.equal(applyActionAlertDetailExecute.selected?.surface, "apply_action");
   assert.equal(applyActionAlertDetailExecute.selected?.action, "inspect_apply");
@@ -3462,6 +3465,59 @@ try {
   );
   assert.equal(applyActionAlertDetailExecute.executed?.exitCode, 0);
   assert.deepEqual(applyActionAlertDetailExecute.filter.applyIds, ["detached-session-api-backed-reset"]);
+  const applyActionAlertMutatingDetailBlocked = await cliJson<{
+    ok: true;
+    session: string;
+    dryRun: boolean;
+    detailCommand: string;
+    selected: {
+      surface: string;
+      action: string;
+      command: string[];
+      detailCommand?: string;
+      applyId?: string;
+      executionId?: string;
+    } | null;
+    executed: { command: string[]; exitCode: number | null } | null;
+    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--severity",
+    "error",
+    "--surface",
+    "apply_action",
+    "--reason",
+    "failed_apply_action_execution",
+    "--apply",
+    "detached-session-api-backed-reset",
+    "--execution",
+    failedApplyActionExecutionId,
+    "--action",
+    "inspect_drain_continuation_resets",
+    "--detail-command",
+    "execute_apply_action",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(applyActionAlertMutatingDetailBlocked.ok, true);
+  assert.equal(applyActionAlertMutatingDetailBlocked.session, sessionName);
+  assert.equal(applyActionAlertMutatingDetailBlocked.dryRun, false);
+  assert.equal(applyActionAlertMutatingDetailBlocked.detailCommand, "execute_apply_action");
+  assert.equal(applyActionAlertMutatingDetailBlocked.selected?.action, "execute_apply_action");
+  assert.equal(applyActionAlertMutatingDetailBlocked.selected?.detailCommand, "execute_apply_action");
+  assert.equal(
+    applyActionAlertMutatingDetailBlocked.selected?.command.join(" "),
+    `npm run cli -- runs session-applies ${sessionName} --server --action-queue --execute-next --apply-id detached-session-api-backed-reset --apply-action inspect_drain_continuation_resets`,
+  );
+  assert.equal(applyActionAlertMutatingDetailBlocked.executed, null);
+  assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.blocked, true);
+  assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.mutating, true);
+  assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.confirmationRequired, true);
+  assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.confirmed, false);
+  assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.reason, "mutating detail command requires confirm=true");
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

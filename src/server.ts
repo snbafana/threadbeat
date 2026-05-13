@@ -563,6 +563,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         name,
         {
           dryRun: parseBoolean(body.dryRun, false),
+          confirm: parseBoolean(body.confirm, false),
           lines: parseOptionalInteger(body.lines) ?? 5,
           detailCommand: parseOptionalString(body.detailCommand),
           severities: parseOptionalList(body.severity),
@@ -3909,6 +3910,24 @@ const parseControlPlaneAlertDetailCommand = (
   return value as WorkerSessionControlPlaneAlertDetailCommand;
 };
 
+const isMutatingControlPlaneAlertDetailCommand = (
+  detailCommand: WorkerSessionControlPlaneAlertDetailCommand,
+): boolean => {
+  return detailCommand === "execute_apply_action"
+    || detailCommand === "acknowledge_reset_audit"
+    || detailCommand === "reset_failed_drain_continuations"
+    || detailCommand === "reset_selected_failed_drain_continuations";
+};
+
+type WorkerSessionControlPlaneAlertExecutionSafety = {
+  detailCommand: WorkerSessionControlPlaneAlertDetailCommand;
+  mutating: boolean;
+  confirmationRequired: boolean;
+  confirmed: boolean;
+  blocked: boolean;
+  reason: string | null;
+};
+
 const selectControlPlaneAlertDetailCommand = (
   alert: WorkerSessionControlPlaneAlert | null,
   details: WorkerSessionControlPlaneAlertDetails | null,
@@ -4097,7 +4116,7 @@ const executeWorkerSessionControlPlaneAlert = async (
   db: Database,
   baseUrl: string,
   sessionName: string,
-  options: { dryRun: boolean; lines: number; detailCommand?: string } & Omit<Parameters<typeof readWorkerSessionControlPlaneAlertPreview>[3], "limit">,
+  options: { dryRun: boolean; confirm: boolean; lines: number; detailCommand?: string } & Omit<Parameters<typeof readWorkerSessionControlPlaneAlertPreview>[3], "limit">,
 ): Promise<{
   ok: true;
   session: string;
@@ -4114,6 +4133,7 @@ const executeWorkerSessionControlPlaneAlert = async (
   after: WorkerSessionControlPlaneStatus;
   filter: Awaited<ReturnType<typeof readWorkerSessionControlPlaneAlertPreview>>["filter"];
   detailCommand: WorkerSessionControlPlaneAlertDetailCommand;
+  executionSafety: WorkerSessionControlPlaneAlertExecutionSafety;
 }> => {
   const observedAt = new Date().toISOString();
   const before = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
@@ -4121,7 +4141,18 @@ const executeWorkerSessionControlPlaneAlert = async (
   const detailCommand = parseControlPlaneAlertDetailCommand(options.detailCommand);
   const selectedCommand = selectControlPlaneAlertDetailCommand(preview.alert, preview.details, detailCommand);
   const selected = controlPlaneAdvanceActionFromAlert(preview.alert, selectedCommand);
-  const executed = selected && !options.dryRun
+  const mutating = isMutatingControlPlaneAlertDetailCommand(detailCommand);
+  const executionSafety: WorkerSessionControlPlaneAlertExecutionSafety = {
+    detailCommand,
+    mutating,
+    confirmationRequired: Boolean(selected && mutating),
+    confirmed: options.confirm,
+    blocked: Boolean(selected && mutating && !options.dryRun && !options.confirm),
+    reason: selected && mutating && !options.dryRun && !options.confirm
+      ? "mutating detail command requires confirm=true"
+      : null,
+  };
+  const executed = selected && !options.dryRun && !executionSafety.blocked
     ? await runControlPlaneTickCommand(settings.projectRoot, baseUrl, selected.command)
     : null;
   const after = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
@@ -4132,6 +4163,7 @@ const executeWorkerSessionControlPlaneAlert = async (
     dryRun: options.dryRun,
     selected,
     executed,
+    executionSafety,
     before,
     after,
   });
@@ -4151,6 +4183,7 @@ const executeWorkerSessionControlPlaneAlert = async (
     after,
     filter: preview.filter,
     detailCommand,
+    executionSafety,
   };
 };
 

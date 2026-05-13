@@ -771,7 +771,9 @@ it, or add `--detail-command inspect_apply`, `execute_apply_action`,
 `acknowledge_reset_audit`, `inspect_failed_drain_continuations`,
 `reset_failed_drain_continuations`, or
 `reset_selected_failed_drain_continuations` to execute one of the selected
-alert's detail commands instead of the primary alert command. Use
+alert's detail commands instead of the primary alert command. Mutating detail
+commands require `--confirm`; without it, Threadbeat writes a blocked advance
+record with `executionSafety.blocked=true` and does not run the command. Use
 `runs session-control-plane-advance <name> --server`
 or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
 first priority next action from that status; add `--dry-run` to inspect the
