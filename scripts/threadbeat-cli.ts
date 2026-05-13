@@ -7104,6 +7104,27 @@ async function fetchWorkerSessionControlPlaneTimeline(
   session: string;
   count: number;
   counts: Record<string, number>;
+  decisions: {
+    count: number;
+    statuses: Record<string, number>;
+    statusReasons: Record<string, number>;
+    plannedSurfaces: Record<string, number>;
+    executedSurfaces: Record<string, number>;
+    skippedSurfaces: Record<string, number>;
+    notPlannedSurfaces: Record<string, number>;
+    latest: Array<{
+      tickId: string;
+      observedAt: string;
+      status: string;
+      statusReason: string;
+      plannedCount: number;
+      executedCount: number;
+      plannedSurfaces: string[];
+      executedSurfaces: string[];
+      skippedSurfaces: string[];
+      notPlannedSurfaces: string[];
+    }>;
+  };
   events: Array<{
     observedAt: string;
     source: string;
@@ -7134,6 +7155,27 @@ async function fetchWorkerSessionControlPlaneTimeline(
     session: string;
     count: number;
     counts: Record<string, number>;
+    decisions: {
+      count: number;
+      statuses: Record<string, number>;
+      statusReasons: Record<string, number>;
+      plannedSurfaces: Record<string, number>;
+      executedSurfaces: Record<string, number>;
+      skippedSurfaces: Record<string, number>;
+      notPlannedSurfaces: Record<string, number>;
+      latest: Array<{
+        tickId: string;
+        observedAt: string;
+        status: string;
+        statusReason: string;
+        plannedCount: number;
+        executedCount: number;
+        plannedSurfaces: string[];
+        executedSurfaces: string[];
+        skippedSurfaces: string[];
+        notPlannedSurfaces: string[];
+      }>;
+    };
     events: Array<{
       observedAt: string;
       source: string;

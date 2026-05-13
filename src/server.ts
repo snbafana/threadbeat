@@ -2805,6 +2805,28 @@ type WorkerSessionControlPlaneTimelineEvent = {
   skippedCount?: number;
 };
 
+type WorkerSessionControlPlaneTimelineDecisionRollup = {
+  count: number;
+  statuses: Record<string, number>;
+  statusReasons: Record<string, number>;
+  plannedSurfaces: Record<string, number>;
+  executedSurfaces: Record<string, number>;
+  skippedSurfaces: Record<string, number>;
+  notPlannedSurfaces: Record<string, number>;
+  latest: Array<{
+    tickId: string;
+    observedAt: string;
+    status: string;
+    statusReason: string;
+    plannedCount: number;
+    executedCount: number;
+    plannedSurfaces: string[];
+    executedSurfaces: string[];
+    skippedSurfaces: string[];
+    notPlannedSurfaces: string[];
+  }>;
+};
+
 const readWorkerSessionControlPlaneTimeline = async (
   settings: Settings,
   name: string,
@@ -2814,6 +2836,7 @@ const readWorkerSessionControlPlaneTimeline = async (
   session: string;
   count: number;
   counts: Record<string, number>;
+  decisions: WorkerSessionControlPlaneTimelineDecisionRollup;
   events: WorkerSessionControlPlaneTimelineEvent[];
 }> => {
   const [ticks, workers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
@@ -2929,8 +2952,47 @@ const readWorkerSessionControlPlaneTimeline = async (
       counts[event.event] = (counts[event.event] ?? 0) + 1;
       return counts;
     }, {}),
+    decisions: summarizeWorkerSessionControlPlaneTimelineDecisions(ticks, options.lines),
     events: sorted,
   };
+};
+
+const summarizeWorkerSessionControlPlaneTimelineDecisions = (
+  ticks: Awaited<ReturnType<typeof listWorkerSessionControlPlaneTickRecords>>,
+  latestLimit: number,
+): WorkerSessionControlPlaneTimelineDecisionRollup => {
+  const decisions = ticks.map((tick) => ({
+    tick,
+    decision: summarizeWorkerSessionControlPlaneTickDecision(tick),
+  }));
+  return {
+    count: decisions.length,
+    statuses: countStrings(decisions.map(({ tick }) => tick.status)),
+    statusReasons: countStrings(decisions.map(({ decision }) => decision.statusReason)),
+    plannedSurfaces: countStrings(decisions.flatMap(({ decision }) => decision.planned.map((entry) => entry.surface))),
+    executedSurfaces: countStrings(decisions.flatMap(({ decision }) => decision.executed.map((entry) => entry.surface))),
+    skippedSurfaces: countStrings(decisions.flatMap(({ decision }) => decision.skipped.map((entry) => entry.surface))),
+    notPlannedSurfaces: countStrings(decisions.flatMap(({ decision }) => decision.notPlanned.map((entry) => entry.surface))),
+    latest: decisions.slice(0, latestLimit).map(({ tick, decision }) => ({
+      tickId: tick.tickId,
+      observedAt: tick.observedAt,
+      status: tick.status,
+      statusReason: decision.statusReason,
+      plannedCount: decision.plannedCount,
+      executedCount: decision.executedCount,
+      plannedSurfaces: decision.planned.map((entry) => entry.surface),
+      executedSurfaces: decision.executed.map((entry) => entry.surface),
+      skippedSurfaces: decision.skipped.map((entry) => entry.surface),
+      notPlannedSurfaces: decision.notPlanned.map((entry) => entry.surface),
+    })),
+  };
+};
+
+const countStrings = (values: string[]): Record<string, number> => {
+  return values.reduce<Record<string, number>>((counts, value) => {
+    counts[value] = (counts[value] ?? 0) + 1;
+    return counts;
+  }, {});
 };
 
 const readWorkerSessionControlPlaneStatus = async (

@@ -2397,6 +2397,26 @@ try {
     session: string;
     count: number;
     counts: Record<string, number>;
+    decisions: {
+      count: number;
+      statuses: Record<string, number>;
+      statusReasons: Record<string, number>;
+      plannedSurfaces: Record<string, number>;
+      executedSurfaces: Record<string, number>;
+      skippedSurfaces: Record<string, number>;
+      notPlannedSurfaces: Record<string, number>;
+      latest: Array<{
+        tickId: string;
+        status: string;
+        statusReason: string;
+        plannedCount: number;
+        executedCount: number;
+        plannedSurfaces: string[];
+        executedSurfaces: string[];
+        skippedSurfaces: string[];
+        notPlannedSurfaces: string[];
+      }>;
+    };
     events: Array<{
       event: string;
       source: string;
@@ -2428,6 +2448,19 @@ try {
   assert.ok((controlPlaneTimeline.counts.worker_completed ?? 0) >= 1);
   assert.ok((controlPlaneTimeline.counts.worker_retired ?? 0) >= 1);
   assert.ok((controlPlaneTimeline.counts.apply_action_executed ?? 0) >= 1);
+  assert.ok(controlPlaneTimeline.decisions.count >= 3);
+  assert.ok((controlPlaneTimeline.decisions.statuses.dry_run ?? 0) >= 2);
+  assert.ok((controlPlaneTimeline.decisions.statusReasons.dry_run ?? 0) >= 2);
+  assert.ok((controlPlaneTimeline.decisions.plannedSurfaces.branch_recovery ?? 0) >= 2);
+  assert.ok((controlPlaneTimeline.decisions.plannedSurfaces.apply_action ?? 0) >= 2);
+  assert.ok((controlPlaneTimeline.decisions.plannedSurfaces.drain_continuation ?? 0) >= 2);
+  assert.ok((controlPlaneTimeline.decisions.skippedSurfaces.branch_recovery ?? 0) >= 2);
+  assert.ok(controlPlaneTimeline.decisions.latest.length <= 5);
+  assert.ok(controlPlaneTimeline.decisions.latest.some((decision) => (
+    decision.statusReason === "dry_run"
+    && decision.plannedSurfaces.includes("branch_recovery")
+    && decision.skippedSurfaces.includes("branch_recovery")
+  )));
   assert.ok(controlPlaneTimeline.events.some((event) => event.event === "tick_recorded" && event.status === "dry_run"));
   assert.ok(controlPlaneTimeline.events.some((event) => (
     event.event === "worker_completed"
