@@ -115,7 +115,7 @@ export async function startWorkerSessionControlPlaneTickWorker(
       stdoutPath,
       stderrPath,
     };
-    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    await fs.writeFile(recordPath, `${JSON.stringify(toStoredControlPlaneTickWorker(worker), null, 2)}\n`, { flag: "wx" });
     recordControlPlaneTickWorkerCompletion(projectRoot, child, worker);
     const alive = processIsAlive(worker.pid);
     return { ...worker, alive, lifecycle: describeControlPlaneTickWorkerLifecycle(worker, alive) };
@@ -430,7 +430,28 @@ async function readControlPlaneTickWorker(projectRoot: string, sessionName: stri
 }
 
 async function writeControlPlaneTickWorker(projectRoot: string, worker: ControlPlaneTickWorker): Promise<void> {
-  await fs.writeFile(controlPlaneTickWorkerPath(projectRoot, worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+  await fs.writeFile(controlPlaneTickWorkerPath(projectRoot, worker.session, worker.workerId), `${JSON.stringify(toStoredControlPlaneTickWorker(worker), null, 2)}\n`);
+}
+
+function toStoredControlPlaneTickWorker(worker: ControlPlaneTickWorker): ControlPlaneTickWorker {
+  return {
+    session: worker.session,
+    workerId: worker.workerId,
+    baseUrl: worker.baseUrl,
+    startedAt: worker.startedAt,
+    command: worker.command,
+    pid: worker.pid,
+    stdoutPath: worker.stdoutPath,
+    stderrPath: worker.stderrPath,
+    ...(worker.stoppedAt !== undefined ? { stoppedAt: worker.stoppedAt } : {}),
+    ...(worker.stopResult !== undefined ? { stopResult: worker.stopResult } : {}),
+    ...(worker.retiredAt !== undefined ? { retiredAt: worker.retiredAt } : {}),
+    ...(worker.restartedAt !== undefined ? { restartedAt: worker.restartedAt } : {}),
+    ...(worker.restartCount !== undefined ? { restartCount: worker.restartCount } : {}),
+    ...(worker.previousPid !== undefined ? { previousPid: worker.previousPid } : {}),
+    ...(worker.completedAt !== undefined ? { completedAt: worker.completedAt } : {}),
+    ...(worker.completionResult !== undefined ? { completionResult: worker.completionResult } : {}),
+  };
 }
 
 async function stopProcessGroup(pid: number | null): Promise<StopProcessGroupResult> {

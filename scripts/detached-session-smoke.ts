@@ -2788,6 +2788,18 @@ try {
   assert.equal(stoppedControlPlaneTickWorkers.workers[0]?.lifecycle.state, "stopped");
   assert.equal(stoppedControlPlaneTickWorkers.workers[0]?.lifecycle.restartable, true);
   assert.equal(stoppedControlPlaneTickWorkers.workers[0]?.lifecycle.reason, "stopped_control_plane_tick_worker");
+  const persistedStoppedControlPlaneTickWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "control-plane-tick-workers",
+    sessionName,
+    "detached-smoke-control-plane-worker.json",
+  ), "utf8")) as Record<string, unknown>;
+  assert.equal(typeof persistedStoppedControlPlaneTickWorker.stoppedAt, "string");
+  assert.equal("alive" in persistedStoppedControlPlaneTickWorker, false);
+  assert.equal("lifecycle" in persistedStoppedControlPlaneTickWorker, false);
+  assert.equal("stdout" in persistedStoppedControlPlaneTickWorker, false);
+  assert.equal("stderr" in persistedStoppedControlPlaneTickWorker, false);
   const controlPlaneTickWorkerNext = await cliJson<{
     ok?: true;
     session: string;
@@ -2847,6 +2859,17 @@ try {
     restartedControlPlaneTickWorker.restarted[0]?.command.join(" "),
     `runs session-control-plane-tick-loop ${sessionName} --server --max-ticks 1 --interval-ms 0 --lines 20 --dry-run`,
   );
+  const persistedRestartedControlPlaneTickWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "control-plane-tick-workers",
+    sessionName,
+    "detached-smoke-control-plane-worker.json",
+  ), "utf8")) as Record<string, unknown>;
+  assert.equal("alive" in persistedRestartedControlPlaneTickWorker, false);
+  assert.equal("lifecycle" in persistedRestartedControlPlaneTickWorker, false);
+  assert.equal("stdout" in persistedRestartedControlPlaneTickWorker, false);
+  assert.equal("stderr" in persistedRestartedControlPlaneTickWorker, false);
   const retiredControlPlaneTickWorkers = await cliJson<typeof stoppedControlPlaneTickWorkers>(baseUrl, [
     "runs",
     "stop-control-plane-tick-workers",
