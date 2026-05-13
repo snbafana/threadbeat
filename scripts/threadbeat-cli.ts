@@ -4827,6 +4827,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
         intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
         lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        drainConfirmations: options["drain-confirmations"] === "1",
+        confirm: options.confirm === "1",
+        maxConfirmations: parsePositiveInteger(options["max-confirmations"] ?? "3", "--max-confirmations"),
       },
     ));
     return;
@@ -4845,6 +4848,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
         intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
         lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        drainConfirmations: options["drain-confirmations"] === "1",
+        confirm: options.confirm === "1",
+        maxConfirmations: parsePositiveInteger(options["max-confirmations"] ?? "3", "--max-confirmations"),
       },
     ));
     return;
@@ -8082,7 +8088,7 @@ async function fetchWorkerSessionControlPlaneAdvances(
 
 async function startWorkerSessionControlPlaneAdvanceWorker(
   sessionName: string,
-  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number },
+  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number },
 ): Promise<{
   ok: true;
   session: string;
@@ -8097,13 +8103,16 @@ async function startWorkerSessionControlPlaneAdvanceWorker(
       maxSteps: options.maxSteps,
       intervalMs: options.intervalMs,
       lines: options.lines,
+      drainConfirmations: options.drainConfirmations ?? false,
+      confirm: options.confirm ?? false,
+      maxConfirmations: options.maxConfirmations ?? 3,
     },
   ) as { ok: true; session: string; worker: unknown };
 }
 
 async function ensureWorkerSessionControlPlaneAdvanceWorker(
   sessionName: string,
-  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number },
+  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number },
 ): Promise<{
   ok: true;
   session: string;
@@ -8121,6 +8130,9 @@ async function ensureWorkerSessionControlPlaneAdvanceWorker(
       maxSteps: options.maxSteps,
       intervalMs: options.intervalMs,
       lines: options.lines,
+      drainConfirmations: options.drainConfirmations ?? false,
+      confirm: options.confirm ?? false,
+      maxConfirmations: options.maxConfirmations ?? 3,
     },
   ) as {
     ok: true;
@@ -11909,8 +11921,8 @@ Commands:
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
-  runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
+  runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3]
+  runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server
   runs restart-control-plane-advance-workers <name> --server --worker-id id [--include-retired] [--lines 20]

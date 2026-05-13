@@ -702,6 +702,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
           intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
           lines: parseOptionalInteger(body.lines) ?? 5,
+          drainConfirmations: parseBoolean(body.drainConfirmations, false),
+          confirm: parseBoolean(body.confirm, false),
+          maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
         },
       );
       return { ok: true, session: name, worker };
@@ -717,12 +720,15 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
       const workerId = parseOptionalString(body.workerId);
       const lines = parseOptionalInteger(body.lines) ?? 20;
+      const drainConfirmations = parseBoolean(body.drainConfirmations, false);
+      const requestedMode = drainConfirmations ? "confirmation_drain" : "advance_loop";
       const existingWorkers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
         sessionName: name,
         ...(workerId ? { workerId } : {}),
         includeRetired: Boolean(workerId),
       }, lines);
-      const runningWorker = existingWorkers.find((worker) => worker.alive);
+      const matchingWorkers = existingWorkers.filter((worker) => (worker.mode ?? "advance_loop") === requestedMode);
+      const runningWorker = matchingWorkers.find((worker) => worker.alive);
       if (runningWorker) {
         return {
           ok: true,
@@ -733,7 +739,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           workers: existingWorkers,
         };
       }
-      const restartableWorker = existingWorkers.find((worker) => worker.lifecycle.restartable);
+      const restartableWorker = matchingWorkers.find((worker) => worker.lifecycle.restartable);
       if (restartableWorker) {
         const restarted = await restartWorkerSessionControlPlaneAdvanceWorker(settings.projectRoot, baseUrl, name, {
           workerId: restartableWorker.workerId,
@@ -768,6 +774,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
           intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
           lines,
+          drainConfirmations,
+          confirm: parseBoolean(body.confirm, false),
+          maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
         },
       );
       return {

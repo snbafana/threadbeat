@@ -5,6 +5,7 @@ import path from "node:path";
 export type ControlPlaneAdvanceWorker = {
   session: string;
   workerId: string;
+  mode: ControlPlaneAdvanceWorkerMode;
   baseUrl: string;
   startedAt: string;
   command: string[];
@@ -20,6 +21,8 @@ export type ControlPlaneAdvanceWorker = {
   completedAt?: string;
   completionResult?: { exitCode: number | null; signal: NodeJS.Signals | null };
 };
+
+export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain";
 
 export type ControlPlaneAdvanceWorkerLifecycle = {
   state: "running" | "stopped" | "completed" | "retired" | "stopping_failed" | "exited_unrecorded";
@@ -69,6 +72,9 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     maxSteps: number;
     intervalMs: number;
     lines: number;
+    drainConfirmations?: boolean;
+    confirm?: boolean;
+    maxConfirmations?: number;
   },
 ): Promise<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle }> {
   assertSafeWorkerSessionName(sessionName);
@@ -82,19 +88,11 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
   if (await pathExists(recordPath)) {
     throw new Error(`control-plane advance worker '${workerId}' already exists for session '${sessionName}'`);
   }
-  const command = [
-    "runs",
-    "session-control-plane-advance-loop",
-    sessionName,
-    "--server",
-    "--max-steps",
-    String(options.maxSteps),
-    "--interval-ms",
-    String(options.intervalMs),
-    "--lines",
-    String(options.lines),
-    ...(options.dryRun ? ["--dry-run"] : []),
-  ];
+  const mode: ControlPlaneAdvanceWorkerMode = options.drainConfirmations ? "confirmation_drain" : "advance_loop";
+  if (mode === "confirmation_drain" && !options.confirm) {
+    throw new Error("control-plane confirmation drain workers require --confirm");
+  }
+  const command = buildControlPlaneAdvanceWorkerCommand(sessionName, mode, options);
   const stdout = await fs.open(stdoutPath, "a");
   const stderr = await fs.open(stderrPath, "a");
   try {
@@ -108,6 +106,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     const worker: ControlPlaneAdvanceWorker = {
       session: sessionName,
       workerId,
+      mode,
       baseUrl,
       startedAt: new Date().toISOString(),
       command,
@@ -504,6 +503,45 @@ function controlPlaneAdvanceWorkerPath(projectRoot: string, sessionName: string,
 
 function createControlPlaneAdvanceWorkerId(): string {
   return `control-plane-advance-worker-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 17)}`;
+}
+
+function buildControlPlaneAdvanceWorkerCommand(
+  sessionName: string,
+  mode: ControlPlaneAdvanceWorkerMode,
+  options: {
+    dryRun: boolean;
+    maxSteps: number;
+    intervalMs: number;
+    lines: number;
+    maxConfirmations?: number;
+  },
+): string[] {
+  if (mode === "confirmation_drain") {
+    return [
+      "runs",
+      "session-control-plane-advances",
+      sessionName,
+      "--server",
+      "--drain-confirmations",
+      "--confirm",
+      "--max-confirmations",
+      String(options.maxConfirmations ?? 3),
+      ...(options.dryRun ? ["--dry-run"] : []),
+    ];
+  }
+  return [
+    "runs",
+    "session-control-plane-advance-loop",
+    sessionName,
+    "--server",
+    "--max-steps",
+    String(options.maxSteps),
+    "--interval-ms",
+    String(options.intervalMs),
+    "--lines",
+    String(options.lines),
+    ...(options.dryRun ? ["--dry-run"] : []),
+  ];
 }
 
 function assertSafeWorkerSessionName(value: string): void {

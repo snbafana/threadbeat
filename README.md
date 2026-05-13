@@ -808,6 +808,11 @@ and log tails, `runs session-control-plane-advance-workers-next <name> --server`
 to list stopped restartable advance workers, and
 `runs stop-control-plane-advance-workers` or
 `runs restart-control-plane-advance-workers` for lifecycle recovery. The
+advance worker can also run a bounded confirmation drain instead of the
+advance loop: `runs start-control-plane-advance-worker <name> --server
+--drain-confirmations --confirm --max-confirmations <n>` records and supervises
+that mutating confirmation drain with the same worker lifecycle and log
+inspection commands. The
 aggregate status includes `workers.controlPlaneAdvance` and advance-worker
 restart next steps alongside the other worker recovery surfaces. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running

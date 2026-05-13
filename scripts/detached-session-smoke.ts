@@ -3783,6 +3783,82 @@ try {
   assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.confirmed, true);
   assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.reason, null);
   assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.confirmationCommand, null);
+  const confirmationDrainWorker = await cliJson<{
+    ok?: true;
+    session: string;
+    worker: {
+      workerId: string;
+      mode: "confirmation_drain";
+      command: string[];
+      pid: number | null;
+      stdoutPath: string;
+      stderrPath: string;
+    };
+  }>(baseUrl, [
+    "runs",
+    "start-control-plane-advance-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-confirmation-drain-worker",
+    "--drain-confirmations",
+    "--confirm",
+    "--max-confirmations",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(confirmationDrainWorker.ok, true);
+  assert.equal(confirmationDrainWorker.session, sessionName);
+  assert.equal(confirmationDrainWorker.worker.workerId, "detached-smoke-confirmation-drain-worker");
+  assert.equal(confirmationDrainWorker.worker.mode, "confirmation_drain");
+  assert.equal(
+    confirmationDrainWorker.worker.command.join(" "),
+    `runs session-control-plane-advances ${sessionName} --server --drain-confirmations --confirm --max-confirmations 1 --dry-run`,
+  );
+  assert.match(confirmationDrainWorker.worker.stdoutPath, /control-plane-advance-workers/);
+  assert.match(confirmationDrainWorker.worker.stderrPath, /control-plane-advance-workers/);
+  type ConfirmationDrainWorkerListResponse = {
+    ok?: true;
+    session: string;
+    count: number;
+    workers: Array<{
+      workerId: string;
+      mode: "confirmation_drain";
+      alive: boolean;
+      completedAt?: string;
+      completionResult?: { exitCode: number | null; signal: string | null };
+      lifecycle: { state: string; restartable: boolean; reason: string };
+      stdout: { lines: string[] };
+    }>;
+  };
+  let completedConfirmationDrainWorkers: ConfirmationDrainWorkerListResponse | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    completedConfirmationDrainWorkers = await cliJson<ConfirmationDrainWorkerListResponse>(baseUrl, [
+      "runs",
+      "session-control-plane-advance-workers",
+      sessionName,
+      "--server",
+      "--worker-id",
+      "detached-smoke-confirmation-drain-worker",
+      "--lines",
+      "80",
+    ]);
+    if (completedConfirmationDrainWorkers?.workers[0]?.completedAt) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(completedConfirmationDrainWorkers?.ok, true);
+  assert.equal(completedConfirmationDrainWorkers?.count, 1);
+  assert.equal(completedConfirmationDrainWorkers?.workers[0]?.workerId, "detached-smoke-confirmation-drain-worker");
+  assert.equal(completedConfirmationDrainWorkers?.workers[0]?.mode, "confirmation_drain");
+  assert.equal(completedConfirmationDrainWorkers?.workers[0]?.alive, false);
+  assert.ok(completedConfirmationDrainWorkers?.workers[0]?.completedAt);
+  assert.equal(completedConfirmationDrainWorkers?.workers[0]?.completionResult?.exitCode, 0);
+  assert.equal(completedConfirmationDrainWorkers?.workers[0]?.lifecycle.state, "completed");
+  assert.equal(completedConfirmationDrainWorkers?.workers[0]?.lifecycle.restartable, false);
+  assert.equal(completedConfirmationDrainWorkers?.workers[0]?.lifecycle.reason, "worker_completed");
+  const confirmationDrainWorkerOutput = completedConfirmationDrainWorkers?.workers[0]?.stdout.lines.join("\n") ?? "";
+  assert.match(confirmationDrainWorkerOutput, /"sourceAdvanceId":/);
+  assert.match(confirmationDrainWorkerOutput, /"confirmed": true/);
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",
