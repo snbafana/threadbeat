@@ -8985,6 +8985,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       "result_inspection:",
       `  pending: ${summary.results.counts.pending}`,
       `  reviewed: ${summary.results.counts.reviewed}`,
+      `  inspect_all: ${formatShellCommand(summary.commands.resultInspections)}`,
+      `  inspect_pending: ${formatShellCommand(summary.commands.pendingResultInspections)}`,
     );
     for (const step of summary.results.inspection.nextSteps) {
       lines.push(
@@ -9000,7 +9002,11 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   } else {
-    lines.push(`result_inspection: none (reviewed=${summary.results.counts.reviewed})`);
+    lines.push(
+      `result_inspection: none (reviewed=${summary.results.counts.reviewed})`,
+      `  inspect_all: ${formatShellCommand(summary.commands.resultInspections)}`,
+      `  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`,
+    );
   }
   if (summary.recovery.recoverNext.recent.length > 0) {
     lines.push("recent_recover_next:");
@@ -9035,6 +9041,13 @@ function workerSessionControlPlaneStatusSummaryCommands(
   for (const step of summary.results.inspection.nextSteps) {
     commands.push({ command: step.commands.inspectResult });
     commands.push({ command: step.commands.reviewRun });
+  }
+  commands.push({ command: summary.commands.resultInspections });
+  if (summary.results.counts.pending > 0) {
+    commands.push({ command: summary.commands.pendingResultInspections });
+  }
+  if (summary.results.counts.reviewed > 0) {
+    commands.push({ command: summary.commands.reviewedResultInspections });
   }
   for (const attempt of summary.recovery.recoverNext.recent) {
     commands.push({ command: attempt.command });
@@ -9222,6 +9235,10 @@ function summarizeWorkerSessionControlPlaneStatus(
     tick: string[];
     tickDryRun: string[];
     timelineSummary: string[];
+    resultInspections: string[];
+    pendingResultInspections: string[];
+    reviewedResultInspections: string[];
+    skippedResultInspections: string[];
   };
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
@@ -9319,6 +9336,10 @@ function summarizeWorkerSessionControlPlaneStatus(
       tick: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server"],
       tickDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server", "--dry-run"],
       timelineSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server", "--summary"],
+      resultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server"],
+      pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
+      reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
+      skippedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped"],
     },
   };
 }

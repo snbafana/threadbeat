@@ -2066,6 +2066,10 @@ try {
       tick: string[];
       tickDryRun: string[];
       timelineSummary: string[];
+      resultInspections: string[];
+      pendingResultInspections: string[];
+      reviewedResultInspections: string[];
+      skippedResultInspections: string[];
     };
   }>(baseUrl, [
     "runs",
@@ -2086,6 +2090,9 @@ try {
   assert.equal(controlPlaneStatusSummary.branches.inspection.count, controlPlaneStatus.branches.nextSteps.length);
   assert.equal(controlPlaneStatusSummary.results.counts.resultCommits, controlPlaneStatus.results.counts.resultCommits);
   assert.equal(controlPlaneStatusSummary.results.inspection.count, controlPlaneStatus.results.nextSteps.length);
+  assert.equal(controlPlaneStatusSummary.commands.resultInspections.join(" "), `npm run cli -- runs session-result-inspections ${sessionName} --server`);
+  assert.equal(controlPlaneStatusSummary.commands.pendingResultInspections.join(" "), `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending`);
+  assert.equal(controlPlaneStatusSummary.commands.reviewedResultInspections.join(" "), `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state reviewed`);
   assert.equal(controlPlaneStatusSummary.staleRuns.counts.ready, controlPlaneStatus.staleRuns.counts.ready);
   assert.equal(controlPlaneStatusSummary.recovery.count, controlPlaneStatus.recovery.count);
   assert.ok(controlPlaneStatusSummary.nextActions.length > 0);
@@ -2121,6 +2128,26 @@ try {
     && step.resultCommit === controlPlaneResultCommit
     && step.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${controlPlaneResultPlan.run.id} --server`
     && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
+  )));
+  const controlPlaneStatusSummaryCommands = await cliJson<{
+    ok?: true;
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStatusSummaryCommands.ok, true);
+  assert.ok(controlPlaneStatusSummaryCommands.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-result-inspections ${sessionName} --server`
+  )));
+  assert.ok(controlPlaneStatusSummaryCommands.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending`
   )));
   const pendingResultInspections = await cliJson<{
     ok?: true;
@@ -2302,6 +2329,23 @@ try {
   assert.equal(controlPlaneStatusAfterResultReview.results.counts.pending, controlPlaneStatus.results.counts.pending - 1);
   assert.equal(controlPlaneStatusAfterResultReview.results.actions.review_result, controlPlaneStatus.results.actions.review_result - 1);
   assert.ok(!controlPlaneStatusAfterResultReview.results.nextSteps.some((step) => step.runId === controlPlaneResultPlan.run.id));
+  const controlPlaneStatusAfterResultReviewCommands = await cliJson<{
+    ok?: true;
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStatusAfterResultReviewCommands.ok, true);
+  assert.ok(controlPlaneStatusAfterResultReviewCommands.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state reviewed`
+  )));
   const resultReviewTimeline = await cliJson<{
     ok?: true;
     session: string;
