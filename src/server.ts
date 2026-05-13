@@ -519,6 +519,27 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/worker-sessions/:name/control-plane-advance-loop", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return await runWorkerSessionControlPlaneAdvanceLoop(
+        settings,
+        db,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          dryRun: parseBoolean(body.dryRun, false),
+          lines: parseOptionalInteger(body.lines) ?? 5,
+          maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
+          intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
+        },
+      );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/control-plane-tick", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -3259,6 +3280,71 @@ const runWorkerSessionControlPlaneAdvance = async (
     executed,
     before,
     after,
+  };
+};
+
+const controlPlaneAdvanceSucceeded = (
+  advance: Awaited<ReturnType<typeof runWorkerSessionControlPlaneAdvance>>,
+): boolean => {
+  return !advance.selected || advance.dryRun || advance.executed?.exitCode === 0;
+};
+
+const runWorkerSessionControlPlaneAdvanceLoop = async (
+  settings: Settings,
+  db: Database,
+  baseUrl: string,
+  sessionName: string,
+  options: { dryRun: boolean; lines: number; maxSteps: number; intervalMs: number },
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  maxSteps: number;
+  intervalMs: number;
+  executedSteps: number;
+  stoppedReason: "noop" | "dry_run" | "action_failed" | "max_steps";
+  advances: Array<Awaited<ReturnType<typeof runWorkerSessionControlPlaneAdvance>>>;
+}> => {
+  if (options.maxSteps < 1) throw new Error("maxSteps must be at least 1");
+  if (options.intervalMs < 0) throw new Error("intervalMs must be non-negative");
+  const observedAt = new Date().toISOString();
+  const advances = [];
+  let stoppedReason: "noop" | "dry_run" | "action_failed" | "max_steps" = "max_steps";
+  for (let stepIndex = 0; stepIndex < options.maxSteps; stepIndex += 1) {
+    const advance = await runWorkerSessionControlPlaneAdvance(settings, db, baseUrl, sessionName, {
+      dryRun: options.dryRun,
+      lines: options.lines,
+    });
+    advances.push(advance);
+    if (!advance.selected) {
+      stoppedReason = "noop";
+      break;
+    }
+    if (options.dryRun) {
+      stoppedReason = "dry_run";
+      break;
+    }
+    if (!controlPlaneAdvanceSucceeded(advance)) {
+      stoppedReason = "action_failed";
+      break;
+    }
+    if (stepIndex + 1 < options.maxSteps) {
+      await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+    }
+  }
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    maxSteps: options.maxSteps,
+    intervalMs: options.intervalMs,
+    executedSteps: advances.length,
+    stoppedReason,
+    advances,
   };
 };
 

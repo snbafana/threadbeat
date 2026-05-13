@@ -1841,7 +1841,16 @@ try {
     };
     recovery: { count: number; actions: Record<string, number> };
     nextActions: Array<{ surface: string; action: string; reason: string; count: number; command: string[] }>;
-    commands: { fullStatus: string[]; advance: string[]; advanceDryRun: string[]; tick: string[]; tickDryRun: string[]; timelineSummary: string[] };
+    commands: {
+      fullStatus: string[];
+      advance: string[];
+      advanceDryRun: string[];
+      advanceLoop: string[];
+      advanceLoopDryRun: string[];
+      tick: string[];
+      tickDryRun: string[];
+      timelineSummary: string[];
+    };
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -1894,6 +1903,14 @@ try {
     controlPlaneStatusSummary.commands.advanceDryRun.join(" "),
     `npm run cli -- runs session-control-plane-advance ${sessionName} --server --dry-run`,
   );
+  assert.equal(
+    controlPlaneStatusSummary.commands.advanceLoop.join(" "),
+    `npm run cli -- runs session-control-plane-advance-loop ${sessionName} --server`,
+  );
+  assert.equal(
+    controlPlaneStatusSummary.commands.advanceLoopDryRun.join(" "),
+    `npm run cli -- runs session-control-plane-advance-loop ${sessionName} --server --dry-run`,
+  );
   const controlPlaneAdvancePreview = await cliJson<{
     ok?: true;
     session: string;
@@ -1920,6 +1937,41 @@ try {
   assert.equal(controlPlaneAdvancePreview.after.branches.counts.ready, controlPlaneStatus.branches.counts.ready);
   assert.equal(controlPlaneAdvancePreview.before.queues.applyActions.actionable, controlPlaneStatus.queues.applyActions.actionable);
   assert.equal(controlPlaneAdvancePreview.after.queues.applyActions.actionable, controlPlaneStatus.queues.applyActions.actionable);
+  const controlPlaneAdvanceLoopPreview = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    maxSteps: number;
+    intervalMs: number;
+    executedSteps: number;
+    stoppedReason: string;
+    advances: Array<{
+      selected: { surface: string; action: string; reason: string; count: number; command: string[] } | null;
+      executed: null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advance-loop",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneAdvanceLoopPreview.ok, true);
+  assert.equal(controlPlaneAdvanceLoopPreview.session, sessionName);
+  assert.equal(controlPlaneAdvanceLoopPreview.dryRun, true);
+  assert.equal(controlPlaneAdvanceLoopPreview.maxSteps, 3);
+  assert.equal(controlPlaneAdvanceLoopPreview.intervalMs, 0);
+  assert.equal(controlPlaneAdvanceLoopPreview.executedSteps, 1);
+  assert.equal(controlPlaneAdvanceLoopPreview.stoppedReason, "dry_run");
+  assert.equal(controlPlaneAdvanceLoopPreview.advances.length, 1);
+  assert.deepEqual(controlPlaneAdvanceLoopPreview.advances[0]?.selected, controlPlaneStatusSummary.nextActions[0]);
+  assert.equal(controlPlaneAdvanceLoopPreview.advances[0]?.executed, null);
   assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
     step.runId === controlPlaneResumePlan.run.id
     && step.action === "resume_branch"

@@ -4542,6 +4542,31 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "session-control-plane-advance-loop") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-advance-loop requires --server");
+    }
+    const response = await executeWorkerSessionControlPlaneAdvanceLoop(
+      required(sessionName, "runs session-control-plane-advance-loop <session> --server"),
+      {
+        dryRun: options["dry-run"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+      },
+    );
+    if (response.advances.some((advance) => (
+      advance.executed?.exitCode !== undefined
+      && advance.executed.exitCode !== null
+      && advance.executed.exitCode !== 0
+    ))) {
+      process.exitCode = 1;
+    }
+    await printJson(response);
+    return;
+  }
   if (subcommandName === "session-control-plane-tick") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6681,6 +6706,19 @@ type WorkerSessionControlPlaneAdvanceResponse = {
   after: WorkerSessionControlPlaneStatusResponse;
 };
 
+type WorkerSessionControlPlaneAdvanceLoopResponse = {
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  maxSteps: number;
+  intervalMs: number;
+  executedSteps: number;
+  stoppedReason: "noop" | "dry_run" | "action_failed" | "max_steps";
+  advances: WorkerSessionControlPlaneAdvanceResponse[];
+};
+
 type WorkerSessionControlPlaneTimelineResponse = {
   ok: true;
   session: string;
@@ -7129,6 +7167,8 @@ function summarizeWorkerSessionControlPlaneStatus(
     fullStatus: string[];
     advance: string[];
     advanceDryRun: string[];
+    advanceLoop: string[];
+    advanceLoopDryRun: string[];
     tick: string[];
     tickDryRun: string[];
     timelineSummary: string[];
@@ -7176,6 +7216,8 @@ function summarizeWorkerSessionControlPlaneStatus(
       fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],
       advance: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
       advanceDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
+      advanceLoop: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance-loop", status.session, "--server"],
+      advanceLoopDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance-loop", status.session, "--server", "--dry-run"],
       tick: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server"],
       tickDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server", "--dry-run"],
       timelineSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server", "--summary"],
@@ -7192,6 +7234,22 @@ async function executeWorkerSessionControlPlaneAdvance(
     `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance`,
     { dryRun: options.dryRun, lines: options.lines },
   ) as WorkerSessionControlPlaneAdvanceResponse;
+}
+
+async function executeWorkerSessionControlPlaneAdvanceLoop(
+  sessionName: string,
+  options: { dryRun: boolean; lines: number; maxSteps: number; intervalMs: number },
+): Promise<WorkerSessionControlPlaneAdvanceLoopResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-loop`,
+    {
+      dryRun: options.dryRun,
+      lines: options.lines,
+      maxSteps: options.maxSteps,
+      intervalMs: options.intervalMs,
+    },
+  ) as WorkerSessionControlPlaneAdvanceLoopResponse;
 }
 
 async function executeWorkerSessionControlPlaneTick(
@@ -10815,6 +10873,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
+  runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
