@@ -79,6 +79,28 @@ try {
     `npm run cli -- runs stop-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId} --retire`,
   );
 
+  const textPreview = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--worker",
+    workerId,
+    "--action",
+    "restart_control_plane_advance_worker",
+    "--format",
+    "text",
+  ]);
+  assert.match(textPreview, /control-plane alert/);
+  assert.match(textPreview, /surface: worker_recovery/);
+  assert.match(textPreview, /target_kind: control_plane_advance_worker/);
+  assert.match(textPreview, new RegExp(`target_worker: ${workerId}`));
+  assert.match(textPreview, /stdout_tail:\n    advance stdout/);
+  assert.match(textPreview, /stderr_tail:\n    advance stderr/);
+  assert.match(textPreview, /restart_worker_recovery: npm run cli -- runs restart-control-plane-advance-workers/);
+
   const commandPreview = await cliJson<{
     commands: Array<{ action: string; workerId?: string; command: string[] }>;
   }>(baseUrl, [
@@ -214,10 +236,14 @@ async function writeAdvanceWorker(workerId: string): Promise<void> {
 }
 
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
+  return JSON.parse(await cliText(baseUrl, args)) as T;
+}
+
+async function cliText(baseUrl: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
     cwd: path.resolve("."),
     env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
     maxBuffer: 1024 * 1024,
   });
-  return JSON.parse(stdout) as T;
+  return stdout;
 }

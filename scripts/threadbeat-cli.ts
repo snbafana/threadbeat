@@ -4592,11 +4592,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-alert requires --server");
     }
-    if (outputFormat !== "json" && outputFormat !== "shell") {
-      throw new Error("runs session-control-plane-alert --format must be json or shell");
+    if (outputFormat !== "json" && outputFormat !== "shell" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-alert --format must be json, shell, or text");
     }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-alert --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-alert --format text cannot be combined with --commands-only");
     }
     const alert = await fetchWorkerSessionControlPlaneAlertPreview(
       required(sessionName, "runs session-control-plane-alert <session> --server"),
@@ -4621,6 +4624,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const { alert: _alert, preview: _preview, ...rest } = alert;
         await printJson({ ...rest, commands });
       }
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneAlertText(alert);
       return;
     }
     await printJson(alert);
@@ -8343,6 +8350,80 @@ function workerSessionControlPlaneAlertPreviewCommands(
     seen.add(key);
     return true;
   });
+}
+
+function printWorkerSessionControlPlaneAlertText(
+  preview: WorkerSessionControlPlaneAlertPreviewResponse,
+): void {
+  console.log(formatWorkerSessionControlPlaneAlertText(preview).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneAlertText(
+  preview: WorkerSessionControlPlaneAlertPreviewResponse,
+): string[] {
+  if (!preview.alert) {
+    return [
+      "control-plane alert: none",
+      `session: ${preview.session}`,
+      `match_count: ${preview.matchCount}`,
+    ];
+  }
+  const lines = [
+    "control-plane alert",
+    `session: ${preview.session}`,
+    `observed_at: ${preview.observedAt}`,
+    `surface: ${preview.alert.surface}`,
+    `severity: ${preview.alert.severity}`,
+    `reason: ${preview.alert.reason}`,
+    `action: ${preview.alert.action ?? ""}`,
+    `count: ${preview.alert.count}`,
+    ...(preview.alert.runId ? [`run: ${preview.alert.runId}`] : []),
+    ...(preview.alert.workerId ? [`worker: ${preview.alert.workerId}`] : []),
+    ...(preview.alert.applyId ? [`apply: ${preview.alert.applyId}`] : []),
+    ...(preview.alert.executionId ? [`execution: ${preview.alert.executionId}`] : []),
+    ...(preview.alert.continuationIds?.length ? [`continuations: ${preview.alert.continuationIds.join(",")}`] : []),
+    `command: ${formatShellCommand(preview.alert.command)}`,
+  ];
+  if (preview.details?.kind === "worker_recovery") {
+    lines.push(...formatWorkerRecoveryAlertDetails(preview.details));
+  }
+  return lines;
+}
+
+function formatWorkerRecoveryAlertDetails(
+  details: Extract<NonNullable<WorkerSessionControlPlaneAlertPreviewResponse["details"]>, { kind: "worker_recovery" }>,
+): string[] {
+  const lines = [
+    "worker_recovery:",
+    `  target_kind: ${details.target.kind}`,
+    `  target_worker: ${details.target.worker?.workerId ?? "<missing>"}`,
+  ];
+  if (details.target.worker) {
+    lines.push(
+      `  stdout: ${details.target.worker.stdout.path}`,
+      "  stdout_tail:",
+      ...formatIndentedTail(details.target.worker.stdout.lines, "    "),
+      `  stderr: ${details.target.worker.stderr.path}`,
+      "  stderr_tail:",
+      ...formatIndentedTail(details.target.worker.stderr.lines, "    "),
+    );
+  }
+  lines.push(
+    "  commands:",
+    ...(details.commands.inspectWorker ? [`    inspect_worker_recovery: ${formatShellCommand(details.commands.inspectWorker)}`] : []),
+    `    restart_worker_recovery: ${formatShellCommand(details.commands.restartWorker)}`,
+    ...(details.commands.retireWorker ? [`    retire_worker_recovery: ${formatShellCommand(details.commands.retireWorker)}`] : []),
+  );
+  return lines;
+}
+
+function formatIndentedTail(lines: string[], indent: string): string[] {
+  if (lines.length === 0) return [`${indent}<empty>`];
+  return lines.map((line) => `${indent}${line}`);
+}
+
+function formatShellCommand(command: string[]): string {
+  return command.map(shellArg).join(" ");
 }
 
 function selectWorkerSessionControlPlaneNextActions(
@@ -12471,7 +12552,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
-  runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
