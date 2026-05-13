@@ -1827,6 +1827,7 @@ try {
         command: string[];
         commands: {
           inspectRun: string[];
+          inspectResult: string[];
           checkoutBranch: string[];
           reviewRun: string[];
           watchRun: string[];
@@ -1949,6 +1950,25 @@ try {
     branches: {
       counts: typeof controlPlaneStatus.branches.counts;
       actions: typeof controlPlaneStatus.branches.actions;
+      inspection: {
+        count: number;
+        nextSteps: Array<{
+          action: string;
+          reason: string;
+          runId: string;
+          branchName: string;
+          resultCommit: string | null;
+          status: string;
+          workerId: string | null;
+          commands: {
+            inspectRun: string[];
+            inspectResult: string[];
+            checkoutBranch: string[];
+            reviewRun: string[];
+            resumeBranch: string[] | null;
+          };
+        }>;
+      };
     };
     staleRuns: {
       counts: typeof controlPlaneStatus.staleRuns.counts;
@@ -1982,6 +2002,7 @@ try {
   assert.equal(controlPlaneStatusSummary.queues.applyActions.actionable, controlPlaneStatus.queues.applyActions.actionable);
   assert.equal(controlPlaneStatusSummary.queues.drainContinuations.total, controlPlaneStatus.queues.drainContinuations.total);
   assert.equal(controlPlaneStatusSummary.branches.counts.ready, controlPlaneStatus.branches.counts.ready);
+  assert.equal(controlPlaneStatusSummary.branches.inspection.count, controlPlaneStatus.branches.nextSteps.length);
   assert.equal(controlPlaneStatusSummary.staleRuns.counts.ready, controlPlaneStatus.staleRuns.counts.ready);
   assert.equal(controlPlaneStatusSummary.recovery.count, controlPlaneStatus.recovery.count);
   assert.ok(controlPlaneStatusSummary.nextActions.length > 0);
@@ -1994,10 +2015,16 @@ try {
   }
   if (controlPlaneStatus.branches.counts.ready > 0) {
     const firstReadyBranch = controlPlaneStatus.branches.nextSteps.find((step) => step.action === "resume_branch");
+    assert.ok(firstReadyBranch);
     assert.ok(controlPlaneStatusSummary.nextActions.some((action) => (
       action.action === "resume_branch"
       && action.count === controlPlaneStatus.branches.counts.ready
-      && action.command.join(" ") === firstReadyBranch?.command.join(" ")
+      && action.command.join(" ") === firstReadyBranch.command.join(" ")
+    )));
+    assert.ok(controlPlaneStatusSummary.branches.inspection.nextSteps.some((step) => (
+      step.runId === firstReadyBranch.runId
+      && step.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${firstReadyBranch.runId} --checkout-dir ./checkouts/${sessionName}-control-plane/${firstReadyBranch.runId}`
+      && step.commands.reviewRun.join(" ") === firstReadyBranch.commands.reviewRun.join(" ")
     )));
   }
   if (controlPlaneStatus.queues.applyActions.actionable > 0) {
@@ -2345,6 +2372,7 @@ try {
     && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id}`
     && step.commands.resumeBranchDryRun.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id} --dry-run`
     && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${controlPlaneResumePlan.run.id}`
+    && step.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${controlPlaneResumePlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane/${controlPlaneResumePlan.run.id}`
     && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${controlPlaneResumePlan.run.id} --dir ./checkouts/${sessionName}-control-plane/${controlPlaneResumePlan.run.id}`
     && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${controlPlaneResumePlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane/${controlPlaneResumePlan.run.id}`
     && step.commands.watchRun.join(" ") === `npm run cli -- runs watch ${controlPlaneResumePlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane/${controlPlaneResumePlan.run.id}`

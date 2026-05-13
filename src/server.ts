@@ -5405,6 +5405,7 @@ const summarizeWorkerSessionBranchRecovery = async (
     command: string[];
     commands: {
       inspectRun: string[];
+      inspectResult: string[];
       checkoutBranch: string[];
       reviewRun: string[];
       watchRun: string[];
@@ -5444,6 +5445,7 @@ const summarizeWorkerSessionBranchRecovery = async (
       command,
       commands: {
         inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+        inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--checkout-dir", checkoutDir],
         checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", checkoutDir],
         reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", checkoutDir],
         watchRun: ["npm", "run", "cli", "--", "runs", "watch", run.id, "--checkout-dir", checkoutDir],

@@ -7749,6 +7749,7 @@ type WorkerSessionControlPlaneStatusResponse = {
       command: string[];
       commands: {
         inspectRun: string[];
+        inspectResult: string[];
         checkoutBranch: string[];
         reviewRun: string[];
         watchRun: string[];
@@ -8711,6 +8712,30 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   } else {
     lines.push("next_recovery: none");
   }
+  if (summary.branches.inspection.count > 0) {
+    lines.push(
+      "branch_inspection:",
+      `  count: ${summary.branches.inspection.count}`,
+    );
+    for (const step of summary.branches.inspection.nextSteps) {
+      lines.push(
+        `  - run: ${step.runId}`,
+        `    action: ${step.action}`,
+        `    reason: ${step.reason}`,
+        `    branch: ${step.branchName}`,
+        `    result_commit: ${step.resultCommit ?? ""}`,
+        `    worker: ${step.workerId ?? ""}`,
+        `    inspect_result: ${formatShellCommand(step.commands.inspectResult)}`,
+        `    review: ${formatShellCommand(step.commands.reviewRun)}`,
+        `    checkout: ${formatShellCommand(step.commands.checkoutBranch)}`,
+      );
+      if (step.commands.resumeBranch) {
+        lines.push(`    resume: ${formatShellCommand(step.commands.resumeBranch)}`);
+      }
+    }
+  } else {
+    lines.push("branch_inspection: none");
+  }
   if (summary.recovery.recoverNext.recent.length > 0) {
     lines.push("recent_recover_next:");
     for (const attempt of summary.recovery.recoverNext.recent) {
@@ -8736,6 +8761,10 @@ function workerSessionControlPlaneStatusSummaryCommands(
   if (summary.nextRecovery) {
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--dry-run"] });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--confirm"] });
+  }
+  for (const step of summary.branches.inspection.nextSteps) {
+    commands.push({ command: step.commands.inspectResult });
+    commands.push({ command: step.commands.reviewRun });
   }
   for (const attempt of summary.recovery.recoverNext.recent) {
     commands.push({ command: attempt.command });
@@ -8863,6 +8892,22 @@ function summarizeWorkerSessionControlPlaneStatus(
     counts: WorkerSessionControlPlaneStatusResponse["branches"]["counts"];
     actions: WorkerSessionControlPlaneStatusResponse["branches"]["actions"];
     executions: WorkerSessionControlPlaneStatusResponse["branches"]["executions"]["counts"];
+    inspection: {
+      count: number;
+      nextSteps: Array<{
+        action: WorkerSessionControlPlaneStatusResponse["branches"]["nextSteps"][number]["action"];
+        reason: WorkerSessionControlPlaneStatusResponse["branches"]["nextSteps"][number]["reason"];
+        runId: string;
+        branchName: string;
+        resultCommit: string | null;
+        status: string;
+        workerId: string | null;
+        commands: Pick<
+          WorkerSessionControlPlaneStatusResponse["branches"]["nextSteps"][number]["commands"],
+          "inspectRun" | "inspectResult" | "checkoutBranch" | "reviewRun" | "resumeBranch"
+        >;
+      }>;
+    };
   };
   staleRuns: {
     counts: WorkerSessionControlPlaneStatusResponse["staleRuns"]["counts"];
@@ -8918,6 +8963,25 @@ function summarizeWorkerSessionControlPlaneStatus(
       counts: status.branches.counts,
       actions: status.branches.actions,
       executions: status.branches.executions.counts,
+      inspection: {
+        count: status.branches.nextSteps.length,
+        nextSteps: status.branches.nextSteps.map((step) => ({
+          action: step.action,
+          reason: step.reason,
+          runId: step.runId,
+          branchName: step.branchName,
+          resultCommit: step.resultCommit,
+          status: step.status,
+          workerId: step.workerId,
+          commands: {
+            inspectRun: step.commands.inspectRun,
+            inspectResult: step.commands.inspectResult,
+            checkoutBranch: step.commands.checkoutBranch,
+            reviewRun: step.commands.reviewRun,
+            resumeBranch: step.commands.resumeBranch,
+          },
+        })),
+      },
     },
     staleRuns: {
       counts: status.staleRuns.counts,
