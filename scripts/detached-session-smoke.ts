@@ -360,6 +360,143 @@ async function assertControlPlaneCoreWorkerEnsure(baseUrl: string, sessionName: 
   ]);
 }
 
+async function assertControlPlaneMutationWorkerEnsure(baseUrl: string, sessionName: string): Promise<void> {
+  const applyWorkerId = "detached-smoke-mutation-apply-worker";
+  const drainWorkerId = "detached-smoke-mutation-drain-worker";
+  const commonArgs = [
+    "runs",
+    "ensure-control-plane-mutation-workers",
+    sessionName,
+    "--server",
+    "--apply-worker-id",
+    applyWorkerId,
+    "--drain-worker-id",
+    drainWorkerId,
+    "--apply-id",
+    "detached-smoke-mutation-empty-apply",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--max-actions",
+    "1",
+    "--max-polls",
+    "1",
+    "--apply-interval-ms",
+    "1",
+    "--max-continuations",
+    "1",
+    "--lines",
+    "5",
+  ];
+  const dryRunMutationWorkers = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    confirmed: boolean;
+    passed: boolean | null;
+    desired: { applyWorkerId: string; drainWorkerId: string; applyId?: string; action?: string; maxActions: number | null; maxPolls: number | null; applyIntervalMs: number | null; maxContinuations: number | null };
+    plan: {
+      expected: number;
+      actionable: number;
+      blocked: number;
+      existing: number;
+      steps: Array<{ kind: string; workerId: string; action: string; reason: string; command: string[] }>;
+      commands: string[][];
+    };
+    executed: unknown[];
+    after: null;
+    checks: { expectedCount: number; actionableCount: number; blockedCount: number; executedCount: number | null; runningAfterCount: number | null };
+  }>(baseUrl, [...commonArgs, "--dry-run"]);
+  assert.equal(dryRunMutationWorkers.ok, true);
+  assert.equal(dryRunMutationWorkers.session, sessionName);
+  assert.equal(dryRunMutationWorkers.dryRun, true);
+  assert.equal(dryRunMutationWorkers.confirmed, false);
+  assert.equal(dryRunMutationWorkers.passed, null);
+  assert.equal(dryRunMutationWorkers.desired.applyWorkerId, applyWorkerId);
+  assert.equal(dryRunMutationWorkers.desired.drainWorkerId, drainWorkerId);
+  assert.equal(dryRunMutationWorkers.desired.applyId, "detached-smoke-mutation-empty-apply");
+  assert.equal(dryRunMutationWorkers.desired.action, "inspect_drain_continuation_resets");
+  assert.equal(dryRunMutationWorkers.desired.maxActions, 1);
+  assert.equal(dryRunMutationWorkers.desired.maxPolls, 1);
+  assert.equal(dryRunMutationWorkers.desired.applyIntervalMs, 1);
+  assert.equal(dryRunMutationWorkers.desired.maxContinuations, 1);
+  assert.equal(dryRunMutationWorkers.plan.expected, 2);
+  assert.equal(dryRunMutationWorkers.plan.actionable, 2);
+  assert.equal(dryRunMutationWorkers.plan.blocked, 0);
+  assert.equal(dryRunMutationWorkers.plan.existing, 0);
+  assert.deepEqual(
+    dryRunMutationWorkers.plan.steps.map((step) => [step.kind, step.workerId, step.action, step.reason]),
+    [
+      ["apply_action", applyWorkerId, "ensure_apply_action_worker", "no_worker_record"],
+      ["drain", drainWorkerId, "ensure_drain_worker", "no_worker_record"],
+    ],
+  );
+  assert.equal(
+    dryRunMutationWorkers.plan.commands[0]?.join(" "),
+    `npm run cli -- runs ensure-apply-action-worker ${sessionName} --server --worker-id ${applyWorkerId} --apply-id detached-smoke-mutation-empty-apply --apply-action inspect_drain_continuation_resets --max-actions 1 --max-polls 1 --interval-ms 1 --lines 5`,
+  );
+  assert.equal(
+    dryRunMutationWorkers.plan.commands[1]?.join(" "),
+    `npm run cli -- runs ensure-drain-worker ${sessionName} --server --worker-id ${drainWorkerId} --max-continuations 1 --lines 5`,
+  );
+  assert.equal(dryRunMutationWorkers.executed.length, 0);
+  assert.equal(dryRunMutationWorkers.after, null);
+  assert.equal(dryRunMutationWorkers.checks.expectedCount, 2);
+  assert.equal(dryRunMutationWorkers.checks.actionableCount, 2);
+  assert.equal(dryRunMutationWorkers.checks.blockedCount, 0);
+  assert.equal(dryRunMutationWorkers.checks.executedCount, null);
+  assert.equal(dryRunMutationWorkers.checks.runningAfterCount, null);
+
+  const confirmedMutationWorkers = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    confirmed: boolean;
+    passed: boolean;
+    plan: { expected: number; actionable: number; blocked: number };
+    executed: Array<{ kind: string; workerId: string; actionResult: string | null }>;
+    checks: { expectedCount: number; actionableCount: number; blockedCount: number; executedCount: number; runningAfterCount: number };
+  }>(baseUrl, [...commonArgs, "--confirm"]);
+  assert.equal(confirmedMutationWorkers.ok, true);
+  assert.equal(confirmedMutationWorkers.session, sessionName);
+  assert.equal(confirmedMutationWorkers.dryRun, false);
+  assert.equal(confirmedMutationWorkers.confirmed, true);
+  assert.equal(confirmedMutationWorkers.passed, true);
+  assert.equal(confirmedMutationWorkers.plan.expected, 2);
+  assert.equal(confirmedMutationWorkers.plan.actionable, 2);
+  assert.equal(confirmedMutationWorkers.plan.blocked, 0);
+  assert.equal(confirmedMutationWorkers.executed.length, 2);
+  assert.deepEqual(
+    confirmedMutationWorkers.executed.map((step) => [step.kind, step.workerId, step.actionResult]),
+    [
+      ["apply_action", applyWorkerId, "started"],
+      ["drain", drainWorkerId, "started"],
+    ],
+  );
+  assert.equal(confirmedMutationWorkers.checks.expectedCount, 2);
+  assert.equal(confirmedMutationWorkers.checks.actionableCount, 2);
+  assert.equal(confirmedMutationWorkers.checks.blockedCount, 0);
+  assert.equal(confirmedMutationWorkers.checks.executedCount, 2);
+  assert.ok(confirmedMutationWorkers.checks.runningAfterCount >= 0);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    applyWorkerId,
+    "--retire",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-drain-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    drainWorkerId,
+    "--retire",
+  ]);
+}
+
 try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
@@ -5570,6 +5707,7 @@ try {
   }
   assert.equal(deadWorkerStoppedRun?.run.status, "running");
   await assertControlPlaneCoreWorkerEnsure(baseUrl, sessionName);
+  await assertControlPlaneMutationWorkerEnsure(baseUrl, sessionName);
 } finally {
   if (sessionStarted && baseUrl !== null) {
     try {
