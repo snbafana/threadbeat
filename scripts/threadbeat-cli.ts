@@ -6868,6 +6868,7 @@ type WorkerSessionControlPlaneTimelineResponse = {
     source: string;
     event: string;
     tickId?: string;
+    advanceId?: string;
     workerId?: string;
     executionId?: string;
     runIds?: string[];
@@ -6876,8 +6877,14 @@ type WorkerSessionControlPlaneTimelineResponse = {
     branchNames?: string[];
     skippedReasons?: string[];
     status?: string;
+    exitCode?: number | null;
     state?: string;
     restartable?: boolean;
+    dryRun?: boolean;
+    selectedSurface?: string;
+    selectedAction?: string;
+    selectedCount?: number;
+    command?: string[];
     reason?: string;
     selected?: number;
     resumedCount?: number;
@@ -7673,12 +7680,18 @@ function summarizeWorkerSessionControlPlaneTimeline(
     source: string;
     event: string;
     tickId?: string;
+    advanceId?: string;
     workerId?: string;
     executionId?: string;
     status?: string;
+    exitCode?: number | null;
     state?: string;
     reason?: string;
     restartable?: boolean;
+    dryRun?: boolean;
+    selectedSurface?: string;
+    selectedAction?: string;
+    selectedCount?: number;
     selected?: number;
     resumedCount?: number;
     skippedCount?: number;
@@ -7698,12 +7711,18 @@ function summarizeWorkerSessionControlPlaneTimeline(
       source: event.source,
       event: event.event,
       tickId: event.tickId,
+      advanceId: event.advanceId,
       workerId: event.workerId,
       executionId: event.executionId,
       status: event.status,
+      exitCode: event.exitCode,
       state: event.state,
       reason: event.reason,
       restartable: event.restartable,
+      dryRun: event.dryRun,
+      selectedSurface: event.selectedSurface,
+      selectedAction: event.selectedAction,
+      selectedCount: event.selectedCount,
       selected: event.selected,
       resumedCount: event.resumedCount,
       skippedCount: event.skippedCount,

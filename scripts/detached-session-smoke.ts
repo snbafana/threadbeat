@@ -2771,6 +2771,7 @@ try {
       event: string;
       source: string;
       tickId?: string;
+      advanceId?: string;
       workerId?: string;
       executionId?: string;
       applyId?: string;
@@ -2780,6 +2781,10 @@ try {
       state?: string;
       reason?: string;
       restartable?: boolean;
+      dryRun?: boolean;
+      selectedSurface?: string;
+      selectedAction?: string;
+      selectedCount?: number;
     }>;
   }>(baseUrl, [
     "runs",
@@ -2795,6 +2800,16 @@ try {
   assert.equal(controlPlaneTimeline.session, sessionName);
   assert.ok(controlPlaneTimeline.count >= 5);
   assert.ok((controlPlaneTimeline.counts.tick_recorded ?? 0) >= 2);
+  assert.ok((controlPlaneTimeline.counts.advance_recorded ?? 0) >= 2);
+  assert.ok(controlPlaneTimeline.events.some((event) => (
+    event.source === "advance"
+    && event.event === "advance_recorded"
+    && event.status === "dry_run"
+    && event.dryRun === true
+    && typeof event.advanceId === "string"
+    && typeof event.selectedSurface === "string"
+    && typeof event.selectedAction === "string"
+  )));
   assert.ok((controlPlaneTimeline.counts.worker_completed ?? 0) >= 1);
   assert.ok((controlPlaneTimeline.counts.worker_retired ?? 0) >= 1);
   assert.ok(controlPlaneTimeline.events.some((event) => (
@@ -2845,6 +2860,9 @@ try {
       event: string;
       source: string;
       status?: string;
+      dryRun?: boolean;
+      selectedSurface?: string;
+      selectedAction?: string;
       state?: string;
       reason?: string;
     }>;
@@ -2864,6 +2882,7 @@ try {
   assert.equal(controlPlaneTimelineSummary.session, sessionName);
   assert.equal(controlPlaneTimelineSummary.events.total, controlPlaneTimeline.count);
   assert.equal(controlPlaneTimelineSummary.events.counts.tick_recorded, controlPlaneTimeline.counts.tick_recorded);
+  assert.equal(controlPlaneTimelineSummary.events.counts.advance_recorded, controlPlaneTimeline.counts.advance_recorded);
   assert.equal(controlPlaneTimelineSummary.decisions.count, controlPlaneTimeline.decisions.count);
   assert.equal(controlPlaneTimelineSummary.decisions.statusReasons.dry_run, controlPlaneTimeline.decisions.statusReasons.dry_run);
   assert.equal(controlPlaneTimelineSummary.latestEvents.length, 3);

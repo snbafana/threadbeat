@@ -3015,9 +3015,10 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution";
-  event: "tick_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed";
+  source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution";
+  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed";
   tickId?: string;
+  advanceId?: string;
   workerId?: string;
   executionId?: string;
   applyId?: string;
@@ -3032,6 +3033,11 @@ type WorkerSessionControlPlaneTimelineEvent = {
   exitCode?: number | null;
   state?: string;
   restartable?: boolean;
+  dryRun?: boolean;
+  selectedSurface?: string;
+  selectedAction?: string;
+  selectedCount?: number;
+  command?: string[];
   reason?: string;
   pid?: number | null;
   previousPid?: number | null;
@@ -3064,6 +3070,29 @@ type WorkerSessionControlPlaneTimelineDecisionRollup = {
   }>;
 };
 
+const timelineRecord = (value: unknown): Record<string, unknown> | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+};
+
+const timelineString = (value: unknown): string | undefined => (
+  typeof value === "string" ? value : undefined
+);
+
+const timelineNumber = (value: unknown): number | undefined => (
+  typeof value === "number" ? value : undefined
+);
+
+const timelineNumberOrNull = (value: unknown): number | null | undefined => (
+  typeof value === "number" || value === null ? value : undefined
+);
+
+const timelineStringArray = (value: unknown): string[] | undefined => (
+  Array.isArray(value) && value.every((part) => typeof part === "string")
+    ? value
+    : undefined
+);
+
 const readWorkerSessionControlPlaneTimeline = async (
   settings: Settings,
   name: string,
@@ -3076,8 +3105,9 @@ const readWorkerSessionControlPlaneTimeline = async (
   decisions: WorkerSessionControlPlaneTimelineDecisionRollup;
   events: WorkerSessionControlPlaneTimelineEvent[];
 }> => {
-  const [ticks, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
+  const [ticks, advances, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, options.limit),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, options.limit),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, options.limit),
@@ -3093,6 +3123,25 @@ const readWorkerSessionControlPlaneTimeline = async (
       status: tick.status,
       plannedCount: [tick.planned.branchRecovery, tick.planned.applyAction, tick.planned.drainContinuation].filter(Boolean).length,
       executedCount: [tick.executed.branchRecovery, tick.executed.applyAction, tick.executed.drainContinuation].filter(Boolean).length,
+    });
+  }
+  for (const advance of advances) {
+    const selected = timelineRecord(advance.selected);
+    const executed = timelineRecord(advance.executed);
+    const exitCode = timelineNumberOrNull(executed?.exitCode);
+    events.push({
+      observedAt: advance.observedAt,
+      source: "advance",
+      event: "advance_recorded",
+      advanceId: advance.advanceId,
+      dryRun: advance.dryRun,
+      status: advance.dryRun ? "dry_run" : selected ? (exitCode === 0 ? "executed" : "failed") : "noop",
+      selectedSurface: timelineString(selected?.surface),
+      selectedAction: timelineString(selected?.action),
+      selectedCount: timelineNumber(selected?.count),
+      command: timelineStringArray(selected?.command),
+      reason: timelineString(selected?.reason),
+      exitCode,
     });
   }
   for (const worker of advanceWorkers) {
