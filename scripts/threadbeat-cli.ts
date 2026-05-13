@@ -4554,6 +4554,33 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-tick-workers-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-tick-workers-next requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneTickWorkerNextSteps(
+      required(sessionName, "runs session-control-plane-tick-workers-next <session> --server"),
+    ));
+    return;
+  }
+  if (subcommandName === "restart-control-plane-tick-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs restart-control-plane-tick-workers requires --server");
+    }
+    await printJson(await restartWorkerSessionControlPlaneTickWorker(
+      required(sessionName, "runs restart-control-plane-tick-workers <session> --server"),
+      {
+        workerId: required(options["worker-id"], "runs restart-control-plane-tick-workers <session> --server --worker-id <id>"),
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "stop-control-plane-tick-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6626,8 +6653,8 @@ async function fetchWorkerSessionControlPlaneStatus(
   };
   recovery: {
     count: number;
-    actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number };
-    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
+    actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number; restart_control_plane_tick_worker: number };
+    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
 }> {
   return await requestJson(
@@ -6682,8 +6709,8 @@ async function fetchWorkerSessionControlPlaneStatus(
     };
     recovery: {
       count: number;
-      actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number };
-      nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
+      actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number; restart_control_plane_tick_worker: number };
+      nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
     };
   };
 }
@@ -6856,6 +6883,48 @@ async function fetchWorkerSessionControlPlaneTickWorkers(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers`, params),
   ) as { ok: true; session: string; count: number; workers: unknown[] };
+}
+
+async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
+  sessionName: string,
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  nextSteps: unknown[];
+  actions: { restart_control_plane_tick_worker: number };
+}> {
+  return await requestJson(
+    "GET",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers/next`,
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    nextSteps: unknown[];
+    actions: { restart_control_plane_tick_worker: number };
+  };
+}
+
+async function restartWorkerSessionControlPlaneTickWorker(
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  restarted: unknown[];
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers/restart`,
+    {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; count: number; restarted: unknown[]; workers: unknown[] };
 }
 
 async function stopWorkerSessionControlPlaneTickWorkers(
@@ -10169,6 +10238,8 @@ Commands:
   runs session-control-plane-ticks <name> [--server] [--limit 20]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
+  runs session-control-plane-tick-workers-next <name> --server
+  runs restart-control-plane-tick-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-tick-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]

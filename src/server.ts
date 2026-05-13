@@ -40,7 +40,9 @@ import {
   writeWorkerSessionControlPlaneTickRecord,
 } from "./workerSessionControlPlaneTicks.js";
 import {
+  listWorkerSessionControlPlaneTickWorkerNextSteps,
   listWorkerSessionControlPlaneTickWorkers,
+  restartWorkerSessionControlPlaneTickWorker,
   startWorkerSessionControlPlaneTickWorker,
   stopWorkerSessionControlPlaneTickWorkers,
 } from "./workerSessionControlPlaneTickWorkers.js";
@@ -502,6 +504,18 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.get("/api/worker-sessions/:name/control-plane-tick-workers/next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      return {
+        ok: true,
+        ...await listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/control-plane-tick-workers", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -519,6 +533,28 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         },
       );
       return { ok: true, session: name, worker };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-tick-workers/restart", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await restartWorkerSessionControlPlaneTickWorker(
+          settings.projectRoot,
+          requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+          name,
+          {
+            workerId: parseString(body.workerId, "workerId"),
+            includeRetired: parseBoolean(body.includeRetired, false),
+            lines: parseOptionalInteger(body.lines) ?? 20,
+          },
+        ),
+      };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -2338,7 +2374,7 @@ const readWorkerSessionControlPlaneStatus = async (
   recovery: {
     count: number;
     actions: Record<string, number>;
-    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
+    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
 }> => {
   const session = await readWorkerSession(settings.projectRoot, name);
@@ -2352,6 +2388,7 @@ const readWorkerSessionControlPlaneStatus = async (
     applyActionWorkers,
     applyActionWorkerNextSteps,
     controlPlaneTickWorkers,
+    controlPlaneTickWorkerNextSteps,
     branchRecovery,
     branchRecoveryExecutions,
   ] = await Promise.all([
@@ -2364,6 +2401,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+    listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
   ]);
@@ -2389,16 +2427,18 @@ const readWorkerSessionControlPlaneStatus = async (
       },
     },
     recovery: {
-      count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count,
+      count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count,
       actions: {
         ...watchWorkerNextSteps.actions,
         ...drainWorkerNextSteps.actions,
         ...applyActionWorkerNextSteps.actions,
+        ...controlPlaneTickWorkerNextSteps.actions,
       },
       nextSteps: {
         watchWorkers: watchWorkerNextSteps.nextSteps,
         drainWorkers: drainWorkerNextSteps.nextSteps,
         applyActionWorkers: applyActionWorkerNextSteps.nextSteps,
+        controlPlaneTickWorkers: controlPlaneTickWorkerNextSteps.nextSteps,
       },
     },
   };

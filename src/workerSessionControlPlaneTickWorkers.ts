@@ -14,6 +14,9 @@ export type ControlPlaneTickWorker = {
   stoppedAt?: string;
   stopResult?: StopProcessGroupResult & { aliveBefore: boolean };
   retiredAt?: string;
+  restartedAt?: string;
+  restartCount?: number;
+  previousPid?: number | null;
 };
 
 type StopProcessGroupResult = {
@@ -21,6 +24,25 @@ type StopProcessGroupResult = {
   signalSent: boolean;
   forced: boolean;
   alive: boolean;
+};
+
+export type ControlPlaneTickWorkerNextStep = {
+  action: "restart_control_plane_tick_worker";
+  reason: "stopped_control_plane_tick_worker";
+  workerId: string;
+  pid: number | null;
+  stoppedAt: string;
+  command: string[];
+  commands: {
+    restartControlPlaneTickWorker: string[];
+    inspectControlPlaneTickWorkers: string[];
+    retireControlPlaneTickWorker: string[];
+  };
+  api: {
+    restart: { method: "POST"; url: string; payload: { workerId: string } };
+    inspect: { method: "GET"; url: string };
+    retire: { method: "POST"; url: string; payload: { workerId: string; retire: true } };
+  };
 };
 
 export async function startWorkerSessionControlPlaneTickWorker(
@@ -185,6 +207,152 @@ export async function stopWorkerSessionControlPlaneTickWorkers(
       includeRetired: true,
     }, options.lines),
   };
+}
+
+export async function listWorkerSessionControlPlaneTickWorkerNextSteps(
+  projectRoot: string,
+  sessionName: string,
+): Promise<{
+  session: string;
+  count: number;
+  nextSteps: ControlPlaneTickWorkerNextStep[];
+  actions: { restart_control_plane_tick_worker: number };
+}> {
+  assertSafeWorkerSessionName(sessionName);
+  const workers = await listWorkerSessionControlPlaneTickWorkers(projectRoot, { sessionName }, 1);
+  const nextSteps = workers
+    .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
+    .map((worker): ControlPlaneTickWorkerNextStep => {
+      const restartControlPlaneTickWorker = ["npm", "run", "cli", "--", "runs", "restart-control-plane-tick-workers", sessionName, "--server", "--worker-id", worker.workerId];
+      const encodedSession = encodeURIComponent(sessionName);
+      const encodedWorker = encodeURIComponent(worker.workerId);
+      return {
+        action: "restart_control_plane_tick_worker",
+        reason: "stopped_control_plane_tick_worker",
+        workerId: worker.workerId,
+        pid: worker.pid,
+        stoppedAt: worker.stoppedAt as string,
+        command: restartControlPlaneTickWorker,
+        commands: {
+          restartControlPlaneTickWorker,
+          inspectControlPlaneTickWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick-workers", sessionName, "--server", "--worker-id", worker.workerId],
+          retireControlPlaneTickWorker: ["npm", "run", "cli", "--", "runs", "stop-control-plane-tick-workers", sessionName, "--server", "--worker-id", worker.workerId, "--retire"],
+        },
+        api: {
+          restart: {
+            method: "POST",
+            url: `/api/worker-sessions/${encodedSession}/control-plane-tick-workers/restart`,
+            payload: { workerId: worker.workerId },
+          },
+          inspect: {
+            method: "GET",
+            url: `/api/worker-sessions/${encodedSession}/control-plane-tick-workers?workerId=${encodedWorker}`,
+          },
+          retire: {
+            method: "POST",
+            url: `/api/worker-sessions/${encodedSession}/control-plane-tick-workers/stop`,
+            payload: { workerId: worker.workerId, retire: true },
+          },
+        },
+      };
+    });
+  return {
+    session: sessionName,
+    count: nextSteps.length,
+    nextSteps,
+    actions: { restart_control_plane_tick_worker: nextSteps.length },
+  };
+}
+
+export async function restartWorkerSessionControlPlaneTickWorker(
+  projectRoot: string,
+  baseUrl: string,
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  session: string;
+  count: number;
+  restarted: Array<{
+    workerId: string;
+    previousPid: number | null;
+    pid: number | null;
+    restartedAt: string;
+    restartCount: number;
+    command: string[];
+  }>;
+  workers: Awaited<ReturnType<typeof listWorkerSessionControlPlaneTickWorkers>>;
+}> {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(options.workerId);
+  let worker: ControlPlaneTickWorker;
+  try {
+    worker = await readControlPlaneTickWorker(projectRoot, sessionName, options.workerId);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`control-plane tick worker '${options.workerId}' not found for session '${sessionName}'`);
+    }
+    throw error;
+  }
+  if (worker.retiredAt && !options.includeRetired) {
+    throw new Error(`control-plane tick worker '${options.workerId}' is retired; pass includeRetired to restart it`);
+  }
+  if (processIsAlive(worker.pid)) {
+    throw new Error(`control-plane tick worker '${options.workerId}' is already alive with pid ${worker.pid}`);
+  }
+  if (worker.session !== sessionName || worker.workerId !== options.workerId) {
+    throw new Error(`control-plane tick worker record mismatch for '${options.workerId}'`);
+  }
+  const stdout = await fs.open(worker.stdoutPath, "a");
+  const stderr = await fs.open(worker.stderrPath, "a");
+  try {
+    const restartedAt = new Date().toISOString();
+    const pendingRestart: ControlPlaneTickWorker = {
+      ...worker,
+      baseUrl,
+      startedAt: restartedAt,
+      pid: null,
+      stoppedAt: undefined,
+      stopResult: undefined,
+      retiredAt: undefined,
+      restartedAt,
+      restartCount: (worker.restartCount ?? 0) + 1,
+      previousPid: worker.pid,
+    };
+    await writeControlPlaneTickWorker(projectRoot, pendingRestart);
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+      cwd: projectRoot,
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const recordedWorker = await readControlPlaneTickWorker(projectRoot, sessionName, options.workerId);
+    const updated: ControlPlaneTickWorker = {
+      ...recordedWorker,
+      pid: child.pid ?? null,
+    };
+    await writeControlPlaneTickWorker(projectRoot, updated);
+    return {
+      session: sessionName,
+      count: 1,
+      restarted: [{
+        workerId: updated.workerId,
+        previousPid: updated.previousPid ?? null,
+        pid: updated.pid,
+        restartedAt,
+        restartCount: updated.restartCount ?? 1,
+        command: updated.command,
+      }],
+      workers: await listWorkerSessionControlPlaneTickWorkers(projectRoot, {
+        sessionName,
+        workerId: options.workerId,
+        includeRetired: true,
+      }, options.lines),
+    };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
 }
 
 async function listControlPlaneTickWorkerSessionNames(projectRoot: string): Promise<string[]> {

@@ -1461,10 +1461,11 @@ try {
     };
     recovery: {
       count: number;
-      actions: { restart_drain_worker: number; restart_apply_action_worker: number };
+      actions: { restart_drain_worker: number; restart_apply_action_worker: number; restart_control_plane_tick_worker: number };
       nextSteps: {
         drainWorkers: Array<{ workerId: string; action: string }>;
         applyActionWorkers: Array<{ workerId: string; action: string }>;
+        controlPlaneTickWorkers: Array<{ workerId: string; action: string }>;
       };
     };
   }>(baseUrl, [
@@ -1654,13 +1655,83 @@ try {
     "--server",
     "--worker-id",
     "detached-smoke-control-plane-worker",
-    "--retire",
   ]);
   assert.equal(stoppedControlPlaneTickWorkers.ok, true);
   assert.equal(stoppedControlPlaneTickWorkers.session, sessionName);
   assert.equal(stoppedControlPlaneTickWorkers.count, 1);
   assert.equal(stoppedControlPlaneTickWorkers.stopped[0]?.workerId, "detached-smoke-control-plane-worker");
-  assert.ok(stoppedControlPlaneTickWorkers.stopped[0]?.retiredAt);
+  assert.equal(stoppedControlPlaneTickWorkers.stopped[0]?.retiredAt, undefined);
+  const controlPlaneTickWorkerNext = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    actions: { restart_control_plane_tick_worker: number };
+    nextSteps: Array<{ action: string; reason: string; workerId: string; command: string[]; api: { restart: { method: string; url: string; payload: { workerId: string } } } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-tick-workers-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(controlPlaneTickWorkerNext.ok, true);
+  assert.equal(controlPlaneTickWorkerNext.session, sessionName);
+  assert.equal(controlPlaneTickWorkerNext.count, 1);
+  assert.equal(controlPlaneTickWorkerNext.actions.restart_control_plane_tick_worker, 1);
+  assert.equal(controlPlaneTickWorkerNext.nextSteps[0]?.workerId, "detached-smoke-control-plane-worker");
+  assert.equal(controlPlaneTickWorkerNext.nextSteps[0]?.action, "restart_control_plane_tick_worker");
+  assert.equal(controlPlaneTickWorkerNext.nextSteps[0]?.reason, "stopped_control_plane_tick_worker");
+  assert.equal(
+    controlPlaneTickWorkerNext.nextSteps[0]?.command.join(" "),
+    `npm run cli -- runs restart-control-plane-tick-workers ${sessionName} --server --worker-id detached-smoke-control-plane-worker`,
+  );
+  assert.equal(controlPlaneTickWorkerNext.nextSteps[0]?.api.restart.method, "POST");
+  assert.match(controlPlaneTickWorkerNext.nextSteps[0]?.api.restart.url ?? "", /\/control-plane-tick-workers\/restart$/);
+  assert.equal(controlPlaneTickWorkerNext.nextSteps[0]?.api.restart.payload.workerId, "detached-smoke-control-plane-worker");
+  const controlPlaneStatusBeforeTickWorkerRestart = await cliJson<typeof controlPlaneStatus>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStatusBeforeTickWorkerRestart.recovery.actions.restart_control_plane_tick_worker, 1);
+  assert.equal(controlPlaneStatusBeforeTickWorkerRestart.recovery.nextSteps.controlPlaneTickWorkers[0]?.workerId, "detached-smoke-control-plane-worker");
+  assert.equal(controlPlaneStatusBeforeTickWorkerRestart.recovery.nextSteps.controlPlaneTickWorkers[0]?.action, "restart_control_plane_tick_worker");
+  const restartedControlPlaneTickWorker = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    restarted: Array<{ workerId: string; previousPid: number | null; pid: number | null; restartCount: number; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "restart-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-control-plane-worker",
+  ]);
+  assert.equal(restartedControlPlaneTickWorker.ok, true);
+  assert.equal(restartedControlPlaneTickWorker.session, sessionName);
+  assert.equal(restartedControlPlaneTickWorker.count, 1);
+  assert.equal(restartedControlPlaneTickWorker.restarted[0]?.workerId, "detached-smoke-control-plane-worker");
+  assert.equal(restartedControlPlaneTickWorker.restarted[0]?.restartCount, 1);
+  assert.equal(
+    restartedControlPlaneTickWorker.restarted[0]?.command.join(" "),
+    `runs session-control-plane-tick-loop ${sessionName} --server --max-ticks 1 --interval-ms 0 --lines 20 --dry-run`,
+  );
+  const retiredControlPlaneTickWorkers = await cliJson<typeof stoppedControlPlaneTickWorkers>(baseUrl, [
+    "runs",
+    "stop-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-control-plane-worker",
+    "--retire",
+  ]);
+  assert.equal(retiredControlPlaneTickWorkers.ok, true);
+  assert.equal(retiredControlPlaneTickWorkers.count, 1);
+  assert.ok(retiredControlPlaneTickWorkers.stopped[0]?.retiredAt);
   const controlPlaneStatusAfterTickWorker = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",
     "session-control-plane-status",
