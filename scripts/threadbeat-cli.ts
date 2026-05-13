@@ -4428,6 +4428,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "ensure-drain-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-drain-worker requires --server");
+    }
+    await printJson(await ensureWorkerSessionDrainWorkerViaServer(
+      required(sessionName, "runs ensure-drain-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        ...(options["max-continuations"] ? { maxContinuations: parsePositiveInteger(options["max-continuations"], "--max-continuations") } : {}),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-apply-action-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6555,6 +6571,35 @@ async function fetchWorkerSessionDrainWorkers(
     session: string;
     count: number;
     workers: Array<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+}
+
+async function ensureWorkerSessionDrainWorkerViaServer(
+  sessionName: string,
+  options: { workerId?: string; maxContinuations?: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  action: "existing" | "restarted" | "started" | "blocked";
+  reason: string;
+  worker: unknown;
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/drain-workers/ensure`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      ...(options.maxContinuations ? { maxContinuations: options.maxContinuations } : {}),
+      lines: options.lines,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    action: "existing" | "restarted" | "started" | "blocked";
+    reason: string;
+    worker: unknown;
+    workers: unknown[];
   };
 }
 
@@ -10355,6 +10400,7 @@ Commands:
   runs session-drain-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs stop-drain-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-drain-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
+  runs ensure-drain-worker <name> --server [--worker-id id] [--max-continuations n] [--lines 20]
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]

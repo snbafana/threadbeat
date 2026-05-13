@@ -48,6 +48,63 @@ export type DrainContinuationWorkerNextStep = {
   };
 };
 
+export async function startWorkerSessionDrainWorker(
+  projectRoot: string,
+  baseUrl: string,
+  sessionName: string,
+  options: { workerId?: string; maxContinuations?: number },
+): Promise<DrainContinuationWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }> {
+  assertSafeWorkerSessionName(sessionName);
+  const workerId = options.workerId ?? createDrainContinuationWorkerId();
+  assertSafeWorkerSessionName(workerId);
+  const workerDir = drainContinuationWorkerDir(projectRoot, sessionName);
+  await fs.mkdir(workerDir, { recursive: true });
+  const stdoutPath = path.join(workerDir, `${workerId}.out.log`);
+  const stderrPath = path.join(workerDir, `${workerId}.err.log`);
+  const recordPath = drainContinuationWorkerPath(projectRoot, sessionName, workerId);
+  if (await pathExists(recordPath)) {
+    throw new Error(`drain continuation worker '${workerId}' already exists for session '${sessionName}'`);
+  }
+  const command = [
+    "runs",
+    "session-drain-continuations",
+    sessionName,
+    "--execute-queued",
+    ...(options.maxContinuations ? ["--max-continuations", String(options.maxContinuations)] : []),
+  ];
+  const stdout = await fs.open(stdoutPath, "a");
+  const stderr = await fs.open(stderrPath, "a");
+  try {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
+      cwd: projectRoot,
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const worker: DrainContinuationWorker = {
+      session: sessionName,
+      workerId,
+      baseUrl,
+      startedAt: new Date().toISOString(),
+      command,
+      pid: child.pid ?? null,
+      stdoutPath,
+      stderrPath,
+    };
+    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    return {
+      ...worker,
+      alive: processIsAlive(worker.pid),
+      stdout: { path: stdoutPath, lines: await tailFileLines(stdoutPath, 0) },
+      stderr: { path: stderrPath, lines: await tailFileLines(stderrPath, 0) },
+    };
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
+}
+
 export async function listWorkerSessionDrainWorkers(
   projectRoot: string,
   options: { sessionName?: string; workerId?: string; includeRetired?: boolean },
@@ -381,4 +438,18 @@ function assertSafeWorkerSessionName(value: string): void {
   if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
     throw new Error("worker session names may only contain letters, numbers, '.', '_', and '-'");
   }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function createDrainContinuationWorkerId(): string {
+  return `drain-worker-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 17)}`;
 }

@@ -2157,6 +2157,93 @@ try {
     serverDrainWorkerId,
     "--retire",
   ]);
+  type DrainWorkerEnsureResponse = {
+    ok?: true;
+    session: string;
+    action: string;
+    reason: string;
+    worker: {
+      workerId: string;
+      command: string[];
+      alive: boolean;
+      restartCount?: number;
+      retiredAt?: string;
+    };
+    workers: Array<{ workerId: string; alive: boolean; retiredAt?: string }>;
+  };
+  const ensuredDrainWorkerId = "detached-smoke-drain-ensure-worker";
+  const ensuredDrainWorker = await cliJson<DrainWorkerEnsureResponse>(baseUrl, [
+    "runs",
+    "ensure-drain-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredDrainWorkerId,
+    "--max-continuations",
+    "1",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(ensuredDrainWorker.ok, true);
+  assert.equal(ensuredDrainWorker.session, sessionName);
+  assert.equal(ensuredDrainWorker.action, "started");
+  assert.equal(ensuredDrainWorker.reason, "no_running_or_restartable_worker");
+  assert.equal(ensuredDrainWorker.worker.workerId, ensuredDrainWorkerId);
+  assert.deepEqual(ensuredDrainWorker.worker.command, [
+    "runs",
+    "session-drain-continuations",
+    sessionName,
+    "--execute-queued",
+    "--max-continuations",
+    "1",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-drain-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredDrainWorkerId,
+  ]);
+  const restartedEnsuredDrainWorker = await cliJson<DrainWorkerEnsureResponse>(baseUrl, [
+    "runs",
+    "ensure-drain-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredDrainWorkerId,
+    "--lines",
+    "5",
+  ]);
+  assert.equal(restartedEnsuredDrainWorker.ok, true);
+  assert.equal(restartedEnsuredDrainWorker.action, "restarted");
+  assert.equal(restartedEnsuredDrainWorker.reason, "restartable_worker_exists");
+  assert.equal(restartedEnsuredDrainWorker.worker.workerId, ensuredDrainWorkerId);
+  assert.equal(restartedEnsuredDrainWorker.worker.restartCount, 1);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-drain-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredDrainWorkerId,
+    "--retire",
+  ]);
+  const blockedEnsuredDrainWorker = await cliJson<DrainWorkerEnsureResponse>(baseUrl, [
+    "runs",
+    "ensure-drain-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredDrainWorkerId,
+    "--lines",
+    "5",
+  ]);
+  assert.equal(blockedEnsuredDrainWorker.ok, true);
+  assert.equal(blockedEnsuredDrainWorker.action, "blocked");
+  assert.equal(blockedEnsuredDrainWorker.reason, "existing_worker_not_restartable");
+  assert.equal(blockedEnsuredDrainWorker.worker.workerId, ensuredDrainWorkerId);
+  assert.equal(typeof blockedEnsuredDrainWorker.worker.retiredAt, "string");
   const restartedApplyActionWorkers = await cliJson<{
     ok?: true;
     count: number;

@@ -847,7 +847,11 @@ to hide it from default worker listings while keeping the durable record
 available with `runs session-drain-workers <name> --server --include-retired`.
 Use `runs restart-drain-workers <name> --server --worker-id <id>` to restart a
 stopped or lost worker from its saved command and log paths; pass
-`--include-retired` when the saved record was intentionally retired.
+`--include-retired` when the saved record was intentionally retired. Use `runs
+ensure-drain-worker <name> --server` for idempotent supervision: it reuses a
+running drain worker, restarts a stopped or lost non-retired worker, starts one
+when none exists, or reports a blocked retired record for the requested worker
+id.
 Apply summaries also include run-filtered
 `runs results --session <name> --run <id> --next` commands so result inspection
 can continue from the exact affected branches. When any affected run now has a
