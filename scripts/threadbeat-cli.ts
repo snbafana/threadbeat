@@ -5148,6 +5148,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(await fetchWorkerSessionBranchRecoveryExecutions(
       required(sessionName, "runs session-branch-recovery-executions <session> --server"),
       {
+        executionId: options.execution,
         runId: options.run,
         status: options.status,
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
@@ -7623,9 +7624,10 @@ async function fetchWorkerSessionApplyActionExecutions(
 
 async function fetchWorkerSessionBranchRecoveryExecutions(
   sessionName: string,
-  options: { runId?: string; status?: string; limit?: number | null },
+  options: { executionId?: string; runId?: string; status?: string; limit?: number | null },
 ): Promise<WorkerSessionBranchRecoveryExecutionsResponse> {
   const params = new URLSearchParams();
+  if (options.executionId) params.set("executionId", options.executionId);
   if (options.runId) params.set("runId", options.runId);
   if (options.status) params.set("status", options.status);
   if (options.limit) params.set("limit", String(options.limit));
@@ -12097,7 +12099,7 @@ Commands:
   runs session-control-plane-tick-workers-next <name> --server
   runs restart-control-plane-tick-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-tick-workers <name> --server [--worker-id id] [--retire] [--lines 20]
-  runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
+  runs session-branch-recovery-executions <name> --server [--execution execution_id[,execution_id]] [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--branch-action resume_branch|review_branch] [--run run_id[,run_id]] [--limit 20] [--offset 20] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]

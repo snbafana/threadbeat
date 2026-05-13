@@ -834,7 +834,8 @@ commands. Each branch next-step row includes objective, branch name, worker
 ownership, running-sandbox blockers, and checkout/review/watch/resume commands
 for direct branch-native inspection. Non-dry-run branch recovery writes durable records under
 `.threadbeat/worker-sessions/branch-recovery-executions/<session>/`; inspect
-them with `runs session-branch-recovery-executions <name> --server` or
+them with `runs session-branch-recovery-executions <name> --server`, narrow a
+specific attempt with `--execution <execution_id>`, or query
 `GET /api/worker-sessions/:name/branch-recovery-executions`. The aggregate
 control-plane status also embeds recent branch-recovery executions and status
 counts plus recent apply-action execution counts and records. It also includes

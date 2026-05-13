@@ -370,8 +370,14 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         ...parseOptionalList(query.runIds),
       ];
       const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
+      const executionIds = [
+        ...parseOptionalList(query.executionId),
+        ...parseOptionalList(query.executionIds),
+      ];
+      const executionIdFilter = executionIds.length > 0 ? new Set(executionIds) : null;
       const records = await listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
       const executions = records
+        .filter((record) => !executionIdFilter || executionIdFilter.has(record.executionId))
         .filter((record) => !statusFilter || statusFilter.has(record.status))
         .filter((record) => !runIdFilter || [
           ...record.resumed.map((run) => run.runId),
@@ -382,7 +388,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         ok: true,
         session: name,
         count: executions.length,
-        filter: { status: statusFilter ? [...statusFilter] : [], runIds, limit },
+        filter: { executionIds, status: statusFilter ? [...statusFilter] : [], runIds, limit },
         executions,
       };
     } catch (error) {
