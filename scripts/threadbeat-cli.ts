@@ -6432,6 +6432,23 @@ async function fetchWorkerSessionControlPlaneStatus(
     };
     drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
   };
+  branches: {
+    counts: {
+      total: number;
+      ready: number;
+      blocked: number;
+      stoppedBranchWithoutResultCommit: number;
+      runningSandboxPresent: number;
+    };
+    actions: { resume_branch: number; inspect_run: number };
+    commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+    nextSteps: Array<{
+      action: "resume_branch" | "inspect_run";
+      reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
+      runId: string;
+      command: string[];
+    }>;
+  };
   recovery: {
     count: number;
     actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number };
@@ -6465,6 +6482,23 @@ async function fetchWorkerSessionControlPlaneStatus(
         pending: number;
       };
       drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
+    };
+    branches: {
+      counts: {
+        total: number;
+        ready: number;
+        blocked: number;
+        stoppedBranchWithoutResultCommit: number;
+        runningSandboxPresent: number;
+      };
+      actions: { resume_branch: number; inspect_run: number };
+      commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+      nextSteps: Array<{
+        action: "resume_branch" | "inspect_run";
+        reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
+        runId: string;
+        command: string[];
+      }>;
     };
     recovery: {
       count: number;

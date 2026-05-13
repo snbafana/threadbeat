@@ -368,6 +368,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { name } = request.params as { name: string };
       const query = request.query as Record<string, string | undefined>;
       const lines = parseOptionalInteger(query.lines) ?? 5;
+      const session = await readWorkerSession(settings.projectRoot, name);
       const [
         applyRecords,
         drainContinuations,
@@ -377,6 +378,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         drainWorkerNextSteps,
         applyActionWorkers,
         applyActionWorkerNextSteps,
+        branchRecovery,
       ] = await Promise.all([
         listWorkerSessionApplyRecords(settings.projectRoot, name),
         listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
@@ -386,6 +388,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
         listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
         listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
+        summarizeWorkerSessionBranchRecovery(db, session, lines),
       ]);
       const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
       return {
@@ -400,6 +403,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           applyActions: applyActionQueue.counts,
           drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
         },
+        branches: branchRecovery,
         recovery: {
           count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count,
           actions: {
@@ -2251,6 +2255,83 @@ const summarizeDrainContinuationStatuses = <T extends { status?: string }>(recor
   executed: records.filter((record) => record.status === "executed").length,
   failed: records.filter((record) => record.status === "failed").length,
 });
+
+const summarizeWorkerSessionBranchRecovery = async (
+  db: Database,
+  session: Awaited<ReturnType<typeof readWorkerSession>>,
+  nextStepLimit: number,
+): Promise<{
+  counts: {
+    total: number;
+    ready: number;
+    blocked: number;
+    stoppedBranchWithoutResultCommit: number;
+    runningSandboxPresent: number;
+  };
+  actions: { resume_branch: number; inspect_run: number };
+  commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+  nextSteps: Array<{
+    action: "resume_branch" | "inspect_run";
+    reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
+    agentId: string;
+    runId: string;
+    status: string;
+    branchName: string;
+    workerId: string | null;
+    command: string[];
+    runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+  }>;
+}> => {
+  const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+  const runs = (await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+    return (await db.listAgentRuns(agentId, ["stopped"]))
+      .filter((run) => run.result_commit === null)
+      .filter((run) => run.worker_id === null || sessionWorkerIds.has(run.worker_id))
+      .map((run) => ({ agentId, run }));
+  }))).flat();
+  const nextSteps = await Promise.all(runs.map(async ({ agentId, run }) => {
+    const runningSandboxes = (await db.listSandboxes({ runId: run.id }))
+      .filter((sandbox) => sandbox.state === "running")
+      .map((sandbox) => ({ id: sandbox.id, providerSandboxId: sandbox.provider_sandbox_id }));
+    const ready = runningSandboxes.length === 0;
+    const command = ready
+      ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+      : ["npm", "run", "cli", "--", "runs", "inspect", run.id];
+    return {
+      action: ready ? "resume_branch" as const : "inspect_run" as const,
+      reason: ready ? "stopped_branch_without_result_commit" as const : "running_sandbox_present" as const,
+      agentId,
+      runId: run.id,
+      status: run.status,
+      branchName: run.run_branch,
+      workerId: run.worker_id,
+      command,
+      runningSandboxes,
+    };
+  }));
+  const ready = nextSteps.filter((step) => step.action === "resume_branch").length;
+  const blocked = nextSteps.length - ready;
+  const resumeSession = ["npm", "run", "cli", "--", "runs", "resume-session", session.session];
+  return {
+    counts: {
+      total: nextSteps.length,
+      ready,
+      blocked,
+      stoppedBranchWithoutResultCommit: ready,
+      runningSandboxPresent: blocked,
+    },
+    actions: {
+      resume_branch: ready,
+      inspect_run: blocked,
+    },
+    commands: {
+      resumeSession,
+      resumeSessionDryRun: [...resumeSession, "--dry-run"],
+      inspectBranches: ["npm", "run", "cli", "--", "runs", "session-branches", session.session, "--server", "--resumable"],
+    },
+    nextSteps: nextSteps.slice(0, nextStepLimit),
+  };
+};
 
 const cliCommandArgs = (command: string[]): string[] => {
   const prefix = ["npm", "run", "cli", "--"];

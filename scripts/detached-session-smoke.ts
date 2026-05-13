@@ -1417,6 +1417,16 @@ try {
   assert.equal(stoppedServerDrainWorker.stopped[0]?.aliveBefore, false);
   assert.equal(stoppedServerDrainWorker.stopped[0]?.alive, false);
   assert.equal(typeof stoppedServerDrainWorker.stopped[0]?.stoppedAt, "string");
+  const controlPlaneResumePlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session control plane branch recovery",
+  ]);
+  await cliJson(baseUrl, ["runs", "claim", controlPlaneResumePlan.run.id, "--worker-id", "detached-smoke-worker-1"]);
+  await cliJson(baseUrl, ["runs", "stop", controlPlaneResumePlan.run.id]);
   const controlPlaneStatus = await cliJson<{
     ok?: true;
     session: string;
@@ -1427,6 +1437,12 @@ try {
     queues: {
       applyActions: { actionable: number; resetAudits: number };
       drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
+    };
+    branches: {
+      counts: { total: number; ready: number; blocked: number; stoppedBranchWithoutResultCommit: number; runningSandboxPresent: number };
+      actions: { resume_branch: number; inspect_run: number };
+      commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+      nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
     };
     recovery: {
       count: number;
@@ -1441,6 +1457,8 @@ try {
     "session-control-plane-status",
     sessionName,
     "--server",
+    "--lines",
+    "20",
   ]);
   assert.equal(controlPlaneStatus.ok, true);
   assert.equal(controlPlaneStatus.session, sessionName);
@@ -1450,6 +1468,21 @@ try {
   assert.equal(controlPlaneStatus.workers.applyAction.total, 1);
   assert.equal(controlPlaneStatus.workers.applyAction.stopped, 1);
   assert.equal(controlPlaneStatus.workers.applyAction.retired, 0);
+  assert.ok(controlPlaneStatus.branches.counts.total >= 1);
+  assert.ok(controlPlaneStatus.branches.counts.ready >= 1);
+  assert.equal(controlPlaneStatus.branches.counts.stoppedBranchWithoutResultCommit, controlPlaneStatus.branches.counts.ready);
+  assert.equal(controlPlaneStatus.branches.counts.runningSandboxPresent, controlPlaneStatus.branches.counts.blocked);
+  assert.equal(controlPlaneStatus.branches.actions.resume_branch, controlPlaneStatus.branches.counts.ready);
+  assert.equal(controlPlaneStatus.branches.actions.inspect_run, controlPlaneStatus.branches.counts.blocked);
+  assert.equal(controlPlaneStatus.branches.commands.resumeSession.join(" "), `npm run cli -- runs resume-session ${sessionName}`);
+  assert.equal(controlPlaneStatus.branches.commands.resumeSessionDryRun.join(" "), `npm run cli -- runs resume-session ${sessionName} --dry-run`);
+  assert.equal(controlPlaneStatus.branches.commands.inspectBranches.join(" "), `npm run cli -- runs session-branches ${sessionName} --server --resumable`);
+  assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
+    step.runId === controlPlaneResumePlan.run.id
+    && step.action === "resume_branch"
+    && step.reason === "stopped_branch_without_result_commit"
+    && step.command.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id}`
+  )));
   assert.ok(controlPlaneStatus.queues.applyActions.actionable >= 1);
   assert.ok(controlPlaneStatus.queues.applyActions.resetAudits >= 1);
   assert.ok(controlPlaneStatus.queues.drainContinuations.total >= 1);
