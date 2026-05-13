@@ -665,6 +665,14 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         ],
         blocked: query.blocked === undefined ? undefined : parseBoolean(query.blocked, false),
         mutating: query.mutating === undefined ? undefined : parseBoolean(query.mutating, false),
+        alertSurfaces: [
+          ...parseOptionalList(query.alertSurface),
+          ...parseOptionalList(query.alertSurfaces),
+        ],
+        detailCommands: [
+          ...parseOptionalList(query.detailCommand),
+          ...parseOptionalList(query.detailCommands),
+        ],
       };
       const advances = await listWorkerSessionControlPlaneAdvanceRecords(
         settings.projectRoot,
@@ -674,6 +682,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           advanceIds: filter.advanceIds,
           blocked: filter.blocked,
           mutating: filter.mutating,
+          alertSurfaces: filter.alertSurfaces,
+          detailCommands: filter.detailCommands,
         },
       );
       return {
@@ -684,6 +694,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           advanceIds: filter.advanceIds,
           blocked: filter.blocked ?? null,
           mutating: filter.mutating ?? null,
+          alertSurfaces: filter.alertSurfaces,
+          detailCommands: filter.detailCommands,
         },
         count: advances.length,
         summary: summarizeWorkerSessionControlPlaneAdvanceRecords(advances),

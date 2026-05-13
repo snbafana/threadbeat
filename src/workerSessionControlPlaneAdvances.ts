@@ -24,6 +24,8 @@ export type WorkerSessionControlPlaneAdvanceListOptions = {
   advanceIds?: string[];
   blocked?: boolean;
   mutating?: boolean;
+  alertSurfaces?: string[];
+  detailCommands?: string[];
 };
 
 export type WorkerSessionControlPlaneAdvanceSummary = {
@@ -111,7 +113,16 @@ function matchesWorkerSessionControlPlaneAdvanceFilters(
   if (options.advanceIds && options.advanceIds.length > 0 && !options.advanceIds.includes(record.advanceId)) return false;
   if (options.blocked !== undefined && executionSafetyBoolean(record, "blocked") !== options.blocked) return false;
   if (options.mutating !== undefined && executionSafetyBoolean(record, "mutating") !== options.mutating) return false;
+  if (options.alertSurfaces && options.alertSurfaces.length > 0 && !options.alertSurfaces.includes(alertSurface(record))) return false;
+  if (options.detailCommands && options.detailCommands.length > 0 && !options.detailCommands.includes(record.detailCommand ?? "")) return false;
   return true;
+}
+
+function alertSurface(record: WorkerSessionControlPlaneAdvanceRecord): string {
+  const alert = record.alert;
+  if (!alert || typeof alert !== "object" || Array.isArray(alert)) return "";
+  const surface = (alert as Record<string, unknown>).surface;
+  return typeof surface === "string" ? surface : "";
 }
 
 function executionSafetyBoolean(

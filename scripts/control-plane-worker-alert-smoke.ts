@@ -192,6 +192,7 @@ try {
   assert.equal(confirmedDryRun.executionSafety.confirmed, true);
 
   const recoveryAttemptHistory = await cliJson<{
+    filter: { alertSurfaces: string[]; detailCommands: string[] };
     advances: Array<{
       advanceId: string;
       alert?: { surface: string; workerId?: string } | null;
@@ -210,7 +211,13 @@ try {
     "--server",
     "--advance",
     confirmedDryRun.advanceId,
+    "--alert-surface",
+    "worker_recovery",
+    "--detail-command",
+    "restart_worker_recovery",
   ]);
+  assert.deepEqual(recoveryAttemptHistory.filter.alertSurfaces, ["worker_recovery"]);
+  assert.deepEqual(recoveryAttemptHistory.filter.detailCommands, ["restart_worker_recovery"]);
   const recoveryAttempt = recoveryAttemptHistory.advances[0];
   assert.equal(recoveryAttempt?.advanceId, confirmedDryRun.advanceId);
   assert.equal(recoveryAttempt?.alert?.surface, "worker_recovery");
