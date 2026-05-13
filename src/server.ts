@@ -3622,6 +3622,7 @@ const readWorkerSessionControlPlaneStatus = async (
       counts: ReturnType<typeof summarizeBranchRecoveryExecutionStatuses>;
     };
   };
+  results: Awaited<ReturnType<typeof summarizeWorkerSessionResultInspection>>;
   staleRuns: Awaited<ReturnType<typeof summarizeWorkerSessionStaleRunRecovery>>;
   recovery: {
     count: number;
@@ -3647,6 +3648,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneTickWorkers,
     controlPlaneTickWorkerNextSteps,
     branchRecovery,
+    resultInspection,
     staleRunRecovery,
     branchRecoveryExecutions,
     applyActionExecutions,
@@ -3667,6 +3669,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
+    summarizeWorkerSessionResultInspection(db, session, lines),
     summarizeWorkerSessionStaleRunRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, lines),
@@ -3712,6 +3715,7 @@ const readWorkerSessionControlPlaneStatus = async (
         counts: summarizeBranchRecoveryExecutionStatuses(branchRecoveryExecutions),
       },
     },
+    results: resultInspection,
     staleRuns: staleRunRecovery,
     recovery: {
       count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneAdvanceWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count,
@@ -5475,6 +5479,73 @@ const summarizeWorkerSessionBranchRecovery = async (
       resumeSessionDryRun: [...resumeSession, "--dry-run"],
       resumeNext: [...resumeSession, "--next"],
       inspectBranches: ["npm", "run", "cli", "--", "runs", "session-branches", session.session, "--server", "--resumable"],
+    },
+    nextSteps: nextSteps.slice(0, nextStepLimit),
+  };
+};
+
+const summarizeWorkerSessionResultInspection = async (
+  db: Database,
+  session: Awaited<ReturnType<typeof readWorkerSession>>,
+  nextStepLimit: number,
+): Promise<{
+  counts: { total: number; resultCommits: number };
+  actions: { review_result: number };
+  nextSteps: Array<{
+    action: "review_result";
+    reason: "result_commit_available";
+    agentId: string;
+    runId: string;
+    objective: string;
+    status: string;
+    branchName: string;
+    resultCommit: string;
+    workerId: string | null;
+    command: string[];
+    commands: {
+      inspectRun: string[];
+      inspectResult: string[];
+      checkoutBranch: string[];
+      reviewRun: string[];
+    };
+  }>;
+}> => {
+  const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+  const runs = (await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+    return (await db.listAgentRuns(agentId, ["completed", "stopped"]))
+      .filter((run) => run.result_commit !== null)
+      .filter((run) => run.worker_id === null || sessionWorkerIds.has(run.worker_id))
+      .map((run) => ({ agentId, run: { ...run, result_commit: run.result_commit as string } }));
+  }))).flat();
+  const nextSteps = runs.map(({ agentId, run }) => {
+    const checkoutDir = `./checkouts/${session.session}-control-plane-results/${run.id}`;
+    const reviewRun = ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", checkoutDir];
+    return {
+      action: "review_result" as const,
+      reason: "result_commit_available" as const,
+      agentId,
+      runId: run.id,
+      objective: run.objective,
+      status: run.status,
+      branchName: run.run_branch,
+      resultCommit: run.result_commit,
+      workerId: run.worker_id,
+      command: reviewRun,
+      commands: {
+        inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+        inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"],
+        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", checkoutDir],
+        reviewRun,
+      },
+    };
+  });
+  return {
+    counts: {
+      total: nextSteps.length,
+      resultCommits: nextSteps.length,
+    },
+    actions: {
+      review_result: nextSteps.length,
     },
     nextSteps: nextSteps.slice(0, nextStepLimit),
   };

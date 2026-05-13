@@ -7763,6 +7763,28 @@ type WorkerSessionControlPlaneStatusResponse = {
       recent: WorkerSessionBranchRecoveryExecutionRecord[];
     };
   };
+  results: {
+    counts: { total: number; resultCommits: number };
+    actions: { review_result: number };
+    nextSteps: Array<{
+      action: "review_result";
+      reason: "result_commit_available";
+      agentId: string;
+      runId: string;
+      objective: string;
+      status: string;
+      branchName: string;
+      resultCommit: string;
+      workerId: string | null;
+      command: string[];
+      commands: {
+        inspectRun: string[];
+        inspectResult: string[];
+        checkoutBranch: string[];
+        reviewRun: string[];
+      };
+    }>;
+  };
   staleRuns: {
     counts: {
       total: number;
@@ -8736,6 +8758,27 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   } else {
     lines.push("branch_inspection: none");
   }
+  if (summary.results.inspection.count > 0) {
+    lines.push(
+      "result_inspection:",
+      `  count: ${summary.results.inspection.count}`,
+    );
+    for (const step of summary.results.inspection.nextSteps) {
+      lines.push(
+        `  - run: ${step.runId}`,
+        `    action: ${step.action}`,
+        `    reason: ${step.reason}`,
+        `    branch: ${step.branchName}`,
+        `    result_commit: ${step.resultCommit}`,
+        `    worker: ${step.workerId ?? ""}`,
+        `    inspect_result: ${formatShellCommand(step.commands.inspectResult)}`,
+        `    review: ${formatShellCommand(step.commands.reviewRun)}`,
+        `    checkout: ${formatShellCommand(step.commands.checkoutBranch)}`,
+      );
+    }
+  } else {
+    lines.push("result_inspection: none");
+  }
   if (summary.recovery.recoverNext.recent.length > 0) {
     lines.push("recent_recover_next:");
     for (const attempt of summary.recovery.recoverNext.recent) {
@@ -8763,6 +8806,10 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--confirm"] });
   }
   for (const step of summary.branches.inspection.nextSteps) {
+    commands.push({ command: step.commands.inspectResult });
+    commands.push({ command: step.commands.reviewRun });
+  }
+  for (const step of summary.results.inspection.nextSteps) {
     commands.push({ command: step.commands.inspectResult });
     commands.push({ command: step.commands.reviewRun });
   }
@@ -8913,6 +8960,26 @@ function summarizeWorkerSessionControlPlaneStatus(
     counts: WorkerSessionControlPlaneStatusResponse["staleRuns"]["counts"];
     actions: WorkerSessionControlPlaneStatusResponse["staleRuns"]["actions"];
   };
+  results: {
+    counts: WorkerSessionControlPlaneStatusResponse["results"]["counts"];
+    actions: WorkerSessionControlPlaneStatusResponse["results"]["actions"];
+    inspection: {
+      count: number;
+      nextSteps: Array<{
+        action: WorkerSessionControlPlaneStatusResponse["results"]["nextSteps"][number]["action"];
+        reason: WorkerSessionControlPlaneStatusResponse["results"]["nextSteps"][number]["reason"];
+        runId: string;
+        branchName: string;
+        resultCommit: string;
+        status: string;
+        workerId: string | null;
+        commands: Pick<
+          WorkerSessionControlPlaneStatusResponse["results"]["nextSteps"][number]["commands"],
+          "inspectRun" | "inspectResult" | "checkoutBranch" | "reviewRun"
+        >;
+      }>;
+    };
+  };
   recovery: {
     count: number;
     actions: Record<string, number>;
@@ -8986,6 +9053,28 @@ function summarizeWorkerSessionControlPlaneStatus(
     staleRuns: {
       counts: status.staleRuns.counts,
       actions: status.staleRuns.actions,
+    },
+    results: {
+      counts: status.results.counts,
+      actions: status.results.actions,
+      inspection: {
+        count: status.results.nextSteps.length,
+        nextSteps: status.results.nextSteps.map((step) => ({
+          action: step.action,
+          reason: step.reason,
+          runId: step.runId,
+          branchName: step.branchName,
+          resultCommit: step.resultCommit,
+          status: step.status,
+          workerId: step.workerId,
+          commands: {
+            inspectRun: step.commands.inspectRun,
+            inspectResult: step.commands.inspectResult,
+            checkoutBranch: step.commands.checkoutBranch,
+            reviewRun: step.commands.reviewRun,
+          },
+        })),
+      },
     },
     recovery: {
       count: status.recovery.count,

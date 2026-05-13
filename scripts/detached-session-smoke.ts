@@ -12,6 +12,7 @@ import { buildServer } from "../src/server.js";
 const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-detached-session-smoke-"));
 const sessionName = `detached-smoke-${Date.now().toString(36)}`;
+const cliMaxBuffer = 16 * 1024 * 1024;
 
 const settings: Settings = {
   projectRoot: path.resolve("."),
@@ -1755,6 +1756,21 @@ try {
   ]);
   await cliJson(baseUrl, ["runs", "sandbox", controlPlaneBlockedPlan.run.id]);
   await db.updateAgentRunCompleted({ id: controlPlaneBlockedPlan.run.id, status: "stopped" });
+  const controlPlaneResultPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session control plane result inspection",
+  ]);
+  const controlPlaneResultCommit = "0123456789abcdef0123456789abcdef01234567";
+  await cliJson(baseUrl, ["runs", "claim", controlPlaneResultPlan.run.id, "--worker-id", "detached-smoke-worker-1"]);
+  await db.updateAgentRunCompleted({
+    id: controlPlaneResultPlan.run.id,
+    status: "completed",
+    resultCommit: controlPlaneResultCommit,
+  });
   const controlPlaneStatus = await cliJson<{
     ok?: true;
     session: string;
@@ -1840,6 +1856,28 @@ try {
         counts: { recent: number; executed: number; partial: number; noop: number };
         recent: Array<{ executionId: string; status: string; resumed: Array<{ runId: string }> }>;
       };
+    };
+    results: {
+      counts: { total: number; resultCommits: number };
+      actions: { review_result: number };
+      nextSteps: Array<{
+        action: string;
+        reason: string;
+        agentId: string;
+        runId: string;
+        objective: string;
+        status: string;
+        branchName: string;
+        resultCommit: string;
+        workerId: string | null;
+        command: string[];
+        commands: {
+          inspectRun: string[];
+          inspectResult: string[];
+          checkoutBranch: string[];
+          reviewRun: string[];
+        };
+      }>;
     };
     staleRuns: {
       counts: { total: number; ready: number; blocked: number; staleRunningClaimWithoutRunningSandbox: number; runningSandboxPresent: number };
@@ -1930,6 +1968,23 @@ try {
   assert.equal(controlPlaneStatus.branches.commands.resumeSessionDryRun.join(" "), `npm run cli -- runs resume-session ${sessionName} --dry-run`);
   assert.equal(controlPlaneStatus.branches.commands.resumeNext.join(" "), `npm run cli -- runs resume-session ${sessionName} --next`);
   assert.equal(controlPlaneStatus.branches.commands.inspectBranches.join(" "), `npm run cli -- runs session-branches ${sessionName} --server --resumable`);
+  assert.equal(controlPlaneStatus.results.counts.resultCommits, controlPlaneStatus.results.actions.review_result);
+  assert.ok(controlPlaneStatus.results.nextSteps.some((step) => (
+    step.runId === controlPlaneResultPlan.run.id
+    && step.action === "review_result"
+    && step.reason === "result_commit_available"
+    && step.agentId === agent.agent.id
+    && step.objective === "detached session control plane result inspection"
+    && step.status === "completed"
+    && step.branchName === controlPlaneResultPlan.plan.branchName
+    && step.resultCommit === controlPlaneResultCommit
+    && step.workerId === "detached-smoke-worker-1"
+    && step.command.join(" ") === `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
+    && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${controlPlaneResultPlan.run.id}`
+    && step.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${controlPlaneResultPlan.run.id} --server`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${controlPlaneResultPlan.run.id} --dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
+    && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
+  )));
   assert.equal(controlPlaneStatus.staleRuns.counts.ready, controlPlaneStatus.staleRuns.actions.recover_session_run);
   assert.equal(controlPlaneStatus.staleRuns.counts.blocked, controlPlaneStatus.staleRuns.actions.inspect_run);
   assert.equal(controlPlaneStatus.staleRuns.counts.staleRunningClaimWithoutRunningSandbox, controlPlaneStatus.staleRuns.counts.ready);
@@ -1974,6 +2029,28 @@ try {
       counts: typeof controlPlaneStatus.staleRuns.counts;
       actions: typeof controlPlaneStatus.staleRuns.actions;
     };
+    results: {
+      counts: typeof controlPlaneStatus.results.counts;
+      actions: typeof controlPlaneStatus.results.actions;
+      inspection: {
+        count: number;
+        nextSteps: Array<{
+          action: string;
+          reason: string;
+          runId: string;
+          branchName: string;
+          resultCommit: string;
+          status: string;
+          workerId: string | null;
+          commands: {
+            inspectRun: string[];
+            inspectResult: string[];
+            checkoutBranch: string[];
+            reviewRun: string[];
+          };
+        }>;
+      };
+    };
     recovery: { count: number; actions: Record<string, number> };
     nextActions: Array<{ surface: string; action: string; reason: string; count: number; command: string[] }>;
     commands: {
@@ -2003,6 +2080,8 @@ try {
   assert.equal(controlPlaneStatusSummary.queues.drainContinuations.total, controlPlaneStatus.queues.drainContinuations.total);
   assert.equal(controlPlaneStatusSummary.branches.counts.ready, controlPlaneStatus.branches.counts.ready);
   assert.equal(controlPlaneStatusSummary.branches.inspection.count, controlPlaneStatus.branches.nextSteps.length);
+  assert.equal(controlPlaneStatusSummary.results.counts.resultCommits, controlPlaneStatus.results.counts.resultCommits);
+  assert.equal(controlPlaneStatusSummary.results.inspection.count, controlPlaneStatus.results.nextSteps.length);
   assert.equal(controlPlaneStatusSummary.staleRuns.counts.ready, controlPlaneStatus.staleRuns.counts.ready);
   assert.equal(controlPlaneStatusSummary.recovery.count, controlPlaneStatus.recovery.count);
   assert.ok(controlPlaneStatusSummary.nextActions.length > 0);
@@ -2033,6 +2112,12 @@ try {
       && action.count === controlPlaneStatus.queues.applyActions.actionable
     )));
   }
+  assert.ok(controlPlaneStatusSummary.results.inspection.nextSteps.some((step) => (
+    step.runId === controlPlaneResultPlan.run.id
+    && step.resultCommit === controlPlaneResultCommit
+    && step.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${controlPlaneResultPlan.run.id} --server`
+    && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
+  )));
   assert.equal(
     controlPlaneStatusSummary.commands.timelineSummary.join(" "),
     `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --summary`,
@@ -4756,6 +4841,7 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
   const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
     cwd: path.resolve("."),
     env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+    maxBuffer: cliMaxBuffer,
   });
   return JSON.parse(stdout) as T;
 }
@@ -4764,6 +4850,7 @@ async function cliText(baseUrl: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
     cwd: path.resolve("."),
     env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+    maxBuffer: cliMaxBuffer,
   });
   return stdout;
 }
