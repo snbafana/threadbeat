@@ -1502,6 +1502,8 @@ try {
     ok?: true;
     session: string;
     dryRun: boolean;
+    tickPath: string;
+    tick: { tickId: string; status: string; dryRun: boolean };
     planned: {
       branchRecovery: { action: string; runIds: string[]; command: string[] } | null;
       applyAction: { action: string; actionable: number } | null;
@@ -1520,6 +1522,9 @@ try {
   assert.equal(controlPlaneTickPreview.ok, true);
   assert.equal(controlPlaneTickPreview.session, sessionName);
   assert.equal(controlPlaneTickPreview.dryRun, true);
+  assert.match(controlPlaneTickPreview.tickPath, /worker-sessions\/control-plane-ticks/);
+  assert.equal(controlPlaneTickPreview.tick.status, "dry_run");
+  assert.equal(controlPlaneTickPreview.tick.dryRun, true);
   assert.equal(controlPlaneTickPreview.planned.branchRecovery?.action, "resume_next_branch");
   assert.ok(controlPlaneTickPreview.planned.branchRecovery?.runIds.includes(controlPlaneResumePlan.run.id));
   assert.equal(controlPlaneTickPreview.planned.branchRecovery?.command.join(" "), `npm run cli -- runs resume-session ${sessionName} --next`);
@@ -1530,6 +1535,21 @@ try {
   assert.equal(controlPlaneTickPreview.executed.branchRecovery, null);
   assert.equal(controlPlaneTickPreview.executed.applyAction, null);
   assert.equal(controlPlaneTickPreview.executed.drainContinuation, null);
+  const controlPlaneTicks = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    ticks: Array<{ tickId: string; status: string; dryRun: boolean }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-ticks",
+    sessionName,
+  ]);
+  assert.equal(controlPlaneTicks.ok, true);
+  assert.equal(controlPlaneTicks.session, sessionName);
+  assert.equal(controlPlaneTicks.count, 1);
+  assert.equal(controlPlaneTicks.ticks[0]?.tickId, controlPlaneTickPreview.tick.tickId);
+  assert.equal(controlPlaneTicks.ticks[0]?.status, "dry_run");
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };
@@ -1931,6 +1951,7 @@ async function cleanupSession(session: string): Promise<void> {
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-executions", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-workers", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-ticks", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuations", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", session), { recursive: true, force: true });
 }

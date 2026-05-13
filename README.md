@@ -753,7 +753,9 @@ their limit, so `runs resume-session <name> --next` does not get stuck on a
 blocked branch while a resumable branch is waiting behind it. Use `runs
 session-control-plane-tick <name> --server` for one bounded CLI control-plane
 pass over the same server surfaces: it can resume one ready branch, execute one
-queued apply action, and execute one queued drain continuation.
+queued apply action, and execute one queued drain continuation. Each tick writes
+a durable record under `.threadbeat/worker-sessions/control-plane-ticks/<session>/`;
+inspect recent ticks with `runs session-control-plane-ticks <name>`.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,
