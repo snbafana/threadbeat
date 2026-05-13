@@ -127,6 +127,40 @@ try {
   ]);
   assert.match(shellCommands, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId}`));
   assert.match(shellCommands, /runs inspect run-a/);
+
+  const timelineCommandQueue = await cliJson<{
+    commands: Array<{ action: string; executionId: string | null; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "branch_recovery_execution",
+    "--commands-only",
+    "--limit",
+    "10",
+  ]);
+  assert.ok(timelineCommandQueue.commands.some((command) => (
+    command.action === "inspect_branch_recovery_execution"
+    && command.executionId === newer.executionId
+    && command.command.includes("--commands-only")
+  )));
+
+  const { stdout: timelineShellCommands } = await cli(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "branch_recovery_execution",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--limit",
+    "10",
+  ]);
+  assert.match(timelineShellCommands, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId} --commands-only`));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", sessionName), { recursive: true, force: true });

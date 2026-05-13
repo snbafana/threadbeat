@@ -887,7 +887,10 @@ that audit stream to one durable surface, such as
 `--source branch_recovery_execution --event branch_recovery_executed --status
 noop` when inspecting blocked branch resumes. Add `--summary` for a
 compact operator view with event counts, the decision rollup, latest bounded
-events, and the command to fetch the full timeline. Its top-level `decisions`
+events, and the command to fetch the full timeline. Add `--commands-only
+--format shell` to turn matching timeline events into the next inspection
+commands for tick, advance, worker, apply-action, and branch-recovery records.
+Its top-level `decisions`
 rollup summarizes recent tick statuses, status reasons, planned/executed/skipped
 surfaces, and the latest bounded tick decisions for long-run progress review.
 Advance timeline events include the advance id, dry-run state, selected

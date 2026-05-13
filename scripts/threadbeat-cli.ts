@@ -5025,12 +5025,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-control-plane-timeline") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-timeline requires --server");
     }
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-timeline --format must be json or shell");
+    }
+    if (options.summary === "1" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-timeline --summary cannot be combined with --commands-only");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-timeline --format shell requires --commands-only");
+    }
     const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    const requiredSessionName = required(sessionName, "runs session-control-plane-timeline <session> --server");
     const timeline = await fetchWorkerSessionControlPlaneTimeline(
-      required(sessionName, "runs session-control-plane-timeline <session> --server"),
+      requiredSessionName,
       {
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 20,
         lines,
@@ -5039,6 +5050,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         status: options.status,
       },
     );
+    if (options["commands-only"] === "1") {
+      const commands = workerSessionControlPlaneTimelineCommands(timeline);
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        const { events, ...rest } = timeline;
+        await printJson({ ...rest, commands });
+      }
+      return;
+    }
     await printJson(options.summary === "1"
       ? summarizeWorkerSessionControlPlaneTimeline(timeline, lines)
       : timeline);
@@ -6602,6 +6623,21 @@ type CommandQueueOutput = {
   commands: Array<{ command: string[] }>;
 };
 
+type ControlPlaneTimelineCommand = {
+  scope: "control_plane_timeline";
+  source: string;
+  event: string;
+  action: "inspect_tick" | "inspect_advance" | "inspect_worker" | "inspect_apply_action_execution" | "inspect_branch_recovery_execution" | "run_selected_command";
+  reason: string;
+  tickId: string | null;
+  advanceId: string | null;
+  workerId: string | null;
+  executionId: string | null;
+  applyId: string | null;
+  runIds: string[];
+  command: string[];
+};
+
 type ControlPlaneAdvanceConfirmationCommand = {
   scope: "control_plane_advance";
   advanceId: string;
@@ -6748,6 +6784,108 @@ function workerSessionBranchRecoveryExecutionCommands(
       ],
     }));
     return [inspectExecution, ...resumed, ...skipped];
+  });
+}
+
+function workerSessionControlPlaneTimelineCommands(
+  timeline: WorkerSessionControlPlaneTimelineResponse,
+): ControlPlaneTimelineCommand[] {
+  return timeline.events.flatMap((event) => {
+    const common = {
+      scope: "control_plane_timeline" as const,
+      source: event.source,
+      event: event.event,
+      reason: event.reason ?? event.status ?? event.state ?? event.event,
+      tickId: event.tickId ?? null,
+      advanceId: event.advanceId ?? null,
+      workerId: event.workerId ?? null,
+      executionId: event.executionId ?? null,
+      applyId: event.applyId ?? null,
+      runIds: event.runIds ?? [],
+    };
+    if (event.source === "tick") {
+      return [{
+        ...common,
+        action: "inspect_tick" as const,
+        command: ["npm", "run", "cli", "--", "runs", "session-control-plane-ticks", timeline.session, "--server", "--limit", String(timeline.filter.limit)],
+      }];
+    }
+    if (event.source === "advance") {
+      const commands: ControlPlaneTimelineCommand[] = [{
+        ...common,
+        action: "inspect_advance" as const,
+        command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", timeline.session, "--server", "--limit", String(timeline.filter.limit)],
+      }];
+      if (event.command) {
+        commands.push({
+          ...common,
+          action: "run_selected_command" as const,
+          command: event.command,
+        });
+      }
+      return commands;
+    }
+    if (event.source === "control_plane_advance_worker" || event.source === "control_plane_tick_worker") {
+      return [{
+        ...common,
+        action: "inspect_worker" as const,
+        command: [
+          "npm",
+          "run",
+          "cli",
+          "--",
+          "runs",
+          event.source === "control_plane_advance_worker" ? "session-control-plane-advance-workers" : "session-control-plane-tick-workers",
+          timeline.session,
+          "--server",
+          ...(event.workerId ? ["--worker-id", event.workerId] : []),
+          "--include-retired",
+          "--lines",
+          String(timeline.filter.lines),
+        ],
+      }];
+    }
+    if (event.source === "apply_action_execution") {
+      return [{
+        ...common,
+        action: "inspect_apply_action_execution" as const,
+        command: [
+          "npm",
+          "run",
+          "cli",
+          "--",
+          "runs",
+          "session-applies",
+          timeline.session,
+          "--server",
+          "--action-executions",
+          ...(event.applyId ? ["--apply-id", event.applyId] : []),
+          ...(event.applyAction ? ["--apply-action", event.applyAction] : []),
+          ...(event.status ? ["--status", event.status] : []),
+          "--limit",
+          String(timeline.filter.limit),
+        ],
+      }];
+    }
+    if (event.source === "branch_recovery_execution") {
+      return [{
+        ...common,
+        action: "inspect_branch_recovery_execution" as const,
+        command: [
+          "npm",
+          "run",
+          "cli",
+          "--",
+          "runs",
+          "session-branch-recovery-executions",
+          timeline.session,
+          "--server",
+          ...(event.executionId ? ["--execution", event.executionId] : []),
+          "--commands-only",
+        ],
+      }];
+    }
+    return [];
   });
 }
 
@@ -7631,6 +7769,9 @@ type WorkerSessionControlPlaneTimelineResponse = {
     advanceId?: string;
     workerId?: string;
     executionId?: string;
+    applyId?: string;
+    applySource?: string;
+    applyAction?: string;
     runIds?: string[];
     resumedRunIds?: string[];
     skippedRunIds?: string[];
@@ -7646,6 +7787,8 @@ type WorkerSessionControlPlaneTimelineResponse = {
     selectedCount?: number;
     command?: string[];
     reason?: string;
+    pid?: number | null;
+    previousPid?: number | null;
     selected?: number;
     resumedCount?: number;
     skippedCount?: number;
@@ -12217,7 +12360,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--source tick,branch_recovery_execution] [--event tick_recorded,branch_recovery_executed] [--status executed,noop] [--limit 20] [--lines 5]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,branch_recovery_execution] [--event tick_recorded,branch_recovery_executed] [--status executed,noop] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
