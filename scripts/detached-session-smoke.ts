@@ -3276,9 +3276,11 @@ try {
       restartable: number;
       advance: { total: number; retired: number; restartable: number };
       tick: { total: number; stopped: number; retired: number; restartable: number };
+      applyAction: { total: number; stopped: number; retired: number; restartable: number };
+      drain: { total: number; stopped: number; retired: number; restartable: number };
     };
     workers: Array<{
-      kind: "control_plane_advance" | "control_plane_tick";
+      kind: "control_plane_advance" | "control_plane_tick" | "apply_action" | "drain";
       workerId: string | null;
       state: string | null;
       restartable: boolean;
@@ -3307,6 +3309,13 @@ try {
   assert.ok(controlPlaneWorkers.summary.tick.retired >= 1);
   assert.ok(controlPlaneWorkers.summary.tick.stopped >= 1);
   assert.ok(controlPlaneWorkers.summary.tick.restartable >= 1);
+  assert.ok(controlPlaneWorkers.summary.applyAction.total >= 2);
+  assert.ok(controlPlaneWorkers.summary.applyAction.stopped >= 1);
+  assert.ok(controlPlaneWorkers.summary.applyAction.retired >= 1);
+  assert.ok(controlPlaneWorkers.summary.applyAction.restartable >= 1);
+  assert.ok(controlPlaneWorkers.summary.drain.total >= 1);
+  assert.ok(controlPlaneWorkers.summary.drain.stopped >= 1);
+  assert.ok(controlPlaneWorkers.summary.drain.restartable >= 1);
   const aggregateTickWorker = controlPlaneWorkers.workers.find((worker) => worker.workerId === "detached-smoke-control-plane-worker");
   assert.equal(aggregateTickWorker?.kind, "control_plane_tick");
   assert.equal(aggregateTickWorker?.state, "stopped");
@@ -3315,12 +3324,42 @@ try {
     aggregateTickWorker?.commands?.restart.join(" "),
     `npm run cli -- runs restart-control-plane-tick-workers ${sessionName} --server --worker-id detached-smoke-control-plane-worker --include-retired`,
   );
+  const aggregateApplyActionWorker = controlPlaneWorkers.workers.find((worker) => worker.workerId === "detached-smoke-apply-action-worker");
+  assert.equal(aggregateApplyActionWorker?.kind, "apply_action");
+  assert.equal(aggregateApplyActionWorker?.state, "stopped");
+  assert.equal(aggregateApplyActionWorker?.restartable, true);
+  assert.equal(
+    aggregateApplyActionWorker?.commands?.restart.join(" "),
+    `npm run cli -- runs restart-apply-action-workers ${sessionName} --server --worker-id detached-smoke-apply-action-worker --include-retired`,
+  );
+  const aggregateDrainWorker = controlPlaneWorkers.workers.find((worker) => worker.workerId === serverDrainWorkerId);
+  assert.equal(aggregateDrainWorker?.kind, "drain");
+  assert.equal(aggregateDrainWorker?.state, "stopped");
+  assert.equal(aggregateDrainWorker?.restartable, true);
+  assert.equal(
+    aggregateDrainWorker?.commands?.restart.join(" "),
+    `npm run cli -- runs restart-drain-workers ${sessionName} --server --worker-id ${serverDrainWorkerId} --include-retired`,
+  );
   assert.ok(controlPlaneWorkers.nextSteps.some((step) => (
     step.kind === "control_plane_tick"
     && step.workerId === "detached-smoke-control-plane-worker"
     && step.action === "restart_control_plane_tick_worker"
     && step.reason === "stopped_control_plane_tick_worker"
     && step.command.join(" ") === `npm run cli -- runs restart-control-plane-tick-workers ${sessionName} --server --worker-id detached-smoke-control-plane-worker`
+  )));
+  assert.ok(controlPlaneWorkers.nextSteps.some((step) => (
+    step.kind === "apply_action"
+    && step.workerId === "detached-smoke-apply-action-worker"
+    && step.action === "restart_apply_action_worker"
+    && step.reason === "stopped_apply_action_worker"
+    && step.command.join(" ") === `npm run cli -- runs restart-apply-action-workers ${sessionName} --server --worker-id detached-smoke-apply-action-worker`
+  )));
+  assert.ok(controlPlaneWorkers.nextSteps.some((step) => (
+    step.kind === "drain"
+    && step.workerId === serverDrainWorkerId
+    && step.action === "restart_drain_worker"
+    && step.reason === "stopped_drain_worker"
+    && step.command.join(" ") === `npm run cli -- runs restart-drain-workers ${sessionName} --server --worker-id ${serverDrainWorkerId}`
   )));
   assert.equal(
     controlPlaneWorkers.commands.restartNext?.join(" "),
@@ -3337,6 +3376,12 @@ try {
   ]);
   assert.ok(controlPlaneWorkerCommands.includes(
     `npm run cli -- runs restart-control-plane-tick-workers ${sessionName} --server --worker-id detached-smoke-control-plane-worker`,
+  ));
+  assert.ok(controlPlaneWorkerCommands.includes(
+    `npm run cli -- runs restart-apply-action-workers ${sessionName} --server --worker-id detached-smoke-apply-action-worker`,
+  ));
+  assert.ok(controlPlaneWorkerCommands.includes(
+    `npm run cli -- runs restart-drain-workers ${sessionName} --server --worker-id ${serverDrainWorkerId}`,
   ));
   const controlPlaneStatusBeforeTickWorkerRestart = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",

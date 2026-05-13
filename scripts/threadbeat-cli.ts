@@ -8663,6 +8663,63 @@ async function fetchWorkerSessionApplyActionWorkerNextSteps(
   };
 }
 
+async function fetchWorkerSessionDrainWorkerNextSteps(
+  sessionName: string,
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  nextSteps: Array<{
+    action: "restart_drain_worker";
+    reason: "stopped_drain_worker" | "queued_drain_continuations_without_worker";
+    workerId: string;
+    pid: number | null;
+    stoppedAt?: string;
+    queuedContinuations: number;
+    command: string[];
+    commands: {
+      restartDrainWorker: string[];
+      inspectDrainWorkers: string[];
+      retireDrainWorker: string[];
+    };
+    api: {
+      restart: { method: "POST"; url: string; payload: { workerId: string } };
+      inspect: { method: "GET"; url: string };
+      retire: { method: "POST"; url: string; payload: { workerId: string; retire: true } };
+    };
+  }>;
+  actions: { restart_drain_worker: number };
+}> {
+  return await requestJson(
+    "GET",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/drain-workers/next`,
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    nextSteps: Array<{
+      action: "restart_drain_worker";
+      reason: "stopped_drain_worker" | "queued_drain_continuations_without_worker";
+      workerId: string;
+      pid: number | null;
+      stoppedAt?: string;
+      queuedContinuations: number;
+      command: string[];
+      commands: {
+        restartDrainWorker: string[];
+        inspectDrainWorkers: string[];
+        retireDrainWorker: string[];
+      };
+      api: {
+        restart: { method: "POST"; url: string; payload: { workerId: string } };
+        inspect: { method: "GET"; url: string };
+        retire: { method: "POST"; url: string; payload: { workerId: string; retire: true } };
+      };
+    }>;
+    actions: { restart_drain_worker: number };
+  };
+}
+
 async function fetchWorkerSessionControlPlaneStatus(
   sessionName: string,
   options: { lines: number },
@@ -9927,7 +9984,7 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   };
 }
 
-type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_tick";
+type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_tick" | "apply_action" | "drain";
 
 type ControlPlaneWorkerSummary = {
   total: number;
@@ -9956,6 +10013,8 @@ async function fetchWorkerSessionControlPlaneWorkers(
   summary: ControlPlaneWorkerSummary & {
     advance: ControlPlaneWorkerSummary;
     tick: ControlPlaneWorkerSummary;
+    applyAction: ControlPlaneWorkerSummary;
+    drain: ControlPlaneWorkerSummary;
   };
   workers: Array<Record<string, unknown> & {
     kind: ControlPlaneWorkerKind;
@@ -9975,25 +10034,40 @@ async function fetchWorkerSessionControlPlaneWorkers(
   commands: {
     inspectAdvanceWorkers: string[];
     inspectTickWorkers: string[];
+    inspectApplyActionWorkers: string[];
+    inspectDrainWorkers: string[];
     restartNext: string[] | null;
   };
 }> {
-  const [advanceWorkers, tickWorkers, advanceNextSteps, tickNextSteps] = await Promise.all([
+  const [advanceWorkers, tickWorkers, applyActionWorkers, drainWorkers, advanceNextSteps, tickNextSteps, applyActionNextSteps, drainNextSteps] = await Promise.all([
     fetchWorkerSessionControlPlaneAdvanceWorkers(sessionName, options),
     fetchWorkerSessionControlPlaneTickWorkers(sessionName, options),
+    fetchWorkerSessionApplyActionWorkers(sessionName, options),
+    fetchWorkerSessionDrainWorkers(sessionName, options),
     fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(sessionName, { workerId: options.workerId }),
     fetchWorkerSessionControlPlaneTickWorkerNextSteps(sessionName, { workerId: options.workerId }),
+    fetchWorkerSessionApplyActionWorkerNextSteps(sessionName),
+    fetchWorkerSessionDrainWorkerNextSteps(sessionName),
   ]);
   const workers = [
     ...advanceWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_advance", sessionName, worker, options.includeRetired)),
     ...tickWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_tick", sessionName, worker, options.includeRetired)),
+    ...applyActionWorkers.workers.map((worker) => normalizeControlPlaneWorker("apply_action", sessionName, worker, options.includeRetired)),
+    ...drainWorkers.workers.map((worker) => normalizeControlPlaneWorker("drain", sessionName, worker, options.includeRetired)),
   ];
-  const nextSteps = [
+  const allNextSteps = [
     ...advanceNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_advance", step)),
     ...tickNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_tick", step)),
+    ...applyActionNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("apply_action", step)),
+    ...drainNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("drain", step)),
   ];
+  const nextSteps = options.workerId
+    ? allNextSteps.filter((step) => step.workerId === options.workerId)
+    : allNextSteps;
   const advanceSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_advance"));
   const tickSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_tick"));
+  const applyActionSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "apply_action"));
+  const drainSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "drain"));
   const allSummary = summarizeControlPlaneWorkers(workers);
   return {
     ok: true,
@@ -10007,6 +10081,8 @@ async function fetchWorkerSessionControlPlaneWorkers(
       ...allSummary,
       advance: advanceSummary,
       tick: tickSummary,
+      applyAction: applyActionSummary,
+      drain: drainSummary,
     },
     workers,
     nextSteps,
@@ -10019,6 +10095,18 @@ async function fetchWorkerSessionControlPlaneWorkers(
       ],
       inspectTickWorkers: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-tick-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      inspectApplyActionWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-apply-action-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      inspectDrainWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-drain-workers", sessionName, "--server",
         ...(options.workerId ? ["--worker-id", options.workerId] : []),
         ...(options.includeRetired ? ["--include-retired"] : []),
         "--lines", String(options.lines),
@@ -10050,8 +10138,12 @@ function normalizeControlPlaneWorker(
   const record = plainRecord(worker) ?? {};
   const lifecycle = plainRecord(record.lifecycle);
   const workerId = stringFromUnknown(record.workerId);
-  const state = stringFromUnknown(lifecycle?.state) ?? (record.alive === true ? "running" : null);
-  const restartable = lifecycle?.restartable === true;
+  const state = stringFromUnknown(lifecycle?.state)
+    ?? (typeof record.retiredAt === "string" ? "retired" : null)
+    ?? (typeof record.stoppedAt === "string" ? "stopped" : null)
+    ?? (record.alive === true ? "running" : null);
+  const restartable = lifecycle?.restartable === true
+    || (record.alive !== true && typeof record.stoppedAt === "string" && typeof record.retiredAt !== "string");
   return {
     ...record,
     kind,
@@ -10059,7 +10151,10 @@ function normalizeControlPlaneWorker(
     alive: record.alive === true,
     state,
     restartable,
-    reason: stringFromUnknown(lifecycle?.reason),
+    reason: stringFromUnknown(lifecycle?.reason)
+      ?? (state === "retired" ? "worker_retired" : null)
+      ?? (state === "stopped" ? "worker_stopped" : null)
+      ?? (state === "running" ? "worker_running" : null),
     commands: workerId ? controlPlaneWorkerCommands(kind, sessionName, workerId, includeRetired) : null,
   };
 }
@@ -10098,7 +10193,7 @@ function controlPlaneWorkerCommands(
   stop: string[];
   retire: string[];
 } {
-  const nouns = kind === "control_plane_advance" ? "control-plane-advance-workers" : "control-plane-tick-workers";
+  const nouns = controlPlaneWorkerCommandNouns(kind);
   return {
     inspect: [
       "npm", "run", "cli", "--", "runs", `session-${nouns}`, sessionName, "--server",
@@ -10120,6 +10215,13 @@ function controlPlaneWorkerCommands(
       "--retire",
     ],
   };
+}
+
+function controlPlaneWorkerCommandNouns(kind: ControlPlaneWorkerKind): string {
+  if (kind === "control_plane_advance") return "control-plane-advance-workers";
+  if (kind === "control_plane_tick") return "control-plane-tick-workers";
+  if (kind === "apply_action") return "apply-action-workers";
+  return "drain-workers";
 }
 
 async function restartWorkerSessionControlPlaneTickWorker(
