@@ -7698,6 +7698,11 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
     totalFailed: number;
     continuations: WorkerSessionDrainContinuationRecord[];
     commands: { inspectFailed: string[]; resetFailed: string[]; resetSelectedFailed: string[] | null };
+  } | {
+    kind: "worker_recovery";
+    workerId: string;
+    step: WorkerSessionControlPlaneRecoveryNextStep;
+    commands: { inspectWorker: string[] | null; restartWorker: string[]; retireWorker: string[] | null };
   }) | null;
   recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];
 };
@@ -8314,9 +8319,18 @@ function workerSessionControlPlaneAlertPreviewCommands(
       commands.push({ ...base, action: "reset_selected_failed_drain_continuations", command: preview.details.commands.resetSelectedFailed });
     }
   }
+  if (preview.details?.kind === "worker_recovery") {
+    if (preview.details.commands.inspectWorker) {
+      commands.push({ ...base, action: "inspect_worker_recovery", command: preview.details.commands.inspectWorker });
+    }
+    commands.push({ ...base, action: "restart_worker_recovery", command: preview.details.commands.restartWorker });
+    if (preview.details.commands.retireWorker) {
+      commands.push({ ...base, action: "retire_worker_recovery", command: preview.details.commands.retireWorker });
+    }
+  }
   const seen = new Set<string>();
   return commands.filter((entry) => {
-    const key = commandKey(entry.command);
+    const key = `${entry.action}:${commandKey(entry.command)}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -12450,7 +12464,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell]
-  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
+  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]

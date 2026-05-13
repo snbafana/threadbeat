@@ -3768,6 +3768,16 @@ type WorkerSessionControlPlaneAlertDetails =
       resetFailed: string[];
       resetSelectedFailed: string[] | null;
     };
+  }
+  | {
+    kind: "worker_recovery";
+    workerId: string;
+    step: WorkerSessionControlPlaneWorkerRecoveryStep;
+    commands: {
+      inspectWorker: string[] | null;
+      restartWorker: string[];
+      retireWorker: string[] | null;
+    };
   };
 
 const readWorkerSessionControlPlaneAlertDetails = async (
@@ -3828,6 +3838,32 @@ const readWorkerSessionControlPlaneAlertDetails = async (
         resetSelectedFailed: selectedFailedIds.length > 0
           ? ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--reset-failed", "--continuation", selectedFailedIds.join(",")]
           : null,
+      },
+    };
+  }
+  if (alert.surface === "worker_recovery" && alert.workerId) {
+    const status = await readWorkerSessionControlPlaneStatus(settings, db, name, 5);
+    const step = [
+      ...status.recovery.nextSteps.watchWorkers,
+      ...status.recovery.nextSteps.drainWorkers,
+      ...status.recovery.nextSteps.applyActionWorkers,
+      ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
+      ...status.recovery.nextSteps.controlPlaneTickWorkers,
+    ].filter(isWorkerSessionControlPlaneWorkerRecoveryStep)
+      .find((candidate) => (
+        candidate.workerId === alert.workerId
+        && candidate.action === alert.action
+        && candidate.reason === alert.reason
+      ));
+    if (!step) return null;
+    return {
+      kind: "worker_recovery",
+      workerId: step.workerId,
+      step,
+      commands: {
+        inspectWorker: findWorkerRecoveryCommand(step.commands, "inspect"),
+        restartWorker: step.command,
+        retireWorker: findWorkerRecoveryCommand(step.commands, "retire"),
       },
     };
   }
@@ -4102,7 +4138,10 @@ type WorkerSessionControlPlaneAlertDetailCommand =
   | "acknowledge_reset_audit"
   | "inspect_failed_drain_continuations"
   | "reset_failed_drain_continuations"
-  | "reset_selected_failed_drain_continuations";
+  | "reset_selected_failed_drain_continuations"
+  | "inspect_worker_recovery"
+  | "restart_worker_recovery"
+  | "retire_worker_recovery";
 
 const parseControlPlaneAlertDetailCommand = (
   value: string | undefined,
@@ -4117,6 +4156,9 @@ const parseControlPlaneAlertDetailCommand = (
     "inspect_failed_drain_continuations",
     "reset_failed_drain_continuations",
     "reset_selected_failed_drain_continuations",
+    "inspect_worker_recovery",
+    "restart_worker_recovery",
+    "retire_worker_recovery",
   ]);
   if (!allowed.has(value as WorkerSessionControlPlaneAlertDetailCommand)) {
     throw new Error(`unknown control-plane alert detail command: ${value}`);
@@ -4130,7 +4172,9 @@ const isMutatingControlPlaneAlertDetailCommand = (
   return detailCommand === "execute_apply_action"
     || detailCommand === "acknowledge_reset_audit"
     || detailCommand === "reset_failed_drain_continuations"
-    || detailCommand === "reset_selected_failed_drain_continuations";
+    || detailCommand === "reset_selected_failed_drain_continuations"
+    || detailCommand === "restart_worker_recovery"
+    || detailCommand === "retire_worker_recovery";
 };
 
 type WorkerSessionControlPlaneAlertExecutionSafety = {
@@ -4217,6 +4261,17 @@ const selectControlPlaneAlertDetailCommand = (
       return { detailCommand, action: detailCommand, command: details.commands.resetSelectedFailed };
     }
   }
+  if (details?.kind === "worker_recovery") {
+    if (detailCommand === "inspect_worker_recovery" && details.commands.inspectWorker) {
+      return { detailCommand, action: detailCommand, command: details.commands.inspectWorker };
+    }
+    if (detailCommand === "restart_worker_recovery") {
+      return { detailCommand, action: detailCommand, command: details.commands.restartWorker };
+    }
+    if (detailCommand === "retire_worker_recovery" && details.commands.retireWorker) {
+      return { detailCommand, action: detailCommand, command: details.commands.retireWorker };
+    }
+  }
   throw new Error(`detail command ${detailCommand} is not available for the selected alert`);
 };
 
@@ -4245,6 +4300,7 @@ type WorkerSessionControlPlaneWorkerRecoveryStep = {
   reason: string;
   workerId: string;
   command: string[];
+  commands?: Record<string, string[]>;
 };
 
 const isWorkerSessionControlPlaneWorkerRecoveryStep = (
@@ -4256,7 +4312,28 @@ const isWorkerSessionControlPlaneWorkerRecoveryStep = (
     && typeof item.reason === "string"
     && typeof item.workerId === "string"
     && Array.isArray(item.command)
-    && item.command.every((part) => typeof part === "string");
+    && item.command.every((part) => typeof part === "string")
+    && (item.commands === undefined || (
+      typeof item.commands === "object"
+      && item.commands !== null
+      && !Array.isArray(item.commands)
+      && Object.values(item.commands).every((command) => (
+        Array.isArray(command) && command.every((part) => typeof part === "string")
+      ))
+    ));
+};
+
+const findWorkerRecoveryCommand = (
+  commands: Record<string, string[]> | undefined,
+  kind: "inspect" | "retire",
+): string[] | null => {
+  if (!commands) return null;
+  const commandEntry = Object.entries(commands).find(([name]) => {
+    const normalized = name.toLowerCase();
+    if (kind === "retire") return normalized.includes("retire") || normalized.includes("stop");
+    return normalized.includes(kind);
+  });
+  return commandEntry?.[1] ?? null;
 };
 
 const selectWorkerSessionControlPlaneAdvanceAction = (
