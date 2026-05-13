@@ -4537,37 +4537,84 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs session-control-plane-recover-next requires --server");
     }
     const requiredSessionName = required(sessionName, "runs session-control-plane-recover-next <session> --server");
-    const status = await fetchWorkerSessionControlPlaneStatus(
-      requiredSessionName,
-      { lines: parsePositiveInteger(options.lines ?? "5", "--lines") },
-    );
-    const summary = summarizeWorkerSessionControlPlaneStatus(status);
     const dryRun = options["dry-run"] === "1" || options.confirm !== "1";
-    if (!summary.nextRecovery) {
+    const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    const executeNextRecovery = async (): Promise<{
+      ok: boolean;
+      session: string;
+      dryRun: boolean;
+      selected: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["nextRecovery"];
+      command: string[] | null;
+      result: unknown;
+      executed?: { exitCode: number | null; stdout: string; stderr: string };
+    }> => {
+      const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
+      const summary = summarizeWorkerSessionControlPlaneStatus(status);
+      if (!summary.nextRecovery) {
+        return {
+          ok: true,
+          session: requiredSessionName,
+          dryRun,
+          selected: null,
+          command: null,
+          result: null,
+        };
+      }
+      const command = dryRun ? summary.nextRecovery.dryRunCommand : summary.nextRecovery.command;
+      const executed = await runCliWorker(cliCommandArgs(command));
+      return {
+        ok: executed.exitCode === 0,
+        session: requiredSessionName,
+        dryRun,
+        selected: summary.nextRecovery,
+        command,
+        result: parseJsonMaybe(executed.stdout),
+        executed,
+      };
+    };
+    if (options["until-empty"] === "1") {
+      const maxSteps = parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps");
+      const intervalMs = parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+      const cycles: Array<Awaited<ReturnType<typeof executeNextRecovery>>> = [];
+      let stoppedReason: "empty" | "dry_run" | "failed" | "max_steps" = "max_steps";
+      for (let stepIndex = 0; stepIndex < maxSteps; stepIndex += 1) {
+        const cycle = await executeNextRecovery();
+        cycles.push(cycle);
+        if (!cycle.selected) {
+          stoppedReason = "empty";
+          break;
+        }
+        if (!cycle.ok) {
+          process.exitCode = 1;
+          stoppedReason = "failed";
+          break;
+        }
+        if (dryRun) {
+          stoppedReason = "dry_run";
+          break;
+        }
+        if (stepIndex + 1 < maxSteps) {
+          await new Promise((resolve) => setTimeout(resolve, intervalMs));
+        }
+      }
       await printJson({
         ok: true,
         session: requiredSessionName,
         dryRun,
-        selected: null,
-        command: null,
-        result: null,
+        untilEmpty: true,
+        maxSteps,
+        intervalMs,
+        executedSteps: cycles.filter((cycle) => cycle.selected).length,
+        stoppedReason,
+        cycles,
       });
       return;
     }
-    const command = dryRun ? summary.nextRecovery.dryRunCommand : summary.nextRecovery.command;
-    const executed = await runCliWorker(cliCommandArgs(command));
-    if (executed.exitCode !== undefined && executed.exitCode !== null && executed.exitCode !== 0) {
+    const response = await executeNextRecovery();
+    if (!response.ok) {
       process.exitCode = 1;
     }
-    await printJson({
-      ok: executed.exitCode === 0,
-      session: requiredSessionName,
-      dryRun,
-      selected: summary.nextRecovery,
-      command,
-      result: parseJsonMaybe(executed.stdout),
-      executed,
-    });
+    await printJson(response);
     return;
   }
   if (subcommandName === "session-control-plane-alerts") {
@@ -12732,7 +12779,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
-  runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--lines 5]
+  runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]

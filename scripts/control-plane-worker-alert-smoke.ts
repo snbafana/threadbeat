@@ -426,6 +426,46 @@ try {
   assert.equal(recoverNextDryRun.result?.results[0]?.dryRun, true);
   assert.equal(recoverNextDryRun.result?.results[0]?.executionSafety.confirmed, true);
   assert.equal(recoverNextDryRun.result?.results[0]?.executionSafety.blocked, false);
+
+  const recoverNextLoopDryRun = await cliJson<{
+    ok: boolean;
+    session: string;
+    dryRun: boolean;
+    untilEmpty: boolean;
+    maxSteps: number;
+    intervalMs: number;
+    executedSteps: number;
+    stoppedReason: "empty" | "dry_run" | "failed" | "max_steps";
+    cycles: Array<{
+      ok: boolean;
+      selected: { kind: string; action: string; count: number } | null;
+      result: { dryRun: boolean; attemptedConfirmations: number } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--until-empty",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+  ]);
+  assert.equal(recoverNextLoopDryRun.ok, true);
+  assert.equal(recoverNextLoopDryRun.session, sessionName);
+  assert.equal(recoverNextLoopDryRun.dryRun, true);
+  assert.equal(recoverNextLoopDryRun.untilEmpty, true);
+  assert.equal(recoverNextLoopDryRun.maxSteps, 3);
+  assert.equal(recoverNextLoopDryRun.intervalMs, 0);
+  assert.equal(recoverNextLoopDryRun.executedSteps, 1);
+  assert.equal(recoverNextLoopDryRun.stoppedReason, "dry_run");
+  assert.equal(recoverNextLoopDryRun.cycles.length, 1);
+  assert.equal(recoverNextLoopDryRun.cycles[0]?.ok, true);
+  assert.equal(recoverNextLoopDryRun.cycles[0]?.selected?.kind, "confirmation_queue");
+  assert.equal(recoverNextLoopDryRun.cycles[0]?.selected?.action, "drain_control_plane_confirmations");
+  assert.equal(recoverNextLoopDryRun.cycles[0]?.result?.dryRun, true);
+  assert.equal(recoverNextLoopDryRun.cycles[0]?.result?.attemptedConfirmations, 1);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
