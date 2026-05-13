@@ -782,9 +782,10 @@ selected stale-run recovery, branch resume, apply action, drain continuation, or
 worker restart without running it. Each advance writes a durable record under
 `.threadbeat/worker-sessions/control-plane-advances/<name>/`; inspect recent
 records with `runs session-control-plane-advances <name> --server` or
-`GET /api/worker-sessions/:name/control-plane-advances`; add `--blocked` and
-`--mutating` to list only blocked mutating attempts, include their summary
-counts, and recover the confirmation command. Add `--confirmation-queue` to
+`GET /api/worker-sessions/:name/control-plane-advances`; add `--advance <id>`
+to inspect one durable advance record, or add `--blocked` and `--mutating` to
+list only blocked mutating attempts, include their summary counts, and recover
+the confirmation command. Add `--confirmation-queue` to
 group blocked confirmations by surface, action, detail command, and reason so
 operators can see the pending confirmation work without scanning each advance
 record. Add

@@ -17,6 +17,7 @@ export type WorkerSessionControlPlaneAdvanceRecord = {
 
 export type WorkerSessionControlPlaneAdvanceListOptions = {
   limit?: number;
+  advanceIds?: string[];
   blocked?: boolean;
   mutating?: boolean;
 };
@@ -103,6 +104,7 @@ function matchesWorkerSessionControlPlaneAdvanceFilters(
   record: WorkerSessionControlPlaneAdvanceRecord,
   options: WorkerSessionControlPlaneAdvanceListOptions,
 ): boolean {
+  if (options.advanceIds && options.advanceIds.length > 0 && !options.advanceIds.includes(record.advanceId)) return false;
   if (options.blocked !== undefined && executionSafetyBoolean(record, "blocked") !== options.blocked) return false;
   if (options.mutating !== undefined && executionSafetyBoolean(record, "mutating") !== options.mutating) return false;
   return true;

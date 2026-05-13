@@ -635,6 +635,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const { name } = request.params as { name: string };
       const query = request.query as Record<string, string | undefined>;
       const filter = {
+        advanceIds: [
+          ...parseOptionalList(query.advance),
+          ...parseOptionalList(query.advanceId),
+          ...parseOptionalList(query.advanceIds),
+        ],
         blocked: query.blocked === undefined ? undefined : parseBoolean(query.blocked, false),
         mutating: query.mutating === undefined ? undefined : parseBoolean(query.mutating, false),
       };
@@ -643,6 +648,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         name,
         {
           limit: parseOptionalInteger(query.limit) ?? 20,
+          advanceIds: filter.advanceIds,
           blocked: filter.blocked,
           mutating: filter.mutating,
         },
@@ -652,6 +658,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         filter: {
           limit: parseOptionalInteger(query.limit) ?? 20,
+          advanceIds: filter.advanceIds,
           blocked: filter.blocked ?? null,
           mutating: filter.mutating ?? null,
         },
