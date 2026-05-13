@@ -1724,6 +1724,17 @@ try {
   assert.equal(stoppedServerDrainWorker.stopped[0]?.aliveBefore, false);
   assert.equal(stoppedServerDrainWorker.stopped[0]?.alive, false);
   assert.equal(typeof stoppedServerDrainWorker.stopped[0]?.stoppedAt, "string");
+  const persistedStoppedDrainWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "drain-continuation-workers",
+    sessionName,
+    `${serverDrainWorkerId}.json`,
+  ), "utf8")) as Record<string, unknown>;
+  assert.equal(typeof persistedStoppedDrainWorker.stoppedAt, "string");
+  assert.equal("alive" in persistedStoppedDrainWorker, false);
+  assert.equal("stdout" in persistedStoppedDrainWorker, false);
+  assert.equal("stderr" in persistedStoppedDrainWorker, false);
   const controlPlaneResumePlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
     "runs",
     "plan",
@@ -4350,6 +4361,17 @@ try {
   assert.equal(restartedServerDrainWorker.restarted[0]?.previousPid, null);
   assert.equal(restartedServerDrainWorker.restarted[0]?.restartCount, 1);
   assert.deepEqual(restartedServerDrainWorker.restarted[0]?.command, ["runs", "session-drain-workers", sessionName, "--server"]);
+  const persistedRestartedDrainWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "drain-continuation-workers",
+    sessionName,
+    `${serverDrainWorkerId}.json`,
+  ), "utf8")) as Record<string, unknown>;
+  assert.equal(persistedRestartedDrainWorker.restartCount, 1);
+  assert.equal("alive" in persistedRestartedDrainWorker, false);
+  assert.equal("stdout" in persistedRestartedDrainWorker, false);
+  assert.equal("stderr" in persistedRestartedDrainWorker, false);
   await cliJson(baseUrl, [
     "runs",
     "stop-drain-workers",
