@@ -50,6 +50,7 @@ import {
   listWorkerSessionApplyActionWorkerNextSteps,
   listWorkerSessionApplyActionWorkers,
   restartWorkerSessionApplyActionWorker,
+  startWorkerSessionApplyActionWorker,
   stopWorkerSessionApplyActionWorkers,
 } from "./workerSessionApplyActionWorkers.js";
 import {
@@ -404,6 +405,79 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return {
         ok: true,
         ...await listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/apply-action-workers/ensure", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
+      const workerId = parseOptionalString(body.workerId);
+      const lines = parseOptionalInteger(body.lines) ?? 20;
+      const existingWorkers = await listWorkerSessionApplyActionWorkers(settings.projectRoot, {
+        sessionName: name,
+        ...(workerId ? { workerId } : {}),
+        includeRetired: Boolean(workerId),
+      }, lines);
+      const runningWorker = existingWorkers.find((worker) => worker.alive);
+      if (runningWorker) {
+        return {
+          ok: true,
+          session: name,
+          action: "existing",
+          reason: "running_worker_exists",
+          worker: runningWorker,
+          workers: existingWorkers,
+        };
+      }
+      const restartableWorker = existingWorkers.find((worker) => !worker.retiredAt);
+      if (restartableWorker) {
+        const restarted = await restartWorkerSessionApplyActionWorker(settings.projectRoot, baseUrl, name, {
+          workerId: restartableWorker.workerId,
+          includeRetired: false,
+          lines,
+        });
+        return {
+          ok: true,
+          action: "restarted",
+          reason: "restartable_worker_exists",
+          ...restarted,
+          worker: restarted.workers[0] ?? null,
+        };
+      }
+      if (workerId && existingWorkers.length > 0) {
+        return {
+          ok: true,
+          session: name,
+          action: "blocked",
+          reason: "existing_worker_not_restartable",
+          worker: existingWorkers[0],
+          workers: existingWorkers,
+        };
+      }
+      const worker = await startWorkerSessionApplyActionWorker(settings.projectRoot, baseUrl, name, {
+        ...(workerId ? { workerId } : {}),
+        ...(parseOptionalString(body.applyId) ? { applyId: parseOptionalString(body.applyId) } : {}),
+        ...(parseOptionalString(body.source) ? { source: parseOptionalString(body.source) } : {}),
+        ...(parseOptionalString(body.action) ? { action: parseOptionalString(body.action) } : {}),
+        limit: parseOptionalInteger(body.limit) ?? null,
+        maxActions: parseOptionalInteger(body.maxActions) ?? null,
+        stopOnFailure: !parseBoolean(body.continueOnFailure, false),
+        untilEmpty: parseBoolean(body.untilEmpty, false),
+        maxPolls: parseOptionalInteger(body.maxPolls) ?? null,
+        intervalMs: parseOptionalInteger(body.intervalMs) ?? null,
+      });
+      return {
+        ok: true,
+        session: name,
+        action: "started",
+        reason: "no_running_or_restartable_worker",
+        worker,
+        workers: [worker],
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

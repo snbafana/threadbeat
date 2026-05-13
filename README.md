@@ -736,6 +736,10 @@ summary through the server. Use `runs stop-apply-action-workers <name> --server`
 workers through the server. Use `runs session-apply-action-workers-next <name>
 --server` or `GET /api/worker-sessions/:name/apply-action-workers/next` to list
 stopped apply-action workers with exact restart, inspect, and retire commands.
+Use `runs ensure-apply-action-worker <name> --server` for idempotent
+supervision: it reuses a running apply-action worker, restarts a stopped or lost
+non-retired worker, starts one when none exists, or reports a blocked retired
+record for the requested worker id.
 Use `runs session-control-plane-status <name> --server` or
 `GET /api/worker-sessions/:name/control-plane-status` for one aggregate status
 view across watch workers, apply-action workers, apply queues, drain

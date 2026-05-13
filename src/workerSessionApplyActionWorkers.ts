@@ -73,6 +73,96 @@ export type ApplyActionWorkerNextStep = {
   };
 };
 
+export async function startWorkerSessionApplyActionWorker(
+  projectRoot: string,
+  baseUrl: string,
+  sessionName: string,
+  options: {
+    workerId?: string;
+    applyId?: string;
+    source?: string;
+    action?: string;
+    limit?: number | null;
+    maxActions?: number | null;
+    stopOnFailure: boolean;
+    untilEmpty: boolean;
+    maxPolls?: number | null;
+    intervalMs?: number | null;
+  },
+): Promise<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }> {
+  assertSafeWorkerSessionName(sessionName);
+  const workerId = options.workerId ?? createApplyActionWorkerId();
+  assertSafeWorkerSessionName(workerId);
+  const workerDir = applyActionWorkerDir(projectRoot, sessionName);
+  await fs.mkdir(workerDir, { recursive: true });
+  const stdoutPath = path.join(workerDir, `${workerId}.out.log`);
+  const stderrPath = path.join(workerDir, `${workerId}.err.log`);
+  const recordPath = applyActionWorkerPath(projectRoot, sessionName, workerId);
+  if (await pathExists(recordPath)) {
+    throw new Error(`apply action worker '${workerId}' already exists for session '${sessionName}'`);
+  }
+  const command = [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-queued",
+    "--record-worker",
+    workerId,
+    ...(options.applyId ? ["--apply-id", options.applyId] : []),
+    ...(options.source ? ["--source", options.source] : []),
+    ...(options.action ? ["--apply-action", options.action] : []),
+    ...(options.limit ? ["--limit", String(options.limit)] : []),
+    ...(options.maxActions ? ["--max-actions", String(options.maxActions)] : []),
+    ...(options.stopOnFailure ? [] : ["--continue-on-failure"]),
+    ...(options.untilEmpty ? ["--until-empty"] : []),
+    ...(options.maxPolls ? ["--max-polls", String(options.maxPolls)] : []),
+    ...(options.intervalMs ? ["--interval-ms", String(options.intervalMs)] : []),
+  ];
+  const stdout = await fs.open(stdoutPath, "a");
+  const stderr = await fs.open(stderrPath, "a");
+  try {
+    const startedAt = new Date().toISOString();
+    const initialWorker: ApplyActionWorker = {
+      session: sessionName,
+      workerId,
+      baseUrl,
+      startedAt,
+      command,
+      pid: null,
+      stdoutPath,
+      stderrPath,
+    };
+    await fs.writeFile(recordPath, `${JSON.stringify(initialWorker, null, 2)}\n`, { flag: "wx" });
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
+      cwd: projectRoot,
+      detached: true,
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      stdio: ["ignore", stdout.fd, stderr.fd],
+    });
+    child.unref();
+    const recordedWorker = await readApplyActionWorker(projectRoot, sessionName, workerId);
+    const worker: ApplyActionWorker = {
+      ...recordedWorker,
+      pid: child.pid ?? null,
+    };
+    await writeApplyActionWorker(projectRoot, worker);
+    return {
+      ...worker,
+      alive: processIsAlive(worker.pid),
+      stdout: { path: stdoutPath, lines: await tailFileLines(stdoutPath, 0) },
+      stderr: { path: stderrPath, lines: await tailFileLines(stderrPath, 0) },
+    };
+  } catch (error) {
+    await fs.rm(recordPath, { force: true });
+    throw error;
+  } finally {
+    await stdout.close();
+    await stderr.close();
+  }
+}
+
 export async function listWorkerSessionApplyActionWorkers(
   projectRoot: string,
   options: { sessionName: string; workerId?: string; includeRetired?: boolean },
@@ -392,4 +482,18 @@ function assertSafeWorkerSessionName(value: string): void {
   if (!/^[A-Za-z0-9_.-]+$/.test(value)) {
     throw new Error("worker session names may only contain letters, numbers, '.', '_', and '-'");
   }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function createApplyActionWorkerId(): string {
+  return `apply-action-worker-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 17)}`;
 }

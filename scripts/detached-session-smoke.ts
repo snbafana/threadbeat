@@ -1355,6 +1355,101 @@ try {
   assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.method, "POST");
   assert.match(applyActionWorkerNext.nextSteps[0]?.api.restart.url ?? "", /\/apply-action-workers\/restart$/);
   assert.equal(applyActionWorkerNext.nextSteps[0]?.api.restart.payload.workerId, "detached-smoke-apply-action-worker");
+  type ApplyActionWorkerEnsureResponse = {
+    ok?: true;
+    session: string;
+    action: string;
+    reason: string;
+    worker: {
+      workerId: string;
+      command: string[];
+      alive: boolean;
+      restartCount?: number;
+      retiredAt?: string;
+    };
+    workers: Array<{ workerId: string; alive: boolean; retiredAt?: string }>;
+  };
+  const ensuredApplyActionWorkerId = "detached-smoke-apply-action-ensure-worker";
+  const ensuredApplyActionWorker = await cliJson<ApplyActionWorkerEnsureResponse>(baseUrl, [
+    "runs",
+    "ensure-apply-action-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredApplyActionWorkerId,
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--max-actions",
+    "1",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(ensuredApplyActionWorker.ok, true);
+  assert.equal(ensuredApplyActionWorker.session, sessionName);
+  assert.equal(ensuredApplyActionWorker.action, "started");
+  assert.equal(ensuredApplyActionWorker.reason, "no_running_or_restartable_worker");
+  assert.equal(ensuredApplyActionWorker.worker.workerId, ensuredApplyActionWorkerId);
+  assert.deepEqual(ensuredApplyActionWorker.worker.command, [
+    "runs",
+    "session-applies",
+    sessionName,
+    "--server",
+    "--action-queue",
+    "--execute-queued",
+    "--record-worker",
+    ensuredApplyActionWorkerId,
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--max-actions",
+    "1",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredApplyActionWorkerId,
+  ]);
+  const restartedEnsuredApplyActionWorker = await cliJson<ApplyActionWorkerEnsureResponse>(baseUrl, [
+    "runs",
+    "ensure-apply-action-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredApplyActionWorkerId,
+    "--lines",
+    "5",
+  ]);
+  assert.equal(restartedEnsuredApplyActionWorker.ok, true);
+  assert.equal(restartedEnsuredApplyActionWorker.action, "restarted");
+  assert.equal(restartedEnsuredApplyActionWorker.reason, "restartable_worker_exists");
+  assert.equal(restartedEnsuredApplyActionWorker.worker.workerId, ensuredApplyActionWorkerId);
+  assert.equal(restartedEnsuredApplyActionWorker.worker.restartCount, 1);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-apply-action-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredApplyActionWorkerId,
+    "--retire",
+  ]);
+  const blockedEnsuredApplyActionWorker = await cliJson<ApplyActionWorkerEnsureResponse>(baseUrl, [
+    "runs",
+    "ensure-apply-action-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    ensuredApplyActionWorkerId,
+    "--lines",
+    "5",
+  ]);
+  assert.equal(blockedEnsuredApplyActionWorker.ok, true);
+  assert.equal(blockedEnsuredApplyActionWorker.action, "blocked");
+  assert.equal(blockedEnsuredApplyActionWorker.reason, "existing_worker_not_restartable");
+  assert.equal(blockedEnsuredApplyActionWorker.worker.workerId, ensuredApplyActionWorkerId);
+  assert.equal(typeof blockedEnsuredApplyActionWorker.worker.retiredAt, "string");
   const serverDrainWorkerId = "detached-smoke-drain-worker";
   const serverDrainWorkerDir = path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", sessionName);
   const serverDrainWorkerStdoutPath = path.join(serverDrainWorkerDir, `${serverDrainWorkerId}.out.log`);
@@ -1481,9 +1576,9 @@ try {
   assert.equal(controlPlaneStatus.workers.drain.total, 1);
   assert.equal(controlPlaneStatus.workers.drain.stopped, 1);
   assert.equal(controlPlaneStatus.workers.drain.retired, 0);
-  assert.equal(controlPlaneStatus.workers.applyAction.total, 1);
+  assert.equal(controlPlaneStatus.workers.applyAction.total, 2);
   assert.equal(controlPlaneStatus.workers.applyAction.stopped, 1);
-  assert.equal(controlPlaneStatus.workers.applyAction.retired, 0);
+  assert.equal(controlPlaneStatus.workers.applyAction.retired, 1);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.total, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.stopped, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.retired, 0);

@@ -4482,6 +4482,30 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "ensure-apply-action-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-apply-action-worker requires --server");
+    }
+    await printJson(await ensureWorkerSessionApplyActionWorkerViaServer(
+      required(sessionName, "runs ensure-apply-action-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        applyId: options["apply-id"],
+        source: options.source,
+        action: options["apply-action"],
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+        maxActions: options["max-actions"] ? parsePositiveInteger(options["max-actions"], "--max-actions") : null,
+        continueOnFailure: options["continue-on-failure"] === "1",
+        untilEmpty: options["until-empty"] === "1",
+        maxPolls: options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null,
+        intervalMs: options["interval-ms"] ? parsePositiveInteger(options["interval-ms"], "--interval-ms") : null,
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-status") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6624,6 +6648,55 @@ async function fetchWorkerSessionApplyActionWorkers(
     session: string;
     count: number;
     workers: Array<ApplyActionWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+}
+
+async function ensureWorkerSessionApplyActionWorkerViaServer(
+  sessionName: string,
+  options: {
+    workerId?: string;
+    applyId?: string;
+    source?: string;
+    action?: string;
+    limit?: number | null;
+    maxActions?: number | null;
+    continueOnFailure: boolean;
+    untilEmpty: boolean;
+    maxPolls?: number | null;
+    intervalMs?: number | null;
+    lines: number;
+  },
+): Promise<{
+  ok: true;
+  session: string;
+  action: "existing" | "restarted" | "started" | "blocked";
+  reason: string;
+  worker: unknown;
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-action-workers/ensure`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      ...(options.applyId ? { applyId: options.applyId } : {}),
+      ...(options.source ? { source: options.source } : {}),
+      ...(options.action ? { action: options.action } : {}),
+      ...(options.limit ? { limit: options.limit } : {}),
+      ...(options.maxActions ? { maxActions: options.maxActions } : {}),
+      continueOnFailure: options.continueOnFailure,
+      untilEmpty: options.untilEmpty,
+      ...(options.maxPolls ? { maxPolls: options.maxPolls } : {}),
+      ...(options.intervalMs ? { intervalMs: options.intervalMs } : {}),
+      lines: options.lines,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    action: "existing" | "restarted" | "started" | "blocked";
+    reason: string;
+    worker: unknown;
+    workers: unknown[];
   };
 }
 
@@ -10403,6 +10476,7 @@ Commands:
   runs ensure-drain-worker <name> --server [--worker-id id] [--max-continuations n] [--lines 20]
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
+  runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--lines 5]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
