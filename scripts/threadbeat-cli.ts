@@ -9811,7 +9811,7 @@ async function startDetachedDrainContinuationWorker(
       stdoutPath,
       stderrPath,
     };
-    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    await fs.writeFile(recordPath, `${JSON.stringify(toStoredDrainContinuationWorker(worker), null, 2)}\n`, { flag: "wx" });
     return { ...worker, alive: processIsAlive(worker.pid) };
   } finally {
     await stdout.close();
@@ -9878,7 +9878,7 @@ async function startDetachedApplyActionWorker(
       stdoutPath,
       stderrPath,
     };
-    await fs.writeFile(recordPath, `${JSON.stringify(initialWorker, null, 2)}\n`, { flag: "wx" });
+    await fs.writeFile(recordPath, `${JSON.stringify(toStoredApplyActionWorker(initialWorker), null, 2)}\n`, { flag: "wx" });
     const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
       detached: true,
       env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
@@ -10738,7 +10738,26 @@ async function readDrainContinuationWorker(sessionName: string, workerId: string
 }
 
 async function writeDrainContinuationWorker(worker: DrainContinuationWorker): Promise<void> {
-  await fs.writeFile(drainContinuationWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+  await fs.writeFile(drainContinuationWorkerPath(worker.session, worker.workerId), `${JSON.stringify(toStoredDrainContinuationWorker(worker), null, 2)}\n`);
+}
+
+function toStoredDrainContinuationWorker(worker: DrainContinuationWorker): DrainContinuationWorker {
+  return {
+    session: worker.session,
+    workerId: worker.workerId,
+    baseUrl: worker.baseUrl,
+    startedAt: worker.startedAt,
+    command: worker.command,
+    pid: worker.pid,
+    stdoutPath: worker.stdoutPath,
+    stderrPath: worker.stderrPath,
+    ...(worker.stoppedAt !== undefined ? { stoppedAt: worker.stoppedAt } : {}),
+    ...(worker.stopResult !== undefined ? { stopResult: worker.stopResult } : {}),
+    ...(worker.retiredAt !== undefined ? { retiredAt: worker.retiredAt } : {}),
+    ...(worker.restartedAt !== undefined ? { restartedAt: worker.restartedAt } : {}),
+    ...(worker.restartCount !== undefined ? { restartCount: worker.restartCount } : {}),
+    ...(worker.previousPid !== undefined ? { previousPid: worker.previousPid } : {}),
+  };
 }
 
 async function readApplyActionWorker(sessionName: string, workerId: string): Promise<ApplyActionWorker> {
@@ -10747,7 +10766,27 @@ async function readApplyActionWorker(sessionName: string, workerId: string): Pro
 }
 
 async function writeApplyActionWorker(worker: ApplyActionWorker): Promise<void> {
-  await fs.writeFile(applyActionWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+  await fs.writeFile(applyActionWorkerPath(worker.session, worker.workerId), `${JSON.stringify(toStoredApplyActionWorker(worker), null, 2)}\n`);
+}
+
+function toStoredApplyActionWorker(worker: ApplyActionWorker): ApplyActionWorker {
+  return {
+    session: worker.session,
+    workerId: worker.workerId,
+    baseUrl: worker.baseUrl,
+    startedAt: worker.startedAt,
+    command: worker.command,
+    pid: worker.pid,
+    stdoutPath: worker.stdoutPath,
+    stderrPath: worker.stderrPath,
+    ...(worker.stoppedAt !== undefined ? { stoppedAt: worker.stoppedAt } : {}),
+    ...(worker.stopResult !== undefined ? { stopResult: worker.stopResult } : {}),
+    ...(worker.retiredAt !== undefined ? { retiredAt: worker.retiredAt } : {}),
+    ...(worker.restartedAt !== undefined ? { restartedAt: worker.restartedAt } : {}),
+    ...(worker.restartCount !== undefined ? { restartCount: worker.restartCount } : {}),
+    ...(worker.previousPid !== undefined ? { previousPid: worker.previousPid } : {}),
+    ...(worker.lastRun !== undefined ? { lastRun: worker.lastRun } : {}),
+  };
 }
 
 async function listWorkerSessions(
