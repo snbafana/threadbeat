@@ -773,7 +773,8 @@ it, or add `--detail-command inspect_apply`, `execute_apply_action`,
 `reset_selected_failed_drain_continuations` to execute one of the selected
 alert's detail commands instead of the primary alert command. Mutating detail
 commands require `--confirm`; without it, Threadbeat writes a blocked advance
-record with `executionSafety.blocked=true` and does not run the command. Use
+record with `executionSafety.blocked=true` plus the exact
+`executionSafety.confirmationCommand`, and does not run the command. Use
 `runs session-control-plane-advance <name> --server`
 or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
 first priority next action from that status; add `--dry-run` to inspect the
@@ -782,8 +783,8 @@ worker restart without running it. Each advance writes a durable record under
 `.threadbeat/worker-sessions/control-plane-advances/<name>/`; inspect recent
 records with `runs session-control-plane-advances <name> --server` or
 `GET /api/worker-sessions/:name/control-plane-advances`; add `--blocked` and
-`--mutating` to list only blocked mutating attempts and include their summary
-counts. Use `runs
+`--mutating` to list only blocked mutating attempts, include their summary
+counts, and recover the confirmation command. Use `runs
 session-control-plane-advance-loop <name> --server --max-steps 10` or
 `POST /api/worker-sessions/:name/control-plane-advance-loop` to repeat those
 single-step advances until the session is empty, an action fails, a dry-run

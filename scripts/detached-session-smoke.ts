@@ -3419,7 +3419,14 @@ try {
     } | null;
     alert: ControlPlaneAlertPreviewResponse["alert"];
     executed: { command: string[]; exitCode: number | null; stdout?: string; stderr?: string } | null;
-    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null };
+    executionSafety: {
+      blocked: boolean;
+      mutating: boolean;
+      confirmationRequired: boolean;
+      confirmed: boolean;
+      reason: string | null;
+      confirmationCommand: string[] | null;
+    };
     filter: ControlPlaneAlertPreviewResponse["filter"];
   }>(baseUrl, [
     "runs",
@@ -3479,7 +3486,7 @@ try {
       executionId?: string;
     } | null;
     executed: { command: string[]; exitCode: number | null } | null;
-    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null };
+    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null; confirmationCommand: string[] | null };
   }>(baseUrl, [
     "runs",
     "session-control-plane-alert-execute",
@@ -3518,6 +3525,10 @@ try {
   assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.confirmationRequired, true);
   assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.confirmed, false);
   assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.reason, "mutating detail command requires confirm=true");
+  assert.equal(
+    applyActionAlertMutatingDetailBlocked.executionSafety.confirmationCommand?.join(" "),
+    `npm run cli -- runs session-control-plane-alert-execute ${sessionName} --server --severity error --surface apply_action --reason failed_apply_action_execution --apply detached-session-api-backed-reset --execution ${failedApplyActionExecutionId} --action inspect_drain_continuation_resets --detail-command execute_apply_action --confirm --lines 20`,
+  );
   const applyActionAlertMutatingDetailConfirmedDryRun = await cliJson<{
     ok: true;
     session: string;
@@ -3525,7 +3536,7 @@ try {
     detailCommand: string;
     selected: { action: string; detailCommand?: string } | null;
     executed: null;
-    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null };
+    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null; confirmationCommand: string[] | null };
   }>(baseUrl, [
     "runs",
     "session-control-plane-alert-execute",
@@ -3562,6 +3573,7 @@ try {
   assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.confirmationRequired, true);
   assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.confirmed, true);
   assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.reason, null);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.confirmationCommand, null);
   const blockedMutatingControlPlaneAdvances = await cliJson<{
     ok: true;
     session: string;
@@ -3570,7 +3582,7 @@ try {
     summary: { blocked: number; mutating: number; executed: number };
     advances: Array<{
       executed: null;
-      executionSafety?: { blocked: boolean; mutating: boolean; reason: string | null };
+      executionSafety?: { blocked: boolean; mutating: boolean; reason: string | null; confirmationCommand: string[] | null };
     }>;
   }>(baseUrl, [
     "runs",
@@ -3593,6 +3605,7 @@ try {
   assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executed === null));
   assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.blocked === true));
   assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.mutating === true));
+  assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.confirmationCommand?.includes("--confirm")));
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

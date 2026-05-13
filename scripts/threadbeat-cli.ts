@@ -7051,6 +7051,7 @@ type WorkerSessionControlPlaneAlertExecuteResponse = WorkerSessionControlPlaneAd
     confirmed: boolean;
     blocked: boolean;
     reason: string | null;
+    confirmationCommand: string[] | null;
   };
 };
 

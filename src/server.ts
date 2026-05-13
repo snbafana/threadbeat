@@ -3941,6 +3941,55 @@ type WorkerSessionControlPlaneAlertExecutionSafety = {
   confirmed: boolean;
   blocked: boolean;
   reason: string | null;
+  confirmationCommand: string[] | null;
+};
+
+type WorkerSessionControlPlaneAlertSelectionOptions = {
+  lines: number;
+  severities: string[];
+  surfaces: string[];
+  reasons: string[];
+  runIds: string[];
+  workerIds: string[];
+  applyIds: string[];
+  executionIds: string[];
+  actions: string[];
+};
+
+const buildConfirmedControlPlaneAlertExecuteCommand = (
+  sessionName: string,
+  options: WorkerSessionControlPlaneAlertSelectionOptions,
+  detailCommand: WorkerSessionControlPlaneAlertDetailCommand,
+): string[] => {
+  const command = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+  ];
+  appendControlPlaneAlertExecuteListOption(command, "--severity", options.severities);
+  appendControlPlaneAlertExecuteListOption(command, "--surface", options.surfaces);
+  appendControlPlaneAlertExecuteListOption(command, "--reason", options.reasons);
+  appendControlPlaneAlertExecuteListOption(command, "--run", options.runIds);
+  appendControlPlaneAlertExecuteListOption(command, "--worker", options.workerIds);
+  appendControlPlaneAlertExecuteListOption(command, "--apply", options.applyIds);
+  appendControlPlaneAlertExecuteListOption(command, "--execution", options.executionIds);
+  appendControlPlaneAlertExecuteListOption(command, "--action", options.actions);
+  command.push("--detail-command", detailCommand, "--confirm", "--lines", String(options.lines));
+  return command;
+};
+
+const appendControlPlaneAlertExecuteListOption = (
+  command: string[],
+  flag: string,
+  values: string[],
+): void => {
+  if (values.length === 0) return;
+  command.push(flag, values.join(","));
 };
 
 const selectControlPlaneAlertDetailCommand = (
@@ -4157,14 +4206,18 @@ const executeWorkerSessionControlPlaneAlert = async (
   const selectedCommand = selectControlPlaneAlertDetailCommand(preview.alert, preview.details, detailCommand);
   const selected = controlPlaneAdvanceActionFromAlert(preview.alert, selectedCommand);
   const mutating = isMutatingControlPlaneAlertDetailCommand(detailCommand);
+  const blocked = Boolean(selected && mutating && !options.dryRun && !options.confirm);
   const executionSafety: WorkerSessionControlPlaneAlertExecutionSafety = {
     detailCommand,
     mutating,
     confirmationRequired: Boolean(selected && mutating),
     confirmed: options.confirm,
-    blocked: Boolean(selected && mutating && !options.dryRun && !options.confirm),
-    reason: selected && mutating && !options.dryRun && !options.confirm
+    blocked,
+    reason: blocked
       ? "mutating detail command requires confirm=true"
+      : null,
+    confirmationCommand: blocked
+      ? buildConfirmedControlPlaneAlertExecuteCommand(sessionName, options, detailCommand)
       : null,
   };
   const executed = selected && !options.dryRun && !executionSafety.blocked
