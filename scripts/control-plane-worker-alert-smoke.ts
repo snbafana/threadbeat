@@ -40,13 +40,17 @@ try {
     details: {
       kind: "worker_recovery";
       workerId: string;
+      target: {
+        kind: string;
+        worker: { workerId: string; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } } | null;
+      };
       commands: { inspectWorker: string[] | null; restartWorker: string[]; retireWorker: string[] | null };
     } | null;
   }>(baseUrl, [
     "runs",
-	    "session-control-plane-alert",
-	    sessionName,
-	    "--server",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
     "--surface",
     "worker_recovery",
     "--worker",
@@ -58,6 +62,10 @@ try {
   assert.equal(preview.alert?.workerId, workerId);
   assert.equal(preview.details?.kind, "worker_recovery");
   assert.equal(preview.details?.workerId, workerId);
+  assert.equal(preview.details?.target.kind, "control_plane_advance_worker");
+  assert.equal(preview.details?.target.worker?.workerId, workerId);
+  assert.deepEqual(preview.details?.target.worker?.stdout.lines, ["advance stdout"]);
+  assert.deepEqual(preview.details?.target.worker?.stderr.lines, ["advance stderr"]);
   assert.equal(
     preview.details?.commands.inspectWorker?.join(" "),
     `npm run cli -- runs session-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`,
@@ -187,8 +195,8 @@ async function writeAdvanceWorker(workerId: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
   const stdoutPath = path.join(dir, `${workerId}.out.log`);
   const stderrPath = path.join(dir, `${workerId}.err.log`);
-  await fs.writeFile(stdoutPath, "");
-  await fs.writeFile(stderrPath, "");
+  await fs.writeFile(stdoutPath, "advance stdout\n");
+  await fs.writeFile(stderrPath, "advance stderr\n");
   await fs.writeFile(path.join(dir, `${workerId}.json`), `${JSON.stringify({
     session: sessionName,
     workerId,

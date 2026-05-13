@@ -7702,6 +7702,14 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
     kind: "worker_recovery";
     workerId: string;
     step: WorkerSessionControlPlaneRecoveryNextStep;
+    target: {
+      kind: "session_watch_worker" | "drain_worker" | "apply_action_worker" | "control_plane_advance_worker" | "control_plane_tick_worker";
+      worker: {
+        workerId: string;
+        stdout: { path: string; lines: string[] };
+        stderr: { path: string; lines: string[] };
+      } | null;
+    };
     commands: { inspectWorker: string[] | null; restartWorker: string[]; retireWorker: string[] | null };
   }) | null;
   recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];

@@ -3728,6 +3728,20 @@ const readRunResumeInspection = async (
 type RunResumeInspection = NonNullable<Awaited<ReturnType<typeof readRunResumeInspection>>>;
 type ApplyActionExecutionRecord = Awaited<ReturnType<typeof listWorkerSessionApplyActionExecutionRecords>>[number];
 type DrainContinuationRecord = Awaited<ReturnType<typeof listWorkerSessionDrainContinuationRecords>>[number];
+type WorkerSessionControlPlaneWorkerRecoveryTargetKind =
+  | "session_watch_worker"
+  | "drain_worker"
+  | "apply_action_worker"
+  | "control_plane_advance_worker"
+  | "control_plane_tick_worker";
+type WorkerSessionControlPlaneWorkerRecoveryTarget = {
+  kind: WorkerSessionControlPlaneWorkerRecoveryTargetKind;
+  worker: {
+    workerId: string;
+    stdout: { path: string; lines: string[] };
+    stderr: { path: string; lines: string[] };
+  } | null;
+};
 
 type WorkerSessionControlPlaneAlert = {
   surface: "apply_action" | "drain_continuation" | "branch" | "stale_run" | "worker_recovery";
@@ -3773,6 +3787,7 @@ type WorkerSessionControlPlaneAlertDetails =
     kind: "worker_recovery";
     workerId: string;
     step: WorkerSessionControlPlaneWorkerRecoveryStep;
+    target: WorkerSessionControlPlaneWorkerRecoveryTarget;
     commands: {
       inspectWorker: string[] | null;
       restartWorker: string[];
@@ -3785,6 +3800,7 @@ const readWorkerSessionControlPlaneAlertDetails = async (
   db: Database,
   name: string,
   alert: WorkerSessionControlPlaneAlert | null,
+  lines: number,
 ): Promise<WorkerSessionControlPlaneAlertDetails | null> => {
   if (!alert) return null;
   if (alert.runId && (alert.surface === "branch" || alert.surface === "stale_run")) {
@@ -3842,7 +3858,7 @@ const readWorkerSessionControlPlaneAlertDetails = async (
     };
   }
   if (alert.surface === "worker_recovery" && alert.workerId) {
-    const status = await readWorkerSessionControlPlaneStatus(settings, db, name, 5);
+    const status = await readWorkerSessionControlPlaneStatus(settings, db, name, lines);
     const step = [
       ...status.recovery.nextSteps.watchWorkers,
       ...status.recovery.nextSteps.drainWorkers,
@@ -3860,6 +3876,7 @@ const readWorkerSessionControlPlaneAlertDetails = async (
       kind: "worker_recovery",
       workerId: step.workerId,
       step,
+      target: await readWorkerSessionControlPlaneWorkerRecoveryTarget(settings, name, step, lines),
       commands: {
         inspectWorker: findWorkerRecoveryCommand(step.commands, "inspect"),
         restartWorker: step.command,
@@ -4096,7 +4113,7 @@ const readWorkerSessionControlPlaneAlertPreview = async (
     limit: Math.max(options.lines, 20),
   });
   const alert = alerts.alerts[0] ?? null;
-  const details = await readWorkerSessionControlPlaneAlertDetails(settings, db, name, alert);
+  const details = await readWorkerSessionControlPlaneAlertDetails(settings, db, name, alert, options.lines);
   return {
     ok: true,
     session: alerts.session,
@@ -4321,6 +4338,40 @@ const isWorkerSessionControlPlaneWorkerRecoveryStep = (
         Array.isArray(command) && command.every((part) => typeof part === "string")
       ))
     ));
+};
+
+const readWorkerSessionControlPlaneWorkerRecoveryTarget = async (
+  settings: Settings,
+  sessionName: string,
+  step: WorkerSessionControlPlaneWorkerRecoveryStep,
+  lines: number,
+): Promise<WorkerSessionControlPlaneWorkerRecoveryTarget> => {
+  const baseOptions = {
+    sessionName,
+    workerId: step.workerId,
+    includeRetired: true,
+  };
+  if (step.action === "restart_session_watch_worker") {
+    const workers = await listWorkerSessionWatchWorkers(settings.projectRoot, baseOptions, lines);
+    return { kind: "session_watch_worker", worker: workers[0] ?? null };
+  }
+  if (step.action === "restart_drain_worker") {
+    const workers = await listWorkerSessionDrainWorkers(settings.projectRoot, baseOptions, lines);
+    return { kind: "drain_worker", worker: workers[0] ?? null };
+  }
+  if (step.action === "restart_apply_action_worker") {
+    const workers = await listWorkerSessionApplyActionWorkers(settings.projectRoot, baseOptions, lines);
+    return { kind: "apply_action_worker", worker: workers[0] ?? null };
+  }
+  if (step.action === "restart_control_plane_advance_worker") {
+    const workers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, baseOptions, lines);
+    return { kind: "control_plane_advance_worker", worker: workers[0] ?? null };
+  }
+  if (step.action === "restart_control_plane_tick_worker") {
+    const workers = await listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, baseOptions, lines);
+    return { kind: "control_plane_tick_worker", worker: workers[0] ?? null };
+  }
+  throw new Error(`unknown worker recovery action: ${step.action}`);
 };
 
 const findWorkerRecoveryCommand = (
