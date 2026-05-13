@@ -4627,6 +4627,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       {
         dryRun: options["dry-run"] === "1",
         lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        detailCommand: options["detail-command"],
         severity: options.severity,
         surface: options.surface,
         reason: options.reason,
@@ -7012,6 +7013,7 @@ type WorkerSessionControlPlaneAdvanceAction = {
   reason: string;
   count: number;
   command: string[];
+  detailCommand?: string;
   runId?: string;
   workerId?: string;
   applyId?: string;
@@ -7036,6 +7038,7 @@ type WorkerSessionControlPlaneAlertExecuteResponse = WorkerSessionControlPlaneAd
   alert: WorkerSessionControlPlaneAlertPreviewResponse["alert"];
   details: WorkerSessionControlPlaneAlertPreviewResponse["details"];
   filter: WorkerSessionControlPlaneAlertPreviewResponse["filter"];
+  detailCommand: string;
 };
 
 type WorkerSessionControlPlaneAdvancesResponse = {
@@ -7487,6 +7490,7 @@ async function executeWorkerSessionControlPlaneAlert(
   options: {
     dryRun: boolean;
     lines: number;
+    detailCommand?: string;
     severity?: string;
     surface?: string;
     reason?: string;
@@ -7503,6 +7507,7 @@ async function executeWorkerSessionControlPlaneAlert(
     {
       dryRun: options.dryRun,
       lines: options.lines,
+      detailCommand: options.detailCommand,
       severity: options.severity,
       surface: options.surface,
       reason: options.reason,
@@ -11591,7 +11596,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell]
-  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--dry-run] [--lines 5]
+  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--limit 20]

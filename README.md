@@ -767,7 +767,11 @@ form prints those follow-up commands with duplicates removed. Use
 filters, or `POST /api/worker-sessions/:name/control-plane-alert/execute`, to
 execute the first matching alert command and persist that attempt in the
 advance ledger; add `--dry-run` to record the selected alert without running
-it. Use
+it, or add `--detail-command inspect_apply`, `execute_apply_action`,
+`acknowledge_reset_audit`, `inspect_failed_drain_continuations`,
+`reset_failed_drain_continuations`, or
+`reset_selected_failed_drain_continuations` to execute one of the selected
+alert's detail commands instead of the primary alert command. Use
 `runs session-control-plane-advance <name> --server`
 or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
 first priority next action from that status; add `--dry-run` to inspect the

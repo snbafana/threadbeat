@@ -564,6 +564,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         {
           dryRun: parseBoolean(body.dryRun, false),
           lines: parseOptionalInteger(body.lines) ?? 5,
+          detailCommand: parseOptionalString(body.detailCommand),
           severities: parseOptionalList(body.severity),
           surfaces: parseOptionalList(body.surface),
           reasons: parseOptionalList(body.reason),
@@ -3871,22 +3872,82 @@ type WorkerSessionControlPlaneAdvanceAction = {
   reason: string;
   count: number;
   command: string[];
+  detailCommand?: string;
   runId?: string;
   workerId?: string;
   applyId?: string;
   executionId?: string;
 };
 
+type WorkerSessionControlPlaneAlertDetailCommand =
+  | "primary"
+  | "inspect_apply"
+  | "inspect_apply_action_executions"
+  | "execute_apply_action"
+  | "acknowledge_reset_audit"
+  | "inspect_failed_drain_continuations"
+  | "reset_failed_drain_continuations"
+  | "reset_selected_failed_drain_continuations";
+
+const parseControlPlaneAlertDetailCommand = (
+  value: string | undefined,
+): WorkerSessionControlPlaneAlertDetailCommand => {
+  if (!value) return "primary";
+  const allowed = new Set<WorkerSessionControlPlaneAlertDetailCommand>([
+    "primary",
+    "inspect_apply",
+    "inspect_apply_action_executions",
+    "execute_apply_action",
+    "acknowledge_reset_audit",
+    "inspect_failed_drain_continuations",
+    "reset_failed_drain_continuations",
+    "reset_selected_failed_drain_continuations",
+  ]);
+  if (!allowed.has(value as WorkerSessionControlPlaneAlertDetailCommand)) {
+    throw new Error(`unknown control-plane alert detail command: ${value}`);
+  }
+  return value as WorkerSessionControlPlaneAlertDetailCommand;
+};
+
+const selectControlPlaneAlertDetailCommand = (
+  alert: WorkerSessionControlPlaneAlert | null,
+  details: WorkerSessionControlPlaneAlertDetails | null,
+  detailCommand: WorkerSessionControlPlaneAlertDetailCommand,
+): { detailCommand: WorkerSessionControlPlaneAlertDetailCommand; action: string; command: string[] } | null => {
+  if (!alert) return null;
+  if (detailCommand === "primary") {
+    return { detailCommand, action: alert.action ?? alert.reason, command: alert.command };
+  }
+  if (details?.kind === "apply_action_execution") {
+    if (detailCommand === "inspect_apply") return { detailCommand, action: detailCommand, command: details.commands.inspectApply };
+    if (detailCommand === "inspect_apply_action_executions") return { detailCommand, action: detailCommand, command: details.commands.inspectApplyActionExecutions };
+    if (detailCommand === "execute_apply_action") return { detailCommand, action: detailCommand, command: details.commands.executeAction };
+    if (detailCommand === "acknowledge_reset_audit" && details.commands.acknowledgeResetAudit) {
+      return { detailCommand, action: detailCommand, command: details.commands.acknowledgeResetAudit };
+    }
+  }
+  if (details?.kind === "drain_continuations") {
+    if (detailCommand === "inspect_failed_drain_continuations") return { detailCommand, action: detailCommand, command: details.commands.inspectFailed };
+    if (detailCommand === "reset_failed_drain_continuations") return { detailCommand, action: detailCommand, command: details.commands.resetFailed };
+    if (detailCommand === "reset_selected_failed_drain_continuations" && details.commands.resetSelectedFailed) {
+      return { detailCommand, action: detailCommand, command: details.commands.resetSelectedFailed };
+    }
+  }
+  throw new Error(`detail command ${detailCommand} is not available for the selected alert`);
+};
+
 const controlPlaneAdvanceActionFromAlert = (
   alert: WorkerSessionControlPlaneAlert | null,
+  selectedCommand: ReturnType<typeof selectControlPlaneAlertDetailCommand>,
 ): WorkerSessionControlPlaneAdvanceAction | null => {
-  if (!alert) return null;
+  if (!alert || !selectedCommand) return null;
   return {
     surface: alert.surface,
-    action: alert.action ?? alert.reason,
+    action: selectedCommand.action,
     reason: alert.reason,
     count: alert.count,
-    command: alert.command,
+    command: selectedCommand.command,
+    detailCommand: selectedCommand.detailCommand === "primary" ? undefined : selectedCommand.detailCommand,
     runId: alert.runId,
     workerId: alert.workerId,
     applyId: alert.applyId,
@@ -4036,7 +4097,7 @@ const executeWorkerSessionControlPlaneAlert = async (
   db: Database,
   baseUrl: string,
   sessionName: string,
-  options: { dryRun: boolean; lines: number } & Omit<Parameters<typeof readWorkerSessionControlPlaneAlertPreview>[3], "limit">,
+  options: { dryRun: boolean; lines: number; detailCommand?: string } & Omit<Parameters<typeof readWorkerSessionControlPlaneAlertPreview>[3], "limit">,
 ): Promise<{
   ok: true;
   session: string;
@@ -4052,11 +4113,14 @@ const executeWorkerSessionControlPlaneAlert = async (
   before: WorkerSessionControlPlaneStatus;
   after: WorkerSessionControlPlaneStatus;
   filter: Awaited<ReturnType<typeof readWorkerSessionControlPlaneAlertPreview>>["filter"];
+  detailCommand: WorkerSessionControlPlaneAlertDetailCommand;
 }> => {
   const observedAt = new Date().toISOString();
   const before = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
   const preview = await readWorkerSessionControlPlaneAlertPreview(settings, db, sessionName, options);
-  const selected = controlPlaneAdvanceActionFromAlert(preview.alert);
+  const detailCommand = parseControlPlaneAlertDetailCommand(options.detailCommand);
+  const selectedCommand = selectControlPlaneAlertDetailCommand(preview.alert, preview.details, detailCommand);
+  const selected = controlPlaneAdvanceActionFromAlert(preview.alert, selectedCommand);
   const executed = selected && !options.dryRun
     ? await runControlPlaneTickCommand(settings.projectRoot, baseUrl, selected.command)
     : null;
@@ -4086,6 +4150,7 @@ const executeWorkerSessionControlPlaneAlert = async (
     before,
     after,
     filter: preview.filter,
+    detailCommand,
   };
 };
 

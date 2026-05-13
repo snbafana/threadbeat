@@ -3400,6 +3400,68 @@ try {
   assert.ok(applyActionAlertCommandLines.includes(
     `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset --ack-reset-audit`,
   ));
+  const applyActionAlertDetailExecute = await cliJson<{
+    ok: true;
+    session: string;
+    dryRun: boolean;
+    detailCommand: string;
+    advanceId: string;
+    advancePath: string;
+    selected: {
+      surface: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      detailCommand?: string;
+      applyId?: string;
+      executionId?: string;
+    } | null;
+    alert: ControlPlaneAlertPreviewResponse["alert"];
+    executed: { command: string[]; exitCode: number | null; stdout?: string; stderr?: string } | null;
+    filter: ControlPlaneAlertPreviewResponse["filter"];
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--severity",
+    "error",
+    "--surface",
+    "apply_action",
+    "--reason",
+    "failed_apply_action_execution",
+    "--apply",
+    "detached-session-api-backed-reset",
+    "--execution",
+    failedApplyActionExecutionId,
+    "--action",
+    "inspect_drain_continuation_resets",
+    "--detail-command",
+    "inspect_apply",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(applyActionAlertDetailExecute.ok, true);
+  assert.equal(applyActionAlertDetailExecute.session, sessionName);
+  assert.equal(applyActionAlertDetailExecute.dryRun, false);
+  assert.equal(applyActionAlertDetailExecute.detailCommand, "inspect_apply");
+  assert.match(applyActionAlertDetailExecute.advancePath, /control-plane-advances/);
+  assert.equal(applyActionAlertDetailExecute.selected?.surface, "apply_action");
+  assert.equal(applyActionAlertDetailExecute.selected?.action, "inspect_apply");
+  assert.equal(applyActionAlertDetailExecute.selected?.detailCommand, "inspect_apply");
+  assert.equal(applyActionAlertDetailExecute.selected?.applyId, "detached-session-api-backed-reset");
+  assert.equal(applyActionAlertDetailExecute.selected?.executionId, failedApplyActionExecutionId);
+  assert.equal(
+    applyActionAlertDetailExecute.selected?.command.join(" "),
+    `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset`,
+  );
+  assert.equal(
+    applyActionAlertDetailExecute.executed?.command.join(" "),
+    `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset`,
+  );
+  assert.equal(applyActionAlertDetailExecute.executed?.exitCode, 0);
+  assert.deepEqual(applyActionAlertDetailExecute.filter.applyIds, ["detached-session-api-backed-reset"]);
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",
