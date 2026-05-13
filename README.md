@@ -775,8 +775,9 @@ next steps. The tick-worker list also includes `lifecycle.state`,
 `lifecycle.restartable`, and `lifecycle.reason` so operators can distinguish
 running, stopped, completed, retired, failed-stop, and unrecorded-exit workers
 without inferring state from raw timestamps.
-`runs session-control-plane-timeline <name> --server` joins recent tick records
-with tick-worker lifecycle events for a durable session-level audit trail.
+`runs session-control-plane-timeline <name> --server` joins recent tick records,
+tick-worker lifecycle events, and branch-recovery executions for a durable
+session-level audit trail.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,

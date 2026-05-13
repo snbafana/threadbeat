@@ -6874,10 +6874,15 @@ async function fetchWorkerSessionControlPlaneTimeline(
     event: string;
     tickId?: string;
     workerId?: string;
+    executionId?: string;
+    runIds?: string[];
     status?: string;
     state?: string;
     restartable?: boolean;
     reason?: string;
+    selected?: number;
+    resumedCount?: number;
+    skippedCount?: number;
   }>;
 }> {
   const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
@@ -6895,10 +6900,15 @@ async function fetchWorkerSessionControlPlaneTimeline(
       event: string;
       tickId?: string;
       workerId?: string;
+      executionId?: string;
+      runIds?: string[];
       status?: string;
       state?: string;
       restartable?: boolean;
       reason?: string;
+      selected?: number;
+      resumedCount?: number;
+      skippedCount?: number;
     }>;
   };
 }

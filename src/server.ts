@@ -2362,10 +2362,12 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "control_plane_tick_worker";
-  event: "tick_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired";
+  source: "tick" | "control_plane_tick_worker" | "branch_recovery_execution";
+  event: "tick_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "branch_recovery_executed";
   tickId?: string;
   workerId?: string;
+  executionId?: string;
+  runIds?: string[];
   status?: string;
   state?: string;
   restartable?: boolean;
@@ -2374,6 +2376,9 @@ type WorkerSessionControlPlaneTimelineEvent = {
   previousPid?: number | null;
   plannedCount?: number;
   executedCount?: number;
+  selected?: number;
+  resumedCount?: number;
+  skippedCount?: number;
 };
 
 const readWorkerSessionControlPlaneTimeline = async (
@@ -2387,9 +2392,10 @@ const readWorkerSessionControlPlaneTimeline = async (
   counts: Record<string, number>;
   events: WorkerSessionControlPlaneTimelineEvent[];
 }> => {
-  const [ticks, workers] = await Promise.all([
+  const [ticks, workers, branchRecoveryExecutions] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, options.limit),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
+    listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, options.limit),
   ]);
   const events: WorkerSessionControlPlaneTimelineEvent[] = [];
   for (const tick of ticks) {
@@ -2451,6 +2457,19 @@ const readWorkerSessionControlPlaneTimeline = async (
         pid: worker.pid,
       });
     }
+  }
+  for (const execution of branchRecoveryExecutions) {
+    events.push({
+      observedAt: execution.observedAt,
+      source: "branch_recovery_execution",
+      event: "branch_recovery_executed",
+      executionId: execution.executionId,
+      status: execution.status,
+      selected: execution.selected,
+      resumedCount: execution.resumed.length,
+      skippedCount: execution.skipped.length,
+      runIds: execution.resumed.map((run) => run.runId),
+    });
   }
   const sorted = events
     .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
