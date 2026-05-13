@@ -4715,8 +4715,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-advances requires --server");
     }
-    if (outputFormat !== "json" && outputFormat !== "shell") {
-      throw new Error("runs session-control-plane-advances --format must be json or shell");
+    if (outputFormat !== "json" && outputFormat !== "shell" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-advances --format must be json, shell, or text");
     }
     const executeConfirmation = options["execute-confirmation"] === "1";
     const executeNextConfirmation = options["execute-next-confirmation"] === "1";
@@ -4742,6 +4742,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-advances --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-advances --format text cannot be combined with --commands-only");
     }
     const limit = parsePositiveInteger(
       options.limit ?? (confirmationExecutionModes > 0 ? "100" : "20"),
@@ -4889,6 +4892,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ...rest,
         confirmationQueue: workerSessionControlPlaneAdvanceConfirmationQueue(advances.advances),
       });
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneAdvancesText(advances);
       return;
     }
     await printJson(advances);
@@ -7784,6 +7791,9 @@ type WorkerSessionControlPlaneAdvancesResponse = {
     mutating: number;
   };
   advances: Array<Omit<WorkerSessionControlPlaneAdvanceResponse, "ok" | "advancePath"> & {
+    alert?: WorkerSessionControlPlaneAlertPreviewResponse["alert"];
+    details?: WorkerSessionControlPlaneAlertPreviewResponse["details"];
+    detailCommand?: string;
     executionSafety?: WorkerSessionControlPlaneAlertExecuteResponse["executionSafety"];
   }>;
 };
@@ -8428,6 +8438,47 @@ function formatIndentedTail(lines: string[], indent: string): string[] {
 
 function formatShellCommand(command: string[]): string {
   return command.map(shellArg).join(" ");
+}
+
+function printWorkerSessionControlPlaneAdvancesText(
+  response: WorkerSessionControlPlaneAdvancesResponse,
+): void {
+  console.log(formatWorkerSessionControlPlaneAdvancesText(response).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneAdvancesText(
+  response: WorkerSessionControlPlaneAdvancesResponse,
+): string[] {
+  const lines = [
+    "control-plane advances",
+    `session: ${response.session}`,
+    `count: ${response.count}`,
+    `filter: advances=${response.filter.advanceIds.join(",") || "*"} blocked=${response.filter.blocked ?? "*"} mutating=${response.filter.mutating ?? "*"} alert_surfaces=${response.filter.alertSurfaces.join(",") || "*"} detail_commands=${response.filter.detailCommands.join(",") || "*"}`,
+  ];
+  for (const advance of response.advances) {
+    lines.push(
+      "",
+      `advance: ${advance.advanceId}`,
+      `  observed_at: ${advance.observedAt}`,
+      `  dry_run: ${advance.dryRun}`,
+      `  detail_command: ${advance.detailCommand ?? ""}`,
+      `  alert: ${advance.alert?.surface ?? ""} ${advance.alert?.reason ?? ""}`,
+      `  action: ${advance.alert?.action ?? advance.selected?.action ?? ""}`,
+      `  worker: ${advance.alert?.workerId ?? advance.selected?.workerId ?? ""}`,
+      `  safety: blocked=${advance.executionSafety?.blocked ?? false} mutating=${advance.executionSafety?.mutating ?? false} confirmed=${advance.executionSafety?.confirmed ?? false}`,
+      `  executed: ${advance.executed ? `exit_code=${advance.executed.exitCode ?? ""}` : "no"}`,
+    );
+    if (advance.selected?.command) {
+      lines.push(`  command: ${formatShellCommand(advance.selected.command)}`);
+    }
+    if (advance.details?.kind === "worker_recovery") {
+      lines.push(
+        `  target_kind: ${advance.details.target.kind}`,
+        `  target_worker: ${advance.details.target.worker?.workerId ?? "<missing>"}`,
+      );
+    }
+  }
+  return lines;
 }
 
 function selectWorkerSessionControlPlaneNextActions(
@@ -12562,7 +12613,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
+  runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

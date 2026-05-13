@@ -230,6 +230,26 @@ try {
   assert.equal(recoveryAttempt?.executionSafety?.mutating, true);
   assert.equal(recoveryAttempt?.executionSafety?.confirmed, true);
   assert.equal(recoveryAttempt?.executionSafety?.blocked, false);
+
+  const recoveryAttemptText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--advance",
+    confirmedDryRun.advanceId,
+    "--alert-surface",
+    "worker_recovery",
+    "--detail-command",
+    "restart_worker_recovery",
+    "--format",
+    "text",
+  ]);
+  assert.match(recoveryAttemptText, /control-plane advances/);
+  assert.match(recoveryAttemptText, new RegExp(`advance: ${confirmedDryRun.advanceId}`));
+  assert.match(recoveryAttemptText, /detail_command: restart_worker_recovery/);
+  assert.match(recoveryAttemptText, /alert: worker_recovery stopped_control_plane_advance_worker/);
+  assert.match(recoveryAttemptText, new RegExp(`target_worker: ${workerId}`));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
