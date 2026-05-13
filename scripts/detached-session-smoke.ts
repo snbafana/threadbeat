@@ -1821,6 +1821,70 @@ try {
   assert.equal(controlPlaneStatus.staleRuns.commands.recoverSession.join(" "), `npm run cli -- runs recover-session ${sessionName} --server`);
   assert.equal(controlPlaneStatus.staleRuns.commands.recoverSessionDryRun.join(" "), `npm run cli -- runs recover-session ${sessionName} --server --dry-run`);
   assert.equal(controlPlaneStatus.staleRuns.commands.inspectSession.join(" "), `npm run cli -- runs session-control-plane-status ${sessionName} --server`);
+  const controlPlaneStatusSummary = await cliJson<{
+    ok?: true;
+    session: string;
+    needsAction: boolean;
+    workers: typeof controlPlaneStatus.workers;
+    queues: {
+      applyActions: { total: number; actionable: number; resetAudits: number };
+      drainContinuations: { total: number; queued: number; running: number; failed: number };
+      applyActionExecutions: { recent: number; executed: number; failed: number };
+    };
+    branches: {
+      counts: typeof controlPlaneStatus.branches.counts;
+      actions: typeof controlPlaneStatus.branches.actions;
+    };
+    staleRuns: {
+      counts: typeof controlPlaneStatus.staleRuns.counts;
+      actions: typeof controlPlaneStatus.staleRuns.actions;
+    };
+    recovery: { count: number; actions: Record<string, number> };
+    nextActions: Array<{ action: string; count: number; command: string[] }>;
+    commands: { fullStatus: string[]; tick: string[]; tickDryRun: string[]; timelineSummary: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStatusSummary.ok, true);
+  assert.equal(controlPlaneStatusSummary.session, sessionName);
+  assert.equal(controlPlaneStatusSummary.needsAction, true);
+  assert.deepEqual(controlPlaneStatusSummary.workers, controlPlaneStatus.workers);
+  assert.equal(controlPlaneStatusSummary.queues.applyActions.actionable, controlPlaneStatus.queues.applyActions.actionable);
+  assert.equal(controlPlaneStatusSummary.queues.drainContinuations.total, controlPlaneStatus.queues.drainContinuations.total);
+  assert.equal(controlPlaneStatusSummary.branches.counts.ready, controlPlaneStatus.branches.counts.ready);
+  assert.equal(controlPlaneStatusSummary.staleRuns.counts.ready, controlPlaneStatus.staleRuns.counts.ready);
+  assert.equal(controlPlaneStatusSummary.recovery.count, controlPlaneStatus.recovery.count);
+  assert.ok(controlPlaneStatusSummary.nextActions.length > 0);
+  if (controlPlaneStatus.staleRuns.counts.ready > 0) {
+    assert.ok(controlPlaneStatusSummary.nextActions.some((action) => (
+      action.action === "recover_stale_run"
+      && action.count === controlPlaneStatus.staleRuns.counts.ready
+      && action.command.join(" ").includes("recover-session")
+    )));
+  }
+  if (controlPlaneStatus.branches.counts.ready > 0) {
+    assert.ok(controlPlaneStatusSummary.nextActions.some((action) => (
+      action.action === "resume_branch"
+      && action.count === controlPlaneStatus.branches.counts.ready
+      && action.command.join(" ") === `npm run cli -- runs resume-session ${sessionName} --next`
+    )));
+  }
+  if (controlPlaneStatus.queues.applyActions.actionable > 0) {
+    assert.ok(controlPlaneStatusSummary.nextActions.some((action) => (
+      action.action === "execute_next_apply_action"
+      && action.count === controlPlaneStatus.queues.applyActions.actionable
+    )));
+  }
+  assert.equal(
+    controlPlaneStatusSummary.commands.timelineSummary.join(" "),
+    `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --summary`,
+  );
   assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
     step.runId === controlPlaneResumePlan.run.id
     && step.action === "resume_branch"

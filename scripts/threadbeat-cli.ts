@@ -4514,10 +4514,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-status requires --server");
     }
-    await printJson(await fetchWorkerSessionControlPlaneStatus(
+    const status = await fetchWorkerSessionControlPlaneStatus(
       required(sessionName, "runs session-control-plane-status <session> --server"),
       { lines: parsePositiveInteger(options.lines ?? "5", "--lines") },
-    ));
+    );
+    await printJson(options.summary === "1"
+      ? summarizeWorkerSessionControlPlaneStatus(status)
+      : status);
     return;
   }
   if (subcommandName === "session-control-plane-tick") {
@@ -6515,6 +6518,113 @@ type WorkerSessionControlPlaneTickWithDecision = WorkerSessionControlPlaneTickRe
   decision: ReturnType<typeof summarizeWorkerSessionControlPlaneTickDecision>;
 };
 
+type WorkerSessionControlPlaneStatusResponse = {
+  ok: true;
+  session: string;
+  workers: {
+    watch: { total: number; alive: number; stopped: number; retired: number };
+    drain: { total: number; alive: number; stopped: number; retired: number };
+    applyAction: { total: number; alive: number; stopped: number; retired: number };
+    controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
+  };
+  queues: {
+    applyActions: {
+      total: number;
+      actionable: number;
+      resumeNeeded: number;
+      resetAudits: number;
+      resetAuditsAcknowledged: number;
+      resetAuditsTotal: number;
+      waiting: number;
+      failed: number;
+      pending: number;
+    };
+    applyActionNextSteps: {
+      count: number;
+      nextSteps: Array<WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number] & {
+        executeCommand: string[];
+      }>;
+    };
+    applyActionExecutions: {
+      counts: { recent: number; executed: number; failed: number };
+      recent: WorkerSessionApplyActionExecutionRecord[];
+    };
+    drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
+  };
+  branches: {
+    counts: {
+      total: number;
+      ready: number;
+      blocked: number;
+      stoppedBranchWithoutResultCommit: number;
+      runningSandboxPresent: number;
+    };
+    actions: { resume_branch: number; inspect_run: number };
+    commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
+    nextSteps: Array<{
+      action: "resume_branch" | "inspect_run";
+      reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
+      agentId: string;
+      runId: string;
+      objective: string;
+      status: string;
+      branchName: string;
+      resultCommit: string | null;
+      workerId: string | null;
+      command: string[];
+      commands: {
+        inspectRun: string[];
+        checkoutBranch: string[];
+        reviewRun: string[];
+        watchRun: string[];
+        resumeBranch: string[] | null;
+        resumeBranchDryRun: string[];
+      };
+      runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+    }>;
+    executions: {
+      counts: { recent: number; executed: number; partial: number; noop: number };
+      recent: WorkerSessionBranchRecoveryExecutionRecord[];
+    };
+  };
+  staleRuns: {
+    counts: {
+      total: number;
+      ready: number;
+      blocked: number;
+      staleRunningClaimWithoutRunningSandbox: number;
+      runningSandboxPresent: number;
+    };
+    actions: { recover_session_run: number; inspect_run: number };
+    commands: { recoverSession: string[]; recoverSessionDryRun: string[]; inspectSession: string[] };
+    nextSteps: Array<{
+      action: "recover_session_run" | "inspect_run";
+      reason: "stale_running_claim_without_running_sandbox" | "running_sandbox_present";
+      agentId: string;
+      runId: string;
+      objective: string;
+      status: string;
+      branchName: string;
+      resultCommit: string | null;
+      workerId: string | null;
+      command: string[];
+      commands: {
+        inspectRun: string[];
+        recoverRun: string[] | null;
+        recoverRunDryRun: string[];
+        recoverSession: string[];
+        recoverSessionDryRun: string[];
+      };
+      runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+    }>;
+  };
+  recovery: {
+    count: number;
+    actions: Record<string, number>;
+    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
+  };
+};
+
 type WorkerSessionControlPlaneTimelineResponse = {
   ok: true;
   session: string;
@@ -6856,161 +6966,129 @@ async function fetchWorkerSessionApplyActionWorkerNextSteps(
 async function fetchWorkerSessionControlPlaneStatus(
   sessionName: string,
   options: { lines: number },
-): Promise<{
-  ok: true;
-  session: string;
-  workers: {
-    watch: { total: number; alive: number; stopped: number; retired: number };
-    drain: { total: number; alive: number; stopped: number; retired: number };
-    applyAction: { total: number; alive: number; stopped: number; retired: number };
-    controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
-  };
-  queues: {
-    applyActions: {
-      total: number;
-      actionable: number;
-      resumeNeeded: number;
-      resetAudits: number;
-      resetAuditsAcknowledged: number;
-      resetAuditsTotal: number;
-      waiting: number;
-      failed: number;
-      pending: number;
-    };
-    applyActionNextSteps: {
-      count: number;
-      nextSteps: Array<WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number] & {
-        executeCommand: string[];
-      }>;
-    };
-    applyActionExecutions: {
-      counts: { recent: number; executed: number; failed: number };
-      recent: WorkerSessionApplyActionExecutionRecord[];
-    };
-    drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
-  };
-  branches: {
-    counts: {
-      total: number;
-      ready: number;
-      blocked: number;
-      stoppedBranchWithoutResultCommit: number;
-      runningSandboxPresent: number;
-    };
-    actions: { resume_branch: number; inspect_run: number };
-    commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
-    nextSteps: Array<{
-      action: "resume_branch" | "inspect_run";
-      reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
-      agentId: string;
-      runId: string;
-      objective: string;
-      status: string;
-      branchName: string;
-      resultCommit: string | null;
-      workerId: string | null;
-      command: string[];
-      commands: {
-        inspectRun: string[];
-        checkoutBranch: string[];
-        reviewRun: string[];
-        watchRun: string[];
-        resumeBranch: string[] | null;
-        resumeBranchDryRun: string[];
-      };
-      runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
-    }>;
-    executions: {
-      counts: { recent: number; executed: number; partial: number; noop: number };
-      recent: WorkerSessionBranchRecoveryExecutionRecord[];
-    };
-  };
-  recovery: {
-    count: number;
-    actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number; restart_control_plane_tick_worker: number };
-    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
-  };
-}> {
+): Promise<WorkerSessionControlPlaneStatusResponse> {
   return await requestJson(
     "GET",
     withQuery(
       `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-status`,
       new URLSearchParams({ lines: String(options.lines) }),
     ),
-  ) as {
-    ok: true;
-    session: string;
-    workers: {
-      watch: { total: number; alive: number; stopped: number; retired: number };
-      drain: { total: number; alive: number; stopped: number; retired: number };
-      applyAction: { total: number; alive: number; stopped: number; retired: number };
-      controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
-    };
+  ) as WorkerSessionControlPlaneStatusResponse;
+}
+
+function summarizeWorkerSessionControlPlaneStatus(
+  status: WorkerSessionControlPlaneStatusResponse,
+): {
+  ok: true;
+  session: string;
+  needsAction: boolean;
+  workers: WorkerSessionControlPlaneStatusResponse["workers"];
+  queues: {
+    applyActions: Pick<WorkerSessionControlPlaneStatusResponse["queues"]["applyActions"], "total" | "actionable" | "resumeNeeded" | "resetAudits" | "waiting" | "failed" | "pending">;
+    drainContinuations: Pick<WorkerSessionControlPlaneStatusResponse["queues"]["drainContinuations"], "total" | "queued" | "running" | "failed">;
+    applyActionExecutions: WorkerSessionControlPlaneStatusResponse["queues"]["applyActionExecutions"]["counts"];
+  };
+  branches: {
+    counts: WorkerSessionControlPlaneStatusResponse["branches"]["counts"];
+    actions: WorkerSessionControlPlaneStatusResponse["branches"]["actions"];
+    executions: WorkerSessionControlPlaneStatusResponse["branches"]["executions"]["counts"];
+  };
+  staleRuns: {
+    counts: WorkerSessionControlPlaneStatusResponse["staleRuns"]["counts"];
+    actions: WorkerSessionControlPlaneStatusResponse["staleRuns"]["actions"];
+  };
+  recovery: {
+    count: number;
+    actions: Record<string, number>;
+  };
+  nextActions: Array<{ action: string; count: number; command: string[] }>;
+  commands: {
+    fullStatus: string[];
+    tick: string[];
+    tickDryRun: string[];
+    timelineSummary: string[];
+  };
+} {
+  const nextActions: Array<{ action: string; count: number; command: string[] }> = [];
+  if (status.staleRuns.counts.ready > 0) {
+    nextActions.push({
+      action: "recover_stale_run",
+      count: status.staleRuns.counts.ready,
+      command: status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run")?.command
+        ?? status.staleRuns.commands.recoverSession,
+    });
+  }
+  if (status.branches.counts.ready > 0) {
+    nextActions.push({
+      action: "resume_branch",
+      count: status.branches.counts.ready,
+      command: status.branches.commands.resumeNext,
+    });
+  }
+  if (status.queues.applyActions.actionable > 0) {
+    nextActions.push({
+      action: "execute_next_apply_action",
+      count: status.queues.applyActions.actionable,
+      command: ["npm", "run", "cli", "--", "runs", "session-applies", status.session, "--server", "--action-queue", "--execute-next"],
+    });
+  }
+  if (status.queues.drainContinuations.queued > 0) {
+    nextActions.push({
+      action: "execute_next_drain_continuation",
+      count: status.queues.drainContinuations.queued,
+      command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--execute-next"],
+    });
+  }
+  if (status.recovery.count > 0) {
+    nextActions.push({
+      action: "restart_stopped_worker",
+      count: status.recovery.count,
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],
+    });
+  }
+  return {
+    ok: true,
+    session: status.session,
+    needsAction: nextActions.length > 0,
+    workers: status.workers,
     queues: {
       applyActions: {
-        total: number;
-        actionable: number;
-        resumeNeeded: number;
-        resetAudits: number;
-        resetAuditsAcknowledged: number;
-        resetAuditsTotal: number;
-        waiting: number;
-        failed: number;
-        pending: number;
-      };
-      applyActionNextSteps: {
-        count: number;
-        nextSteps: Array<WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number] & {
-          executeCommand: string[];
-        }>;
-      };
-      applyActionExecutions: {
-        counts: { recent: number; executed: number; failed: number };
-        recent: WorkerSessionApplyActionExecutionRecord[];
-      };
-      drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
-    };
+        total: status.queues.applyActions.total,
+        actionable: status.queues.applyActions.actionable,
+        resumeNeeded: status.queues.applyActions.resumeNeeded,
+        resetAudits: status.queues.applyActions.resetAudits,
+        waiting: status.queues.applyActions.waiting,
+        failed: status.queues.applyActions.failed,
+        pending: status.queues.applyActions.pending,
+      },
+      drainContinuations: {
+        total: status.queues.drainContinuations.total,
+        queued: status.queues.drainContinuations.queued,
+        running: status.queues.drainContinuations.running,
+        failed: status.queues.drainContinuations.failed,
+      },
+      applyActionExecutions: status.queues.applyActionExecutions.counts,
+    },
     branches: {
-      counts: {
-        total: number;
-        ready: number;
-        blocked: number;
-        stoppedBranchWithoutResultCommit: number;
-        runningSandboxPresent: number;
-      };
-      actions: { resume_branch: number; inspect_run: number };
-      commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
-      nextSteps: Array<{
-        action: "resume_branch" | "inspect_run";
-        reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
-        agentId: string;
-        runId: string;
-        objective: string;
-        status: string;
-        branchName: string;
-        resultCommit: string | null;
-        workerId: string | null;
-        command: string[];
-        commands: {
-          inspectRun: string[];
-          checkoutBranch: string[];
-          reviewRun: string[];
-          watchRun: string[];
-          resumeBranch: string[] | null;
-          resumeBranchDryRun: string[];
-        };
-        runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
-      }>;
-      executions: {
-        counts: { recent: number; executed: number; partial: number; noop: number };
-        recent: WorkerSessionBranchRecoveryExecutionRecord[];
-      };
-    };
+      counts: status.branches.counts,
+      actions: status.branches.actions,
+      executions: status.branches.executions.counts,
+    },
+    staleRuns: {
+      counts: status.staleRuns.counts,
+      actions: status.staleRuns.actions,
+    },
     recovery: {
-      count: number;
-      actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number; restart_control_plane_tick_worker: number };
-      nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
-    };
+      count: status.recovery.count,
+      actions: status.recovery.actions,
+    },
+    nextActions,
+    commands: {
+      fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],
+      tick: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server"],
+      tickDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server", "--dry-run"],
+      timelineSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server", "--summary"],
+    },
   };
 }
 
@@ -10633,7 +10711,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
-  runs session-control-plane-status <name> --server [--lines 5]
+  runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]

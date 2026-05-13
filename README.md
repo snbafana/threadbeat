@@ -745,7 +745,9 @@ Use `runs session-control-plane-status <name> --server` or
 `GET /api/worker-sessions/:name/control-plane-status` for one aggregate status
 view across watch workers, apply-action workers, apply queues, drain
 continuations, control-plane tick workers, branch recovery, and recovery
-suggestions. The `branches` block
+suggestions. Add `--summary` for a compact operator checkpoint with worker
+health, queue pressure, branch/stale-run recovery counts, restart counts, and
+next-action commands. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
 sandbox, and includes exact bulk resume, dry-run, and branch-inspection
 commands. Each branch next-step row includes objective, branch name, worker
