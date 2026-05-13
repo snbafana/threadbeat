@@ -1544,6 +1544,7 @@ try {
     "runs",
     "session-control-plane-ticks",
     sessionName,
+    "--server",
   ]);
   assert.equal(controlPlaneTicks.ok, true);
   assert.equal(controlPlaneTicks.session, sessionName);

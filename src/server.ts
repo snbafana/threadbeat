@@ -36,6 +36,10 @@ import {
   writeWorkerSessionBranchRecoveryExecutionRecord,
 } from "./workerSessionBranchRecovery.js";
 import {
+  listWorkerSessionControlPlaneTickRecords,
+  writeWorkerSessionControlPlaneTickRecord,
+} from "./workerSessionControlPlaneTicks.js";
+import {
   listWorkerSessionApplyActionWorkerNextSteps,
   listWorkerSessionApplyActionWorkers,
   restartWorkerSessionApplyActionWorker,
@@ -402,64 +406,50 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { name } = request.params as { name: string };
       const query = request.query as Record<string, string | undefined>;
-      const lines = parseOptionalInteger(query.lines) ?? 5;
-      const session = await readWorkerSession(settings.projectRoot, name);
-      const [
-        applyRecords,
-        drainContinuations,
-        watchWorkers,
-        watchWorkerNextSteps,
-        drainWorkers,
-        drainWorkerNextSteps,
-        applyActionWorkers,
-        applyActionWorkerNextSteps,
-        branchRecovery,
-        branchRecoveryExecutions,
-      ] = await Promise.all([
-        listWorkerSessionApplyRecords(settings.projectRoot, name),
-        listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
-        listWorkerSessionWatchWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
-        listWorkerSessionWatchWorkerNextSteps(settings.projectRoot, name),
-        listWorkerSessionDrainWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
-        listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
-        listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
-        listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
-        summarizeWorkerSessionBranchRecovery(db, session, lines),
-        listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
-      ]);
-      const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
+      return await readWorkerSessionControlPlaneStatus(
+        settings,
+        db,
+        name,
+        parseOptionalInteger(query.lines) ?? 5,
+      );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-tick", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return await runWorkerSessionControlPlaneTick(
+        settings,
+        db,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          dryRun: parseBoolean(body.dryRun, false),
+          lines: parseOptionalInteger(body.lines) ?? 5,
+        },
+      );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/control-plane-ticks", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const ticks = await listWorkerSessionControlPlaneTickRecords(
+        settings.projectRoot,
+        name,
+        parseOptionalInteger(query.limit) ?? 20,
+      );
       return {
         ok: true,
         session: name,
-        workers: {
-          watch: summarizeControlPlaneWorkers(watchWorkers),
-          drain: summarizeControlPlaneWorkers(drainWorkers),
-          applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
-        },
-        queues: {
-          applyActions: applyActionQueue.counts,
-          drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
-        },
-        branches: {
-          ...branchRecovery,
-          executions: {
-            recent: branchRecoveryExecutions,
-            counts: summarizeBranchRecoveryExecutionStatuses(branchRecoveryExecutions),
-          },
-        },
-        recovery: {
-          count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count,
-          actions: {
-            ...watchWorkerNextSteps.actions,
-            ...drainWorkerNextSteps.actions,
-            ...applyActionWorkerNextSteps.actions,
-          },
-          nextSteps: {
-            watchWorkers: watchWorkerNextSteps.nextSteps,
-            drainWorkers: drainWorkerNextSteps.nextSteps,
-            applyActionWorkers: applyActionWorkerNextSteps.nextSteps,
-          },
-        },
+        count: ticks.length,
+        ticks,
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -2234,6 +2224,244 @@ const requestBody = (body: unknown): Record<string, unknown> => {
     return body as Record<string, unknown>;
   }
   return {};
+};
+
+const readWorkerSessionControlPlaneStatus = async (
+  settings: Settings,
+  db: Database,
+  name: string,
+  lines: number,
+): Promise<{
+  ok: true;
+  session: string;
+  workers: {
+    watch: { total: number; alive: number; stopped: number; retired: number };
+    drain: { total: number; alive: number; stopped: number; retired: number };
+    applyAction: { total: number; alive: number; stopped: number; retired: number };
+  };
+  queues: {
+    applyActions: ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["counts"];
+    drainContinuations: ReturnType<typeof summarizeDrainContinuationStatuses>;
+  };
+  branches: Awaited<ReturnType<typeof summarizeWorkerSessionBranchRecovery>> & {
+    executions: {
+      recent: Awaited<ReturnType<typeof listWorkerSessionBranchRecoveryExecutionRecords>>;
+      counts: ReturnType<typeof summarizeBranchRecoveryExecutionStatuses>;
+    };
+  };
+  recovery: {
+    count: number;
+    actions: Record<string, number>;
+    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
+  };
+}> => {
+  const session = await readWorkerSession(settings.projectRoot, name);
+  const [
+    applyRecords,
+    drainContinuations,
+    watchWorkers,
+    watchWorkerNextSteps,
+    drainWorkers,
+    drainWorkerNextSteps,
+    applyActionWorkers,
+    applyActionWorkerNextSteps,
+    branchRecovery,
+    branchRecoveryExecutions,
+  ] = await Promise.all([
+    listWorkerSessionApplyRecords(settings.projectRoot, name),
+    listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
+    listWorkerSessionWatchWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+    listWorkerSessionWatchWorkerNextSteps(settings.projectRoot, name),
+    listWorkerSessionDrainWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+    listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
+    listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+    listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
+    summarizeWorkerSessionBranchRecovery(db, session, lines),
+    listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
+  ]);
+  const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
+  return {
+    ok: true,
+    session: name,
+    workers: {
+      watch: summarizeControlPlaneWorkers(watchWorkers),
+      drain: summarizeControlPlaneWorkers(drainWorkers),
+      applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
+    },
+    queues: {
+      applyActions: applyActionQueue.counts,
+      drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
+    },
+    branches: {
+      ...branchRecovery,
+      executions: {
+        recent: branchRecoveryExecutions,
+        counts: summarizeBranchRecoveryExecutionStatuses(branchRecoveryExecutions),
+      },
+    },
+    recovery: {
+      count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count,
+      actions: {
+        ...watchWorkerNextSteps.actions,
+        ...drainWorkerNextSteps.actions,
+        ...applyActionWorkerNextSteps.actions,
+      },
+      nextSteps: {
+        watchWorkers: watchWorkerNextSteps.nextSteps,
+        drainWorkers: drainWorkerNextSteps.nextSteps,
+        applyActionWorkers: applyActionWorkerNextSteps.nextSteps,
+      },
+    },
+  };
+};
+
+const runWorkerSessionControlPlaneTick = async (
+  settings: Settings,
+  db: Database,
+  baseUrl: string,
+  sessionName: string,
+  options: { dryRun: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  tickPath: string;
+  tick: Awaited<ReturnType<typeof writeWorkerSessionControlPlaneTickRecord>>["record"];
+  planned: Awaited<ReturnType<typeof writeWorkerSessionControlPlaneTickRecord>>["record"]["planned"];
+  executed: Awaited<ReturnType<typeof writeWorkerSessionControlPlaneTickRecord>>["record"]["executed"];
+  before: Awaited<ReturnType<typeof readWorkerSessionControlPlaneStatus>>;
+  after: Awaited<ReturnType<typeof readWorkerSessionControlPlaneStatus>>;
+}> => {
+  const observedAt = new Date().toISOString();
+  const before = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
+  const branchRunIds = before.branches.nextSteps
+    .filter((step) => step.action === "resume_branch")
+    .map((step) => step.runId);
+  const planned = {
+    branchRecovery: branchRunIds.length > 0
+      ? {
+        action: "resume_next_branch" as const,
+        runIds: branchRunIds.slice(0, 1),
+        command: before.branches.commands.resumeNext,
+      }
+      : null,
+    applyAction: before.queues.applyActions.actionable > 0
+      ? {
+        action: "execute_next_apply_action" as const,
+        actionable: before.queues.applyActions.actionable,
+      }
+      : null,
+    drainContinuation: before.queues.drainContinuations.queued > 0
+      ? {
+        action: "execute_next_drain_continuation" as const,
+        queued: before.queues.drainContinuations.queued,
+      }
+      : null,
+  };
+  const executed = {
+    branchRecovery: null as TickCommandExecution | null,
+    applyAction: null as TickCommandExecution | null,
+    drainContinuation: null as TickCommandExecution | null,
+  };
+  if (!options.dryRun) {
+    if (planned.branchRecovery) {
+      executed.branchRecovery = await runControlPlaneTickCommand(
+        settings.projectRoot,
+        baseUrl,
+        planned.branchRecovery.command,
+      );
+    }
+    if (planned.applyAction) {
+      executed.applyAction = await runControlPlaneTickCommand(
+        settings.projectRoot,
+        baseUrl,
+        ["npm", "run", "cli", "--", "runs", "session-applies", sessionName, "--server", "--action-queue", "--execute-next"],
+      );
+    }
+    if (planned.drainContinuation) {
+      executed.drainContinuation = await runControlPlaneTickCommand(
+        settings.projectRoot,
+        baseUrl,
+        ["npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName, "--execute-next"],
+      );
+    }
+  }
+  const after = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
+  const plannedCount = [
+    planned.branchRecovery,
+    planned.applyAction,
+    planned.drainContinuation,
+  ].filter(Boolean).length;
+  const executedCount = [
+    commandSucceeded(executed.branchRecovery) ? executed.branchRecovery : null,
+    commandExecutedBoolean(executed.applyAction) ? executed.applyAction : null,
+    commandExecutedBoolean(executed.drainContinuation) ? executed.drainContinuation : null,
+  ].filter(Boolean).length;
+  const tick = await writeWorkerSessionControlPlaneTickRecord(settings.projectRoot, {
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    status: options.dryRun
+      ? "dry_run"
+      : plannedCount === 0
+        ? "noop"
+        : executedCount === plannedCount
+          ? "executed"
+          : "partial",
+    planned,
+    executed,
+    before,
+    after,
+  });
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: tick.record.completedAt,
+    dryRun: options.dryRun,
+    tickPath: tick.path,
+    tick: tick.record,
+    planned,
+    executed,
+    before,
+    after,
+  };
+};
+
+type TickCommandExecution = {
+  command: string[];
+  exitCode: number | null;
+  stdout?: string;
+  stderr?: string;
+  output: unknown;
+};
+
+const runControlPlaneTickCommand = async (
+  projectRoot: string,
+  baseUrl: string,
+  command: string[],
+): Promise<TickCommandExecution> => {
+  const result = await runCliContinuationCommand(projectRoot, baseUrl, command);
+  return {
+    command,
+    exitCode: result.exitCode,
+    ...(result.stdout ? { stdout: result.stdout } : {}),
+    ...(result.stderr ? { stderr: result.stderr } : {}),
+    output: parseJsonMaybe(result.stdout),
+  };
+};
+
+const commandSucceeded = (execution: TickCommandExecution | null): boolean => {
+  return execution?.exitCode === 0;
+};
+
+const commandExecutedBoolean = (execution: TickCommandExecution | null): boolean => {
+  if (!commandSucceeded(execution)) return false;
+  if (typeof execution?.output !== "object" || execution.output === null || Array.isArray(execution.output)) return false;
+  return (execution.output as { executed?: unknown }).executed === true;
 };
 
 const parseString = (value: unknown, field: string): string => {

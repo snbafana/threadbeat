@@ -4484,7 +4484,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-tick requires --server");
     }
-    await printJson(await runWorkerSessionControlPlaneTick(
+    await printJson(await executeWorkerSessionControlPlaneTick(
       required(sessionName, "runs session-control-plane-tick <session> --server"),
       {
         dryRun: options["dry-run"] === "1",
@@ -4496,10 +4496,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-control-plane-ticks") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
-    await printJson(await listWorkerSessionControlPlaneTickRecords(
-      required(sessionName, "runs session-control-plane-ticks <session>"),
-      options.limit ? parsePositiveInteger(options.limit, "--limit") : 20,
-    ));
+    const requiredSessionName = required(sessionName, "runs session-control-plane-ticks <session>");
+    const limit = options.limit ? parsePositiveInteger(options.limit, "--limit") : 20;
+    await printJson(options.server === "1"
+      ? await fetchWorkerSessionControlPlaneTicks(requiredSessionName, limit)
+      : await listWorkerSessionControlPlaneTickRecords(requiredSessionName, limit));
     return;
   }
   if (subcommandName === "session-branch-recovery-executions") {
@@ -6290,8 +6291,8 @@ type WorkerSessionControlPlaneTickRecord = {
   };
   executed: {
     branchRecovery: unknown | null;
-    applyAction: ExecuteNextWorkerSessionApplyActionResponse | null;
-    drainContinuation: ExecuteNextWorkerSessionDrainContinuationResponse | null;
+    applyAction: unknown | null;
+    drainContinuation: unknown | null;
   };
   before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
   after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
@@ -6618,7 +6619,7 @@ async function fetchWorkerSessionControlPlaneStatus(
   };
 }
 
-async function runWorkerSessionControlPlaneTick(
+async function executeWorkerSessionControlPlaneTick(
   sessionName: string,
   options: { dryRun: boolean; lines: number },
 ): Promise<{
@@ -6634,93 +6635,43 @@ async function runWorkerSessionControlPlaneTick(
   before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
   after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
 }> {
-  const observedAt = new Date().toISOString();
-  const before = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: options.lines });
-  const branchRunIds = before.branches.nextSteps
-    .filter((step) => step.action === "resume_branch")
-    .map((step) => step.runId);
-  const planned = {
-    branchRecovery: branchRunIds.length > 0
-      ? {
-        action: "resume_next_branch" as const,
-        runIds: branchRunIds.slice(0, 1),
-        command: before.branches.commands.resumeNext,
-      }
-      : null,
-    applyAction: before.queues.applyActions.actionable > 0
-      ? {
-        action: "execute_next_apply_action" as const,
-        actionable: before.queues.applyActions.actionable,
-      }
-      : null,
-    drainContinuation: before.queues.drainContinuations.queued > 0
-      ? {
-        action: "execute_next_drain_continuation" as const,
-        queued: before.queues.drainContinuations.queued,
-      }
-      : null,
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick`,
+    { dryRun: options.dryRun, lines: options.lines },
+  ) as {
+    ok: true;
+    session: string;
+    observedAt: string;
+    completedAt: string;
+    dryRun: boolean;
+    tickPath: string;
+    tick: WorkerSessionControlPlaneTickRecord;
+    planned: WorkerSessionControlPlaneTickRecord["planned"];
+    executed: WorkerSessionControlPlaneTickRecord["executed"];
+    before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
+    after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
   };
-  const executed = {
-    branchRecovery: null as unknown | null,
-    applyAction: null as ExecuteNextWorkerSessionApplyActionResponse | null,
-    drainContinuation: null as ExecuteNextWorkerSessionDrainContinuationResponse | null,
-  };
-  if (!options.dryRun) {
-    if (planned.branchRecovery) {
-      executed.branchRecovery = await requestJson(
-        "POST",
-        `/api/worker-sessions/${encodeURIComponent(sessionName)}/resume-branches`,
-        { limit: 1 },
-      );
-    }
-    if (planned.applyAction) {
-      executed.applyAction = await executeNextWorkerSessionApplyAction(sessionName, {});
-    }
-    if (planned.drainContinuation) {
-      executed.drainContinuation = await executeNextWorkerSessionDrainContinuation(sessionName);
-    }
-  }
-  const after = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: options.lines });
-  const plannedCount = [
-    planned.branchRecovery,
-    planned.applyAction,
-    planned.drainContinuation,
-  ].filter(Boolean).length;
-  const executedCount = [
-    executed.branchRecovery,
-    executed.applyAction?.executed ? executed.applyAction : null,
-    executed.drainContinuation?.executed ? executed.drainContinuation : null,
-  ].filter(Boolean).length;
-  const tick = await writeWorkerSessionControlPlaneTickRecord({
-    tickId: createControlPlaneTickId(observedAt),
-    session: sessionName,
-    observedAt,
-    completedAt: new Date().toISOString(),
-    dryRun: options.dryRun,
-    status: options.dryRun
-      ? "dry_run"
-      : plannedCount === 0
-        ? "noop"
-        : executedCount === plannedCount
-          ? "executed"
-          : "partial",
-    planned,
-    executed,
-    before,
-    after,
-  });
-  return {
-    ok: true,
-    session: sessionName,
-    observedAt,
-    completedAt: tick.record.completedAt,
-    dryRun: options.dryRun,
-    tickPath: tick.path,
-    tick: tick.record,
-    planned,
-    executed,
-    before,
-    after,
+}
+
+async function fetchWorkerSessionControlPlaneTicks(
+  sessionName: string,
+  limit = 20,
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  ticks: WorkerSessionControlPlaneTickRecord[];
+}> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-ticks`, params),
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    ticks: WorkerSessionControlPlaneTickRecord[];
   };
 }
 
@@ -6756,19 +6707,6 @@ async function listWorkerSessionControlPlaneTickRecords(
     }
     throw error;
   }
-}
-
-async function writeWorkerSessionControlPlaneTickRecord(
-  record: WorkerSessionControlPlaneTickRecord,
-): Promise<{ path: string; record: WorkerSessionControlPlaneTickRecord }> {
-  const tickPath = workerSessionControlPlaneTickPath(record.session, record.tickId);
-  await fs.mkdir(path.dirname(tickPath), { recursive: true });
-  await fs.writeFile(tickPath, `${JSON.stringify(record, null, 2)}\n`);
-  return { path: tickPath, record };
-}
-
-function createControlPlaneTickId(observedAt: string): string {
-  return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 async function fetchWorkerSessionBranches(
@@ -9744,12 +9682,6 @@ function workerSessionControlPlaneTickDir(sessionName: string): string {
   return path.join(workerSessionDir, "control-plane-ticks", sessionName);
 }
 
-function workerSessionControlPlaneTickPath(sessionName: string, tickId: string): string {
-  assertSafeSessionName(sessionName);
-  assertSafeSessionName(tickId);
-  return path.join(workerSessionControlPlaneTickDir(sessionName), `${tickId}.json`);
-}
-
 function drainContinuationWorkerRootDir(): string {
   return path.join(workerSessionDir, "drain-continuation-workers");
 }
@@ -10063,7 +9995,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
-  runs session-control-plane-ticks <name> [--limit 20]
+  runs session-control-plane-ticks <name> [--server] [--limit 20]
   runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
