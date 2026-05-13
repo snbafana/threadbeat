@@ -4009,6 +4009,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       if (options["action-executions"] === "1") {
         await printJson(await fetchWorkerSessionApplyActionExecutions(requiredSessionName, {
+          executionId: options.execution,
           applyId: options["apply-id"],
           action: options["apply-action"],
           status: options.status,
@@ -6881,6 +6882,7 @@ function workerSessionControlPlaneTimelineCommands(
           ...(event.applyId ? ["--apply-id", event.applyId] : []),
           ...(event.applyAction ? ["--apply-action", event.applyAction] : []),
           ...(event.status ? ["--status", event.status] : []),
+          ...(event.executionId ? ["--execution", event.executionId] : []),
           "--limit",
           String(timeline.filter.limit),
         ],
@@ -7908,9 +7910,10 @@ async function fetchWorkerSessionApplyActions(
 
 async function fetchWorkerSessionApplyActionExecutions(
   sessionName: string,
-  options: { applyId?: string; action?: string; status?: string; limit?: number | null },
+  options: { executionId?: string; applyId?: string; action?: string; status?: string; limit?: number | null },
 ): Promise<WorkerSessionApplyActionExecutionsResponse> {
   const params = new URLSearchParams();
+  if (options.executionId) params.set("executionId", options.executionId);
   if (options.applyId) params.set("applyId", options.applyId);
   if (options.action) params.set("action", options.action);
   if (options.status) params.set("status", options.status);
@@ -12390,7 +12393,7 @@ Commands:
   runs session-summary <name> [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action continue_watch] [--branch-action resume_branch|review_branch] [--older-than-ms 600000] [--interval-ms 2000] [--max-polls 1]
   runs session-review <name> [--include-stopped] [--next] [--limit 20] [--offset 20] [--commands-only] [--format json|shell] [--action review_changed_results] [--branch-action resume_branch|review_branch] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]] [--lines 20] [--status planned,running,stopped]
   runs session-apply <name> (--action recover_session|recover_stopped|resume_session|review_changed_results|retry_failed|resume_pending|review_ready_results|reset_failed_drain_continuations|reset_running_drain_continuations|--apply-action retry_failed|resume_pending|review_ready_results|inspect_drain_continuation_resets|--branch-action resume_branch|review_branch) [--source review|status|watch|branches] [--include-stopped] [--run run_id[,run_id]] [--limit 1] [--dry-run] [--apply-id id] [--resume] [--resume-filter failed|pending|failed,pending] [--until-empty] [--continue-prefix prefix] [--max-polls 10] [--interval-ms 2000] [--concurrency 1]
-  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--execute-next|--execute-queued] [--max-actions 10] [--until-empty] [--max-polls 10] [--interval-ms 2000] [--continue-on-failure] [--detach] [--worker-id id] [--action-executions] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
+  runs session-applies <name> [--server] [--apply-id id] [--ack-reset-audit] [--summary] [--action-queue] [--execute-next|--execute-queued] [--max-actions 10] [--until-empty] [--max-polls 10] [--interval-ms 2000] [--continue-on-failure] [--detach] [--worker-id id] [--action-executions] [--execution execution_id] [--summary-group resume-needed|ready-to-review|drain-prefixes|drain-resets] [--continue-drains] [--drain-prefix prefix[,prefix]] [--ready-results] [--format json|shell] [--checkout-dir ./checkouts] [--changed-only] [--changed-path path[,path]]
   runs session-drains <name> [--drain-prefix prefix[,prefix]] [--format json|shell]
   runs session-drain-continuations <name> [--queue] [--execute continuation_id|--execute-next|--execute-queued|--reset-running|--reset-failed] [--older-than-ms 600000] [--continuation id[,id]] [--detach] [--worker-id id] [--max-continuations 10] [--status queued,running,executed,failed] [--drain-prefix prefix[,prefix]] [--dry-run] [--max-polls 10] [--interval-ms 2000] [--limit 20] [--format json]
   runs session-drain-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]

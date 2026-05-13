@@ -904,7 +904,8 @@ resumed/skipped run ids, branch names, and skipped reasons so operators can see
 partial/noop recovery attempts without opening each execution record first.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
---action-executions` lists those records,
+--action-executions` lists those records; add `--execution <execution_id>` to
+inspect one recorded apply-action attempt,
 `runs session-applies <name> --server --apply-id <id> --ack-reset-audit` to
 acknowledge a drain-continuation reset audit through the server API, or
 `--apply-id <id>` to inspect the failed executions, pending commands,

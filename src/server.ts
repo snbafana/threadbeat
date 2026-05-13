@@ -334,10 +334,17 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const limit = parseOptionalInteger(query.limit) ?? 20;
       const applyIds = parseOptionalList(query.applyId);
       const applyIdFilter = applyIds.length > 0 ? new Set(applyIds) : null;
+      const executionIds = [
+        ...parseOptionalList(query.execution),
+        ...parseOptionalList(query.executionId),
+        ...parseOptionalList(query.executionIds),
+      ];
+      const executionIdFilter = executionIds.length > 0 ? new Set(executionIds) : null;
       const actionFilter = query.action ? new Set(parseOptionalApplyActions(query.action)) : null;
       const statusFilter = query.status ? new Set(parseOptionalApplyActionExecutionStatuses(query.status)) : null;
       const records = await listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
       const executions = records
+        .filter((record) => !executionIdFilter || executionIdFilter.has(record.executionId))
         .filter((record) => !applyIdFilter || applyIdFilter.has(record.applyId))
         .filter((record) => !actionFilter || actionFilter.has(record.action))
         .filter((record) => !statusFilter || statusFilter.has(record.status))
@@ -347,6 +354,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         count: executions.length,
         filter: {
+          executionIds,
           applyIds,
           action: actionFilter ? [...actionFilter] : [],
           status: statusFilter ? [...statusFilter] : [],
