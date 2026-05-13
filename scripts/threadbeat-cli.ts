@@ -5142,18 +5142,39 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-branch-recovery-executions") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
     if (options.server !== "1") {
       throw new Error("runs session-branch-recovery-executions requires --server");
     }
-    await printJson(await fetchWorkerSessionBranchRecoveryExecutions(
-      required(sessionName, "runs session-branch-recovery-executions <session> --server"),
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-branch-recovery-executions --format must be json or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-branch-recovery-executions --format shell requires --commands-only");
+    }
+    const requiredSessionName = required(sessionName, "runs session-branch-recovery-executions <session> --server");
+    const response = await fetchWorkerSessionBranchRecoveryExecutions(
+      requiredSessionName,
       {
         executionId: options.execution,
         runId: options.run,
         status: options.status,
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
       },
-    ));
+    );
+    if (options["commands-only"] === "1") {
+      const commands = workerSessionBranchRecoveryExecutionCommands(requiredSessionName, response.executions, {
+        checkoutRoot: options["checkout-dir"] ?? `./checkouts/${requiredSessionName}-branch-recovery`,
+      });
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        const { executions, ...rest } = response;
+        await printJson({ ...rest, commands });
+      }
+      return;
+    }
+    await printJson(response);
     return;
   }
   if (subcommandName === "session-branches") {
@@ -6642,6 +6663,94 @@ function printCommandQueueShell(commands: CommandQueueOutput["commands"]): void 
   }
 }
 
+function workerSessionBranchRecoveryExecutionCommands(
+  sessionName: string,
+  executions: WorkerSessionBranchRecoveryExecutionRecord[],
+  options: { checkoutRoot: string },
+): Array<{
+  scope: "branch_recovery_execution" | "branch_recovery_run";
+  action: "inspect_execution" | "inspect_run" | "inspect_branch" | "review_branch";
+  reason: string;
+  executionId: string;
+  status: WorkerSessionBranchRecoveryExecutionRecord["status"];
+  runId: string | null;
+  workerId: string | null;
+  branchName: string | null;
+  resultCommit: string | null;
+  command: string[];
+}> {
+  return executions.flatMap((execution) => {
+    const inspectExecution = {
+      scope: "branch_recovery_execution" as const,
+      action: "inspect_execution" as const,
+      reason: execution.status,
+      executionId: execution.executionId,
+      status: execution.status,
+      runId: null,
+      workerId: null,
+      branchName: null,
+      resultCommit: null,
+      command: [
+        "npm",
+        "run",
+        "cli",
+        "--",
+        "runs",
+        "session-branch-recovery-executions",
+        sessionName,
+        "--server",
+        "--execution",
+        execution.executionId,
+      ],
+    };
+    const resumed = execution.resumed.map((run) => {
+      const resultCommit = run.resultCommit ?? null;
+      const checkoutDir = `${options.checkoutRoot}/${execution.executionId}/${run.runId}`;
+      return {
+        scope: "branch_recovery_run" as const,
+        action: resultCommit ? "review_branch" as const : "inspect_run" as const,
+        reason: resultCommit ? "result_commit_available" : "resumed_branch",
+        executionId: execution.executionId,
+        status: execution.status,
+        runId: run.runId,
+        workerId: run.workerId,
+        branchName: run.branchName ?? null,
+        resultCommit,
+        command: resultCommit
+          ? ["npm", "run", "cli", "--", "runs", "review", run.runId, "--checkout-dir", checkoutDir]
+          : ["npm", "run", "cli", "--", "runs", "inspect", run.runId],
+      };
+    });
+    const skipped = execution.skipped.map((run) => ({
+      scope: "branch_recovery_run" as const,
+      action: "inspect_branch" as const,
+      reason: run.reason,
+      executionId: execution.executionId,
+      status: execution.status,
+      runId: run.runId,
+      workerId: run.workerId,
+      branchName: run.branchName ?? null,
+      resultCommit: run.resultCommit ?? null,
+      command: [
+        "npm",
+        "run",
+        "cli",
+        "--",
+        "runs",
+        "session-branches",
+        sessionName,
+        "--server",
+        "--run",
+        run.runId,
+        "--limit",
+        "1",
+        "--commands-only",
+      ],
+    }));
+    return [inspectExecution, ...resumed, ...skipped];
+  });
+}
+
 function workerSessionControlPlaneAdvanceConfirmationCommands(
   advances: WorkerSessionControlPlaneAdvancesResponse["advances"],
 ): ControlPlaneAdvanceConfirmationCommand[] {
@@ -7070,8 +7179,24 @@ type WorkerSessionBranchRecoveryExecutionRecord = {
   status: "executed" | "partial" | "noop";
   filter: Record<string, unknown>;
   selected: number;
-  resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
-  skipped: Array<{ runId: string; reason: string; workerId: string | null }>;
+  resumed: Array<{
+    agentId?: string;
+    runId: string;
+    objective?: string;
+    branchName?: string;
+    resultCommit?: string | null;
+    status?: string;
+    workerId: string | null;
+  }>;
+  skipped: Array<{
+    agentId?: string;
+    runId: string;
+    objective?: string;
+    branchName?: string;
+    resultCommit?: string | null;
+    reason: string;
+    workerId: string | null;
+  }>;
   nextStep?: unknown;
 };
 
@@ -12099,7 +12224,7 @@ Commands:
   runs session-control-plane-tick-workers-next <name> --server
   runs restart-control-plane-tick-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-tick-workers <name> --server [--worker-id id] [--retire] [--lines 20]
-  runs session-branch-recovery-executions <name> --server [--execution execution_id[,execution_id]] [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
+  runs session-branch-recovery-executions <name> --server [--execution execution_id[,execution_id]] [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20] [--commands-only] [--checkout-dir ./checkouts/name-branch-recovery] [--format json|shell]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--branch-action resume_branch|review_branch] [--run run_id[,run_id]] [--limit 20] [--offset 20] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]

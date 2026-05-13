@@ -84,6 +84,49 @@ try {
     "10",
   ]);
   assert.deepEqual(byStatus.executions.map((execution) => execution.executionId), [older.executionId]);
+
+  const commandQueue = await cliJson<{
+    commands: Array<{ action: string; executionId: string; runId: string | null; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-recovery-executions",
+    sessionName,
+    "--server",
+    "--execution",
+    older.executionId,
+    "--commands-only",
+    "--checkout-dir",
+    "./checkouts/branch-recovery-smoke",
+  ]);
+  assert.deepEqual(commandQueue.commands.map((command) => command.action), ["inspect_execution", "inspect_branch"]);
+  assert.deepEqual(commandQueue.commands.map((command) => command.executionId), [older.executionId, older.executionId]);
+  assert.deepEqual(commandQueue.commands.map((command) => command.runId), [null, "run-b"]);
+  assert.deepEqual(commandQueue.commands[0]?.command, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-branch-recovery-executions",
+    sessionName,
+    "--server",
+    "--execution",
+    older.executionId,
+  ]);
+
+  const { stdout: shellCommands } = await cli(baseUrl, [
+    "runs",
+    "session-branch-recovery-executions",
+    sessionName,
+    "--server",
+    "--execution",
+    newer.executionId,
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(shellCommands, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId}`));
+  assert.match(shellCommands, /runs inspect run-a/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", sessionName), { recursive: true, force: true });
@@ -141,10 +184,15 @@ async function writeBranchRecoveryExecution(options: {
 }
 
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
+  const { stdout } = await cli(baseUrl, args);
+  return JSON.parse(stdout) as T;
+}
+
+async function cli(baseUrl: string, args: string[]): Promise<{ stdout: string }> {
   const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
     cwd: path.resolve("."),
     env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
     maxBuffer: 1024 * 1024,
   });
-  return JSON.parse(stdout) as T;
+  return { stdout };
 }
