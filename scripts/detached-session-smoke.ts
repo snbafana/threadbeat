@@ -112,6 +112,126 @@ async function assertControlPlaneWorkerDrill(baseUrl: string, sessionName: strin
   ]);
 }
 
+async function assertControlPlaneWorkerReconcile(baseUrl: string, sessionName: string): Promise<void> {
+  const reconcileTickWorkerId = "detached-smoke-control-plane-reconcile-worker";
+  await cliJson(baseUrl, [
+    "runs",
+    "start-control-plane-tick-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    reconcileTickWorkerId,
+    "--dry-run",
+    "--max-ticks",
+    "50",
+    "--interval-ms",
+    "1000",
+    "--lines",
+    "5",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    reconcileTickWorkerId,
+    "--lines",
+    "5",
+  ]);
+  const dryRunReconcile = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    confirmed: boolean;
+    passed: boolean | null;
+    filter: { workerId: string | null; kind: string | null; includeRetired: boolean; limit: number | null };
+    plan: { count: number; skipped: number; steps: Array<{ kind: string; workerId: string; action: string; command: string[] }>; commands: string[][] };
+    executed: unknown[];
+    after: null;
+    checks: { plannedCount: number; executedCount: number | null; remainingCount: number | null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    reconcileTickWorkerId,
+    "--kind",
+    "control-plane-tick",
+    "--dry-run",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(dryRunReconcile.ok, true);
+  assert.equal(dryRunReconcile.session, sessionName);
+  assert.equal(dryRunReconcile.dryRun, true);
+  assert.equal(dryRunReconcile.confirmed, false);
+  assert.equal(dryRunReconcile.passed, null);
+  assert.equal(dryRunReconcile.filter.workerId, reconcileTickWorkerId);
+  assert.equal(dryRunReconcile.filter.kind, "control_plane_tick");
+  assert.equal(dryRunReconcile.filter.includeRetired, false);
+  assert.equal(dryRunReconcile.plan.count, 1);
+  assert.equal(dryRunReconcile.plan.steps[0]?.workerId, reconcileTickWorkerId);
+  assert.equal(dryRunReconcile.plan.steps[0]?.action, "restart_control_plane_tick_worker");
+  assert.equal(
+    dryRunReconcile.plan.commands[0]?.join(" "),
+    `npm run cli -- runs restart-control-plane-tick-workers ${sessionName} --server --worker-id ${reconcileTickWorkerId}`,
+  );
+  assert.equal(dryRunReconcile.executed.length, 0);
+  assert.equal(dryRunReconcile.after, null);
+  assert.equal(dryRunReconcile.checks.plannedCount, 1);
+  assert.equal(dryRunReconcile.checks.executedCount, null);
+  assert.equal(dryRunReconcile.checks.remainingCount, null);
+
+  const confirmedReconcile = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    confirmed: boolean;
+    passed: boolean;
+    plan: { count: number; steps: Array<{ kind: string; workerId: string; action: string }> };
+    executed: Array<{ kind: string; workerId: string; restartCount: number | null }>;
+    remaining: Array<{ kind: string; workerId: string }>;
+    checks: { plannedCount: number; executedCount: number; remainingCount: number };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    reconcileTickWorkerId,
+    "--kind",
+    "control-plane-tick",
+    "--confirm",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(confirmedReconcile.ok, true);
+  assert.equal(confirmedReconcile.session, sessionName);
+  assert.equal(confirmedReconcile.dryRun, false);
+  assert.equal(confirmedReconcile.confirmed, true);
+  assert.equal(confirmedReconcile.passed, true);
+  assert.equal(confirmedReconcile.plan.count, 1);
+  assert.equal(confirmedReconcile.executed.length, 1);
+  assert.equal(confirmedReconcile.executed[0]?.workerId, reconcileTickWorkerId);
+  assert.equal(confirmedReconcile.executed[0]?.kind, "control_plane_tick");
+  assert.equal(confirmedReconcile.executed[0]?.restartCount, 1);
+  assert.equal(confirmedReconcile.remaining.length, 0);
+  assert.equal(confirmedReconcile.checks.plannedCount, 1);
+  assert.equal(confirmedReconcile.checks.executedCount, 1);
+  assert.equal(confirmedReconcile.checks.remainingCount, 0);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    reconcileTickWorkerId,
+    "--retire",
+  ]);
+}
+
 try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
@@ -3683,6 +3803,7 @@ try {
     `npm run cli -- runs session-control-plane-timeline ${sessionName} --server`,
   );
   await assertControlPlaneWorkerDrill(baseUrl, sessionName);
+  await assertControlPlaneWorkerReconcile(baseUrl, sessionName);
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };

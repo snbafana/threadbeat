@@ -5238,6 +5238,31 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-reconcile-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-reconcile-workers requires --server");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (!dryRun && !confirm) {
+      throw new Error("runs session-control-plane-reconcile-workers requires --confirm or --dry-run");
+    }
+    await printJson(await reconcileWorkerSessionControlPlaneWorkers(
+      required(sessionName, "runs session-control-plane-reconcile-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        kind: options.kind ? parseControlPlaneWorkerKind(options.kind) : null,
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+        dryRun,
+        confirm,
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-advance-workers-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -10275,6 +10300,208 @@ type ControlPlaneWorkerDrillSnapshot = {
   };
 };
 
+type ControlPlaneWorkerReconcilePlanStep = {
+  kind: ControlPlaneWorkerKind;
+  action: string | null;
+  reason: string | null;
+  workerId: string;
+  command: string[];
+};
+
+function controlPlaneWorkerStepKey(step: { kind: ControlPlaneWorkerKind; workerId: string | null }): string {
+  return `${step.kind}:${step.workerId ?? ""}`;
+}
+
+function controlPlaneWorkerReconcilePlan(
+  nextSteps: ControlPlaneWorkerAggregateNextStep[],
+  options: { workerId?: string; kind: ControlPlaneWorkerKind | null; limit: number | null },
+): {
+  skipped: ControlPlaneWorkerAggregateNextStep[];
+  planned: ControlPlaneWorkerReconcilePlanStep[];
+} {
+  const seen = new Set<string>();
+  const planned: ControlPlaneWorkerReconcilePlanStep[] = [];
+  const skipped: ControlPlaneWorkerAggregateNextStep[] = [];
+  for (const step of nextSteps) {
+    if (options.workerId && step.workerId !== options.workerId) {
+      skipped.push(step);
+      continue;
+    }
+    if (options.kind && step.kind !== options.kind) {
+      skipped.push(step);
+      continue;
+    }
+    if (!step.workerId || step.command.length === 0) {
+      skipped.push(step);
+      continue;
+    }
+    const key = controlPlaneWorkerStepKey({ kind: step.kind, workerId: step.workerId });
+    if (seen.has(key)) {
+      skipped.push(step);
+      continue;
+    }
+    if (options.limit !== null && planned.length >= options.limit) {
+      skipped.push(step);
+      continue;
+    }
+    seen.add(key);
+    planned.push({
+      kind: step.kind,
+      action: step.action,
+      reason: step.reason,
+      workerId: step.workerId,
+      command: step.command,
+    });
+  }
+  return { skipped, planned };
+}
+
+async function reconcileWorkerSessionControlPlaneWorkers(
+  sessionName: string,
+  options: {
+    workerId?: string;
+    kind: ControlPlaneWorkerKind | null;
+    includeRetired: boolean;
+    lines: number;
+    limit: number | null;
+    dryRun: boolean;
+    confirm: boolean;
+  },
+): Promise<{
+  ok: true;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  passed: boolean | null;
+  observedAt: string;
+  completedAt: string;
+  filter: {
+    workerId: string | null;
+    kind: ControlPlaneWorkerKind | null;
+    includeRetired: boolean;
+    lines: number;
+    limit: number | null;
+  };
+  before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>;
+  after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>> | null;
+  plan: {
+    count: number;
+    skipped: number;
+    steps: ControlPlaneWorkerReconcilePlanStep[];
+    commands: string[][];
+  };
+  executed: Array<ControlPlaneWorkerReconcilePlanStep & {
+    result: unknown;
+    restartCount: number | null;
+  }>;
+  remaining: ControlPlaneWorkerReconcilePlanStep[] | null;
+  checks: {
+    plannedCount: number;
+    executedCount: number | null;
+    remainingCount: number | null;
+  };
+}> {
+  const observedAt = new Date().toISOString();
+  const before = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    workerId: options.workerId,
+    includeRetired: options.includeRetired,
+    lines: options.lines,
+  });
+  const plan = controlPlaneWorkerReconcilePlan(before.nextSteps, options);
+  if (options.dryRun || !options.confirm) {
+    return {
+      ok: true,
+      session: sessionName,
+      dryRun: options.dryRun,
+      confirmed: options.confirm,
+      passed: null,
+      observedAt,
+      completedAt: new Date().toISOString(),
+      filter: {
+        workerId: options.workerId ?? null,
+        kind: options.kind,
+        includeRetired: options.includeRetired,
+        lines: options.lines,
+        limit: options.limit,
+      },
+      before,
+      after: null,
+      plan: {
+        count: plan.planned.length,
+        skipped: plan.skipped.length,
+        steps: plan.planned,
+        commands: plan.planned.map((step) => step.command),
+      },
+      executed: [],
+      remaining: null,
+      checks: {
+        plannedCount: plan.planned.length,
+        executedCount: null,
+        remainingCount: null,
+      },
+    };
+  }
+
+  const executed: Array<ControlPlaneWorkerReconcilePlanStep & { result: unknown; restartCount: number | null }> = [];
+  for (const step of plan.planned) {
+    const result = await restartControlPlaneWorkerForDrill(sessionName, {
+      kind: step.kind,
+      workerId: step.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+    });
+    executed.push({
+      ...step,
+      result,
+      restartCount: numberFromUnknown(plainRecord(result)?.count),
+    });
+  }
+  const after = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    workerId: options.workerId,
+    includeRetired: options.includeRetired,
+    lines: options.lines,
+  });
+  const executedKeys = new Set(executed.map((step) => controlPlaneWorkerStepKey(step)));
+  const remaining = controlPlaneWorkerReconcilePlan(after.nextSteps, {
+    workerId: options.workerId,
+    kind: options.kind,
+    limit: null,
+  }).planned.filter((step) => executedKeys.has(controlPlaneWorkerStepKey(step)));
+  return {
+    ok: true,
+    session: sessionName,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    passed: executed.length === plan.planned.length
+      && executed.every((step) => (step.restartCount ?? 0) > 0)
+      && remaining.length === 0,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    filter: {
+      workerId: options.workerId ?? null,
+      kind: options.kind,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+      limit: options.limit,
+    },
+    before,
+    after,
+    plan: {
+      count: plan.planned.length,
+      skipped: plan.skipped.length,
+      steps: plan.planned,
+      commands: plan.planned.map((step) => step.command),
+    },
+    executed,
+    remaining,
+    checks: {
+      plannedCount: plan.planned.length,
+      executedCount: executed.length,
+      remainingCount: remaining.length,
+    },
+  };
+}
+
 async function executeWorkerSessionControlPlaneWorkerDrill(
   sessionName: string,
   options: {
@@ -13907,6 +14134,7 @@ Commands:
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|shell]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]
   runs restart-control-plane-advance-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-advance-workers <name> --server [--worker-id id] [--retire] [--lines 20]
