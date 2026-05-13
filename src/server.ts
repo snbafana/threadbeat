@@ -36,6 +36,12 @@ import {
   writeWorkerSessionBranchRecoveryExecutionRecord,
 } from "./workerSessionBranchRecovery.js";
 import {
+  latestResultReviewByRunCommit,
+  listWorkerSessionResultReviewRecords,
+  resultReviewRunCommitKey,
+  writeWorkerSessionResultReviewRecord,
+} from "./workerSessionResultReviews.js";
+import {
   listWorkerSessionControlPlaneAdvanceRecords,
   summarizeWorkerSessionControlPlaneAdvanceRecords,
   writeWorkerSessionControlPlaneAdvanceRecord,
@@ -459,6 +465,58 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         filter: { executionIds, status: statusFilter ? [...statusFilter] : [], runIds, limit },
         executions,
       };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/result-reviews", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const limit = parseOptionalInteger(query.limit) ?? 20;
+      const reviewIds = [
+        ...parseOptionalList(query.reviewId),
+        ...parseOptionalList(query.reviewIds),
+      ];
+      const reviewIdFilter = reviewIds.length > 0 ? new Set(reviewIds) : null;
+      const runIds = [
+        ...parseOptionalList(query.runId),
+        ...parseOptionalList(query.runIds),
+      ];
+      const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
+      const actionFilter = query.action ? new Set(parseOptionalResultReviewActions(query.action)) : null;
+      const records = await listWorkerSessionResultReviewRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
+      const reviews = records
+        .filter((record) => !reviewIdFilter || reviewIdFilter.has(record.reviewId))
+        .filter((record) => !runIdFilter || runIdFilter.has(record.runId))
+        .filter((record) => !actionFilter || actionFilter.has(record.action))
+        .slice(0, limit);
+      return {
+        ok: true,
+        session: name,
+        count: reviews.length,
+        filter: { reviewIds, runIds, action: actionFilter ? [...actionFilter] : [], limit },
+        reviews,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/result-reviews", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const runId = parseString(body.runId, "result review runId");
+      const action = parseRequiredResultReviewAction(body.action ?? "reviewed");
+      return await recordWorkerSessionResultReview(settings, db, name, {
+        runId,
+        action,
+        dryRun: parseBoolean(body.dryRun, false),
+        reviewedBy: parseOptionalString(body.reviewedBy) ?? "server",
+        note: parseOptionalString(body.note),
+      });
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -3622,7 +3680,12 @@ const readWorkerSessionControlPlaneStatus = async (
       counts: ReturnType<typeof summarizeBranchRecoveryExecutionStatuses>;
     };
   };
-  results: Awaited<ReturnType<typeof summarizeWorkerSessionResultInspection>>;
+  results: Awaited<ReturnType<typeof summarizeWorkerSessionResultInspection>> & {
+    reviews: {
+      count: number;
+      recent: Awaited<ReturnType<typeof listWorkerSessionResultReviewRecords>>;
+    };
+  };
   staleRuns: Awaited<ReturnType<typeof summarizeWorkerSessionStaleRunRecovery>>;
   recovery: {
     count: number;
@@ -3648,7 +3711,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneTickWorkers,
     controlPlaneTickWorkerNextSteps,
     branchRecovery,
-    resultInspection,
+    resultReviews,
     staleRunRecovery,
     branchRecoveryExecutions,
     applyActionExecutions,
@@ -3669,7 +3732,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
-    summarizeWorkerSessionResultInspection(db, session, lines),
+    listWorkerSessionResultReviewRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
     summarizeWorkerSessionStaleRunRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, lines),
@@ -3688,6 +3751,7 @@ const readWorkerSessionControlPlaneStatus = async (
     }),
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
+  const resultInspection = await summarizeWorkerSessionResultInspection(db, session, lines, resultReviews);
   return {
     ok: true,
     session: name,
@@ -3715,7 +3779,13 @@ const readWorkerSessionControlPlaneStatus = async (
         counts: summarizeBranchRecoveryExecutionStatuses(branchRecoveryExecutions),
       },
     },
-    results: resultInspection,
+    results: {
+      ...resultInspection,
+      reviews: {
+        count: resultReviews.length,
+        recent: resultReviews.slice(0, lines),
+      },
+    },
     staleRuns: staleRunRecovery,
     recovery: {
       count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneAdvanceWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count,
@@ -5248,6 +5318,22 @@ const parseOptionalBranchRecoveryExecutionStatuses = (value: unknown): Array<"ex
   return statuses as Array<"executed" | "partial" | "noop">;
 };
 
+const parseRequiredResultReviewAction = (value: unknown): "reviewed" | "skipped" => {
+  const action = parseString(value, "result review action");
+  const allowed = new Set(["reviewed", "skipped"]);
+  if (!allowed.has(action)) throw new Error(`unknown result review action: ${action}`);
+  return action as "reviewed" | "skipped";
+};
+
+const parseOptionalResultReviewActions = (value: unknown): Array<"reviewed" | "skipped"> => {
+  const actions = parseOptionalList(value);
+  const allowed = new Set(["reviewed", "skipped"]);
+  for (const action of actions) {
+    if (!allowed.has(action)) throw new Error(`unknown result review action: ${action}`);
+  }
+  return actions as Array<"reviewed" | "skipped">;
+};
+
 const parseCommand = (value: unknown): string[] => {
   if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
     if (value.length === 0) throw new Error("command must not be empty");
@@ -5488,8 +5574,9 @@ const summarizeWorkerSessionResultInspection = async (
   db: Database,
   session: Awaited<ReturnType<typeof readWorkerSession>>,
   nextStepLimit: number,
+  resultReviews: Awaited<ReturnType<typeof listWorkerSessionResultReviewRecords>>,
 ): Promise<{
-  counts: { total: number; resultCommits: number };
+  counts: { total: number; resultCommits: number; reviewed: number; pending: number };
   actions: { review_result: number };
   nextSteps: Array<{
     action: "review_result";
@@ -5511,13 +5598,15 @@ const summarizeWorkerSessionResultInspection = async (
   }>;
 }> => {
   const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+  const latestReviews = latestResultReviewByRunCommit(resultReviews);
   const runs = (await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
     return (await db.listAgentRuns(agentId, ["completed", "stopped"]))
       .filter((run) => run.result_commit !== null)
       .filter((run) => run.worker_id === null || sessionWorkerIds.has(run.worker_id))
       .map((run) => ({ agentId, run: { ...run, result_commit: run.result_commit as string } }));
   }))).flat();
-  const nextSteps = runs.map(({ agentId, run }) => {
+  const pendingRuns = runs.filter(({ run }) => !latestReviews.has(resultReviewRunCommitKey(run.id, run.result_commit)));
+  const nextSteps = pendingRuns.map(({ agentId, run }) => {
     const checkoutDir = `./checkouts/${session.session}-control-plane-results/${run.id}`;
     const reviewRun = ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", checkoutDir];
     return {
@@ -5541,13 +5630,83 @@ const summarizeWorkerSessionResultInspection = async (
   });
   return {
     counts: {
-      total: nextSteps.length,
-      resultCommits: nextSteps.length,
+      total: runs.length,
+      resultCommits: runs.length,
+      reviewed: runs.length - pendingRuns.length,
+      pending: pendingRuns.length,
     },
     actions: {
-      review_result: nextSteps.length,
+      review_result: pendingRuns.length,
     },
     nextSteps: nextSteps.slice(0, nextStepLimit),
+  };
+};
+
+const recordWorkerSessionResultReview = async (
+  settings: Settings,
+  db: Database,
+  sessionName: string,
+  options: {
+    runId: string;
+    action: "reviewed" | "skipped";
+    dryRun: boolean;
+    reviewedBy: string;
+    note?: string;
+  },
+): Promise<{
+  ok: true;
+  session: string;
+  dryRun: boolean;
+  recorded: boolean;
+  reviewPath?: string;
+  review: Awaited<ReturnType<typeof writeWorkerSessionResultReviewRecord>>["record"];
+}> => {
+  const session = await readWorkerSession(settings.projectRoot, sessionName);
+  const run = await db.getAgentRun(options.runId);
+  if (!run) throw new Error(`run ${options.runId} does not exist`);
+  const sessionAgentIds = new Set(workerSessionAgentIds(session));
+  if (!sessionAgentIds.has(run.agent_id)) {
+    throw new Error(`run ${run.id} does not belong to worker session ${session.session}`);
+  }
+  const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+  if (run.worker_id !== null && !sessionWorkerIds.has(run.worker_id)) {
+    throw new Error(`run ${run.id} is claimed by worker ${run.worker_id}, outside session ${session.session}`);
+  }
+  if (!run.result_commit) {
+    throw new Error(`run ${run.id} has no result commit to review`);
+  }
+  const checkoutDir = `./checkouts/${session.session}-control-plane-results/${run.id}`;
+  const reviewInput = {
+    session: session.session,
+    observedAt: new Date().toISOString(),
+    action: options.action,
+    runId: run.id,
+    agentId: run.agent_id,
+    objective: run.objective,
+    branchName: run.run_branch,
+    resultCommit: run.result_commit,
+    workerId: run.worker_id,
+    reviewedBy: options.reviewedBy,
+    ...(options.note ? { note: options.note } : {}),
+    command: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", checkoutDir],
+  };
+  if (options.dryRun) {
+    return {
+      ok: true,
+      session: session.session,
+      dryRun: true,
+      recorded: false,
+      review: { ...reviewInput, reviewId: "dry-run" },
+    };
+  }
+  const written = await writeWorkerSessionResultReviewRecord(settings.projectRoot, reviewInput);
+  return {
+    ok: true,
+    session: session.session,
+    dryRun: false,
+    recorded: true,
+    reviewPath: written.path,
+    review: written.record,
   };
 };
 

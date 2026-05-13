@@ -4557,6 +4557,45 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(status);
     return;
   }
+  if (subcommandName === "session-result-reviews") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-result-reviews requires --server");
+    }
+    const requiredSessionName = required(sessionName, "runs session-result-reviews <session> --server");
+    const recordAction = options["record-reviewed"] === "1"
+      ? "reviewed"
+      : options["record-skipped"] === "1"
+        ? "skipped"
+        : null;
+    if (options["record-reviewed"] === "1" && options["record-skipped"] === "1") {
+      throw new Error("runs session-result-reviews accepts only one of --record-reviewed or --record-skipped");
+    }
+    if (recordAction) {
+      await printJson(await recordWorkerSessionResultReview(
+        requiredSessionName,
+        {
+          runId: required(options.run, "runs session-result-reviews <session> --server --record-reviewed|--record-skipped --run <run>"),
+          action: recordAction,
+          dryRun: options["dry-run"] === "1",
+          reviewedBy: options["reviewed-by"],
+          note: options.note,
+        },
+      ));
+      return;
+    }
+    await printJson(await fetchWorkerSessionResultReviews(
+      requiredSessionName,
+      {
+        reviewId: options.review,
+        runId: options.run,
+        action: options.action,
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-recover-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6777,7 +6816,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -7547,6 +7586,39 @@ type WorkerSessionBranchRecoveryExecutionsResponse = {
   executions: WorkerSessionBranchRecoveryExecutionRecord[];
 };
 
+type WorkerSessionResultReviewRecord = {
+  reviewId: string;
+  session: string;
+  observedAt: string;
+  action: "reviewed" | "skipped";
+  runId: string;
+  agentId: string;
+  objective: string;
+  branchName: string;
+  resultCommit: string;
+  workerId: string | null;
+  reviewedBy: string;
+  note?: string;
+  command: string[];
+};
+
+type WorkerSessionResultReviewsResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  filter: Record<string, unknown>;
+  reviews: WorkerSessionResultReviewRecord[];
+};
+
+type RecordWorkerSessionResultReviewResponse = {
+  ok: true;
+  session: string;
+  dryRun: boolean;
+  recorded: boolean;
+  reviewPath?: string;
+  review: WorkerSessionResultReviewRecord;
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -7764,7 +7836,7 @@ type WorkerSessionControlPlaneStatusResponse = {
     };
   };
   results: {
-    counts: { total: number; resultCommits: number };
+    counts: { total: number; resultCommits: number; reviewed: number; pending: number };
     actions: { review_result: number };
     nextSteps: Array<{
       action: "review_result";
@@ -7784,6 +7856,10 @@ type WorkerSessionControlPlaneStatusResponse = {
         reviewRun: string[];
       };
     }>;
+    reviews: {
+      count: number;
+      recent: WorkerSessionResultReviewRecord[];
+    };
   };
   staleRuns: {
     counts: {
@@ -8217,6 +8293,38 @@ async function fetchWorkerSessionBranchRecoveryExecutions(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/branch-recovery-executions`, params),
   ) as WorkerSessionBranchRecoveryExecutionsResponse;
+}
+
+async function fetchWorkerSessionResultReviews(
+  sessionName: string,
+  options: { reviewId?: string; runId?: string; action?: string; limit?: number | null },
+): Promise<WorkerSessionResultReviewsResponse> {
+  const params = new URLSearchParams();
+  if (options.reviewId) params.set("reviewId", options.reviewId);
+  if (options.runId) params.set("runId", options.runId);
+  if (options.action) params.set("action", options.action);
+  if (options.limit) params.set("limit", String(options.limit));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/result-reviews`, params),
+  ) as WorkerSessionResultReviewsResponse;
+}
+
+async function recordWorkerSessionResultReview(
+  sessionName: string,
+  options: { runId: string; action: "reviewed" | "skipped"; dryRun: boolean; reviewedBy?: string; note?: string },
+): Promise<RecordWorkerSessionResultReviewResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/result-reviews`,
+    {
+      runId: options.runId,
+      action: options.action,
+      dryRun: options.dryRun,
+      reviewedBy: options.reviewedBy,
+      note: options.note,
+    },
+  ) as RecordWorkerSessionResultReviewResponse;
 }
 
 async function fetchWorkerSessionDrainWorkers(
@@ -8761,7 +8869,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   if (summary.results.inspection.count > 0) {
     lines.push(
       "result_inspection:",
-      `  count: ${summary.results.inspection.count}`,
+      `  pending: ${summary.results.counts.pending}`,
+      `  reviewed: ${summary.results.counts.reviewed}`,
     );
     for (const step of summary.results.inspection.nextSteps) {
       lines.push(
@@ -8777,7 +8886,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   } else {
-    lines.push("result_inspection: none");
+    lines.push(`result_inspection: none (reviewed=${summary.results.counts.reviewed})`);
   }
   if (summary.recovery.recoverNext.recent.length > 0) {
     lines.push("recent_recover_next:");
@@ -8979,6 +9088,7 @@ function summarizeWorkerSessionControlPlaneStatus(
         >;
       }>;
     };
+    reviews: WorkerSessionControlPlaneStatusResponse["results"]["reviews"];
   };
   recovery: {
     count: number;
@@ -9075,6 +9185,7 @@ function summarizeWorkerSessionControlPlaneStatus(
           },
         })),
       },
+      reviews: status.results.reviews,
     },
     recovery: {
       count: status.recovery.count,
@@ -13069,6 +13180,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
