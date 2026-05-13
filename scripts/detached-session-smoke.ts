@@ -1443,7 +1443,7 @@ try {
     workers: {
       drain: { total: number; stopped: number; retired: number };
       applyAction: { total: number; stopped: number; retired: number };
-      controlPlaneTick: { total: number; stopped: number; retired: number };
+      controlPlaneTick: { total: number; stopped: number; retired: number; completed: number };
     };
     queues: {
       applyActions: { actionable: number; resetAudits: number };
@@ -1487,6 +1487,7 @@ try {
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.total, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.stopped, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.retired, 0);
+  assert.equal(controlPlaneStatus.workers.controlPlaneTick.completed, 0);
   assert.ok(controlPlaneStatus.branches.counts.total >= 1);
   assert.ok(controlPlaneStatus.branches.counts.ready >= 1);
   assert.equal(controlPlaneStatus.branches.counts.stoppedBranchWithoutResultCommit, controlPlaneStatus.branches.counts.ready);
@@ -1590,6 +1591,62 @@ try {
   assert.equal(controlPlaneTicks.ticks[0]?.tickId, controlPlaneTickLoopPreview.ticks[0]?.tickId);
   assert.equal(controlPlaneTicks.ticks[0]?.status, "dry_run");
   assert.equal(controlPlaneTicks.ticks[1]?.tickId, controlPlaneTickPreview.tick.tickId);
+  const completedControlPlaneTickWorker = await cliJson<{
+    ok?: true;
+    session: string;
+    worker: { workerId: string; pid: number | null; stdoutPath: string; stderrPath: string };
+  }>(baseUrl, [
+    "runs",
+    "start-control-plane-tick-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-control-plane-complete-worker",
+    "--dry-run",
+    "--max-ticks",
+    "1",
+    "--interval-ms",
+    "0",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(completedControlPlaneTickWorker.ok, true);
+  assert.equal(completedControlPlaneTickWorker.worker.workerId, "detached-smoke-control-plane-complete-worker");
+  type ControlPlaneTickWorkerListResponse = {
+    ok?: true;
+    session: string;
+    count: number;
+    workers: Array<{ workerId: string; alive: boolean; completedAt?: string; completionResult?: { exitCode: number | null; signal: string | null } }>;
+  };
+  let completedControlPlaneTickWorkers: ControlPlaneTickWorkerListResponse | null = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    completedControlPlaneTickWorkers = await cliJson<ControlPlaneTickWorkerListResponse>(baseUrl, [
+      "runs",
+      "session-control-plane-tick-workers",
+      sessionName,
+      "--server",
+      "--worker-id",
+      "detached-smoke-control-plane-complete-worker",
+    ]);
+    if (completedControlPlaneTickWorkers?.workers[0]?.completedAt) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(completedControlPlaneTickWorkers?.ok, true);
+  assert.equal(completedControlPlaneTickWorkers?.count, 1);
+  assert.equal(completedControlPlaneTickWorkers?.workers[0]?.workerId, "detached-smoke-control-plane-complete-worker");
+  assert.equal(completedControlPlaneTickWorkers?.workers[0]?.alive, false);
+  assert.ok(completedControlPlaneTickWorkers?.workers[0]?.completedAt);
+  assert.equal(completedControlPlaneTickWorkers?.workers[0]?.completionResult?.exitCode, 0);
+  const controlPlaneStatusAfterCompletedTickWorker = await cliJson<typeof controlPlaneStatus>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStatusAfterCompletedTickWorker.workers.controlPlaneTick.completed, 1);
+  assert.equal(controlPlaneStatusAfterCompletedTickWorker.recovery.actions.restart_control_plane_tick_worker ?? 0, 0);
   const controlPlaneTickWorker = await cliJson<{
     ok?: true;
     session: string;
@@ -1740,8 +1797,9 @@ try {
     "--lines",
     "20",
   ]);
-  assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.total, 1);
+  assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.total, 2);
   assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.retired, 1);
+  assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.completed, 1);
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };

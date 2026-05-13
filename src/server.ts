@@ -2359,7 +2359,7 @@ const readWorkerSessionControlPlaneStatus = async (
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
-    controlPlaneTick: { total: number; alive: number; stopped: number; retired: number };
+    controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   queues: {
     applyActions: ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["counts"];
@@ -2413,7 +2413,7 @@ const readWorkerSessionControlPlaneStatus = async (
       watch: summarizeControlPlaneWorkers(watchWorkers),
       drain: summarizeControlPlaneWorkers(drainWorkers),
       applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
-      controlPlaneTick: summarizeControlPlaneWorkers(controlPlaneTickWorkers),
+      controlPlaneTick: summarizeControlPlaneTickWorkers(controlPlaneTickWorkers),
     },
     queues: {
       applyActions: applyActionQueue.counts,
@@ -2761,6 +2761,17 @@ const summarizeControlPlaneWorkers = <T extends { alive: boolean; retiredAt?: st
   alive: workers.filter((worker) => worker.alive).length,
   stopped: workers.filter((worker) => !worker.alive && Boolean(worker.stoppedAt) && !worker.retiredAt).length,
   retired: workers.filter((worker) => Boolean(worker.retiredAt)).length,
+});
+
+const summarizeControlPlaneTickWorkers = <T extends { alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string }>(workers: T[]): {
+  total: number;
+  alive: number;
+  stopped: number;
+  retired: number;
+  completed: number;
+} => ({
+  ...summarizeControlPlaneWorkers(workers),
+  completed: workers.filter((worker) => !worker.alive && Boolean(worker.completedAt) && !worker.stoppedAt && !worker.retiredAt).length,
 });
 
 const summarizeDrainContinuationStatuses = <T extends { status?: string }>(records: T[]): {

@@ -17,6 +17,8 @@ export type ControlPlaneTickWorker = {
   restartedAt?: string;
   restartCount?: number;
   previousPid?: number | null;
+  completedAt?: string;
+  completionResult?: { exitCode: number | null; signal: NodeJS.Signals | null };
 };
 
 type StopProcessGroupResult = {
@@ -102,6 +104,7 @@ export async function startWorkerSessionControlPlaneTickWorker(
       stderrPath,
     };
     await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    recordControlPlaneTickWorkerCompletion(projectRoot, child, worker);
     return { ...worker, alive: processIsAlive(worker.pid) };
   } finally {
     await stdout.close();
@@ -314,6 +317,8 @@ export async function restartWorkerSessionControlPlaneTickWorker(
       stoppedAt: undefined,
       stopResult: undefined,
       retiredAt: undefined,
+      completedAt: undefined,
+      completionResult: undefined,
       restartedAt,
       restartCount: (worker.restartCount ?? 0) + 1,
       previousPid: worker.pid,
@@ -332,6 +337,7 @@ export async function restartWorkerSessionControlPlaneTickWorker(
       pid: child.pid ?? null,
     };
     await writeControlPlaneTickWorker(projectRoot, updated);
+    recordControlPlaneTickWorkerCompletion(projectRoot, child, updated);
     return {
       session: sessionName,
       count: 1,
@@ -353,6 +359,25 @@ export async function restartWorkerSessionControlPlaneTickWorker(
     await stdout.close();
     await stderr.close();
   }
+}
+
+function recordControlPlaneTickWorkerCompletion(projectRoot: string, child: ReturnType<typeof spawn>, worker: ControlPlaneTickWorker): void {
+  child.once("exit", (exitCode, signal) => {
+    void (async () => {
+      const current = await readControlPlaneTickWorker(projectRoot, worker.session, worker.workerId).catch((error) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      if (!current || current.pid !== child.pid || current.stoppedAt || current.retiredAt) return;
+      await writeControlPlaneTickWorker(projectRoot, {
+        ...current,
+        completedAt: new Date().toISOString(),
+        completionResult: { exitCode, signal },
+      });
+    })().catch((error) => {
+      console.error(`failed to record control-plane tick worker completion: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
 }
 
 async function listControlPlaneTickWorkerSessionNames(projectRoot: string): Promise<string[]> {
