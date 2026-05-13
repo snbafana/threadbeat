@@ -2622,6 +2622,7 @@ try {
   assert.match(stoppedWatchWorkers.stopped[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(stoppedWatchWorkers.workers[0]?.workerId, watchWorkerId);
   assert.match(stoppedWatchWorkers.workers[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  await assertStoredWatchWorkerRecord(detachedWorkerSessionName, watchWorkerId, { retiredAt: true });
   const apiWatchWorkerId = "smoke-api-session-watch-worker";
   const apiWatchWorkerWatchId = "smoke-api-session-watch-worker-record";
   const apiWatchWorkerStartResponse = await app.inject({
@@ -2710,6 +2711,7 @@ try {
   assert.match(apiWatchWorkerStop.stopped[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
   assert.equal(apiWatchWorkerStop.workers[0]?.workerId, apiWatchWorkerId);
   assert.match(apiWatchWorkerStop.workers[0]?.retiredAt ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  await assertStoredWatchWorkerRecord(detachedWorkerSessionName, apiWatchWorkerId, { retiredAt: true });
   await smokeApiWatchWorkerRestart(app, baseUrl, detachedWorkerSessionName);
   const watchRestartWatchWorkerId = "smoke-watch-worker-watch-restart";
   const watchRestartWatchWorkerWatchId = "smoke-watch-worker-watch-restart-record";
@@ -2875,6 +2877,7 @@ try {
   assert.equal(restartedWatchWorker.workers[0]?.restartCount, 1);
   assert.equal(restartedWatchWorker.workers[0]?.stoppedAt, undefined);
   assert.equal(restartedWatchWorker.workers[0]?.retiredAt, undefined);
+  await assertStoredWatchWorkerRecord(detachedWorkerSessionName, watchRestartWatchWorkerId, { restartCount: 1 });
   const detachedWorkerLogs = await cliJson<{
     session: string;
     workers: Array<{
@@ -8181,6 +8184,26 @@ async function smokeApiWatchWorkerRestart(
   assert.equal(apiRestartWatchWorker.workers[0]?.restartCount, 1);
   assert.equal(apiRestartWatchWorker.workers[0]?.stoppedAt, undefined);
   assert.equal(apiRestartWatchWorker.workers[0]?.retiredAt, undefined);
+  await assertStoredWatchWorkerRecord(detachedWorkerSessionName, apiRestartWatchWorkerId, { restartCount: 1 });
+}
+
+async function assertStoredWatchWorkerRecord(
+  sessionName: string,
+  workerId: string,
+  options: { retiredAt?: boolean; restartCount?: number },
+): Promise<void> {
+  const persisted = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "watch-workers",
+    sessionName,
+    `${workerId}.json`,
+  ), "utf8")) as Record<string, unknown>;
+  if (options.retiredAt) assert.match(String(persisted.retiredAt ?? ""), /^\d{4}-\d{2}-\d{2}T/);
+  if (options.restartCount !== undefined) assert.equal(persisted.restartCount, options.restartCount);
+  assert.equal("alive" in persisted, false);
+  assert.equal("stdout" in persisted, false);
+  assert.equal("stderr" in persisted, false);
 }
 
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {

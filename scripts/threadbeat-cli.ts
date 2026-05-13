@@ -9964,7 +9964,7 @@ async function startDetachedSessionWatchWorker(
       stdoutPath,
       stderrPath,
     };
-    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    await fs.writeFile(recordPath, `${JSON.stringify(toStoredSessionWatchWorker(worker), null, 2)}\n`, { flag: "wx" });
     return { ...worker, alive: processIsAlive(worker.pid) };
   } finally {
     await stdout.close();
@@ -10905,7 +10905,27 @@ async function readSessionWatchWorker(sessionName: string, workerId: string): Pr
 }
 
 async function writeSessionWatchWorker(worker: SessionWatchWorker): Promise<void> {
-  await fs.writeFile(sessionWatchWorkerPath(worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+  await fs.writeFile(sessionWatchWorkerPath(worker.session, worker.workerId), `${JSON.stringify(toStoredSessionWatchWorker(worker), null, 2)}\n`);
+}
+
+function toStoredSessionWatchWorker(worker: SessionWatchWorker): SessionWatchWorker {
+  return {
+    session: worker.session,
+    workerId: worker.workerId,
+    watchId: worker.watchId,
+    baseUrl: worker.baseUrl,
+    startedAt: worker.startedAt,
+    command: worker.command,
+    pid: worker.pid,
+    stdoutPath: worker.stdoutPath,
+    stderrPath: worker.stderrPath,
+    ...(worker.stoppedAt !== undefined ? { stoppedAt: worker.stoppedAt } : {}),
+    ...(worker.stopResult !== undefined ? { stopResult: worker.stopResult } : {}),
+    ...(worker.retiredAt !== undefined ? { retiredAt: worker.retiredAt } : {}),
+    ...(worker.restartedAt !== undefined ? { restartedAt: worker.restartedAt } : {}),
+    ...(worker.restartCount !== undefined ? { restartCount: worker.restartCount } : {}),
+    ...(worker.previousPid !== undefined ? { previousPid: worker.previousPid } : {}),
+  };
 }
 
 async function readSessionApplyRecord(sessionName: string, applyId: string): Promise<SessionApplyRecord | null> {
