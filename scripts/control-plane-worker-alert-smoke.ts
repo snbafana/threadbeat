@@ -393,6 +393,39 @@ try {
   assert.equal(statusBlockedAttempt?.detailCommand, "restart_worker_recovery");
   assert.equal(statusBlockedAttempt?.workerId, workerId);
   assert.equal(statusBlockedAttempt?.confirmed, false);
+
+  const recoverNextDryRun = await cliJson<{
+    ok: boolean;
+    session: string;
+    dryRun: boolean;
+    selected: { kind: string; action: string; count: number } | null;
+    command: string[] | null;
+    result: {
+      dryRun: boolean;
+      availableConfirmations: number;
+      attemptedConfirmations: number;
+      results: Array<{ sourceAdvanceId: string; dryRun: boolean; executionSafety: { confirmed: boolean; blocked: boolean } }>;
+    } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(recoverNextDryRun.ok, true);
+  assert.equal(recoverNextDryRun.session, sessionName);
+  assert.equal(recoverNextDryRun.dryRun, true);
+  assert.equal(recoverNextDryRun.selected?.kind, "confirmation_queue");
+  assert.equal(recoverNextDryRun.selected?.action, "drain_control_plane_confirmations");
+  assert.equal(recoverNextDryRun.selected?.count, 1);
+  assert.deepEqual(recoverNextDryRun.command, statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmationsDryRun);
+  assert.equal(recoverNextDryRun.result?.dryRun, true);
+  assert.equal(recoverNextDryRun.result?.availableConfirmations, 1);
+  assert.equal(recoverNextDryRun.result?.attemptedConfirmations, 1);
+  assert.equal(recoverNextDryRun.result?.results[0]?.sourceAdvanceId, statusBlockedAttempt?.advanceId);
+  assert.equal(recoverNextDryRun.result?.results[0]?.dryRun, true);
+  assert.equal(recoverNextDryRun.result?.results[0]?.executionSafety.confirmed, true);
+  assert.equal(recoverNextDryRun.result?.results[0]?.executionSafety.blocked, false);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
