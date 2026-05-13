@@ -3132,6 +3132,73 @@ try {
     && event.skippedRunIds?.includes(controlPlaneBlockedPlan.run.id)
     && event.skippedReasons?.includes("running_sandbox_present")
   )));
+  const controlPlaneAlerts = await cliJson<{
+    ok?: true;
+    session: string;
+    limit: number;
+    summary: { total: number; errors: number; warnings: number };
+    alerts: Array<{
+      surface: string;
+      severity: string;
+      reason: string;
+      count: number;
+      runId?: string;
+      command: string[];
+    }>;
+    recentTimeline: {
+      count: number;
+      counts: Record<string, number>;
+      events: Array<{ event: string; source: string; status?: string; skippedRunIds?: string[] }>;
+    };
+    commands: { fullStatus: string[]; timelineFailures: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--limit",
+    "10",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneAlerts.ok, true);
+  assert.equal(controlPlaneAlerts.session, sessionName);
+  assert.equal(controlPlaneAlerts.limit, 10);
+  assert.ok(controlPlaneAlerts.summary.total > 0);
+  assert.equal(controlPlaneAlerts.summary.total, controlPlaneAlerts.alerts.length);
+  assert.ok(controlPlaneAlerts.summary.warnings > 0);
+  assert.ok(controlPlaneAlerts.alerts.some((alert) => (
+    alert.surface === "branch"
+    && alert.reason === "running_sandbox_present"
+    && alert.runId === controlPlaneBlockedPlan.run.id
+    && alert.command.join(" ") === `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`
+  )));
+  assert.ok(controlPlaneAlerts.recentTimeline.events.some((event) => (
+    event.source === "branch_recovery_execution"
+    && event.event === "branch_recovery_executed"
+    && event.status === "noop"
+    && event.skippedRunIds?.includes(controlPlaneBlockedPlan.run.id)
+  )));
+  assert.equal(
+    controlPlaneAlerts.commands.fullStatus.join(" "),
+    `npm run cli -- runs session-control-plane-status ${sessionName} --server`,
+  );
+  assert.equal(
+    controlPlaneAlerts.commands.timelineFailures.join(" "),
+    `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --status failed,noop`,
+  );
+  const controlPlaneAlertCommands = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.ok(controlPlaneAlertCommands.split("\n").filter(Boolean).includes(
+    `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
+  ));
   const controlPlaneStatusAfterResume = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",
     "session-control-plane-status",

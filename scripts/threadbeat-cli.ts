@@ -4523,6 +4523,51 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : status);
     return;
   }
+  if (subcommandName === "session-control-plane-alerts") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-alerts requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-alerts --format must be json or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-alerts --format shell requires --commands-only");
+    }
+    const alerts = await fetchWorkerSessionControlPlaneAlerts(
+      required(sessionName, "runs session-control-plane-alerts <session> --server"),
+      {
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 20,
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      },
+    );
+    if (options["commands-only"] === "1") {
+      const commands = alerts.alerts.map((alert) => ({
+        scope: "control_plane_alert",
+        surface: alert.surface,
+        severity: alert.severity,
+        reason: alert.reason,
+        count: alert.count,
+        runId: alert.runId,
+        workerId: alert.workerId,
+        applyId: alert.applyId,
+        executionId: alert.executionId,
+        action: alert.action,
+        command: alert.command,
+      }));
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        const { alerts: _alerts, ...rest } = alerts;
+        await printJson({ ...rest, commands });
+      }
+      return;
+    }
+    await printJson(alerts);
+    return;
+  }
   if (subcommandName === "session-control-plane-advance") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6808,6 +6853,32 @@ type WorkerSessionControlPlaneStatusResponse = {
   };
 };
 
+type WorkerSessionControlPlaneAlertsResponse = {
+  ok: true;
+  session: string;
+  observedAt: string;
+  limit: number;
+  summary: { total: number; errors: number; warnings: number };
+  alerts: Array<{
+    surface: "apply_action" | "drain_continuation" | "branch" | "stale_run" | "worker_recovery";
+    severity: "error" | "warning";
+    reason: string;
+    count: number;
+    command: string[];
+    runId?: string;
+    workerId?: string;
+    applyId?: string;
+    executionId?: string;
+    action?: string;
+  }>;
+  recentTimeline: {
+    count: number;
+    counts: Record<string, number>;
+    events: WorkerSessionControlPlaneTimelineResponse["events"];
+  };
+  commands: { fullStatus: string[]; timelineFailures: string[] };
+};
+
 type WorkerSessionControlPlaneAdvanceAction = {
   surface: "stale_run" | "branch" | "apply_action" | "drain_continuation" | "worker_recovery";
   action: string;
@@ -7210,6 +7281,19 @@ async function fetchWorkerSessionControlPlaneStatus(
       new URLSearchParams({ lines: String(options.lines) }),
     ),
   ) as WorkerSessionControlPlaneStatusResponse;
+}
+
+async function fetchWorkerSessionControlPlaneAlerts(
+  sessionName: string,
+  options: { limit: number; lines: number },
+): Promise<WorkerSessionControlPlaneAlertsResponse> {
+  return await requestJson(
+    "GET",
+    withQuery(
+      `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-alerts`,
+      new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) }),
+    ),
+  ) as WorkerSessionControlPlaneAlertsResponse;
 }
 
 function selectWorkerSessionControlPlaneNextActions(
@@ -11228,6 +11312,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
+  runs session-control-plane-alerts <name> --server [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--limit 20]

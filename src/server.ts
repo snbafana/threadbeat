@@ -511,6 +511,19 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.get("/api/worker-sessions/:name/control-plane-alerts", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      return await readWorkerSessionControlPlaneAlerts(settings, db, name, {
+        limit: parseOptionalInteger(query.limit) ?? 20,
+        lines: parseOptionalInteger(query.lines) ?? 5,
+      });
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/control-plane-advance", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -3471,6 +3484,135 @@ const readWorkerSessionControlPlaneStatus = async (
 };
 
 type WorkerSessionControlPlaneStatus = Awaited<ReturnType<typeof readWorkerSessionControlPlaneStatus>>;
+
+type WorkerSessionControlPlaneAlert = {
+  surface: "apply_action" | "drain_continuation" | "branch" | "stale_run" | "worker_recovery";
+  severity: "error" | "warning";
+  reason: string;
+  count: number;
+  command: string[];
+  runId?: string;
+  workerId?: string;
+  applyId?: string;
+  executionId?: string;
+  action?: string;
+};
+
+const readWorkerSessionControlPlaneAlerts = async (
+  settings: Settings,
+  db: Database,
+  name: string,
+  options: { limit: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  limit: number;
+  summary: { total: number; errors: number; warnings: number };
+  alerts: WorkerSessionControlPlaneAlert[];
+  recentTimeline: {
+    count: number;
+    counts: Record<string, number>;
+    events: WorkerSessionControlPlaneTimelineEvent[];
+  };
+  commands: { fullStatus: string[]; timelineFailures: string[] };
+}> => {
+  const [status, timeline] = await Promise.all([
+    readWorkerSessionControlPlaneStatus(settings, db, name, options.lines),
+    readWorkerSessionControlPlaneTimeline(settings, name, {
+      limit: options.limit,
+      lines: options.lines,
+      sources: [],
+      events: [],
+      statuses: ["failed", "noop"],
+    }),
+  ]);
+  const workerRecoverySteps = [
+    ...status.recovery.nextSteps.watchWorkers,
+    ...status.recovery.nextSteps.drainWorkers,
+    ...status.recovery.nextSteps.applyActionWorkers,
+    ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
+    ...status.recovery.nextSteps.controlPlaneTickWorkers,
+  ].filter(isWorkerSessionControlPlaneWorkerRecoveryStep);
+  const alerts: WorkerSessionControlPlaneAlert[] = [
+    ...status.queues.applyActionExecutions.recent
+      .filter((execution) => execution.status === "failed")
+      .map((execution) => ({
+        surface: "apply_action" as const,
+        severity: "error" as const,
+        reason: "failed_apply_action_execution",
+        count: 1,
+        command: execution.command,
+        applyId: execution.applyId,
+        executionId: execution.executionId,
+        action: execution.action,
+      })),
+    ...(status.queues.drainContinuations.failed > 0
+      ? [{
+          surface: "drain_continuation" as const,
+          severity: "error" as const,
+          reason: "failed_drain_continuations",
+          count: status.queues.drainContinuations.failed,
+          command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--status", "failed"],
+          action: "inspect_failed_drain_continuations",
+        }]
+      : []),
+    ...status.branches.nextSteps
+      .filter((step) => step.action === "inspect_run")
+      .map((step) => ({
+        surface: "branch" as const,
+        severity: "warning" as const,
+        reason: step.reason,
+        count: 1,
+        command: step.command,
+        runId: step.runId,
+        workerId: step.workerId ?? undefined,
+        action: step.action,
+      })),
+    ...status.staleRuns.nextSteps
+      .filter((step) => step.action === "inspect_run")
+      .map((step) => ({
+        surface: "stale_run" as const,
+        severity: "warning" as const,
+        reason: step.reason,
+        count: 1,
+        command: step.command,
+        runId: step.runId,
+        workerId: step.workerId ?? undefined,
+        action: step.action,
+      })),
+    ...workerRecoverySteps.map((step) => ({
+      surface: "worker_recovery" as const,
+      severity: "warning" as const,
+      reason: step.reason,
+      count: 1,
+      command: step.command,
+      workerId: step.workerId,
+      action: step.action,
+    })),
+  ].slice(0, options.limit);
+  return {
+    ok: true,
+    session: name,
+    observedAt: new Date().toISOString(),
+    limit: options.limit,
+    summary: {
+      total: alerts.length,
+      errors: alerts.filter((alert) => alert.severity === "error").length,
+      warnings: alerts.filter((alert) => alert.severity === "warning").length,
+    },
+    alerts,
+    recentTimeline: {
+      count: timeline.count,
+      counts: timeline.counts,
+      events: timeline.events,
+    },
+    commands: {
+      fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", name, "--server"],
+      timelineFailures: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", name, "--server", "--status", "failed,noop"],
+    },
+  };
+};
 
 type WorkerSessionControlPlaneAdvanceAction = {
   surface: "stale_run" | "branch" | "apply_action" | "drain_continuation" | "worker_recovery";
