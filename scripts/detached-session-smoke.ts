@@ -3606,6 +3606,24 @@ try {
   assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.blocked === true));
   assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.mutating === true));
   assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.confirmationCommand?.includes("--confirm")));
+  const blockedMutatingControlPlaneAdvanceCommands = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--blocked",
+    "--mutating",
+    "--commands-only",
+    "--format",
+    "shell",
+    "--limit",
+    "5",
+  ]);
+  const blockedMutatingControlPlaneAdvanceCommandLines = blockedMutatingControlPlaneAdvanceCommands.trim().split("\n").filter(Boolean);
+  assert.ok(blockedMutatingControlPlaneAdvanceCommandLines.length >= 1);
+  assert.ok(blockedMutatingControlPlaneAdvanceCommandLines.every((line) => line.includes("session-control-plane-alert-execute")));
+  assert.ok(blockedMutatingControlPlaneAdvanceCommandLines.every((line) => line.includes("--confirm")));
+  assert.ok(blockedMutatingControlPlaneAdvanceCommandLines.some((line) => line.includes(`--execution ${failedApplyActionExecutionId}`)));
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

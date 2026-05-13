@@ -4692,17 +4692,52 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-control-plane-advances") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-advances requires --server");
     }
-    await printJson(await fetchWorkerSessionControlPlaneAdvances(
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-advances --format must be json or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-advances --format shell requires --commands-only");
+    }
+    const advances = await fetchWorkerSessionControlPlaneAdvances(
       required(sessionName, "runs session-control-plane-advances <session> --server"),
       {
         limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
         blocked: options.blocked === "1" ? true : undefined,
         mutating: options.mutating === "1" ? true : undefined,
       },
-    ));
+    );
+    if (options["commands-only"] === "1") {
+      const seen = new Set<string>();
+      const commands = advances.advances.flatMap((advance) => {
+        const command = advance.executionSafety?.confirmationCommand;
+        if (!command) return [];
+        const key = commandKey(command);
+        if (seen.has(key)) return [];
+        seen.add(key);
+        return [{
+          scope: "control_plane_advance",
+          advanceId: advance.advanceId,
+          completedAt: advance.completedAt,
+          detailCommand: advance.executionSafety?.detailCommand,
+          blocked: advance.executionSafety?.blocked ?? false,
+          mutating: advance.executionSafety?.mutating ?? false,
+          reason: advance.executionSafety?.reason ?? null,
+          command,
+        }];
+      });
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        const { advances: _advances, ...rest } = advances;
+        await printJson({ ...rest, commands });
+      }
+      return;
+    }
+    await printJson(advances);
     return;
   }
   if (subcommandName === "start-control-plane-advance-worker") {
@@ -11629,7 +11664,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--limit 20]
+  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--limit 20] [--commands-only] [--format json|shell]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
