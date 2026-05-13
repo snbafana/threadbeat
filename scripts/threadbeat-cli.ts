@@ -6779,6 +6779,10 @@ async function fetchWorkerSessionControlPlaneStatus(
       failed: number;
       pending: number;
     };
+    applyActionExecutions: {
+      counts: { recent: number; executed: number; failed: number };
+      recent: WorkerSessionApplyActionExecutionRecord[];
+    };
     drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
   };
   branches: {
@@ -6834,6 +6838,10 @@ async function fetchWorkerSessionControlPlaneStatus(
         waiting: number;
         failed: number;
         pending: number;
+      };
+      applyActionExecutions: {
+        counts: { recent: number; executed: number; failed: number };
+        recent: WorkerSessionApplyActionExecutionRecord[];
       };
       drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
     };

@@ -2581,17 +2581,21 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "control_plane_tick_worker" | "branch_recovery_execution";
-  event: "tick_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "branch_recovery_executed";
+  source: "tick" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution";
+  event: "tick_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed";
   tickId?: string;
   workerId?: string;
   executionId?: string;
+  applyId?: string;
+  applySource?: string;
+  applyAction?: string;
   runIds?: string[];
   resumedRunIds?: string[];
   skippedRunIds?: string[];
   branchNames?: string[];
   skippedReasons?: string[];
   status?: string;
+  exitCode?: number | null;
   state?: string;
   restartable?: boolean;
   reason?: string;
@@ -2615,9 +2619,10 @@ const readWorkerSessionControlPlaneTimeline = async (
   counts: Record<string, number>;
   events: WorkerSessionControlPlaneTimelineEvent[];
 }> => {
-  const [ticks, workers, branchRecoveryExecutions] = await Promise.all([
+  const [ticks, workers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, options.limit),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
+    listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, options.limit),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, options.limit),
   ]);
   const events: WorkerSessionControlPlaneTimelineEvent[] = [];
@@ -2681,6 +2686,19 @@ const readWorkerSessionControlPlaneTimeline = async (
       });
     }
   }
+  for (const execution of applyActionExecutions) {
+    events.push({
+      observedAt: execution.observedAt,
+      source: "apply_action_execution",
+      event: "apply_action_executed",
+      executionId: execution.executionId,
+      applyId: execution.applyId,
+      applySource: execution.source,
+      applyAction: execution.action,
+      status: execution.status,
+      exitCode: execution.exitCode,
+    });
+  }
   for (const execution of branchRecoveryExecutions) {
     const resumedRunIds = execution.resumed.map((run) => run.runId);
     const skippedRunIds = execution.skipped.map((run) => run.runId);
@@ -2734,6 +2752,10 @@ const readWorkerSessionControlPlaneStatus = async (
   };
   queues: {
     applyActions: ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["counts"];
+    applyActionExecutions: {
+      recent: Awaited<ReturnType<typeof listWorkerSessionApplyActionExecutionRecords>>;
+      counts: ReturnType<typeof summarizeApplyActionExecutionStatuses>;
+    };
     drainContinuations: ReturnType<typeof summarizeDrainContinuationStatuses>;
   };
   branches: Awaited<ReturnType<typeof summarizeWorkerSessionBranchRecovery>> & {
@@ -2762,6 +2784,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneTickWorkerNextSteps,
     branchRecovery,
     branchRecoveryExecutions,
+    applyActionExecutions,
   ] = await Promise.all([
     listWorkerSessionApplyRecords(settings.projectRoot, name),
     listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
@@ -2775,6 +2798,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
+    listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, lines),
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
   return {
@@ -2788,6 +2812,10 @@ const readWorkerSessionControlPlaneStatus = async (
     },
     queues: {
       applyActions: applyActionQueue.counts,
+      applyActionExecutions: {
+        recent: applyActionExecutions,
+        counts: summarizeApplyActionExecutionStatuses(applyActionExecutions),
+      },
       drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
     },
     branches: {
@@ -3169,6 +3197,16 @@ const summarizeBranchRecoveryExecutionStatuses = <T extends { status: string }>(
   executed: records.filter((record) => record.status === "executed").length,
   partial: records.filter((record) => record.status === "partial").length,
   noop: records.filter((record) => record.status === "noop").length,
+});
+
+const summarizeApplyActionExecutionStatuses = <T extends { status: string }>(records: T[]): {
+  recent: number;
+  executed: number;
+  failed: number;
+} => ({
+  recent: records.length,
+  executed: records.filter((record) => record.status === "executed").length,
+  failed: records.filter((record) => record.status === "failed").length,
 });
 
 const summarizeWorkerSessionBranchRecovery = async (

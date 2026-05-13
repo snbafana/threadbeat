@@ -752,10 +752,12 @@ commands. Non-dry-run branch recovery writes durable records under
 them with `runs session-branch-recovery-executions <name> --server` or
 `GET /api/worker-sessions/:name/branch-recovery-executions`. The aggregate
 control-plane status also embeds recent branch-recovery executions and status
-counts so operators can see recent resume attempts next to the current branch
-queue. Bounded resume calls prioritize ready stopped branches before applying
-their limit, so `runs resume-session <name> --next` does not get stuck on a
-blocked branch while a resumable branch is waiting behind it. Use `runs
+counts plus recent apply-action execution counts and records, so operators can
+see recent resume, retry, reset-audit, and continuation attempts next to the
+current branch and apply queues. Bounded resume calls prioritize ready stopped
+branches before applying their limit, so `runs resume-session <name> --next`
+does not get stuck on a blocked branch while a resumable branch is waiting
+behind it. Use `runs
 session-control-plane-tick <name> --server` or
 `POST /api/worker-sessions/:name/control-plane-tick` for one bounded
 control-plane pass over the same server surfaces: it can resume one ready
@@ -783,11 +785,12 @@ next steps. The tick-worker list also includes `lifecycle.state`,
 running, stopped, completed, retired, failed-stop, and unrecorded-exit workers
 without inferring state from raw timestamps.
 `runs session-control-plane-timeline <name> --server` joins recent tick records,
-tick-worker lifecycle events, and branch-recovery executions for a durable
-session-level audit trail. Branch-recovery timeline events include all selected
-run ids, separated resumed/skipped run ids, branch names, and skipped reasons so
-operators can see partial/noop recovery attempts without opening each execution
-record first.
+tick-worker lifecycle events, apply-action executions, and branch-recovery
+executions for a durable session-level audit trail. Apply-action timeline events
+include the apply id, action, status, and exit code. Branch-recovery timeline
+events include all selected run ids, separated resumed/skipped run ids, branch
+names, and skipped reasons so operators can see partial/noop recovery attempts
+without opening each execution record first.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,

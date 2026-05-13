@@ -1542,6 +1542,10 @@ try {
     };
     queues: {
       applyActions: { actionable: number; resetAudits: number };
+      applyActionExecutions: {
+        counts: { recent: number; executed: number; failed: number };
+        recent: Array<{ executionId: string; applyId: string; action: string; status: string; exitCode: number | null }>;
+      };
       drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
     };
     branches: {
@@ -1583,6 +1587,16 @@ try {
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.stopped, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.retired, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.completed, 0);
+  assert.ok(controlPlaneStatus.queues.applyActionExecutions.counts.recent >= serverApplyActionExecutionsAfterWorker.count);
+  assert.ok(controlPlaneStatus.queues.applyActionExecutions.counts.executed >= serverApplyActionExecutionsAfterWorker.count);
+  assert.equal(controlPlaneStatus.queues.applyActionExecutions.counts.failed, 0);
+  assert.ok(controlPlaneStatus.queues.applyActionExecutions.recent.some((execution) => (
+    execution.executionId === serverExecutedApplyAction.execution?.executionId
+    && execution.applyId === "detached-session-api-backed-reset"
+    && execution.action === "inspect_drain_continuation_resets"
+    && execution.status === "executed"
+    && execution.exitCode === 0
+  )));
   assert.ok(controlPlaneStatus.branches.counts.total >= 1);
   assert.ok(controlPlaneStatus.branches.counts.ready >= 1);
   assert.equal(controlPlaneStatus.branches.counts.stoppedBranchWithoutResultCommit, controlPlaneStatus.branches.counts.ready);
@@ -2017,14 +2031,27 @@ try {
     session: string;
     count: number;
     counts: Record<string, number>;
-    events: Array<{ event: string; source: string; tickId?: string; workerId?: string; status?: string; state?: string; reason?: string; restartable?: boolean }>;
+    events: Array<{
+      event: string;
+      source: string;
+      tickId?: string;
+      workerId?: string;
+      executionId?: string;
+      applyId?: string;
+      applyAction?: string;
+      status?: string;
+      exitCode?: number | null;
+      state?: string;
+      reason?: string;
+      restartable?: boolean;
+    }>;
   }>(baseUrl, [
     "runs",
     "session-control-plane-timeline",
     sessionName,
     "--server",
     "--limit",
-    "50",
+    "120",
     "--lines",
     "5",
   ]);
@@ -2034,6 +2061,7 @@ try {
   assert.ok((controlPlaneTimeline.counts.tick_recorded ?? 0) >= 2);
   assert.ok((controlPlaneTimeline.counts.worker_completed ?? 0) >= 1);
   assert.ok((controlPlaneTimeline.counts.worker_retired ?? 0) >= 1);
+  assert.ok((controlPlaneTimeline.counts.apply_action_executed ?? 0) >= 1);
   assert.ok(controlPlaneTimeline.events.some((event) => event.event === "tick_recorded" && event.status === "dry_run"));
   assert.ok(controlPlaneTimeline.events.some((event) => (
     event.event === "worker_completed"
