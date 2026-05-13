@@ -1495,6 +1495,17 @@ try {
   assert.equal(stoppedApplyActionWorkers.workers[0]?.alive, false);
   assert.equal(typeof stoppedApplyActionWorkers.workers[0]?.stoppedAt, "string");
   assert.equal(stoppedApplyActionWorkers.workers[0]?.retiredAt, undefined);
+  const persistedStoppedApplyActionWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "apply-action-workers",
+    sessionName,
+    "detached-smoke-apply-action-worker.json",
+  ), "utf8")) as Record<string, unknown>;
+  assert.equal(typeof persistedStoppedApplyActionWorker.stoppedAt, "string");
+  assert.equal("alive" in persistedStoppedApplyActionWorker, false);
+  assert.equal("stdout" in persistedStoppedApplyActionWorker, false);
+  assert.equal("stderr" in persistedStoppedApplyActionWorker, false);
   const applyActionWorkerNext = await cliJson<{
     ok?: true;
     count: number;
@@ -1617,6 +1628,16 @@ try {
   assert.equal(restartedEnsuredApplyActionWorker.reason, "restartable_worker_exists");
   assert.equal(restartedEnsuredApplyActionWorker.worker.workerId, ensuredApplyActionWorkerId);
   assert.equal(restartedEnsuredApplyActionWorker.worker.restartCount, 1);
+  const persistedRestartedApplyActionWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "apply-action-workers",
+    sessionName,
+    `${ensuredApplyActionWorkerId}.json`,
+  ), "utf8")) as Record<string, unknown>;
+  assert.equal("alive" in persistedRestartedApplyActionWorker, false);
+  assert.equal("stdout" in persistedRestartedApplyActionWorker, false);
+  assert.equal("stderr" in persistedRestartedApplyActionWorker, false);
   await cliJson(baseUrl, [
     "runs",
     "stop-apply-action-workers",

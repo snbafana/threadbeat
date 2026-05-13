@@ -134,7 +134,7 @@ export async function startWorkerSessionApplyActionWorker(
       stdoutPath,
       stderrPath,
     };
-    await fs.writeFile(recordPath, `${JSON.stringify(initialWorker, null, 2)}\n`, { flag: "wx" });
+    await fs.writeFile(recordPath, `${JSON.stringify(toStoredApplyActionWorker(initialWorker), null, 2)}\n`, { flag: "wx" });
     const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
       cwd: projectRoot,
       detached: true,
@@ -416,7 +416,27 @@ async function readApplyActionWorker(projectRoot: string, sessionName: string, w
 }
 
 async function writeApplyActionWorker(projectRoot: string, worker: ApplyActionWorker): Promise<void> {
-  await fs.writeFile(applyActionWorkerPath(projectRoot, worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+  await fs.writeFile(applyActionWorkerPath(projectRoot, worker.session, worker.workerId), `${JSON.stringify(toStoredApplyActionWorker(worker), null, 2)}\n`);
+}
+
+function toStoredApplyActionWorker(worker: ApplyActionWorker): ApplyActionWorker {
+  return {
+    session: worker.session,
+    workerId: worker.workerId,
+    baseUrl: worker.baseUrl,
+    startedAt: worker.startedAt,
+    command: worker.command,
+    pid: worker.pid,
+    stdoutPath: worker.stdoutPath,
+    stderrPath: worker.stderrPath,
+    ...(worker.stoppedAt !== undefined ? { stoppedAt: worker.stoppedAt } : {}),
+    ...(worker.stopResult !== undefined ? { stopResult: worker.stopResult } : {}),
+    ...(worker.retiredAt !== undefined ? { retiredAt: worker.retiredAt } : {}),
+    ...(worker.restartedAt !== undefined ? { restartedAt: worker.restartedAt } : {}),
+    ...(worker.restartCount !== undefined ? { restartCount: worker.restartCount } : {}),
+    ...(worker.previousPid !== undefined ? { previousPid: worker.previousPid } : {}),
+    ...(worker.lastRun !== undefined ? { lastRun: worker.lastRun } : {}),
+  };
 }
 
 async function stopProcessGroup(pid: number | null): Promise<StopProcessGroupResult> {
