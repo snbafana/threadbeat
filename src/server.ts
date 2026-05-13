@@ -1747,6 +1747,199 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/worker-sessions/:name/recover-branches", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const session = await readWorkerSession(settings.projectRoot, name);
+      const dryRun = parseBoolean(body.dryRun, false);
+      const includeStopped = parseBoolean(body.includeStopped, false);
+      const runIds = [
+        ...parseOptionalList(body.runIds),
+        ...parseOptionalList(body.runId),
+      ];
+      const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
+      const limit = parseOptionalInteger(body.limit) ?? null;
+      const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+      const candidateStatuses = includeStopped ? ["running", "stopped"] : ["running"];
+      const candidates = (await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+        const runs = await db.listAgentRuns(agentId, candidateStatuses);
+        return runs
+          .filter((run) => !runIdFilter || runIdFilter.has(run.id))
+          .filter((run) => {
+            const sessionClaimed = run.worker_id !== null && sessionWorkerIds.has(run.worker_id);
+            const unassignedStopped = includeStopped && run.worker_id === null && run.status === "stopped" && run.result_commit === null;
+            return sessionClaimed || unassignedStopped;
+          })
+          .filter((run) => run.status === "running" || (includeStopped && run.status === "stopped" && run.result_commit === null))
+          .map((run) => ({ agentId, run }));
+      }))).flat();
+      const selectedCandidates = limit === null ? candidates : candidates.slice(0, limit);
+      const recovered = [];
+      for (const { agentId, run } of selectedCandidates) {
+        const runningSandboxes = (await db.listSandboxes({ runId: run.id }))
+          .filter((sandbox) => sandbox.state === "running")
+          .map((sandbox) => ({ id: sandbox.id, providerSandboxId: sandbox.provider_sandbox_id }));
+        const item = {
+          agentId,
+          runId: run.id,
+          objective: run.objective,
+          branchName: run.run_branch,
+          resultCommit: run.result_commit,
+          workerId: run.worker_id,
+          currentStatus: run.status,
+          recoveryInspection: {
+            recovery: {
+              ready: runningSandboxes.length === 0,
+              reason: runningSandboxes.length === 0 ? "stale_or_stopped_branch_without_running_sandbox" : "running_sandbox_present",
+              inspectionMode: "server_metadata",
+              runningSandboxes,
+            },
+            commands: {
+              inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+              recoverSession: [
+                "npm",
+                "run",
+                "cli",
+                "--",
+                "runs",
+                "recover-session",
+                session.session,
+                "--server",
+                ...(includeStopped ? ["--include-stopped"] : []),
+              ],
+            },
+          },
+        };
+        if (dryRun) {
+          recovered.push({
+            ...item,
+            dryRun: true,
+            ...(runningSandboxes.length === 0 ? {} : { skipped: "running_sandbox_present" }),
+          });
+          continue;
+        }
+        if (runningSandboxes.length > 0) {
+          recovered.push({ ...item, skipped: "running_sandbox_present" });
+          continue;
+        }
+        const requeued = await db.requeueAgentRun(run.id);
+        if (!requeued) {
+          recovered.push({ ...item, skipped: "run could not be recovered" });
+          continue;
+        }
+        await db.appendMessage({
+          agentId: requeued.agent_id,
+          runId: requeued.id,
+          type: "agent_run_requeued",
+          text: `Requeued run by ${session.session}`,
+        });
+        recovered.push({ ...item, status: requeued.status, workerId: requeued.worker_id, run: requeued });
+      }
+      const recoverSession = ["npm", "run", "cli", "--", "runs", "recover-session", session.session, "--server"];
+      if (includeStopped) recoverSession.push("--include-stopped");
+      const actions = {
+        sessionWait: ["npm", "run", "cli", "--", "runs", "session-wait", session.session],
+        sessionWatch: ["npm", "run", "cli", "--", "runs", "session-watch", session.session, "--recoverable", "--include-stopped", "--next"],
+        sessionReview: ["npm", "run", "cli", "--", "runs", "session-review", session.session, "--include-stopped"],
+        restartSession: ["npm", "run", "cli", "--", "runs", "restart-session", session.session, "--recover"],
+        recoverSession,
+      };
+      const changedRuns = recovered.filter((item) => !("skipped" in item)).length;
+      const candidateSelection = {
+        candidates: candidates.length,
+        selected: selectedCandidates.length,
+        recovered: changedRuns,
+        skipped: recovered.length - changedRuns,
+        includeStopped,
+        limit,
+      };
+      if (dryRun) {
+        return {
+          ok: true,
+          session: session.session,
+          recovered,
+          filter: { dryRun, includeStopped, runIds, limit },
+          candidateSelection,
+          actions,
+          nextStep: {
+            action: "recover_session",
+            reason: "dry_run_preview",
+            count: changedRuns,
+            command: actions.recoverSession,
+          },
+        };
+      }
+      const logs = await readWorkerSessionLogs(settings.projectRoot, session.session, 0);
+      const aliveWorkers = logs.workers.filter((worker) => worker.alive).length;
+      const nextStep = changedRuns > 0 && aliveWorkers > 0
+        ? {
+          action: "wait_session",
+          reason: "recovered_runs_for_live_workers",
+          count: changedRuns,
+          command: actions.sessionWait,
+        }
+        : changedRuns > 0
+          ? {
+            action: "restart_session",
+            reason: "recovered_runs_without_live_workers",
+            count: changedRuns,
+            command: actions.restartSession,
+          }
+          : {
+            action: "review_session",
+            reason: "no_runs_recovered",
+            count: 0,
+            command: actions.sessionReview,
+          };
+      const observedAt = new Date().toISOString();
+      const execution = await writeWorkerSessionBranchRecoveryExecutionRecord(settings.projectRoot, {
+        session: session.session,
+        observedAt,
+        completedAt: new Date().toISOString(),
+        status: changedRuns === 0 ? "noop" : changedRuns === recovered.length ? "executed" : "partial",
+        filter: { action: "recover_session", dryRun, includeStopped, runIds, limit, candidateSelection },
+        selected: recovered.length,
+        resumed: recovered
+          .filter((item) => !("skipped" in item))
+          .map((item) => ({
+            agentId: item.agentId,
+            runId: item.runId,
+            objective: item.objective,
+            branchName: item.branchName,
+            resultCommit: item.resultCommit,
+            workerId: item.workerId,
+            ...("status" in item ? { status: item.status } : {}),
+          })),
+        skipped: recovered
+          .filter((item): item is typeof item & { skipped: string } => "skipped" in item)
+          .map((item) => ({
+            agentId: item.agentId,
+            runId: item.runId,
+            objective: item.objective,
+            branchName: item.branchName,
+            resultCommit: item.resultCommit,
+            workerId: item.workerId,
+            reason: item.skipped,
+          })),
+        nextStep,
+      });
+      return {
+        ok: true,
+        session: session.session,
+        recovered,
+        filter: { dryRun, includeStopped, runIds, limit },
+        candidateSelection,
+        actions,
+        nextStep,
+        executionPath: execution.path,
+        execution: execution.record,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.get("/api/worker-sessions/:name/watch-workers", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };

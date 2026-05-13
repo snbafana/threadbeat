@@ -373,6 +373,101 @@ try {
   assert.equal(recovered.nextStep.command.join(" "), `npm run cli -- runs session-wait ${sessionName}`);
   assert.equal(recovered.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${sessionName}`);
   assert.equal(recovered.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
+
+  const serverRecoverBranch = `threadbeat/runs/server-recovery-${Date.now().toString(36)}`;
+  const serverRecoverRun = await db.createAgentRun({
+    agentId: agent.agent.id,
+    objective: "detached session server recovery",
+    inputRef: "main",
+    runBranch: serverRecoverBranch,
+  });
+  const serverRecoverClaim = await db.claimAgentRun(serverRecoverRun.id, "detached-smoke-worker-1");
+  assert.ok(serverRecoverClaim);
+  const serverRecoveredPreview = await cliJson<{
+    ok?: true;
+    session: string;
+    recovered: Array<{
+      runId: string;
+      branchName: string;
+      workerId: string | null;
+      currentStatus: string;
+      dryRun?: boolean;
+      recoveryInspection: {
+        recovery: {
+          ready: boolean;
+          reason: string;
+          inspectionMode: string;
+          runningSandboxes: unknown[];
+        };
+        commands: {
+          recoverSession: string[];
+          inspectRun: string[];
+        };
+      };
+    }>;
+    candidateSelection: { selected: number; recovered: number; skipped: number };
+    actions: { recoverSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
+  }>(baseUrl, ["runs", "recover-session", sessionName, "--server", "--dry-run", "--run", serverRecoverRun.id]);
+  assert.equal(serverRecoveredPreview.ok, true);
+  assert.equal(serverRecoveredPreview.session, sessionName);
+  assert.deepEqual(serverRecoveredPreview.recovered.map((run) => run.runId), [serverRecoverRun.id]);
+  assert.equal(serverRecoveredPreview.recovered[0].branchName, serverRecoverBranch);
+  assert.equal(serverRecoveredPreview.recovered[0].workerId, "detached-smoke-worker-1");
+  assert.equal(serverRecoveredPreview.recovered[0].currentStatus, "running");
+  assert.equal(serverRecoveredPreview.recovered[0].dryRun, true);
+  assert.equal(serverRecoveredPreview.recovered[0].recoveryInspection.recovery.ready, true);
+  assert.equal(serverRecoveredPreview.recovered[0].recoveryInspection.recovery.reason, "stale_or_stopped_branch_without_running_sandbox");
+  assert.equal(serverRecoveredPreview.recovered[0].recoveryInspection.recovery.inspectionMode, "server_metadata");
+  assert.deepEqual(serverRecoveredPreview.recovered[0].recoveryInspection.recovery.runningSandboxes, []);
+  assert.equal(serverRecoveredPreview.recovered[0].recoveryInspection.commands.recoverSession.join(" "), `npm run cli -- runs recover-session ${sessionName} --server`);
+  assert.equal(serverRecoveredPreview.recovered[0].recoveryInspection.commands.inspectRun.join(" "), `npm run cli -- runs inspect ${serverRecoverRun.id}`);
+  assert.equal(serverRecoveredPreview.candidateSelection.selected, 1);
+  assert.equal(serverRecoveredPreview.candidateSelection.recovered, 1);
+  assert.equal(serverRecoveredPreview.candidateSelection.skipped, 0);
+  assert.equal(serverRecoveredPreview.nextStep.action, "recover_session");
+  assert.equal(serverRecoveredPreview.nextStep.reason, "dry_run_preview");
+  assert.equal(serverRecoveredPreview.nextStep.count, 1);
+  assert.equal(serverRecoveredPreview.nextStep.command.join(" "), `npm run cli -- runs recover-session ${sessionName} --server`);
+  assert.equal(serverRecoveredPreview.actions.recoverSession.join(" "), `npm run cli -- runs recover-session ${sessionName} --server`);
+  const serverRecovered = await cliJson<{
+    ok?: true;
+    session: string;
+    recovered: Array<{ runId: string; status?: string; workerId: string | null }>;
+    candidateSelection: { selected: number; recovered: number; skipped: number };
+    actions: { sessionWait: string[]; restartSession: string[] };
+    nextStep: { action: string; reason: string; count: number; command: string[] };
+    execution: {
+      status: string;
+      selected: number;
+      resumed: Array<{ runId: string; branchName: string; status?: string }>;
+      skipped: unknown[];
+      filter: { action?: string; runIds?: string[] };
+    };
+  }>(baseUrl, ["runs", "recover-session", sessionName, "--server", "--run", serverRecoverRun.id]);
+  assert.equal(serverRecovered.ok, true);
+  assert.equal(serverRecovered.session, sessionName);
+  assert.deepEqual(serverRecovered.recovered.map((run) => run.runId), [serverRecoverRun.id]);
+  assert.equal(serverRecovered.recovered[0].status, "planned");
+  assert.equal(serverRecovered.recovered[0].workerId, null);
+  assert.equal(serverRecovered.candidateSelection.selected, 1);
+  assert.equal(serverRecovered.candidateSelection.recovered, 1);
+  assert.equal(serverRecovered.candidateSelection.skipped, 0);
+  assert.equal(serverRecovered.nextStep.action, "wait_session");
+  assert.equal(serverRecovered.nextStep.reason, "recovered_runs_for_live_workers");
+  assert.equal(serverRecovered.nextStep.count, 1);
+  assert.equal(serverRecovered.nextStep.command.join(" "), `npm run cli -- runs session-wait ${sessionName}`);
+  assert.equal(serverRecovered.actions.sessionWait.join(" "), `npm run cli -- runs session-wait ${sessionName}`);
+  assert.equal(serverRecovered.actions.restartSession.join(" "), `npm run cli -- runs restart-session ${sessionName} --recover`);
+  assert.equal(serverRecovered.execution.status, "executed");
+  assert.equal(serverRecovered.execution.selected, 1);
+  assert.deepEqual(serverRecovered.execution.resumed.map((run) => run.runId), [serverRecoverRun.id]);
+  assert.equal(serverRecovered.execution.resumed[0].branchName, serverRecoverBranch);
+  assert.equal(serverRecovered.execution.resumed[0].status, "planned");
+  assert.deepEqual(serverRecovered.execution.skipped, []);
+  assert.equal(serverRecovered.execution.filter.action, "recover_session");
+  assert.deepEqual(serverRecovered.execution.filter.runIds, [serverRecoverRun.id]);
+
   const resumePreview = await cliJson<{
     session: string;
     resumed: Array<{ runId: string; currentStatus?: string; dryRun?: boolean; branchName: string; workerId: string | null }>;

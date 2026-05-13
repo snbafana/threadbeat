@@ -5274,7 +5274,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "recover-session") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
-    const session = await readWorkerSession(required(sessionName, "runs recover-session <session>"));
+    const requiredSessionName = required(sessionName, "runs recover-session <session>");
+    const runIds = options.run ? parseList(options.run) : undefined;
+    const limit = options.limit ? parsePositiveInteger(options.limit, "--limit") : undefined;
+    if (options.server === "1") {
+      await printJson(await requestJson("POST", `/api/worker-sessions/${encodeURIComponent(requiredSessionName)}/recover-branches`, {
+        dryRun: options["dry-run"] === "1",
+        includeStopped: options["include-stopped"] === "1",
+        ...(limit ? { limit } : {}),
+        ...(runIds ? { runIds } : {}),
+      }));
+      return;
+    }
+    const session = await readWorkerSession(requiredSessionName);
     const workerIds = new Set(session.workers.map((worker) => worker.workerId));
     const recovered = await recoverStaleRuns(
       workerSessionAgentIds(session),
@@ -10550,7 +10562,7 @@ Commands:
   runs restart-session-watch-workers <name> --worker-id id [--include-retired] [--lines 20]
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
-  runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
+  runs recover-session <name> [--server] [--include-stopped] [--dry-run] [--concurrency 4] [--limit 1] [--run run_id[,run_id]]
   runs resume-session <name> [--worker-id worker-a] [--dry-run] [--next] [--limit 1] [--run run_id[,run_id]]
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--wait] [--max-polls 60] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]

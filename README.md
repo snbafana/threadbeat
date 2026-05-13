@@ -341,6 +341,7 @@ npm run cli -- runs session-watch overnight --recoverable --include-stopped --ne
 npm run cli -- runs session-watch overnight --recoverable --include-stopped --next --action-queue --commands-only --format shell --checkout-dir ./checkouts/overnight-watch
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs recover-session overnight --dry-run
+npm run cli -- runs recover-session overnight --server --dry-run
 npm run cli -- runs resume-session overnight --worker-id worker-a --dry-run
 npm run cli -- runs resume-session overnight --next
 npm run cli -- runs stop-session overnight --recover
@@ -936,9 +937,10 @@ make the review snapshot show only branches with local changes that matter.
 `runs recover-session <name>` requeues stale runs claimed by that session's
 workers without stopping or restarting the worker group; add `--dry-run` to
 preview the affected runs first. Add `--include-stopped` to also requeue
-unfinished stopped branch runs for that session's agents. The response includes
-the next branch-native command: wait on live workers, restart dead workers, or
-review the session when nothing changed.
+unfinished stopped branch runs for that session's agents. Add `--server` to run
+the same recovery through `POST /api/worker-sessions/:name/recover-branches`;
+the server path also accepts `--run` and `--limit`, writes a branch-recovery
+execution record, and returns the same wait/restart/review next command.
 `runs resume-session <name>` is the branch-only bulk resume path for a detached
 worker session: it requeues stopped runs with no result commit while leaving
 completed result branches alone. Add `--worker-id <id>` to target only that
