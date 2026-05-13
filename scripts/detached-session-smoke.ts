@@ -1616,7 +1616,13 @@ try {
     ok?: true;
     session: string;
     count: number;
-    workers: Array<{ workerId: string; alive: boolean; completedAt?: string; completionResult?: { exitCode: number | null; signal: string | null } }>;
+    workers: Array<{
+      workerId: string;
+      alive: boolean;
+      completedAt?: string;
+      completionResult?: { exitCode: number | null; signal: string | null };
+      lifecycle: { state: string; restartable: boolean; reason: string };
+    }>;
   };
   let completedControlPlaneTickWorkers: ControlPlaneTickWorkerListResponse | null = null;
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -1637,6 +1643,9 @@ try {
   assert.equal(completedControlPlaneTickWorkers?.workers[0]?.alive, false);
   assert.ok(completedControlPlaneTickWorkers?.workers[0]?.completedAt);
   assert.equal(completedControlPlaneTickWorkers?.workers[0]?.completionResult?.exitCode, 0);
+  assert.equal(completedControlPlaneTickWorkers?.workers[0]?.lifecycle.state, "completed");
+  assert.equal(completedControlPlaneTickWorkers?.workers[0]?.lifecycle.restartable, false);
+  assert.equal(completedControlPlaneTickWorkers?.workers[0]?.lifecycle.reason, "worker_completed");
   const controlPlaneStatusAfterCompletedTickWorker = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -1686,7 +1695,14 @@ try {
     ok?: true;
     session: string;
     count: number;
-    workers: Array<{ workerId: string; command: string[]; pid: number | null; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
+    workers: Array<{
+      workerId: string;
+      command: string[];
+      pid: number | null;
+      lifecycle: { state: string; restartable: boolean; reason: string };
+      stdout: { lines: string[] };
+      stderr: { lines: string[] };
+    }>;
   }>(baseUrl, [
     "runs",
     "session-control-plane-tick-workers",
@@ -1699,12 +1715,13 @@ try {
   assert.equal(controlPlaneTickWorkers.session, sessionName);
   assert.equal(controlPlaneTickWorkers.count, 1);
   assert.equal(controlPlaneTickWorkers.workers[0]?.workerId, "detached-smoke-control-plane-worker");
+  assert.equal(controlPlaneTickWorkers.workers[0]?.lifecycle.restartable, false);
   const stoppedControlPlaneTickWorkers = await cliJson<{
     ok?: true;
     session: string;
     count: number;
     stopped: Array<{ workerId: string; stoppedAt: string; retiredAt?: string }>;
-    workers: Array<{ workerId: string; retiredAt?: string }>;
+    workers: Array<{ workerId: string; retiredAt?: string; lifecycle: { state: string; restartable: boolean; reason: string } }>;
   }>(baseUrl, [
     "runs",
     "stop-control-plane-tick-workers",
@@ -1718,6 +1735,9 @@ try {
   assert.equal(stoppedControlPlaneTickWorkers.count, 1);
   assert.equal(stoppedControlPlaneTickWorkers.stopped[0]?.workerId, "detached-smoke-control-plane-worker");
   assert.equal(stoppedControlPlaneTickWorkers.stopped[0]?.retiredAt, undefined);
+  assert.equal(stoppedControlPlaneTickWorkers.workers[0]?.lifecycle.state, "stopped");
+  assert.equal(stoppedControlPlaneTickWorkers.workers[0]?.lifecycle.restartable, true);
+  assert.equal(stoppedControlPlaneTickWorkers.workers[0]?.lifecycle.reason, "stopped_control_plane_tick_worker");
   const controlPlaneTickWorkerNext = await cliJson<{
     ok?: true;
     session: string;

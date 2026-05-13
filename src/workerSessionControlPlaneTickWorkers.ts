@@ -21,6 +21,18 @@ export type ControlPlaneTickWorker = {
   completionResult?: { exitCode: number | null; signal: NodeJS.Signals | null };
 };
 
+export type ControlPlaneTickWorkerLifecycle = {
+  state: "running" | "stopped" | "completed" | "retired" | "stopping_failed" | "exited_unrecorded";
+  restartable: boolean;
+  reason:
+    | "worker_running"
+    | "stopped_control_plane_tick_worker"
+    | "worker_completed"
+    | "worker_retired"
+    | "stop_recorded_but_process_alive"
+    | "worker_exited_without_stop_or_completion_record";
+};
+
 type StopProcessGroupResult = {
   stopped: boolean;
   signalSent: boolean;
@@ -58,7 +70,7 @@ export async function startWorkerSessionControlPlaneTickWorker(
     intervalMs: number;
     lines: number;
   },
-): Promise<ControlPlaneTickWorker & { alive: boolean }> {
+): Promise<ControlPlaneTickWorker & { alive: boolean; lifecycle: ControlPlaneTickWorkerLifecycle }> {
   assertSafeWorkerSessionName(sessionName);
   const workerId = options.workerId ?? createControlPlaneTickWorkerId();
   assertSafeWorkerSessionName(workerId);
@@ -105,7 +117,8 @@ export async function startWorkerSessionControlPlaneTickWorker(
     };
     await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
     recordControlPlaneTickWorkerCompletion(projectRoot, child, worker);
-    return { ...worker, alive: processIsAlive(worker.pid) };
+    const alive = processIsAlive(worker.pid);
+    return { ...worker, alive, lifecycle: describeControlPlaneTickWorkerLifecycle(worker, alive) };
   } finally {
     await stdout.close();
     await stderr.close();
@@ -116,7 +129,7 @@ export async function listWorkerSessionControlPlaneTickWorkers(
   projectRoot: string,
   options: { sessionName?: string; workerId?: string; includeRetired?: boolean },
   lines: number,
-): Promise<Array<ControlPlaneTickWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
+): Promise<Array<ControlPlaneTickWorker & { alive: boolean; lifecycle: ControlPlaneTickWorkerLifecycle; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
   const sessionNames = options.sessionName ? [options.sessionName] : await listControlPlaneTickWorkerSessionNames(projectRoot);
   const workers = await Promise.all(sessionNames.map(async (sessionName) => {
     assertSafeWorkerSessionName(sessionName);
@@ -131,9 +144,11 @@ export async function listWorkerSessionControlPlaneTickWorkers(
         .map(async (entry) => {
           const worker = await readControlPlaneTickWorker(projectRoot, sessionName, entry.name.replace(/\.json$/, ""));
           if (worker.retiredAt && !options.includeRetired) return null;
+          const alive = processIsAlive(worker.pid);
           return {
             ...worker,
-            alive: processIsAlive(worker.pid),
+            alive,
+            lifecycle: describeControlPlaneTickWorkerLifecycle(worker, alive),
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
           };
@@ -378,6 +393,25 @@ function recordControlPlaneTickWorkerCompletion(projectRoot: string, child: Retu
       console.error(`failed to record control-plane tick worker completion: ${error instanceof Error ? error.message : String(error)}`);
     });
   });
+}
+
+function describeControlPlaneTickWorkerLifecycle(worker: ControlPlaneTickWorker, alive: boolean): ControlPlaneTickWorkerLifecycle {
+  if (worker.retiredAt) {
+    return { state: "retired", restartable: false, reason: "worker_retired" };
+  }
+  if (alive && worker.stoppedAt) {
+    return { state: "stopping_failed", restartable: false, reason: "stop_recorded_but_process_alive" };
+  }
+  if (alive) {
+    return { state: "running", restartable: false, reason: "worker_running" };
+  }
+  if (worker.stoppedAt) {
+    return { state: "stopped", restartable: true, reason: "stopped_control_plane_tick_worker" };
+  }
+  if (worker.completedAt) {
+    return { state: "completed", restartable: false, reason: "worker_completed" };
+  }
+  return { state: "exited_unrecorded", restartable: false, reason: "worker_exited_without_stop_or_completion_record" };
 }
 
 async function listControlPlaneTickWorkerSessionNames(projectRoot: string): Promise<string[]> {

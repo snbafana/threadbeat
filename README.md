@@ -771,7 +771,10 @@ with `runs restart-control-plane-tick-workers <name> --server --worker-id <id>`,
 and stop or retire it with `runs stop-control-plane-tick-workers <name>
 --server`. Naturally exited tick workers record `completedAt` and appear in the
 aggregate status `workers.controlPlaneTick.completed` count rather than recovery
-next steps.
+next steps. The tick-worker list also includes `lifecycle.state`,
+`lifecycle.restartable`, and `lifecycle.reason` so operators can distinguish
+running, stopped, completed, retired, failed-stop, and unrecorded-exit workers
+without inferring state from raw timestamps.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,
