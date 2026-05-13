@@ -807,6 +807,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return await readWorkerSessionControlPlaneTimeline(settings, name, {
         limit: parseOptionalInteger(query.limit) ?? 20,
         lines: parseOptionalInteger(query.lines) ?? 5,
+        sources: parseOptionalList(query.source),
+        events: parseOptionalList(query.event),
+        statuses: parseOptionalList(query.status),
       });
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -3096,10 +3099,11 @@ const timelineStringArray = (value: unknown): string[] | undefined => (
 const readWorkerSessionControlPlaneTimeline = async (
   settings: Settings,
   name: string,
-  options: { limit: number; lines: number },
+  options: { limit: number; lines: number; sources: string[]; events: string[]; statuses: string[] },
 ): Promise<{
   ok: true;
   session: string;
+  filter: { sources: string[]; events: string[]; statuses: string[]; limit: number; lines: number };
   count: number;
   counts: Record<string, number>;
   decisions: WorkerSessionControlPlaneTimelineDecisionRollup;
@@ -3277,12 +3281,26 @@ const readWorkerSessionControlPlaneTimeline = async (
       skippedReasons: [...new Set(execution.skipped.map((run) => run.reason))],
     });
   }
-  const sorted = events
+  const sourceFilter = options.sources.length > 0 ? new Set(options.sources) : null;
+  const eventFilter = options.events.length > 0 ? new Set(options.events) : null;
+  const statusFilter = options.statuses.length > 0 ? new Set(options.statuses) : null;
+  const filteredEvents = events
+    .filter((event) => !sourceFilter || sourceFilter.has(event.source))
+    .filter((event) => !eventFilter || eventFilter.has(event.event))
+    .filter((event) => !statusFilter || (event.status && statusFilter.has(event.status)));
+  const sorted = filteredEvents
     .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
     .slice(0, options.limit);
   return {
     ok: true,
     session: name,
+    filter: {
+      sources: options.sources,
+      events: options.events,
+      statuses: options.statuses,
+      limit: options.limit,
+      lines: options.lines,
+    },
     count: sorted.length,
     counts: sorted.reduce<Record<string, number>>((counts, event) => {
       counts[event.event] = (counts[event.event] ?? 0) + 1;

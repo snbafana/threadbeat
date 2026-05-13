@@ -4728,6 +4728,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       {
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 20,
         lines,
+        source: options.source,
+        event: options.event,
+        status: options.status,
       },
     );
     await printJson(options.summary === "1"
@@ -6853,6 +6856,7 @@ type WorkerSessionControlPlaneAdvanceLoopResponse = {
 type WorkerSessionControlPlaneTimelineResponse = {
   ok: true;
   session: string;
+  filter: { sources: string[]; events: string[]; statuses: string[]; limit: number; lines: number };
   count: number;
   counts: Record<string, number>;
   decisions: {
@@ -7671,9 +7675,12 @@ async function listWorkerSessionControlPlaneTickRecords(
 
 async function fetchWorkerSessionControlPlaneTimeline(
   sessionName: string,
-  options: { limit: number; lines: number },
+  options: { limit: number; lines: number; source?: string; event?: string; status?: string },
 ): Promise<WorkerSessionControlPlaneTimelineResponse> {
   const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
+  if (options.source) params.set("source", options.source);
+  if (options.event) params.set("event", options.event);
+  if (options.status) params.set("status", options.status);
   return await requestJson(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-timeline`, params),
@@ -7686,6 +7693,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
 ): {
   ok: true;
   session: string;
+  filter: WorkerSessionControlPlaneTimelineResponse["filter"];
   events: { total: number; counts: Record<string, number> };
   decisions: WorkerSessionControlPlaneTimelineResponse["decisions"];
   latestEvents: Array<{
@@ -7714,6 +7722,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
   return {
     ok: true,
     session: timeline.session,
+    filter: timeline.filter,
     events: {
       total: timeline.count,
       counts: timeline.counts,
@@ -7741,7 +7750,12 @@ function summarizeWorkerSessionControlPlaneTimeline(
       skippedCount: event.skippedCount,
     })),
     commands: {
-      fullTimeline: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", timeline.session, "--server"],
+      fullTimeline: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", timeline.session, "--server",
+        ...(timeline.filter.sources.length > 0 ? ["--source", timeline.filter.sources.join(",")] : []),
+        ...(timeline.filter.events.length > 0 ? ["--event", timeline.filter.events.join(",")] : []),
+        ...(timeline.filter.statuses.length > 0 ? ["--status", timeline.filter.statuses.join(",")] : []),
+      ],
     },
   };
 }
@@ -11226,7 +11240,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--limit 20] [--lines 5]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,branch_recovery_execution] [--event tick_recorded,branch_recovery_executed] [--status executed,noop] [--limit 20] [--lines 5]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

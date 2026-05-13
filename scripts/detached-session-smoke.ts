@@ -3087,6 +3087,51 @@ try {
     && event.skippedReasons?.includes("running_sandbox_present")
     && event.branchNames?.includes(controlPlaneBlockedPlan.plan.branchName)
   )));
+  const filteredBranchRecoveryTimeline = await cliJson<{
+    ok?: true;
+    session: string;
+    filter: { sources: string[]; events: string[]; statuses: string[]; limit: number };
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{
+      event: string;
+      source: string;
+      executionId?: string;
+      status?: string;
+      skippedRunIds?: string[];
+      skippedReasons?: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "branch_recovery_execution",
+    "--event",
+    "branch_recovery_executed",
+    "--status",
+    "noop",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(filteredBranchRecoveryTimeline.ok, true);
+  assert.deepEqual(filteredBranchRecoveryTimeline.filter.sources, ["branch_recovery_execution"]);
+  assert.deepEqual(filteredBranchRecoveryTimeline.filter.events, ["branch_recovery_executed"]);
+  assert.deepEqual(filteredBranchRecoveryTimeline.filter.statuses, ["noop"]);
+  assert.equal(filteredBranchRecoveryTimeline.filter.limit, 5);
+  assert.equal(filteredBranchRecoveryTimeline.counts.branch_recovery_executed, filteredBranchRecoveryTimeline.count);
+  assert.ok(filteredBranchRecoveryTimeline.count >= 1);
+  assert.ok(filteredBranchRecoveryTimeline.events.every((event) => (
+    event.source === "branch_recovery_execution"
+    && event.event === "branch_recovery_executed"
+    && event.status === "noop"
+  )));
+  assert.ok(filteredBranchRecoveryTimeline.events.some((event) => (
+    event.executionId === controlPlaneResumeBlocked.execution.executionId
+    && event.skippedRunIds?.includes(controlPlaneBlockedPlan.run.id)
+    && event.skippedReasons?.includes("running_sandbox_present")
+  )));
   const controlPlaneStatusAfterResume = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",
     "session-control-plane-status",

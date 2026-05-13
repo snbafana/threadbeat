@@ -821,7 +821,10 @@ without inferring state from raw timestamps.
 `runs session-control-plane-timeline <name> --server` joins recent advance
 records, tick records, advance-worker lifecycle events, tick-worker lifecycle
 events, apply-action executions, and branch-recovery executions for a durable
-session-level audit trail. Add `--summary` for a
+session-level audit trail. Add `--source`, `--event`, or `--status` to narrow
+that audit stream to one durable surface, such as
+`--source branch_recovery_execution --event branch_recovery_executed --status
+noop` when inspecting blocked branch resumes. Add `--summary` for a
 compact operator view with event counts, the decision rollup, latest bounded
 events, and the command to fetch the full timeline. Its top-level `decisions`
 rollup summarizes recent tick statuses, status reasons, planned/executed/skipped
