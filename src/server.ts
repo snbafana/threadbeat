@@ -2368,6 +2368,10 @@ type WorkerSessionControlPlaneTimelineEvent = {
   workerId?: string;
   executionId?: string;
   runIds?: string[];
+  resumedRunIds?: string[];
+  skippedRunIds?: string[];
+  branchNames?: string[];
+  skippedReasons?: string[];
   status?: string;
   state?: string;
   restartable?: boolean;
@@ -2459,6 +2463,8 @@ const readWorkerSessionControlPlaneTimeline = async (
     }
   }
   for (const execution of branchRecoveryExecutions) {
+    const resumedRunIds = execution.resumed.map((run) => run.runId);
+    const skippedRunIds = execution.skipped.map((run) => run.runId);
     events.push({
       observedAt: execution.observedAt,
       source: "branch_recovery_execution",
@@ -2468,7 +2474,14 @@ const readWorkerSessionControlPlaneTimeline = async (
       selected: execution.selected,
       resumedCount: execution.resumed.length,
       skippedCount: execution.skipped.length,
-      runIds: execution.resumed.map((run) => run.runId),
+      runIds: [...resumedRunIds, ...skippedRunIds],
+      resumedRunIds,
+      skippedRunIds,
+      branchNames: [
+        ...execution.resumed.map((run) => run.branchName),
+        ...execution.skipped.map((run) => run.branchName),
+      ],
+      skippedReasons: [...new Set(execution.skipped.map((run) => run.reason))],
     });
   }
   const sorted = events

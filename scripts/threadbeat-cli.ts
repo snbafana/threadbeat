@@ -6876,6 +6876,10 @@ async function fetchWorkerSessionControlPlaneTimeline(
     workerId?: string;
     executionId?: string;
     runIds?: string[];
+    resumedRunIds?: string[];
+    skippedRunIds?: string[];
+    branchNames?: string[];
+    skippedReasons?: string[];
     status?: string;
     state?: string;
     restartable?: boolean;
@@ -6902,6 +6906,10 @@ async function fetchWorkerSessionControlPlaneTimeline(
       workerId?: string;
       executionId?: string;
       runIds?: string[];
+      resumedRunIds?: string[];
+      skippedRunIds?: string[];
+      branchNames?: string[];
+      skippedReasons?: string[];
       status?: string;
       state?: string;
       restartable?: boolean;

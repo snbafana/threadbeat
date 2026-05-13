@@ -1920,7 +1920,20 @@ try {
     session: string;
     count: number;
     counts: Record<string, number>;
-    events: Array<{ event: string; source: string; executionId?: string; runIds?: string[]; status?: string; selected?: number; resumedCount?: number; skippedCount?: number }>;
+    events: Array<{
+      event: string;
+      source: string;
+      executionId?: string;
+      runIds?: string[];
+      resumedRunIds?: string[];
+      skippedRunIds?: string[];
+      branchNames?: string[];
+      skippedReasons?: string[];
+      status?: string;
+      selected?: number;
+      resumedCount?: number;
+      skippedCount?: number;
+    }>;
   }>(baseUrl, [
     "runs",
     "session-control-plane-timeline",
@@ -1940,6 +1953,52 @@ try {
     && event.resumedCount === 1
     && event.skippedCount === 0
     && event.runIds?.includes(controlPlaneResumePlan.run.id)
+    && event.resumedRunIds?.includes(controlPlaneResumePlan.run.id)
+  )));
+  const controlPlaneResumeBlocked = await cliJson<{
+    resumed: Array<{ runId: string; skipped?: string }>;
+    execution: {
+      executionId: string;
+      status: string;
+      selected: number;
+      resumed: Array<{ runId: string }>;
+      skipped: Array<{ runId: string; reason: string }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "resume-session",
+    sessionName,
+    "--run",
+    controlPlaneBlockedPlan.run.id,
+  ]);
+  assert.deepEqual(controlPlaneResumeBlocked.resumed.map((run) => run.runId), [controlPlaneBlockedPlan.run.id]);
+  assert.equal(controlPlaneResumeBlocked.resumed[0]?.skipped, "running_sandbox_present");
+  assert.equal(controlPlaneResumeBlocked.execution.status, "noop");
+  assert.equal(controlPlaneResumeBlocked.execution.selected, 1);
+  assert.deepEqual(controlPlaneResumeBlocked.execution.resumed, []);
+  assert.deepEqual(controlPlaneResumeBlocked.execution.skipped.map((run) => run.runId), [controlPlaneBlockedPlan.run.id]);
+  assert.equal(controlPlaneResumeBlocked.execution.skipped[0]?.reason, "running_sandbox_present");
+  const controlPlaneTimelineAfterSkippedBranchRecovery = await cliJson<typeof controlPlaneTimelineAfterBranchRecovery>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--limit",
+    "30",
+  ]);
+  assert.ok((controlPlaneTimelineAfterSkippedBranchRecovery.counts.branch_recovery_executed ?? 0) >= 2);
+  assert.ok(controlPlaneTimelineAfterSkippedBranchRecovery.events.some((event) => (
+    event.event === "branch_recovery_executed"
+    && event.source === "branch_recovery_execution"
+    && event.executionId === controlPlaneResumeBlocked.execution.executionId
+    && event.status === "noop"
+    && event.selected === 1
+    && event.resumedCount === 0
+    && event.skippedCount === 1
+    && event.runIds?.includes(controlPlaneBlockedPlan.run.id)
+    && event.skippedRunIds?.includes(controlPlaneBlockedPlan.run.id)
+    && event.skippedReasons?.includes("running_sandbox_present")
+    && event.branchNames?.includes(controlPlaneBlockedPlan.plan.branchName)
   )));
   const controlPlaneStatusAfterResume = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",
