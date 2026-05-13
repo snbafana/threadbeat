@@ -6493,7 +6493,7 @@ type WorkerSessionControlPlaneTickRecord = {
   dryRun: boolean;
   status: "dry_run" | "executed" | "partial" | "noop";
   planned: {
-    branchRecovery: null | { action: "resume_next_branch"; runIds: string[]; command: string[] };
+    branchRecovery: null | { action: "recover_stale_running_run" | "resume_next_branch"; runIds: string[]; command: string[] };
     applyAction: null | { action: "execute_next_apply_action"; actionable: number };
     drainContinuation: null | { action: "execute_next_drain_continuation"; queued: number };
   };

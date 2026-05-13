@@ -2958,6 +2958,7 @@ const readWorkerSessionControlPlaneStatus = async (
       counts: ReturnType<typeof summarizeBranchRecoveryExecutionStatuses>;
     };
   };
+  staleRuns: Awaited<ReturnType<typeof summarizeWorkerSessionStaleRunRecovery>>;
   recovery: {
     count: number;
     actions: Record<string, number>;
@@ -2977,6 +2978,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneTickWorkers,
     controlPlaneTickWorkerNextSteps,
     branchRecovery,
+    staleRunRecovery,
     branchRecoveryExecutions,
     applyActionExecutions,
   ] = await Promise.all([
@@ -2991,6 +2993,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
+    summarizeWorkerSessionStaleRunRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, lines),
   ]);
@@ -3020,6 +3023,7 @@ const readWorkerSessionControlPlaneStatus = async (
         counts: summarizeBranchRecoveryExecutionStatuses(branchRecoveryExecutions),
       },
     },
+    staleRuns: staleRunRecovery,
     recovery: {
       count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count,
       actions: {
@@ -3059,11 +3063,21 @@ const runWorkerSessionControlPlaneTick = async (
 }> => {
   const observedAt = new Date().toISOString();
   const before = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
+  const staleRunIds = before.staleRuns.nextSteps
+    .filter((step) => step.action === "recover_session_run")
+    .map((step) => step.runId);
   const branchRunIds = before.branches.nextSteps
     .filter((step) => step.action === "resume_branch")
     .map((step) => step.runId);
   const planned = {
-    branchRecovery: branchRunIds.length > 0
+    branchRecovery: staleRunIds.length > 0
+      ? {
+        action: "recover_stale_running_run" as const,
+        runIds: staleRunIds.slice(0, 1),
+        command: before.staleRuns.nextSteps.find((step) => step.runId === staleRunIds[0])?.command
+          ?? [...before.staleRuns.commands.recoverSession, "--run", staleRunIds[0]],
+      }
+      : branchRunIds.length > 0
       ? {
         action: "resume_next_branch" as const,
         runIds: branchRunIds.slice(0, 1),
@@ -3531,6 +3545,101 @@ const summarizeWorkerSessionBranchRecovery = async (
       resumeSessionDryRun: [...resumeSession, "--dry-run"],
       resumeNext: [...resumeSession, "--next"],
       inspectBranches: ["npm", "run", "cli", "--", "runs", "session-branches", session.session, "--server", "--resumable"],
+    },
+    nextSteps: nextSteps.slice(0, nextStepLimit),
+  };
+};
+
+const summarizeWorkerSessionStaleRunRecovery = async (
+  db: Database,
+  session: Awaited<ReturnType<typeof readWorkerSession>>,
+  nextStepLimit: number,
+): Promise<{
+  counts: {
+    total: number;
+    ready: number;
+    blocked: number;
+    staleRunningClaimWithoutRunningSandbox: number;
+    runningSandboxPresent: number;
+  };
+  actions: { recover_session_run: number; inspect_run: number };
+  commands: { recoverSession: string[]; recoverSessionDryRun: string[]; inspectSession: string[] };
+  nextSteps: Array<{
+    action: "recover_session_run" | "inspect_run";
+    reason: "stale_running_claim_without_running_sandbox" | "running_sandbox_present";
+    agentId: string;
+    runId: string;
+    objective: string;
+    status: string;
+    branchName: string;
+    resultCommit: string | null;
+    workerId: string | null;
+    command: string[];
+    commands: {
+      inspectRun: string[];
+      recoverRun: string[] | null;
+      recoverRunDryRun: string[];
+      recoverSession: string[];
+      recoverSessionDryRun: string[];
+    };
+    runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+  }>;
+}> => {
+  const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+  const recoverSession = ["npm", "run", "cli", "--", "runs", "recover-session", session.session, "--server"];
+  const runs = (await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+    return (await db.listAgentRuns(agentId, ["running"]))
+      .filter((run) => run.worker_id !== null && sessionWorkerIds.has(run.worker_id))
+      .map((run) => ({ agentId, run }));
+  }))).flat();
+  const nextSteps = await Promise.all(runs.map(async ({ agentId, run }) => {
+    const runningSandboxes = (await db.listSandboxes({ runId: run.id }))
+      .filter((sandbox) => sandbox.state === "running")
+      .map((sandbox) => ({ id: sandbox.id, providerSandboxId: sandbox.provider_sandbox_id }));
+    const ready = runningSandboxes.length === 0;
+    const recoverRun = [...recoverSession, "--run", run.id];
+    const command = ready
+      ? recoverRun
+      : ["npm", "run", "cli", "--", "runs", "inspect", run.id];
+    return {
+      action: ready ? "recover_session_run" as const : "inspect_run" as const,
+      reason: ready ? "stale_running_claim_without_running_sandbox" as const : "running_sandbox_present" as const,
+      agentId,
+      runId: run.id,
+      objective: run.objective,
+      status: run.status,
+      branchName: run.run_branch,
+      resultCommit: run.result_commit,
+      workerId: run.worker_id,
+      command,
+      commands: {
+        inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+        recoverRun: ready ? recoverRun : null,
+        recoverRunDryRun: [...recoverRun, "--dry-run"],
+        recoverSession,
+        recoverSessionDryRun: [...recoverSession, "--dry-run"],
+      },
+      runningSandboxes,
+    };
+  }));
+  const ready = nextSteps.filter((step) => step.action === "recover_session_run").length;
+  const blocked = nextSteps.length - ready;
+  return {
+    counts: {
+      total: nextSteps.length,
+      ready,
+      blocked,
+      staleRunningClaimWithoutRunningSandbox: ready,
+      runningSandboxPresent: blocked,
+    },
+    actions: {
+      recover_session_run: ready,
+      inspect_run: blocked,
+    },
+    commands: {
+      recoverSession,
+      recoverSessionDryRun: [...recoverSession, "--dry-run"],
+      inspectSession: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", session.session, "--server"],
     },
     nextSteps: nextSteps.slice(0, nextStepLimit),
   };

@@ -1733,6 +1733,31 @@ try {
         recent: Array<{ executionId: string; status: string; resumed: Array<{ runId: string }> }>;
       };
     };
+    staleRuns: {
+      counts: { total: number; ready: number; blocked: number; staleRunningClaimWithoutRunningSandbox: number; runningSandboxPresent: number };
+      actions: { recover_session_run: number; inspect_run: number };
+      commands: { recoverSession: string[]; recoverSessionDryRun: string[]; inspectSession: string[] };
+      nextSteps: Array<{
+        action: string;
+        reason: string;
+        agentId: string;
+        runId: string;
+        objective: string;
+        status: string;
+        branchName: string;
+        resultCommit: string | null;
+        workerId: string | null;
+        command: string[];
+        commands: {
+          inspectRun: string[];
+          recoverRun: string[] | null;
+          recoverRunDryRun: string[];
+          recoverSession: string[];
+          recoverSessionDryRun: string[];
+        };
+        runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+      }>;
+    };
     recovery: {
       count: number;
       actions: { restart_drain_worker: number; restart_apply_action_worker: number; restart_control_plane_tick_worker: number };
@@ -1789,6 +1814,13 @@ try {
   assert.equal(controlPlaneStatus.branches.commands.resumeSessionDryRun.join(" "), `npm run cli -- runs resume-session ${sessionName} --dry-run`);
   assert.equal(controlPlaneStatus.branches.commands.resumeNext.join(" "), `npm run cli -- runs resume-session ${sessionName} --next`);
   assert.equal(controlPlaneStatus.branches.commands.inspectBranches.join(" "), `npm run cli -- runs session-branches ${sessionName} --server --resumable`);
+  assert.equal(controlPlaneStatus.staleRuns.counts.ready, controlPlaneStatus.staleRuns.actions.recover_session_run);
+  assert.equal(controlPlaneStatus.staleRuns.counts.blocked, controlPlaneStatus.staleRuns.actions.inspect_run);
+  assert.equal(controlPlaneStatus.staleRuns.counts.staleRunningClaimWithoutRunningSandbox, controlPlaneStatus.staleRuns.counts.ready);
+  assert.equal(controlPlaneStatus.staleRuns.counts.runningSandboxPresent, controlPlaneStatus.staleRuns.counts.blocked);
+  assert.equal(controlPlaneStatus.staleRuns.commands.recoverSession.join(" "), `npm run cli -- runs recover-session ${sessionName} --server`);
+  assert.equal(controlPlaneStatus.staleRuns.commands.recoverSessionDryRun.join(" "), `npm run cli -- runs recover-session ${sessionName} --server --dry-run`);
+  assert.equal(controlPlaneStatus.staleRuns.commands.inspectSession.join(" "), `npm run cli -- runs session-control-plane-status ${sessionName} --server`);
   assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
     step.runId === controlPlaneResumePlan.run.id
     && step.action === "resume_branch"
@@ -1904,6 +1936,108 @@ try {
   assert.equal(controlPlaneTicks.ticks[0]?.tickId, controlPlaneTickLoopPreview.ticks[0]?.tickId);
   assert.equal(controlPlaneTicks.ticks[0]?.status, "dry_run");
   assert.equal(controlPlaneTicks.ticks[1]?.tickId, controlPlaneTickPreview.tick.tickId);
+  const controlPlaneStaleBranch = `threadbeat/runs/control-plane-stale-${Date.now().toString(36)}`;
+  const controlPlaneStaleRun = await db.createAgentRun({
+    agentId: agent.agent.id,
+    objective: "detached session control plane stale running recovery",
+    inputRef: "main",
+    runBranch: controlPlaneStaleBranch,
+  });
+  const controlPlaneStaleClaim = await db.claimAgentRun(controlPlaneStaleRun.id, "detached-smoke-worker-1");
+  assert.ok(controlPlaneStaleClaim);
+  const controlPlaneStaleStatus = await cliJson<{
+    ok?: true;
+    session: string;
+    staleRuns: {
+      counts: { ready: number; staleRunningClaimWithoutRunningSandbox: number };
+      actions: { recover_session_run: number };
+      nextSteps: Array<{
+        action: string;
+        reason: string;
+        agentId: string;
+        runId: string;
+        objective: string;
+        status: string;
+        branchName: string;
+        workerId: string | null;
+        command: string[];
+        commands: {
+          inspectRun: string[];
+          recoverRun: string[] | null;
+          recoverRunDryRun: string[];
+          recoverSession: string[];
+          recoverSessionDryRun: string[];
+        };
+        runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+      }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStaleStatus.ok, true);
+  assert.equal(controlPlaneStaleStatus.session, sessionName);
+  assert.ok(controlPlaneStaleStatus.staleRuns.counts.ready >= 1);
+  assert.equal(
+    controlPlaneStaleStatus.staleRuns.counts.staleRunningClaimWithoutRunningSandbox,
+    controlPlaneStaleStatus.staleRuns.counts.ready,
+  );
+  assert.equal(controlPlaneStaleStatus.staleRuns.actions.recover_session_run, controlPlaneStaleStatus.staleRuns.counts.ready);
+  assert.ok(controlPlaneStaleStatus.staleRuns.nextSteps.some((step) => (
+    step.runId === controlPlaneStaleRun.id
+    && step.action === "recover_session_run"
+    && step.reason === "stale_running_claim_without_running_sandbox"
+    && step.agentId === agent.agent.id
+    && step.objective === "detached session control plane stale running recovery"
+    && step.status === "running"
+    && step.branchName === controlPlaneStaleBranch
+    && step.workerId === "detached-smoke-worker-1"
+    && step.command.join(" ") === `npm run cli -- runs recover-session ${sessionName} --server --run ${controlPlaneStaleRun.id}`
+    && step.commands.recoverRun?.join(" ") === `npm run cli -- runs recover-session ${sessionName} --server --run ${controlPlaneStaleRun.id}`
+    && step.commands.recoverRunDryRun.join(" ") === `npm run cli -- runs recover-session ${sessionName} --server --run ${controlPlaneStaleRun.id} --dry-run`
+    && step.commands.recoverSession.join(" ") === `npm run cli -- runs recover-session ${sessionName} --server`
+    && step.commands.recoverSessionDryRun.join(" ") === `npm run cli -- runs recover-session ${sessionName} --server --dry-run`
+    && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${controlPlaneStaleRun.id}`
+    && step.runningSandboxes.length === 0
+  )));
+  const controlPlaneStaleTick = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    tick: { status: string; dryRun: boolean };
+    planned: { branchRecovery: { action: string; runIds: string[]; command: string[] } | null };
+    executed: {
+      branchRecovery: {
+        exitCode: number | null;
+        output?: { recovered?: Array<{ runId: string; status: string; workerId: string | null }> };
+      } | null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-tick",
+    sessionName,
+    "--server",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStaleTick.ok, true);
+  assert.equal(controlPlaneStaleTick.session, sessionName);
+  assert.equal(controlPlaneStaleTick.dryRun, false);
+  assert.ok(["executed", "partial"].includes(controlPlaneStaleTick.tick.status));
+  assert.equal(controlPlaneStaleTick.tick.dryRun, false);
+  assert.equal(controlPlaneStaleTick.planned.branchRecovery?.action, "recover_stale_running_run");
+  assert.deepEqual(controlPlaneStaleTick.planned.branchRecovery?.runIds, [controlPlaneStaleRun.id]);
+  assert.equal(controlPlaneStaleTick.planned.branchRecovery?.command.join(" "), `npm run cli -- runs recover-session ${sessionName} --server --run ${controlPlaneStaleRun.id}`);
+  assert.equal(controlPlaneStaleTick.executed.branchRecovery?.exitCode, 0);
+  assert.ok(controlPlaneStaleTick.executed.branchRecovery?.output?.recovered?.some((run) => (
+    run.runId === controlPlaneStaleRun.id
+    && run.status === "planned"
+    && run.workerId === null
+  )));
   const completedControlPlaneTickWorker = await cliJson<{
     ok?: true;
     session: string;

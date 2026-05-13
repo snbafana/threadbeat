@@ -765,9 +765,11 @@ does not get stuck on a blocked branch while a resumable branch is waiting
 behind it. Use `runs
 session-control-plane-tick <name> --server` or
 `POST /api/worker-sessions/:name/control-plane-tick` for one bounded
-control-plane pass over the same server surfaces: it can resume one ready
-branch, execute one queued apply action, and execute one queued drain
-continuation. Each tick writes a durable record under
+control-plane pass over the same server surfaces: it first recovers one stale
+running session claim with `recover-session --server --run <id>` when a claimed
+run has no running sandbox, otherwise it can resume one ready branch, execute
+one queued apply action, and execute one queued drain continuation. Each tick
+writes a durable record under
 `.threadbeat/worker-sessions/control-plane-ticks/<session>/`; inspect recent
 ticks with `runs session-control-plane-ticks <name> --server` or
 `GET /api/worker-sessions/:name/control-plane-ticks`. Use `runs
