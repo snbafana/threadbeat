@@ -3251,12 +3251,13 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution";
-  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed";
+  source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
+  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
   tickId?: string;
   advanceId?: string;
   workerId?: string;
   executionId?: string;
+  reviewId?: string;
   applyId?: string;
   applySource?: string;
   applyAction?: string;
@@ -3282,6 +3283,11 @@ type WorkerSessionControlPlaneTimelineEvent = {
   selected?: number;
   resumedCount?: number;
   skippedCount?: number;
+  agentId?: string;
+  objective?: string;
+  resultCommit?: string;
+  reviewedBy?: string;
+  note?: string;
 };
 
 type WorkerSessionControlPlaneTimelineDecisionRollup = {
@@ -3375,13 +3381,14 @@ const readWorkerSessionControlPlaneTimeline = async (
     options.runIds,
   ].some((values) => values.length > 0);
   const recordReadLimit = hasIdentityFilter ? Number.MAX_SAFE_INTEGER : options.limit;
-  const [ticks, advances, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
+  const [ticks, advances, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions, resultReviews] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, { limit: recordReadLimit }),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, recordReadLimit),
+    listWorkerSessionResultReviewRecords(settings.projectRoot, name, recordReadLimit),
   ]);
   const events: WorkerSessionControlPlaneTimelineEvent[] = [];
   for (const tick of ticks) {
@@ -3545,6 +3552,24 @@ const readWorkerSessionControlPlaneTimeline = async (
         ...execution.skipped.map((run) => run.branchName),
       ],
       skippedReasons: [...new Set(execution.skipped.map((run) => run.reason))],
+    });
+  }
+  for (const review of resultReviews) {
+    events.push({
+      observedAt: review.observedAt,
+      source: "result_review",
+      event: "result_review_recorded",
+      reviewId: review.reviewId,
+      status: review.action,
+      agentId: review.agentId,
+      runIds: [review.runId],
+      branchNames: [review.branchName],
+      resultCommit: review.resultCommit,
+      workerId: review.workerId ?? undefined,
+      reviewedBy: review.reviewedBy,
+      objective: review.objective,
+      command: review.command,
+      ...(review.note ? { note: review.note } : {}),
     });
   }
   const sourceFilter = options.sources.length > 0 ? new Set(options.sources) : null;

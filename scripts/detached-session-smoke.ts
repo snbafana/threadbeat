@@ -2206,6 +2206,74 @@ try {
   assert.equal(controlPlaneStatusAfterResultReview.results.counts.pending, controlPlaneStatus.results.counts.pending - 1);
   assert.equal(controlPlaneStatusAfterResultReview.results.actions.review_result, controlPlaneStatus.results.actions.review_result - 1);
   assert.ok(!controlPlaneStatusAfterResultReview.results.nextSteps.some((step) => step.runId === controlPlaneResultPlan.run.id));
+  const resultReviewTimeline = await cliJson<{
+    ok?: true;
+    session: string;
+    filter: { sources: string[]; events: string[]; statuses: string[]; runIds: string[] };
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{
+      source: string;
+      event: string;
+      reviewId?: string;
+      status?: string;
+      runIds?: string[];
+      branchNames?: string[];
+      resultCommit?: string;
+      reviewedBy?: string;
+      command?: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "result_review",
+    "--event",
+    "result_review_recorded",
+    "--status",
+    "reviewed",
+    "--run",
+    controlPlaneResultPlan.run.id,
+  ]);
+  assert.equal(resultReviewTimeline.ok, true);
+  assert.deepEqual(resultReviewTimeline.filter.sources, ["result_review"]);
+  assert.deepEqual(resultReviewTimeline.filter.events, ["result_review_recorded"]);
+  assert.deepEqual(resultReviewTimeline.filter.statuses, ["reviewed"]);
+  assert.deepEqual(resultReviewTimeline.filter.runIds, [controlPlaneResultPlan.run.id]);
+  assert.equal(resultReviewTimeline.counts.result_review_recorded, 1);
+  assert.equal(resultReviewTimeline.count, 1);
+  assert.equal(resultReviewTimeline.events[0]?.reviewId, resultReview.review.reviewId);
+  assert.equal(resultReviewTimeline.events[0]?.source, "result_review");
+  assert.equal(resultReviewTimeline.events[0]?.event, "result_review_recorded");
+  assert.equal(resultReviewTimeline.events[0]?.status, "reviewed");
+  assert.ok(resultReviewTimeline.events[0]?.runIds?.includes(controlPlaneResultPlan.run.id));
+  assert.ok(resultReviewTimeline.events[0]?.branchNames?.includes(controlPlaneResultPlan.plan.branchName));
+  assert.equal(resultReviewTimeline.events[0]?.resultCommit, controlPlaneResultCommit);
+  assert.equal(resultReviewTimeline.events[0]?.reviewedBy, "detached-smoke");
+  assert.equal(resultReviewTimeline.events[0]?.command?.join(" "), `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`);
+  const resultReviewTimelineCommands = await cliJson<{
+    ok?: true;
+    commands: Array<{ action: string; reviewId: string | null; runIds: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "result_review",
+    "--run",
+    controlPlaneResultPlan.run.id,
+    "--commands-only",
+  ]);
+  assert.equal(resultReviewTimelineCommands.ok, true);
+  assert.ok(resultReviewTimelineCommands.commands.some((command) => (
+    command.action === "inspect_result_review"
+    && command.reviewId === resultReview.review.reviewId
+    && command.runIds.includes(controlPlaneResultPlan.run.id)
+    && command.command.join(" ") === `npm run cli -- runs session-result-reviews ${sessionName} --server --review ${resultReview.review.reviewId} --run ${controlPlaneResultPlan.run.id} --limit 20`
+  )));
   assert.equal(
     controlPlaneStatusSummary.commands.timelineSummary.join(" "),
     `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --summary`,
