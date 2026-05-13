@@ -500,6 +500,25 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/worker-sessions/:name/control-plane-advance", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return await runWorkerSessionControlPlaneAdvance(
+        settings,
+        db,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          dryRun: parseBoolean(body.dryRun, false),
+          lines: parseOptionalInteger(body.lines) ?? 5,
+        },
+      );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/control-plane-tick", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -3105,6 +3124,141 @@ const readWorkerSessionControlPlaneStatus = async (
         controlPlaneTickWorkers: controlPlaneTickWorkerNextSteps.nextSteps,
       },
     },
+  };
+};
+
+type WorkerSessionControlPlaneStatus = Awaited<ReturnType<typeof readWorkerSessionControlPlaneStatus>>;
+
+type WorkerSessionControlPlaneAdvanceAction = {
+  surface: "stale_run" | "branch" | "apply_action" | "drain_continuation" | "worker_recovery";
+  action: string;
+  reason: string;
+  count: number;
+  command: string[];
+  runId?: string;
+  workerId?: string;
+  applyId?: string;
+};
+
+type WorkerSessionControlPlaneWorkerRecoveryStep = {
+  action: string;
+  reason: string;
+  workerId: string;
+  command: string[];
+};
+
+const isWorkerSessionControlPlaneWorkerRecoveryStep = (
+  value: unknown,
+): value is WorkerSessionControlPlaneWorkerRecoveryStep => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.action === "string"
+    && typeof item.reason === "string"
+    && typeof item.workerId === "string"
+    && Array.isArray(item.command)
+    && item.command.every((part) => typeof part === "string");
+};
+
+const selectWorkerSessionControlPlaneAdvanceAction = (
+  status: WorkerSessionControlPlaneStatus,
+): WorkerSessionControlPlaneAdvanceAction | null => {
+  const staleRun = status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run");
+  if (staleRun) {
+    return {
+      surface: "stale_run",
+      action: "recover_stale_run",
+      reason: staleRun.reason,
+      count: status.staleRuns.counts.ready,
+      command: staleRun.command,
+      runId: staleRun.runId,
+      workerId: staleRun.workerId ?? undefined,
+    };
+  }
+  const branch = status.branches.nextSteps.find((step) => step.action === "resume_branch");
+  if (branch) {
+    return {
+      surface: "branch",
+      action: "resume_branch",
+      reason: branch.reason,
+      count: status.branches.counts.ready,
+      command: branch.command,
+      runId: branch.runId,
+      workerId: branch.workerId ?? undefined,
+    };
+  }
+  const applyAction = status.queues.applyActionNextSteps.nextSteps[0];
+  if (applyAction) {
+    return {
+      surface: "apply_action",
+      action: "execute_next_apply_action",
+      reason: applyAction.action,
+      count: status.queues.applyActions.actionable,
+      command: applyAction.executeCommand,
+      applyId: applyAction.applyId,
+    };
+  }
+  if (status.queues.drainContinuations.queued > 0) {
+    return {
+      surface: "drain_continuation",
+      action: "execute_next_drain_continuation",
+      reason: "queued_drain_continuation",
+      count: status.queues.drainContinuations.queued,
+      command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--execute-next"],
+    };
+  }
+  const workerRecovery = [
+    ...status.recovery.nextSteps.watchWorkers,
+    ...status.recovery.nextSteps.drainWorkers,
+    ...status.recovery.nextSteps.applyActionWorkers,
+    ...status.recovery.nextSteps.controlPlaneTickWorkers,
+  ].find(isWorkerSessionControlPlaneWorkerRecoveryStep);
+  if (workerRecovery) {
+    return {
+      surface: "worker_recovery",
+      action: workerRecovery.action,
+      reason: workerRecovery.reason,
+      count: status.recovery.count,
+      command: workerRecovery.command,
+      workerId: workerRecovery.workerId,
+    };
+  }
+  return null;
+};
+
+const runWorkerSessionControlPlaneAdvance = async (
+  settings: Settings,
+  db: Database,
+  baseUrl: string,
+  sessionName: string,
+  options: { dryRun: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  selected: WorkerSessionControlPlaneAdvanceAction | null;
+  executed: TickCommandExecution | null;
+  before: WorkerSessionControlPlaneStatus;
+  after: WorkerSessionControlPlaneStatus;
+}> => {
+  const observedAt = new Date().toISOString();
+  const before = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
+  const selected = selectWorkerSessionControlPlaneAdvanceAction(before);
+  const executed = selected && !options.dryRun
+    ? await runControlPlaneTickCommand(settings.projectRoot, baseUrl, selected.command)
+    : null;
+  const after = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    selected,
+    executed,
+    before,
+    after,
   };
 };
 

@@ -747,7 +747,11 @@ view across watch workers, apply-action workers, apply queues, drain
 continuations, control-plane tick workers, branch recovery, and recovery
 suggestions. Add `--summary` for a compact operator checkpoint with worker
 health, queue pressure, branch/stale-run recovery counts, restart counts, and
-next-action commands. The `branches` block
+next-action commands. Use `runs session-control-plane-advance <name> --server`
+or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
+first priority next action from that status; add `--dry-run` to inspect the
+selected stale-run recovery, branch resume, apply action, drain continuation, or
+worker restart without running it. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
 sandbox, and includes exact bulk resume, dry-run, and branch-inspection
 commands. Each branch next-step row includes objective, branch name, worker

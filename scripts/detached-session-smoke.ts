@@ -1840,8 +1840,8 @@ try {
       actions: typeof controlPlaneStatus.staleRuns.actions;
     };
     recovery: { count: number; actions: Record<string, number> };
-    nextActions: Array<{ action: string; count: number; command: string[] }>;
-    commands: { fullStatus: string[]; tick: string[]; tickDryRun: string[]; timelineSummary: string[] };
+    nextActions: Array<{ surface: string; action: string; reason: string; count: number; command: string[] }>;
+    commands: { fullStatus: string[]; advance: string[]; advanceDryRun: string[]; tick: string[]; tickDryRun: string[]; timelineSummary: string[] };
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -1869,10 +1869,11 @@ try {
     )));
   }
   if (controlPlaneStatus.branches.counts.ready > 0) {
+    const firstReadyBranch = controlPlaneStatus.branches.nextSteps.find((step) => step.action === "resume_branch");
     assert.ok(controlPlaneStatusSummary.nextActions.some((action) => (
       action.action === "resume_branch"
       && action.count === controlPlaneStatus.branches.counts.ready
-      && action.command.join(" ") === `npm run cli -- runs resume-session ${sessionName} --next`
+      && action.command.join(" ") === firstReadyBranch?.command.join(" ")
     )));
   }
   if (controlPlaneStatus.queues.applyActions.actionable > 0) {
@@ -1885,6 +1886,40 @@ try {
     controlPlaneStatusSummary.commands.timelineSummary.join(" "),
     `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --summary`,
   );
+  assert.equal(
+    controlPlaneStatusSummary.commands.advance.join(" "),
+    `npm run cli -- runs session-control-plane-advance ${sessionName} --server`,
+  );
+  assert.equal(
+    controlPlaneStatusSummary.commands.advanceDryRun.join(" "),
+    `npm run cli -- runs session-control-plane-advance ${sessionName} --server --dry-run`,
+  );
+  const controlPlaneAdvancePreview = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    selected: { surface: string; action: string; reason: string; count: number; command: string[] } | null;
+    executed: null;
+    before: { branches: { counts: { ready: number } }; queues: { applyActions: { actionable: number } }; recovery: { count: number } };
+    after: { branches: { counts: { ready: number } }; queues: { applyActions: { actionable: number } }; recovery: { count: number } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advance",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneAdvancePreview.ok, true);
+  assert.equal(controlPlaneAdvancePreview.session, sessionName);
+  assert.equal(controlPlaneAdvancePreview.dryRun, true);
+  assert.deepEqual(controlPlaneAdvancePreview.selected, controlPlaneStatusSummary.nextActions[0]);
+  assert.equal(controlPlaneAdvancePreview.executed, null);
+  assert.equal(controlPlaneAdvancePreview.before.branches.counts.ready, controlPlaneStatus.branches.counts.ready);
+  assert.equal(controlPlaneAdvancePreview.after.branches.counts.ready, controlPlaneStatus.branches.counts.ready);
+  assert.equal(controlPlaneAdvancePreview.before.queues.applyActions.actionable, controlPlaneStatus.queues.applyActions.actionable);
+  assert.equal(controlPlaneAdvancePreview.after.queues.applyActions.actionable, controlPlaneStatus.queues.applyActions.actionable);
   assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
     step.runId === controlPlaneResumePlan.run.id
     && step.action === "resume_branch"

@@ -4523,6 +4523,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : status);
     return;
   }
+  if (subcommandName === "session-control-plane-advance") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-advance requires --server");
+    }
+    const response = await executeWorkerSessionControlPlaneAdvance(
+      required(sessionName, "runs session-control-plane-advance <session> --server"),
+      {
+        dryRun: options["dry-run"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      },
+    );
+    if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+      process.exitCode = 1;
+    }
+    await printJson(response);
+    return;
+  }
   if (subcommandName === "session-control-plane-tick") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6514,6 +6533,15 @@ type WorkerSessionControlPlaneTickRecord = {
   after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
 };
 
+type WorkerSessionControlPlaneRecoveryNextStep = {
+  action: string;
+  reason: string;
+  workerId: string;
+  command: string[];
+  commands: Record<string, string[]>;
+  api?: unknown;
+};
+
 type WorkerSessionControlPlaneTickWithDecision = WorkerSessionControlPlaneTickRecord & {
   decision: ReturnType<typeof summarizeWorkerSessionControlPlaneTickDecision>;
 };
@@ -6621,8 +6649,36 @@ type WorkerSessionControlPlaneStatusResponse = {
   recovery: {
     count: number;
     actions: Record<string, number>;
-    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
+    nextSteps: {
+      watchWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
+      drainWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
+      applyActionWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
+      controlPlaneTickWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
+    };
   };
+};
+
+type WorkerSessionControlPlaneAdvanceAction = {
+  surface: "stale_run" | "branch" | "apply_action" | "drain_continuation" | "worker_recovery";
+  action: string;
+  reason: string;
+  count: number;
+  command: string[];
+  runId?: string;
+  workerId?: string;
+  applyId?: string;
+};
+
+type WorkerSessionControlPlaneAdvanceResponse = {
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  selected: WorkerSessionControlPlaneAdvanceAction | null;
+  executed: { command: string[]; exitCode: number | null; stdout?: string; stderr?: string; output: unknown } | null;
+  before: WorkerSessionControlPlaneStatusResponse;
+  after: WorkerSessionControlPlaneStatusResponse;
 };
 
 type WorkerSessionControlPlaneTimelineResponse = {
@@ -6976,6 +7032,73 @@ async function fetchWorkerSessionControlPlaneStatus(
   ) as WorkerSessionControlPlaneStatusResponse;
 }
 
+function selectWorkerSessionControlPlaneNextActions(
+  status: WorkerSessionControlPlaneStatusResponse,
+): Array<WorkerSessionControlPlaneAdvanceAction> {
+  const nextActions: Array<WorkerSessionControlPlaneAdvanceAction> = [];
+  const staleRun = status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run");
+  if (staleRun) {
+    nextActions.push({
+      surface: "stale_run",
+      action: "recover_stale_run",
+      reason: staleRun.reason,
+      count: status.staleRuns.counts.ready,
+      command: staleRun.command,
+      runId: staleRun.runId,
+      ...(staleRun.workerId ? { workerId: staleRun.workerId } : {}),
+    });
+  }
+  const branch = status.branches.nextSteps.find((step) => step.action === "resume_branch");
+  if (branch) {
+    nextActions.push({
+      surface: "branch",
+      action: "resume_branch",
+      reason: branch.reason,
+      count: status.branches.counts.ready,
+      command: branch.command,
+      runId: branch.runId,
+      ...(branch.workerId ? { workerId: branch.workerId } : {}),
+    });
+  }
+  const applyAction = status.queues.applyActionNextSteps.nextSteps[0];
+  if (applyAction) {
+    nextActions.push({
+      surface: "apply_action",
+      action: "execute_next_apply_action",
+      reason: applyAction.action,
+      count: status.queues.applyActions.actionable,
+      command: applyAction.executeCommand,
+      applyId: applyAction.applyId,
+    });
+  }
+  if (status.queues.drainContinuations.queued > 0) {
+    nextActions.push({
+      surface: "drain_continuation",
+      action: "execute_next_drain_continuation",
+      reason: "queued_drain_continuation",
+      count: status.queues.drainContinuations.queued,
+      command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--execute-next"],
+    });
+  }
+  const workerRecovery = [
+    ...status.recovery.nextSteps.watchWorkers,
+    ...status.recovery.nextSteps.drainWorkers,
+    ...status.recovery.nextSteps.applyActionWorkers,
+    ...status.recovery.nextSteps.controlPlaneTickWorkers,
+  ][0];
+  if (workerRecovery) {
+    nextActions.push({
+      surface: "worker_recovery",
+      action: workerRecovery.action,
+      reason: workerRecovery.reason,
+      count: status.recovery.count,
+      command: workerRecovery.command,
+      workerId: workerRecovery.workerId,
+    });
+  }
+  return nextActions;
+}
+
 function summarizeWorkerSessionControlPlaneStatus(
   status: WorkerSessionControlPlaneStatusResponse,
 ): {
@@ -7001,51 +7124,17 @@ function summarizeWorkerSessionControlPlaneStatus(
     count: number;
     actions: Record<string, number>;
   };
-  nextActions: Array<{ action: string; count: number; command: string[] }>;
+  nextActions: WorkerSessionControlPlaneAdvanceAction[];
   commands: {
     fullStatus: string[];
+    advance: string[];
+    advanceDryRun: string[];
     tick: string[];
     tickDryRun: string[];
     timelineSummary: string[];
   };
 } {
-  const nextActions: Array<{ action: string; count: number; command: string[] }> = [];
-  if (status.staleRuns.counts.ready > 0) {
-    nextActions.push({
-      action: "recover_stale_run",
-      count: status.staleRuns.counts.ready,
-      command: status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run")?.command
-        ?? status.staleRuns.commands.recoverSession,
-    });
-  }
-  if (status.branches.counts.ready > 0) {
-    nextActions.push({
-      action: "resume_branch",
-      count: status.branches.counts.ready,
-      command: status.branches.commands.resumeNext,
-    });
-  }
-  if (status.queues.applyActions.actionable > 0) {
-    nextActions.push({
-      action: "execute_next_apply_action",
-      count: status.queues.applyActions.actionable,
-      command: ["npm", "run", "cli", "--", "runs", "session-applies", status.session, "--server", "--action-queue", "--execute-next"],
-    });
-  }
-  if (status.queues.drainContinuations.queued > 0) {
-    nextActions.push({
-      action: "execute_next_drain_continuation",
-      count: status.queues.drainContinuations.queued,
-      command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--execute-next"],
-    });
-  }
-  if (status.recovery.count > 0) {
-    nextActions.push({
-      action: "restart_stopped_worker",
-      count: status.recovery.count,
-      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],
-    });
-  }
+  const nextActions = selectWorkerSessionControlPlaneNextActions(status);
   return {
     ok: true,
     session: status.session,
@@ -7085,11 +7174,24 @@ function summarizeWorkerSessionControlPlaneStatus(
     nextActions,
     commands: {
       fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],
+      advance: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
+      advanceDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
       tick: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server"],
       tickDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server", "--dry-run"],
       timelineSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server", "--summary"],
     },
   };
+}
+
+async function executeWorkerSessionControlPlaneAdvance(
+  sessionName: string,
+  options: { dryRun: boolean; lines: number },
+): Promise<WorkerSessionControlPlaneAdvanceResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance`,
+    { dryRun: options.dryRun, lines: options.lines },
+  ) as WorkerSessionControlPlaneAdvanceResponse;
 }
 
 async function executeWorkerSessionControlPlaneTick(
@@ -10712,6 +10814,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
+  runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
