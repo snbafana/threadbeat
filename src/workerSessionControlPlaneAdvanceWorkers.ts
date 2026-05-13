@@ -47,6 +47,7 @@ export type ControlPlaneAdvanceWorkerNextStep = {
   action: "restart_control_plane_advance_worker";
   reason: "stopped_control_plane_advance_worker";
   workerId: string;
+  mode: ControlPlaneAdvanceWorkerMode;
   pid: number | null;
   stoppedAt: string;
   command: string[];
@@ -247,6 +248,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
         action: "restart_control_plane_advance_worker",
         reason: "stopped_control_plane_advance_worker",
         workerId: worker.workerId,
+        mode: worker.mode ?? "advance_loop",
         pid: worker.pid,
         stoppedAt: worker.stoppedAt as string,
         command: restartControlPlaneAdvanceWorker,

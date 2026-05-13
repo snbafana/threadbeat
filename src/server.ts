@@ -3381,7 +3381,17 @@ const readWorkerSessionControlPlaneStatus = async (
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
-    controlPlaneAdvance: { total: number; alive: number; stopped: number; retired: number; completed: number };
+    controlPlaneAdvance: {
+      total: number;
+      alive: number;
+      stopped: number;
+      retired: number;
+      completed: number;
+      modes: {
+        advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
+      };
+    };
     controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   queues: {
@@ -3450,7 +3460,7 @@ const readWorkerSessionControlPlaneStatus = async (
       watch: summarizeControlPlaneWorkers(watchWorkers),
       drain: summarizeControlPlaneWorkers(drainWorkers),
       applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
-      controlPlaneAdvance: summarizeControlPlaneCompletedWorkers(controlPlaneAdvanceWorkers),
+      controlPlaneAdvance: summarizeControlPlaneAdvanceWorkers(controlPlaneAdvanceWorkers),
       controlPlaneTick: summarizeControlPlaneTickWorkers(controlPlaneTickWorkers),
     },
     queues: {
@@ -4667,6 +4677,24 @@ const summarizeControlPlaneCompletedWorkers = <T extends { alive: boolean; retir
 } => ({
   ...summarizeControlPlaneWorkers(workers),
   completed: workers.filter((worker) => !worker.alive && Boolean(worker.completedAt) && !worker.stoppedAt && !worker.retiredAt).length,
+});
+
+const summarizeControlPlaneAdvanceWorkers = <T extends { alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string; mode?: "advance_loop" | "confirmation_drain" }>(workers: T[]): {
+  total: number;
+  alive: number;
+  stopped: number;
+  retired: number;
+  completed: number;
+  modes: {
+    advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+    confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
+  };
+} => ({
+  ...summarizeControlPlaneCompletedWorkers(workers),
+  modes: {
+    advance_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => (worker.mode ?? "advance_loop") === "advance_loop")),
+    confirmation_drain: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "confirmation_drain")),
+  },
 });
 
 const summarizeControlPlaneTickWorkers = summarizeControlPlaneCompletedWorkers;

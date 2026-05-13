@@ -1729,7 +1729,16 @@ try {
     workers: {
       drain: { total: number; stopped: number; retired: number };
       applyAction: { total: number; stopped: number; retired: number };
-      controlPlaneAdvance: { total: number; stopped: number; retired: number; completed: number };
+      controlPlaneAdvance: {
+        total: number;
+        stopped: number;
+        retired: number;
+        completed: number;
+        modes: {
+          advance_loop: { total: number; stopped: number; retired: number; completed: number };
+          confirmation_drain: { total: number; stopped: number; retired: number; completed: number };
+        };
+      };
       controlPlaneTick: { total: number; stopped: number; retired: number; completed: number };
     };
     queues: {
@@ -1814,7 +1823,7 @@ try {
       nextSteps: {
         drainWorkers: Array<{ workerId: string; action: string }>;
         applyActionWorkers: Array<{ workerId: string; action: string }>;
-        controlPlaneAdvanceWorkers: Array<{ workerId: string; action: string }>;
+        controlPlaneAdvanceWorkers: Array<{ workerId: string; action: string; mode?: "advance_loop" | "confirmation_drain" }>;
         controlPlaneTickWorkers: Array<{ workerId: string; action: string }>;
       };
     };
@@ -1838,6 +1847,8 @@ try {
   assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.stopped, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.retired, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.completed, 0);
+  assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.modes.advance_loop.total, 0);
+  assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.modes.confirmation_drain.total, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.total, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.stopped, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.retired, 0);
@@ -2143,7 +2154,7 @@ try {
     session: string;
     count: number;
     actions: { restart_control_plane_advance_worker: number };
-    nextSteps: Array<{ action: string; reason: string; workerId: string; command: string[]; api: { restart: { method: string; url: string; payload: { workerId: string } } } }>;
+    nextSteps: Array<{ action: string; reason: string; workerId: string; mode: "advance_loop" | "confirmation_drain"; command: string[]; api: { restart: { method: string; url: string; payload: { workerId: string } } } }>;
   }>(baseUrl, [
     "runs",
     "session-control-plane-advance-workers-next",
@@ -2155,6 +2166,7 @@ try {
   assert.equal(controlPlaneAdvanceWorkerNext.count, 1);
   assert.equal(controlPlaneAdvanceWorkerNext.actions.restart_control_plane_advance_worker, 1);
   assert.equal(controlPlaneAdvanceWorkerNext.nextSteps[0]?.workerId, "detached-smoke-control-plane-advance-worker");
+  assert.equal(controlPlaneAdvanceWorkerNext.nextSteps[0]?.mode, "advance_loop");
   assert.equal(controlPlaneAdvanceWorkerNext.nextSteps[0]?.action, "restart_control_plane_advance_worker");
   assert.equal(controlPlaneAdvanceWorkerNext.nextSteps[0]?.reason, "stopped_control_plane_advance_worker");
   assert.equal(
@@ -2174,6 +2186,7 @@ try {
   ]);
   assert.equal(controlPlaneStatusBeforeAdvanceWorkerRestart.recovery.actions.restart_control_plane_advance_worker, 1);
   assert.equal(controlPlaneStatusBeforeAdvanceWorkerRestart.recovery.nextSteps.controlPlaneAdvanceWorkers[0]?.workerId, "detached-smoke-control-plane-advance-worker");
+  assert.equal(controlPlaneStatusBeforeAdvanceWorkerRestart.recovery.nextSteps.controlPlaneAdvanceWorkers[0]?.mode, "advance_loop");
   assert.equal(controlPlaneStatusBeforeAdvanceWorkerRestart.recovery.nextSteps.controlPlaneAdvanceWorkers[0]?.action, "restart_control_plane_advance_worker");
   const restartedControlPlaneAdvanceWorker = await cliJson<{
     ok?: true;
@@ -2220,6 +2233,9 @@ try {
   assert.equal(controlPlaneStatusAfterAdvanceWorker.workers.controlPlaneAdvance.total, 1);
   assert.equal(controlPlaneStatusAfterAdvanceWorker.workers.controlPlaneAdvance.retired, 1);
   assert.equal(controlPlaneStatusAfterAdvanceWorker.workers.controlPlaneAdvance.completed, 0);
+  assert.equal(controlPlaneStatusAfterAdvanceWorker.workers.controlPlaneAdvance.modes.advance_loop.total, 1);
+  assert.equal(controlPlaneStatusAfterAdvanceWorker.workers.controlPlaneAdvance.modes.advance_loop.retired, 1);
+  assert.equal(controlPlaneStatusAfterAdvanceWorker.workers.controlPlaneAdvance.modes.confirmation_drain.total, 0);
   assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
     step.runId === controlPlaneResumePlan.run.id
     && step.action === "resume_branch"
@@ -3859,6 +3875,21 @@ try {
   const confirmationDrainWorkerOutput = completedConfirmationDrainWorkers?.workers[0]?.stdout.lines.join("\n") ?? "";
   assert.match(confirmationDrainWorkerOutput, /"sourceAdvanceId":/);
   assert.match(confirmationDrainWorkerOutput, /"confirmed": true/);
+  const controlPlaneStatusAfterConfirmationDrainWorker = await cliJson<typeof controlPlaneStatus>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.total, 2);
+  assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.retired, 1);
+  assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.completed, 1);
+  assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.modes.advance_loop.total, 1);
+  assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.modes.advance_loop.retired, 1);
+  assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.modes.confirmation_drain.total, 1);
+  assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.modes.confirmation_drain.completed, 1);
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

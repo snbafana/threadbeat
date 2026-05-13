@@ -7096,6 +7096,7 @@ type WorkerSessionControlPlaneRecoveryNextStep = {
   action: string;
   reason: string;
   workerId: string;
+  mode?: "advance_loop" | "confirmation_drain";
   command: string[];
   commands: Record<string, string[]>;
   api?: unknown;
@@ -7112,7 +7113,17 @@ type WorkerSessionControlPlaneStatusResponse = {
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
-    controlPlaneAdvance: { total: number; alive: number; stopped: number; retired: number; completed: number };
+    controlPlaneAdvance: {
+      total: number;
+      alive: number;
+      stopped: number;
+      retired: number;
+      completed: number;
+      modes: {
+        advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
+      };
+    };
     controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   queues: {
