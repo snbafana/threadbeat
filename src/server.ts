@@ -504,6 +504,41 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.get("/api/worker-sessions/:name/result-inspections", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const limit = parseOptionalInteger(query.limit) ?? 20;
+      const runIds = [
+        ...parseOptionalList(query.runId),
+        ...parseOptionalList(query.runIds),
+      ];
+      const reviewStates = [
+        ...parseOptionalResultReviewStates(query.reviewState),
+        ...parseOptionalResultReviewStates(query.reviewStates),
+      ];
+      const session = await readWorkerSession(settings.projectRoot, name);
+      const resultReviews = await listWorkerSessionResultReviewRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
+      const inspections = await readWorkerSessionResultInspections(settings, db, session, resultReviews);
+      const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
+      const reviewStateFilter = reviewStates.length > 0 ? new Set(reviewStates) : null;
+      const filtered = inspections
+        .filter((inspection) => !runIdFilter || runIdFilter.has(inspection.runId))
+        .filter((inspection) => !reviewStateFilter || reviewStateFilter.has(inspection.reviewState));
+      const counts = summarizeWorkerSessionResultInspectionRecords(filtered);
+      return {
+        ok: true,
+        session: session.session,
+        count: Math.min(filtered.length, limit),
+        summary: counts,
+        filter: { runIds, reviewStates, limit },
+        resultCommits: filtered.slice(0, limit),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/result-reviews", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -5359,6 +5394,15 @@ const parseOptionalResultReviewActions = (value: unknown): Array<"reviewed" | "s
   return actions as Array<"reviewed" | "skipped">;
 };
 
+const parseOptionalResultReviewStates = (value: unknown): Array<"pending" | "reviewed" | "skipped"> => {
+  const states = parseOptionalList(value);
+  const allowed = new Set(["pending", "reviewed", "skipped"]);
+  for (const state of states) {
+    if (!allowed.has(state)) throw new Error(`unknown result review state: ${state}`);
+  }
+  return states as Array<"pending" | "reviewed" | "skipped">;
+};
+
 const parseCommand = (value: unknown): string[] => {
   if (Array.isArray(value) && value.every((item) => typeof item === "string")) {
     if (value.length === 0) throw new Error("command must not be empty");
@@ -5664,6 +5708,151 @@ const summarizeWorkerSessionResultInspection = async (
       review_result: pendingRuns.length,
     },
     nextSteps: nextSteps.slice(0, nextStepLimit),
+  };
+};
+
+const readWorkerSessionResultInspections = async (
+  settings: Settings,
+  db: Database,
+  session: Awaited<ReturnType<typeof readWorkerSession>>,
+  resultReviews: Awaited<ReturnType<typeof listWorkerSessionResultReviewRecords>>,
+): Promise<Array<{
+  agentId: string;
+  runId: string;
+  objective: string;
+  status: string;
+  branchName: string;
+  resultCommit: string;
+  workerId: string | null;
+  reviewState: "pending" | "reviewed" | "skipped";
+  latestReview: {
+    reviewId: string;
+    action: "reviewed" | "skipped";
+    observedAt: string;
+    reviewedBy: string;
+    note?: string;
+  } | null;
+  links: {
+    repoUrl: string | null;
+    branchTreeUrl: string | null;
+    resultTreeUrl: string | null;
+    resultCommitUrl: string | null;
+    resultCompareUrl: string | null;
+  };
+  commands: {
+    inspectRun: string[];
+    inspectResult: string[];
+    checkoutBranch: string[];
+    reviewRun: string[];
+    recordReviewed: string[];
+    recordSkipped: string[];
+    inspectReviews: string[];
+  };
+  nextStep: {
+    action: "review_result" | "inspect_review";
+    reason: "result_commit_unreviewed" | "result_commit_reviewed" | "result_commit_skipped";
+    command: string[];
+  };
+}>> => {
+  const sessionWorkerIds = new Set(session.workers.map((worker) => worker.workerId));
+  const latestReviews = latestResultReviewByRunCommit(resultReviews);
+  const inspections = (await Promise.all(workerSessionAgentIds(session).map(async (agentId) => {
+    const agent = await db.getAgent(agentId);
+    if (!agent) return [];
+    const runs = (await db.listAgentRuns(agentId, ["completed", "stopped"]))
+      .filter((run) => run.result_commit !== null)
+      .filter((run) => run.worker_id === null || sessionWorkerIds.has(run.worker_id))
+      .map((run) => ({ ...run, result_commit: run.result_commit as string }));
+    return runs.map((run) => {
+      const review = latestReviews.get(resultReviewRunCommitKey(run.id, run.result_commit)) ?? null;
+      const reviewState: "pending" | "reviewed" | "skipped" = review?.action ?? "pending";
+      const checkoutDir = `./checkouts/${session.session}-control-plane-results/${run.id}`;
+      const branchLinks = deriveGitHubLinks(agent.repo_url, {
+        compareBaseRef: run.input_ref,
+        compareHeadRef: run.run_branch,
+        treeRef: run.run_branch,
+      });
+      const resultLinks = deriveGitHubLinks(agent.repo_url, {
+        commitRef: run.result_commit,
+        compareBaseRef: run.input_ref,
+        compareHeadRef: run.result_commit,
+        treeRef: run.result_commit,
+      });
+      const inspectReviews = [
+        "npm",
+        "run",
+        "cli",
+        "--",
+        "runs",
+        "session-result-reviews",
+        session.session,
+        "--server",
+        ...(review ? ["--review", review.reviewId] : ["--run", run.id]),
+        "--limit",
+        "20",
+      ];
+      const reviewRun = ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", checkoutDir];
+      return {
+        agentId,
+        runId: run.id,
+        objective: run.objective,
+        status: run.status,
+        branchName: run.run_branch,
+        resultCommit: run.result_commit,
+        workerId: run.worker_id,
+        reviewState,
+        latestReview: review ? {
+          reviewId: review.reviewId,
+          action: review.action,
+          observedAt: review.observedAt,
+          reviewedBy: review.reviewedBy,
+          ...(review.note ? { note: review.note } : {}),
+        } : null,
+        links: {
+          repoUrl: branchLinks.repoUrl,
+          branchTreeUrl: branchLinks.treeUrl,
+          resultTreeUrl: resultLinks.treeUrl,
+          resultCommitUrl: resultLinks.commitUrl,
+          resultCompareUrl: resultLinks.compareUrl,
+        },
+        commands: {
+          inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+          inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"],
+          checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", checkoutDir],
+          reviewRun,
+          recordReviewed: ["npm", "run", "cli", "--", "runs", "session-result-reviews", session.session, "--server", "--record-reviewed", "--run", run.id],
+          recordSkipped: ["npm", "run", "cli", "--", "runs", "session-result-reviews", session.session, "--server", "--record-skipped", "--run", run.id],
+          inspectReviews,
+        },
+        nextStep: review
+          ? {
+              action: "inspect_review" as const,
+              reason: review.action === "reviewed" ? "result_commit_reviewed" as const : "result_commit_skipped" as const,
+              command: inspectReviews,
+            }
+          : {
+              action: "review_result" as const,
+              reason: "result_commit_unreviewed" as const,
+              command: reviewRun,
+            },
+      };
+    });
+  }))).flat();
+  return inspections.sort((left, right) => (
+    left.reviewState.localeCompare(right.reviewState)
+    || left.agentId.localeCompare(right.agentId)
+    || left.runId.localeCompare(right.runId)
+  ));
+};
+
+const summarizeWorkerSessionResultInspectionRecords = (
+  inspections: Awaited<ReturnType<typeof readWorkerSessionResultInspections>>,
+): { resultCommits: number; pending: number; reviewed: number; skipped: number } => {
+  return {
+    resultCommits: inspections.length,
+    pending: inspections.filter((inspection) => inspection.reviewState === "pending").length,
+    reviewed: inspections.filter((inspection) => inspection.reviewState === "reviewed").length,
+    skipped: inspections.filter((inspection) => inspection.reviewState === "skipped").length,
   };
 };
 

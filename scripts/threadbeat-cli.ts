@@ -4596,6 +4596,36 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-result-inspections") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-result-inspections requires --server");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-result-inspections --format shell requires --commands-only");
+    }
+    const resultInspections = await fetchWorkerSessionResultInspections(
+      required(sessionName, "runs session-result-inspections <session> --server"),
+      {
+        runId: options.run,
+        reviewState: options["review-state"],
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+      },
+    );
+    const commands = resultInspections.resultCommits.map((result) => ({ command: result.nextStep.command }));
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        await printJson({ ...resultInspections, commands });
+      }
+      return;
+    }
+    await printJson(resultInspections);
+    return;
+  }
   if (subcommandName === "session-control-plane-recover-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -7632,6 +7662,48 @@ type WorkerSessionResultReviewsResponse = {
   reviews: WorkerSessionResultReviewRecord[];
 };
 
+type WorkerSessionResultInspectionRecord = {
+  agentId: string;
+  runId: string;
+  objective: string;
+  status: string;
+  branchName: string;
+  resultCommit: string;
+  workerId: string | null;
+  reviewState: "pending" | "reviewed" | "skipped";
+  latestReview: Pick<WorkerSessionResultReviewRecord, "reviewId" | "action" | "observedAt" | "reviewedBy" | "note"> | null;
+  links: {
+    repoUrl: string | null;
+    branchTreeUrl: string | null;
+    resultTreeUrl: string | null;
+    resultCommitUrl: string | null;
+    resultCompareUrl: string | null;
+  };
+  commands: {
+    inspectRun: string[];
+    inspectResult: string[];
+    checkoutBranch: string[];
+    reviewRun: string[];
+    recordReviewed: string[];
+    recordSkipped: string[];
+    inspectReviews: string[];
+  };
+  nextStep: {
+    action: "review_result" | "inspect_review";
+    reason: "result_commit_unreviewed" | "result_commit_reviewed" | "result_commit_skipped";
+    command: string[];
+  };
+};
+
+type WorkerSessionResultInspectionsResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  summary: { resultCommits: number; pending: number; reviewed: number; skipped: number };
+  filter: Record<string, unknown>;
+  resultCommits: WorkerSessionResultInspectionRecord[];
+};
+
 type RecordWorkerSessionResultReviewResponse = {
   ok: true;
   session: string;
@@ -8336,6 +8408,20 @@ async function fetchWorkerSessionResultReviews(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/result-reviews`, params),
   ) as WorkerSessionResultReviewsResponse;
+}
+
+async function fetchWorkerSessionResultInspections(
+  sessionName: string,
+  options: { runId?: string; reviewState?: string; limit?: number | null },
+): Promise<WorkerSessionResultInspectionsResponse> {
+  const params = new URLSearchParams();
+  if (options.runId) params.set("runId", options.runId);
+  if (options.reviewState) params.set("reviewState", options.reviewState);
+  if (options.limit) params.set("limit", String(options.limit));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/result-inspections`, params),
+  ) as WorkerSessionResultInspectionsResponse;
 }
 
 async function recordWorkerSessionResultReview(
@@ -13215,6 +13301,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20]
+  runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--commands-only] [--format json|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
