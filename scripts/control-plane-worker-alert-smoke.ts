@@ -261,6 +261,20 @@ try {
         blocked: number;
         mutating: number;
       };
+      recentAttempts: Array<{
+        advanceId: string;
+        detailCommand: string | null;
+        workerId: string | null;
+        action: string | null;
+        reason: string | null;
+        dryRun: boolean;
+        executed: boolean;
+        failed: boolean;
+        blocked: boolean | null;
+        mutating: boolean | null;
+        confirmed: boolean | null;
+        command: string[];
+      }>;
     };
   }>(baseUrl, [
     "runs",
@@ -275,6 +289,40 @@ try {
   assert.equal(statusSummary.recovery.attempts.failed, 0);
   assert.equal(statusSummary.recovery.attempts.blocked, 1);
   assert.equal(statusSummary.recovery.attempts.mutating, 2);
+  assert.equal(statusSummary.recovery.recentAttempts.length, 2);
+  const statusConfirmedAttempt = statusSummary.recovery.recentAttempts.find((attempt) => (
+    attempt.advanceId === confirmedDryRun.advanceId
+  ));
+  assert.equal(statusConfirmedAttempt?.detailCommand, "restart_worker_recovery");
+  assert.equal(statusConfirmedAttempt?.workerId, workerId);
+  assert.equal(statusConfirmedAttempt?.action, "restart_control_plane_advance_worker");
+  assert.equal(statusConfirmedAttempt?.reason, "stopped_control_plane_advance_worker");
+  assert.equal(statusConfirmedAttempt?.dryRun, true);
+  assert.equal(statusConfirmedAttempt?.executed, false);
+  assert.equal(statusConfirmedAttempt?.failed, false);
+  assert.equal(statusConfirmedAttempt?.blocked, false);
+  assert.equal(statusConfirmedAttempt?.mutating, true);
+  assert.equal(statusConfirmedAttempt?.confirmed, true);
+  assert.deepEqual(statusConfirmedAttempt?.command, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--advance",
+    confirmedDryRun.advanceId,
+    "--alert-surface",
+    "worker_recovery",
+    "--detail-command",
+    "restart_worker_recovery",
+  ]);
+  const statusBlockedAttempt = statusSummary.recovery.recentAttempts.find((attempt) => attempt.blocked);
+  assert.equal(statusBlockedAttempt?.detailCommand, "restart_worker_recovery");
+  assert.equal(statusBlockedAttempt?.workerId, workerId);
+  assert.equal(statusBlockedAttempt?.confirmed, false);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

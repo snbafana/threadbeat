@@ -97,6 +97,23 @@ type AppParts = {
 
 type WorkerSessionApplyActionSummary = ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["actions"][number];
 
+type WorkerSessionControlPlaneRecoveryAttemptStatus = {
+  advanceId: string;
+  observedAt: string;
+  completedAt: string;
+  detailCommand: string | null;
+  workerId: string | null;
+  action: string | null;
+  reason: string | null;
+  dryRun: boolean;
+  executed: boolean;
+  failed: boolean;
+  blocked: boolean | null;
+  mutating: boolean | null;
+  confirmed: boolean | null;
+  command: string[];
+};
+
 export const buildServer = async (settings: Settings): Promise<AppParts> => {
   const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
   await db.initSchema();
@@ -3566,6 +3583,7 @@ const readWorkerSessionControlPlaneStatus = async (
     count: number;
     actions: Record<string, number>;
     attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
+    recentAttempts: WorkerSessionControlPlaneRecoveryAttemptStatus[];
     nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
 }> => {
@@ -3648,6 +3666,9 @@ const readWorkerSessionControlPlaneStatus = async (
         ...controlPlaneTickWorkerNextSteps.actions,
       },
       attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(controlPlaneRecoveryAttempts),
+      recentAttempts: controlPlaneRecoveryAttempts
+        .slice(0, lines)
+        .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
       nextSteps: {
         watchWorkers: watchWorkerNextSteps.nextSteps,
         drainWorkers: drainWorkerNextSteps.nextSteps,
@@ -3660,6 +3681,67 @@ const readWorkerSessionControlPlaneStatus = async (
 };
 
 type WorkerSessionControlPlaneStatus = Awaited<ReturnType<typeof readWorkerSessionControlPlaneStatus>>;
+
+const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
+  sessionName: string,
+  record: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>[number],
+): WorkerSessionControlPlaneRecoveryAttemptStatus => {
+  const alert = objectRecord(record.alert);
+  const selected = objectRecord(record.selected);
+  const safety = objectRecord(record.executionSafety);
+  const detailCommand = record.detailCommand ?? null;
+  return {
+    advanceId: record.advanceId,
+    observedAt: record.observedAt,
+    completedAt: record.completedAt,
+    detailCommand,
+    workerId: stringRecordField(alert, "workerId") ?? stringRecordField(selected, "workerId"),
+    action: stringRecordField(alert, "action") ?? stringRecordField(selected, "action"),
+    reason: stringRecordField(alert, "reason") ?? stringRecordField(selected, "reason"),
+    dryRun: record.dryRun,
+    executed: Boolean(record.executed),
+    failed: controlPlaneAdvanceExecutionFailed(record.executed),
+    blocked: booleanRecordField(safety, "blocked"),
+    mutating: booleanRecordField(safety, "mutating"),
+    confirmed: booleanRecordField(safety, "confirmed"),
+    command: [
+      "npm",
+      "run",
+      "cli",
+      "--",
+      "runs",
+      "session-control-plane-advances",
+      sessionName,
+      "--server",
+      "--advance",
+      record.advanceId,
+      "--alert-surface",
+      "worker_recovery",
+      ...(detailCommand ? ["--detail-command", detailCommand] : []),
+    ],
+  };
+};
+
+const objectRecord = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+};
+
+const stringRecordField = (record: Record<string, unknown> | null, key: string): string | null => {
+  const value = record?.[key];
+  return typeof value === "string" ? value : null;
+};
+
+const booleanRecordField = (record: Record<string, unknown> | null, key: string): boolean | null => {
+  const value = record?.[key];
+  return typeof value === "boolean" ? value : null;
+};
+
+const controlPlaneAdvanceExecutionFailed = (executed: unknown): boolean => {
+  const execution = objectRecord(executed);
+  const exitCode = execution?.exitCode;
+  return typeof exitCode === "number" && exitCode !== 0;
+};
 
 const readRunResumeInspection = async (
   db: Database,

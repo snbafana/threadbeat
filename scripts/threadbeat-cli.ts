@@ -7631,6 +7631,22 @@ type WorkerSessionControlPlaneStatusResponse = {
     count: number;
     actions: Record<string, number>;
     attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+    recentAttempts: Array<{
+      advanceId: string;
+      observedAt: string;
+      completedAt: string;
+      detailCommand: string | null;
+      workerId: string | null;
+      action: string | null;
+      reason: string | null;
+      dryRun: boolean;
+      executed: boolean;
+      failed: boolean;
+      blocked: boolean | null;
+      mutating: boolean | null;
+      confirmed: boolean | null;
+      command: string[];
+    }>;
     nextSteps: {
       watchWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       drainWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
@@ -8575,6 +8591,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     count: number;
     actions: Record<string, number>;
     attempts: WorkerSessionControlPlaneStatusResponse["recovery"]["attempts"];
+    recentAttempts: WorkerSessionControlPlaneStatusResponse["recovery"]["recentAttempts"];
   };
   nextActions: WorkerSessionControlPlaneAdvanceAction[];
   commands: {
@@ -8625,6 +8642,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       count: status.recovery.count,
       actions: status.recovery.actions,
       attempts: status.recovery.attempts,
+      recentAttempts: status.recovery.recentAttempts,
     },
     nextActions,
     commands: {
