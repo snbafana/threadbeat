@@ -2472,6 +2472,45 @@ try {
     && event.workerId === "detached-smoke-control-plane-worker"
     && event.state === "retired"
   )));
+  const controlPlaneTimelineSummary = await cliJson<{
+    ok?: true;
+    session: string;
+    events: {
+      total: number;
+      counts: Record<string, number>;
+    };
+    decisions: typeof controlPlaneTimeline.decisions;
+    latestEvents: Array<{
+      event: string;
+      source: string;
+      status?: string;
+      state?: string;
+      reason?: string;
+    }>;
+    commands: { fullTimeline: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--summary",
+    "--limit",
+    "120",
+    "--lines",
+    "3",
+  ]);
+  assert.equal(controlPlaneTimelineSummary.ok, true);
+  assert.equal(controlPlaneTimelineSummary.session, sessionName);
+  assert.equal(controlPlaneTimelineSummary.events.total, controlPlaneTimeline.count);
+  assert.equal(controlPlaneTimelineSummary.events.counts.tick_recorded, controlPlaneTimeline.counts.tick_recorded);
+  assert.equal(controlPlaneTimelineSummary.decisions.count, controlPlaneTimeline.decisions.count);
+  assert.equal(controlPlaneTimelineSummary.decisions.statusReasons.dry_run, controlPlaneTimeline.decisions.statusReasons.dry_run);
+  assert.equal(controlPlaneTimelineSummary.latestEvents.length, 3);
+  assert.ok(controlPlaneTimelineSummary.latestEvents.every((event) => typeof event.event === "string" && typeof event.source === "string"));
+  assert.equal(
+    controlPlaneTimelineSummary.commands.fullTimeline.join(" "),
+    `npm run cli -- runs session-control-plane-timeline ${sessionName} --server`,
+  );
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };

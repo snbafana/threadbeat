@@ -4568,13 +4568,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-timeline requires --server");
     }
-    await printJson(await fetchWorkerSessionControlPlaneTimeline(
+    const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    const timeline = await fetchWorkerSessionControlPlaneTimeline(
       required(sessionName, "runs session-control-plane-timeline <session> --server"),
       {
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 20,
-        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        lines,
       },
-    ));
+    );
+    await printJson(options.summary === "1"
+      ? summarizeWorkerSessionControlPlaneTimeline(timeline, lines)
+      : timeline);
     return;
   }
   if (subcommandName === "start-control-plane-tick-worker") {
@@ -6511,6 +6515,54 @@ type WorkerSessionControlPlaneTickWithDecision = WorkerSessionControlPlaneTickRe
   decision: ReturnType<typeof summarizeWorkerSessionControlPlaneTickDecision>;
 };
 
+type WorkerSessionControlPlaneTimelineResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  counts: Record<string, number>;
+  decisions: {
+    count: number;
+    statuses: Record<string, number>;
+    statusReasons: Record<string, number>;
+    plannedSurfaces: Record<string, number>;
+    executedSurfaces: Record<string, number>;
+    skippedSurfaces: Record<string, number>;
+    notPlannedSurfaces: Record<string, number>;
+    latest: Array<{
+      tickId: string;
+      observedAt: string;
+      status: string;
+      statusReason: string;
+      plannedCount: number;
+      executedCount: number;
+      plannedSurfaces: string[];
+      executedSurfaces: string[];
+      skippedSurfaces: string[];
+      notPlannedSurfaces: string[];
+    }>;
+  };
+  events: Array<{
+    observedAt: string;
+    source: string;
+    event: string;
+    tickId?: string;
+    workerId?: string;
+    executionId?: string;
+    runIds?: string[];
+    resumedRunIds?: string[];
+    skippedRunIds?: string[];
+    branchNames?: string[];
+    skippedReasons?: string[];
+    status?: string;
+    state?: string;
+    restartable?: boolean;
+    reason?: string;
+    selected?: number;
+    resumedCount?: number;
+    skippedCount?: number;
+  }>;
+};
+
 type ExecuteQueuedWorkerSessionDrainContinuationsResponse = {
   ok: true;
   session: string;
@@ -7099,103 +7151,65 @@ async function listWorkerSessionControlPlaneTickRecords(
 async function fetchWorkerSessionControlPlaneTimeline(
   sessionName: string,
   options: { limit: number; lines: number },
-): Promise<{
+): Promise<WorkerSessionControlPlaneTimelineResponse> {
+  const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-timeline`, params),
+  ) as WorkerSessionControlPlaneTimelineResponse;
+}
+
+function summarizeWorkerSessionControlPlaneTimeline(
+  timeline: WorkerSessionControlPlaneTimelineResponse,
+  latestLimit: number,
+): {
   ok: true;
   session: string;
-  count: number;
-  counts: Record<string, number>;
-  decisions: {
-    count: number;
-    statuses: Record<string, number>;
-    statusReasons: Record<string, number>;
-    plannedSurfaces: Record<string, number>;
-    executedSurfaces: Record<string, number>;
-    skippedSurfaces: Record<string, number>;
-    notPlannedSurfaces: Record<string, number>;
-    latest: Array<{
-      tickId: string;
-      observedAt: string;
-      status: string;
-      statusReason: string;
-      plannedCount: number;
-      executedCount: number;
-      plannedSurfaces: string[];
-      executedSurfaces: string[];
-      skippedSurfaces: string[];
-      notPlannedSurfaces: string[];
-    }>;
-  };
-  events: Array<{
+  events: { total: number; counts: Record<string, number> };
+  decisions: WorkerSessionControlPlaneTimelineResponse["decisions"];
+  latestEvents: Array<{
     observedAt: string;
     source: string;
     event: string;
     tickId?: string;
     workerId?: string;
     executionId?: string;
-    runIds?: string[];
-    resumedRunIds?: string[];
-    skippedRunIds?: string[];
-    branchNames?: string[];
-    skippedReasons?: string[];
     status?: string;
     state?: string;
-    restartable?: boolean;
     reason?: string;
+    restartable?: boolean;
     selected?: number;
     resumedCount?: number;
     skippedCount?: number;
   }>;
-}> {
-  const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
-  return await requestJson(
-    "GET",
-    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-timeline`, params),
-  ) as {
-    ok: true;
-    session: string;
-    count: number;
-    counts: Record<string, number>;
-    decisions: {
-      count: number;
-      statuses: Record<string, number>;
-      statusReasons: Record<string, number>;
-      plannedSurfaces: Record<string, number>;
-      executedSurfaces: Record<string, number>;
-      skippedSurfaces: Record<string, number>;
-      notPlannedSurfaces: Record<string, number>;
-      latest: Array<{
-        tickId: string;
-        observedAt: string;
-        status: string;
-        statusReason: string;
-        plannedCount: number;
-        executedCount: number;
-        plannedSurfaces: string[];
-        executedSurfaces: string[];
-        skippedSurfaces: string[];
-        notPlannedSurfaces: string[];
-      }>;
-    };
-    events: Array<{
-      observedAt: string;
-      source: string;
-      event: string;
-      tickId?: string;
-      workerId?: string;
-      executionId?: string;
-      runIds?: string[];
-      resumedRunIds?: string[];
-      skippedRunIds?: string[];
-      branchNames?: string[];
-      skippedReasons?: string[];
-      status?: string;
-      state?: string;
-      restartable?: boolean;
-      reason?: string;
-      selected?: number;
-      resumedCount?: number;
-      skippedCount?: number;
-    }>;
+  commands: { fullTimeline: string[] };
+} {
+  return {
+    ok: true,
+    session: timeline.session,
+    events: {
+      total: timeline.count,
+      counts: timeline.counts,
+    },
+    decisions: timeline.decisions,
+    latestEvents: timeline.events.slice(0, latestLimit).map((event) => ({
+      observedAt: event.observedAt,
+      source: event.source,
+      event: event.event,
+      tickId: event.tickId,
+      workerId: event.workerId,
+      executionId: event.executionId,
+      status: event.status,
+      state: event.state,
+      reason: event.reason,
+      restartable: event.restartable,
+      selected: event.selected,
+      resumedCount: event.resumedCount,
+      skippedCount: event.skippedCount,
+    })),
+    commands: {
+      fullTimeline: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", timeline.session, "--server"],
+    },
   };
 }
 
@@ -10623,7 +10637,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--limit 20] [--lines 5]
+  runs session-control-plane-timeline <name> --server [--summary] [--limit 20] [--lines 5]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
