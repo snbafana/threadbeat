@@ -3552,6 +3552,65 @@ try {
     controlPlaneAlertPreviewCommand.trim(),
     `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
   );
+  const controlPlaneAlertExecute = await cliJson<{
+    ok: true;
+    session: string;
+    dryRun: boolean;
+    advanceId: string;
+    advancePath: string;
+    selected: {
+      surface: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      runId?: string;
+    } | null;
+    alert: ControlPlaneAlertPreviewResponse["alert"];
+    details: ControlPlaneAlertPreviewResponse["details"];
+    executed: { command: string[]; exitCode: number | null; stdout?: string; stderr?: string } | null;
+    before: { ok: true; session: string };
+    after: { ok: true; session: string };
+    filter: ControlPlaneAlertPreviewResponse["filter"];
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--severity",
+    "warning",
+    "--surface",
+    "branch",
+    "--reason",
+    "running_sandbox_present",
+    "--run",
+    controlPlaneBlockedPlan.run.id,
+    "--action",
+    "inspect_run",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneAlertExecute.ok, true);
+  assert.equal(controlPlaneAlertExecute.session, sessionName);
+  assert.equal(controlPlaneAlertExecute.dryRun, false);
+  assert.match(controlPlaneAlertExecute.advancePath, /control-plane-advances/);
+  assert.equal(controlPlaneAlertExecute.selected?.surface, "branch");
+  assert.equal(controlPlaneAlertExecute.selected?.action, "inspect_run");
+  assert.equal(controlPlaneAlertExecute.selected?.runId, controlPlaneBlockedPlan.run.id);
+  assert.equal(
+    controlPlaneAlertExecute.selected?.command.join(" "),
+    `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
+  );
+  assert.equal(controlPlaneAlertExecute.alert?.runId, controlPlaneBlockedPlan.run.id);
+  assert.equal(controlPlaneAlertExecute.details?.kind, "run_resume_inspection");
+  assert.deepEqual(controlPlaneAlertExecute.filter.runIds, [controlPlaneBlockedPlan.run.id]);
+  assert.equal(
+    controlPlaneAlertExecute.executed?.command.join(" "),
+    `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
+  );
+  assert.equal(controlPlaneAlertExecute.executed?.exitCode, 0);
+  assert.equal(controlPlaneAlertExecute.before.session, sessionName);
+  assert.equal(controlPlaneAlertExecute.after.session, sessionName);
   const controlPlaneStatusAfterResume = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",
     "session-control-plane-status",

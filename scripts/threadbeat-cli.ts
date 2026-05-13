@@ -4616,6 +4616,33 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(alert);
     return;
   }
+  if (subcommandName === "session-control-plane-alert-execute") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-alert-execute requires --server");
+    }
+    const response = await executeWorkerSessionControlPlaneAlert(
+      required(sessionName, "runs session-control-plane-alert-execute <session> --server"),
+      {
+        dryRun: options["dry-run"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        severity: options.severity,
+        surface: options.surface,
+        reason: options.reason,
+        runId: options.run,
+        workerId: options.worker,
+        applyId: options.apply,
+        executionId: options.execution,
+        action: options.action,
+      },
+    );
+    if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+      process.exitCode = 1;
+    }
+    await printJson(response);
+    return;
+  }
   if (subcommandName === "session-control-plane-advance") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6988,6 +7015,7 @@ type WorkerSessionControlPlaneAdvanceAction = {
   runId?: string;
   workerId?: string;
   applyId?: string;
+  executionId?: string;
 };
 
 type WorkerSessionControlPlaneAdvanceResponse = {
@@ -7002,6 +7030,12 @@ type WorkerSessionControlPlaneAdvanceResponse = {
   executed: { command: string[]; exitCode: number | null; stdout?: string; stderr?: string; output: unknown } | null;
   before: WorkerSessionControlPlaneStatusResponse;
   after: WorkerSessionControlPlaneStatusResponse;
+};
+
+type WorkerSessionControlPlaneAlertExecuteResponse = WorkerSessionControlPlaneAdvanceResponse & {
+  alert: WorkerSessionControlPlaneAlertPreviewResponse["alert"];
+  details: WorkerSessionControlPlaneAlertPreviewResponse["details"];
+  filter: WorkerSessionControlPlaneAlertPreviewResponse["filter"];
 };
 
 type WorkerSessionControlPlaneAdvancesResponse = {
@@ -7446,6 +7480,39 @@ async function fetchWorkerSessionControlPlaneAlertPreview(
       params,
     ),
   ) as WorkerSessionControlPlaneAlertPreviewResponse;
+}
+
+async function executeWorkerSessionControlPlaneAlert(
+  sessionName: string,
+  options: {
+    dryRun: boolean;
+    lines: number;
+    severity?: string;
+    surface?: string;
+    reason?: string;
+    runId?: string;
+    workerId?: string;
+    applyId?: string;
+    executionId?: string;
+    action?: string;
+  },
+): Promise<WorkerSessionControlPlaneAlertExecuteResponse> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-alert/execute`,
+    {
+      dryRun: options.dryRun,
+      lines: options.lines,
+      severity: options.severity,
+      surface: options.surface,
+      reason: options.reason,
+      runId: options.runId,
+      workerId: options.workerId,
+      applyId: options.applyId,
+      executionId: options.executionId,
+      action: options.action,
+    },
+  ) as WorkerSessionControlPlaneAlertExecuteResponse;
 }
 
 function workerSessionControlPlaneAlertPreviewCommands(
@@ -11524,6 +11591,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--dry-run] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--limit 20]

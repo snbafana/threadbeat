@@ -552,6 +552,33 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/worker-sessions/:name/control-plane-alert/execute", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return await executeWorkerSessionControlPlaneAlert(
+        settings,
+        db,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          dryRun: parseBoolean(body.dryRun, false),
+          lines: parseOptionalInteger(body.lines) ?? 5,
+          severities: parseOptionalList(body.severity),
+          surfaces: parseOptionalList(body.surface),
+          reasons: parseOptionalList(body.reason),
+          runIds: parseOptionalList(body.runId),
+          workerIds: parseOptionalList(body.workerId),
+          applyIds: parseOptionalList(body.applyId),
+          executionIds: parseOptionalList(body.executionId),
+          actions: parseOptionalList(body.action),
+        },
+      );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/control-plane-advance", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -3847,6 +3874,24 @@ type WorkerSessionControlPlaneAdvanceAction = {
   runId?: string;
   workerId?: string;
   applyId?: string;
+  executionId?: string;
+};
+
+const controlPlaneAdvanceActionFromAlert = (
+  alert: WorkerSessionControlPlaneAlert | null,
+): WorkerSessionControlPlaneAdvanceAction | null => {
+  if (!alert) return null;
+  return {
+    surface: alert.surface,
+    action: alert.action ?? alert.reason,
+    reason: alert.reason,
+    count: alert.count,
+    command: alert.command,
+    runId: alert.runId,
+    workerId: alert.workerId,
+    applyId: alert.applyId,
+    executionId: alert.executionId,
+  };
 };
 
 type WorkerSessionControlPlaneWorkerRecoveryStep = {
@@ -3983,6 +4028,64 @@ const runWorkerSessionControlPlaneAdvance = async (
     executed,
     before,
     after,
+  };
+};
+
+const executeWorkerSessionControlPlaneAlert = async (
+  settings: Settings,
+  db: Database,
+  baseUrl: string,
+  sessionName: string,
+  options: { dryRun: boolean; lines: number } & Omit<Parameters<typeof readWorkerSessionControlPlaneAlertPreview>[3], "limit">,
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  advanceId: string;
+  advancePath: string;
+  selected: WorkerSessionControlPlaneAdvanceAction | null;
+  alert: WorkerSessionControlPlaneAlert | null;
+  details: WorkerSessionControlPlaneAlertDetails | null;
+  executed: TickCommandExecution | null;
+  before: WorkerSessionControlPlaneStatus;
+  after: WorkerSessionControlPlaneStatus;
+  filter: Awaited<ReturnType<typeof readWorkerSessionControlPlaneAlertPreview>>["filter"];
+}> => {
+  const observedAt = new Date().toISOString();
+  const before = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
+  const preview = await readWorkerSessionControlPlaneAlertPreview(settings, db, sessionName, options);
+  const selected = controlPlaneAdvanceActionFromAlert(preview.alert);
+  const executed = selected && !options.dryRun
+    ? await runControlPlaneTickCommand(settings.projectRoot, baseUrl, selected.command)
+    : null;
+  const after = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
+  const written = await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    selected,
+    executed,
+    before,
+    after,
+  });
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: written.record.completedAt,
+    dryRun: options.dryRun,
+    advanceId: written.record.advanceId,
+    advancePath: written.path,
+    selected,
+    alert: preview.alert,
+    details: preview.details,
+    executed,
+    before,
+    after,
+    filter: preview.filter,
   };
 };
 

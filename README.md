@@ -763,6 +763,11 @@ failed drain-continuation alerts include their backing execution/continuation
 records plus exact inspect, retry, acknowledge, or selected-reset commands in
 the `details.commands` block. The singular `--commands-only --format shell`
 form prints those follow-up commands with duplicates removed. Use
+`runs session-control-plane-alert-execute <name> --server` with the same
+filters, or `POST /api/worker-sessions/:name/control-plane-alert/execute`, to
+execute the first matching alert command and persist that attempt in the
+advance ledger; add `--dry-run` to record the selected alert without running
+it. Use
 `runs session-control-plane-advance <name> --server`
 or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
 first priority next action from that status; add `--dry-run` to inspect the
