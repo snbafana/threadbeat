@@ -745,7 +745,10 @@ sandbox, and includes exact bulk resume, dry-run, and branch-inspection
 commands. Non-dry-run branch recovery writes durable records under
 `.threadbeat/worker-sessions/branch-recovery-executions/<session>/`; inspect
 them with `runs session-branch-recovery-executions <name> --server` or
-`GET /api/worker-sessions/:name/branch-recovery-executions`.
+`GET /api/worker-sessions/:name/branch-recovery-executions`. The aggregate
+control-plane status also embeds recent branch-recovery executions and status
+counts so operators can see recent resume attempts next to the current branch
+queue.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,

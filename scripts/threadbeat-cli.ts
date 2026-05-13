@@ -6505,6 +6505,10 @@ async function fetchWorkerSessionControlPlaneStatus(
       runId: string;
       command: string[];
     }>;
+    executions: {
+      counts: { recent: number; executed: number; partial: number; noop: number };
+      recent: WorkerSessionBranchRecoveryExecutionRecord[];
+    };
   };
   recovery: {
     count: number;
@@ -6556,6 +6560,10 @@ async function fetchWorkerSessionControlPlaneStatus(
         runId: string;
         command: string[];
       }>;
+      executions: {
+        counts: { recent: number; executed: number; partial: number; noop: number };
+        recent: WorkerSessionBranchRecoveryExecutionRecord[];
+      };
     };
     recovery: {
       count: number;

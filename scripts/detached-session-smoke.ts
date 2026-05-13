@@ -1443,6 +1443,10 @@ try {
       actions: { resume_branch: number; inspect_run: number };
       commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
       nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+      executions: {
+        counts: { recent: number; executed: number; partial: number; noop: number };
+        recent: Array<{ executionId: string; status: string; resumed: Array<{ runId: string }> }>;
+      };
     };
     recovery: {
       count: number;
@@ -1530,6 +1534,21 @@ try {
   assert.equal(branchRecoveryExecutions.executions[0]?.executionId, controlPlaneResumeNext.execution.executionId);
   assert.equal(branchRecoveryExecutions.executions[0]?.status, "executed");
   assert.deepEqual(branchRecoveryExecutions.executions[0]?.resumed.map((run) => run.runId), [controlPlaneResumePlan.run.id]);
+  const controlPlaneStatusAfterResume = await cliJson<typeof controlPlaneStatus>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--lines",
+    "20",
+  ]);
+  assert.ok(controlPlaneStatusAfterResume.branches.executions.counts.recent >= 1);
+  assert.ok(controlPlaneStatusAfterResume.branches.executions.counts.executed >= 1);
+  assert.ok(controlPlaneStatusAfterResume.branches.executions.recent.some((execution) => (
+    execution.executionId === controlPlaneResumeNext.execution.executionId
+    && execution.status === "executed"
+    && execution.resumed.some((run) => run.runId === controlPlaneResumePlan.run.id)
+  )));
   assert.ok(controlPlaneStatus.queues.applyActions.actionable >= 1);
   assert.ok(controlPlaneStatus.queues.applyActions.resetAudits >= 1);
   assert.ok(controlPlaneStatus.queues.drainContinuations.total >= 1);

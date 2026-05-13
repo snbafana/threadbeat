@@ -414,6 +414,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         applyActionWorkers,
         applyActionWorkerNextSteps,
         branchRecovery,
+        branchRecoveryExecutions,
       ] = await Promise.all([
         listWorkerSessionApplyRecords(settings.projectRoot, name),
         listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
@@ -424,6 +425,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
         listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
         summarizeWorkerSessionBranchRecovery(db, session, lines),
+        listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
       ]);
       const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
       return {
@@ -438,7 +440,13 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           applyActions: applyActionQueue.counts,
           drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
         },
-        branches: branchRecovery,
+        branches: {
+          ...branchRecovery,
+          executions: {
+            recent: branchRecoveryExecutions,
+            counts: summarizeBranchRecoveryExecutionStatuses(branchRecoveryExecutions),
+          },
+        },
         recovery: {
           count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count,
           actions: {
@@ -2333,6 +2341,18 @@ const summarizeDrainContinuationStatuses = <T extends { status?: string }>(recor
   running: records.filter((record) => record.status === "running").length,
   executed: records.filter((record) => record.status === "executed").length,
   failed: records.filter((record) => record.status === "failed").length,
+});
+
+const summarizeBranchRecoveryExecutionStatuses = <T extends { status: string }>(records: T[]): {
+  recent: number;
+  executed: number;
+  partial: number;
+  noop: number;
+} => ({
+  recent: records.length,
+  executed: records.filter((record) => record.status === "executed").length,
+  partial: records.filter((record) => record.status === "partial").length,
+  noop: records.filter((record) => record.status === "noop").length,
 });
 
 const summarizeWorkerSessionBranchRecovery = async (
