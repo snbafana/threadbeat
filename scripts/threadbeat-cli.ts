@@ -4541,6 +4541,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       {
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 20,
         lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        severity: options.severity,
+        surface: options.surface,
+        reason: options.reason,
       },
     );
     if (options["commands-only"] === "1") {
@@ -6858,6 +6861,7 @@ type WorkerSessionControlPlaneAlertsResponse = {
   session: string;
   observedAt: string;
   limit: number;
+  filter: { severities: string[]; surfaces: string[]; reasons: string[]; totalAlerts: number; visibleAlerts: number; hasMore: boolean };
   summary: { total: number; errors: number; warnings: number };
   alerts: Array<{
     surface: "apply_action" | "drain_continuation" | "branch" | "stale_run" | "worker_recovery";
@@ -7285,13 +7289,17 @@ async function fetchWorkerSessionControlPlaneStatus(
 
 async function fetchWorkerSessionControlPlaneAlerts(
   sessionName: string,
-  options: { limit: number; lines: number },
+  options: { limit: number; lines: number; severity?: string; surface?: string; reason?: string },
 ): Promise<WorkerSessionControlPlaneAlertsResponse> {
+  const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
+  if (options.severity) params.set("severity", options.severity);
+  if (options.surface) params.set("surface", options.surface);
+  if (options.reason) params.set("reason", options.reason);
   return await requestJson(
     "GET",
     withQuery(
       `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-alerts`,
-      new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) }),
+      params,
     ),
   ) as WorkerSessionControlPlaneAlertsResponse;
 }
@@ -11312,7 +11320,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
-  runs session-control-plane-alerts <name> --server [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--limit 20]

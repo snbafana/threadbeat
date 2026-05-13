@@ -751,7 +751,8 @@ next-action commands. Use `runs session-control-plane-alerts <name> --server`
 or `GET /api/worker-sessions/:name/control-plane-alerts` for a compact
 actionable-failures queue across failed apply executions, failed drain
 continuations, blocked branch/stale-run resumes, stopped workers, and recent
-failed/noop timeline records; add `--commands-only --format shell` to print the
+failed/noop timeline records; add `--severity`, `--surface`, or `--reason` to
+focus one failure class, and add `--commands-only --format shell` to print the
 inspection or recovery commands directly. Use `runs session-control-plane-advance <name> --server`
 or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
 first priority next action from that status; add `--dry-run` to inspect the

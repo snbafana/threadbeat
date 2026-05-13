@@ -518,6 +518,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return await readWorkerSessionControlPlaneAlerts(settings, db, name, {
         limit: parseOptionalInteger(query.limit) ?? 20,
         lines: parseOptionalInteger(query.lines) ?? 5,
+        severities: parseOptionalList(query.severity),
+        surfaces: parseOptionalList(query.surface),
+        reasons: parseOptionalList(query.reason),
       });
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -3502,12 +3505,13 @@ const readWorkerSessionControlPlaneAlerts = async (
   settings: Settings,
   db: Database,
   name: string,
-  options: { limit: number; lines: number },
+  options: { limit: number; lines: number; severities: string[]; surfaces: string[]; reasons: string[] },
 ): Promise<{
   ok: true;
   session: string;
   observedAt: string;
   limit: number;
+  filter: { severities: string[]; surfaces: string[]; reasons: string[]; totalAlerts: number; visibleAlerts: number; hasMore: boolean };
   summary: { total: number; errors: number; warnings: number };
   alerts: WorkerSessionControlPlaneAlert[];
   recentTimeline: {
@@ -3534,7 +3538,7 @@ const readWorkerSessionControlPlaneAlerts = async (
     ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
   ].filter(isWorkerSessionControlPlaneWorkerRecoveryStep);
-  const alerts: WorkerSessionControlPlaneAlert[] = [
+  const allAlerts: WorkerSessionControlPlaneAlert[] = [
     ...status.queues.applyActionExecutions.recent
       .filter((execution) => execution.status === "failed")
       .map((execution) => ({
@@ -3590,12 +3594,28 @@ const readWorkerSessionControlPlaneAlerts = async (
       workerId: step.workerId,
       action: step.action,
     })),
-  ].slice(0, options.limit);
+  ];
+  const severityFilter = options.severities.length > 0 ? new Set(options.severities) : null;
+  const surfaceFilter = options.surfaces.length > 0 ? new Set(options.surfaces) : null;
+  const reasonFilter = options.reasons.length > 0 ? new Set(options.reasons) : null;
+  const filteredAlerts = allAlerts
+    .filter((alert) => !severityFilter || severityFilter.has(alert.severity))
+    .filter((alert) => !surfaceFilter || surfaceFilter.has(alert.surface))
+    .filter((alert) => !reasonFilter || reasonFilter.has(alert.reason));
+  const alerts = filteredAlerts.slice(0, options.limit);
   return {
     ok: true,
     session: name,
     observedAt: new Date().toISOString(),
     limit: options.limit,
+    filter: {
+      severities: options.severities,
+      surfaces: options.surfaces,
+      reasons: options.reasons,
+      totalAlerts: filteredAlerts.length,
+      visibleAlerts: alerts.length,
+      hasMore: filteredAlerts.length > alerts.length,
+    },
     summary: {
       total: alerts.length,
       errors: alerts.filter((alert) => alert.severity === "error").length,

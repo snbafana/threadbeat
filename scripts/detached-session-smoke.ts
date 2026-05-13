@@ -3136,6 +3136,7 @@ try {
     ok?: true;
     session: string;
     limit: number;
+    filter: { severities: string[]; surfaces: string[]; reasons: string[]; totalAlerts: number; visibleAlerts: number; hasMore: boolean };
     summary: { total: number; errors: number; warnings: number };
     alerts: Array<{
       surface: string;
@@ -3164,6 +3165,10 @@ try {
   assert.equal(controlPlaneAlerts.ok, true);
   assert.equal(controlPlaneAlerts.session, sessionName);
   assert.equal(controlPlaneAlerts.limit, 10);
+  assert.deepEqual(controlPlaneAlerts.filter.severities, []);
+  assert.deepEqual(controlPlaneAlerts.filter.surfaces, []);
+  assert.deepEqual(controlPlaneAlerts.filter.reasons, []);
+  assert.equal(controlPlaneAlerts.filter.visibleAlerts, controlPlaneAlerts.alerts.length);
   assert.ok(controlPlaneAlerts.summary.total > 0);
   assert.equal(controlPlaneAlerts.summary.total, controlPlaneAlerts.alerts.length);
   assert.ok(controlPlaneAlerts.summary.warnings > 0);
@@ -3187,11 +3192,44 @@ try {
     controlPlaneAlerts.commands.timelineFailures.join(" "),
     `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --status failed,noop`,
   );
+  const filteredBranchAlerts = await cliJson<typeof controlPlaneAlerts>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--severity",
+    "warning",
+    "--surface",
+    "branch",
+    "--reason",
+    "running_sandbox_present",
+    "--limit",
+    "5",
+    "--lines",
+    "20",
+  ]);
+  assert.deepEqual(filteredBranchAlerts.filter.severities, ["warning"]);
+  assert.deepEqual(filteredBranchAlerts.filter.surfaces, ["branch"]);
+  assert.deepEqual(filteredBranchAlerts.filter.reasons, ["running_sandbox_present"]);
+  assert.equal(filteredBranchAlerts.limit, 5);
+  assert.ok(filteredBranchAlerts.summary.total > 0);
+  assert.ok(filteredBranchAlerts.alerts.every((alert) => (
+    alert.severity === "warning"
+    && alert.surface === "branch"
+    && alert.reason === "running_sandbox_present"
+  )));
+  assert.ok(filteredBranchAlerts.alerts.some((alert) => alert.runId === controlPlaneBlockedPlan.run.id));
   const controlPlaneAlertCommands = await cliText(baseUrl, [
     "runs",
     "session-control-plane-alerts",
     sessionName,
     "--server",
+    "--severity",
+    "warning",
+    "--surface",
+    "branch",
+    "--reason",
+    "running_sandbox_present",
     "--commands-only",
     "--format",
     "shell",
