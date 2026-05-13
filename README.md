@@ -885,7 +885,9 @@ events, apply-action executions, and branch-recovery executions for a durable
 session-level audit trail. Add `--source`, `--event`, or `--status` to narrow
 that audit stream to one durable surface, such as
 `--source branch_recovery_execution --event branch_recovery_executed --status
-noop` when inspecting blocked branch resumes. Add `--summary` for a
+noop` when inspecting blocked branch resumes. Add `--tick`, `--advance`,
+`--worker`, `--execution`, `--apply`, or `--run` to jump to exact durable ids
+from status, alert, or timeline output. Add `--summary` for a
 compact operator view with event counts, the decision rollup, latest bounded
 events, and the command to fetch the full timeline. Add `--commands-only
 --format shell` to turn matching timeline events into the next inspection

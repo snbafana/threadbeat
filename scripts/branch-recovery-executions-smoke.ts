@@ -128,6 +128,42 @@ try {
   assert.match(shellCommands, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId}`));
   assert.match(shellCommands, /runs inspect run-a/);
 
+  const timelineByExecution = await cliJson<{
+    filter: { executionIds: string[] };
+    events: Array<{ source: string; executionId?: string; runIds?: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--execution",
+    older.executionId,
+    "--limit",
+    "1",
+  ]);
+  assert.deepEqual(timelineByExecution.filter.executionIds, [older.executionId]);
+  assert.deepEqual(timelineByExecution.events.map((event) => event.executionId), [older.executionId]);
+
+  const timelineByRun = await cliJson<{
+    filter: { runIds: string[] };
+    events: Array<{ source: string; executionId?: string; runIds?: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--run",
+    "run-a",
+    "--limit",
+    "10",
+  ]);
+  assert.deepEqual(timelineByRun.filter.runIds, ["run-a"]);
+  assert.ok(timelineByRun.events.some((event) => (
+    event.source === "branch_recovery_execution"
+    && event.executionId === newer.executionId
+    && event.runIds?.includes("run-a")
+  )));
+
   const timelineCommandQueue = await cliJson<{
     commands: Array<{ action: string; executionId: string | null; command: string[] }>;
   }>(baseUrl, [

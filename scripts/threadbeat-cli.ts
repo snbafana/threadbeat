@@ -5048,6 +5048,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         source: options.source,
         event: options.event,
         status: options.status,
+        tickId: options.tick,
+        advanceId: options.advance,
+        workerId: options.worker,
+        executionId: options.execution,
+        applyId: options.apply,
+        runId: options.run,
       },
     );
     if (options["commands-only"] === "1") {
@@ -7737,7 +7743,19 @@ type WorkerSessionControlPlaneAdvanceLoopResponse = {
 type WorkerSessionControlPlaneTimelineResponse = {
   ok: true;
   session: string;
-  filter: { sources: string[]; events: string[]; statuses: string[]; limit: number; lines: number };
+  filter: {
+    sources: string[];
+    events: string[];
+    statuses: string[];
+    tickIds: string[];
+    advanceIds: string[];
+    workerIds: string[];
+    executionIds: string[];
+    applyIds: string[];
+    runIds: string[];
+    limit: number;
+    lines: number;
+  };
   count: number;
   counts: Record<string, number>;
   decisions: {
@@ -8733,12 +8751,30 @@ async function listWorkerSessionControlPlaneTickRecords(
 
 async function fetchWorkerSessionControlPlaneTimeline(
   sessionName: string,
-  options: { limit: number; lines: number; source?: string; event?: string; status?: string },
+  options: {
+    limit: number;
+    lines: number;
+    source?: string;
+    event?: string;
+    status?: string;
+    tickId?: string;
+    advanceId?: string;
+    workerId?: string;
+    executionId?: string;
+    applyId?: string;
+    runId?: string;
+  },
 ): Promise<WorkerSessionControlPlaneTimelineResponse> {
   const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
   if (options.source) params.set("source", options.source);
   if (options.event) params.set("event", options.event);
   if (options.status) params.set("status", options.status);
+  if (options.tickId) params.set("tickId", options.tickId);
+  if (options.advanceId) params.set("advanceId", options.advanceId);
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.executionId) params.set("executionId", options.executionId);
+  if (options.applyId) params.set("applyId", options.applyId);
+  if (options.runId) params.set("runId", options.runId);
   return await requestJson(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-timeline`, params),
@@ -8813,6 +8849,12 @@ function summarizeWorkerSessionControlPlaneTimeline(
         ...(timeline.filter.sources.length > 0 ? ["--source", timeline.filter.sources.join(",")] : []),
         ...(timeline.filter.events.length > 0 ? ["--event", timeline.filter.events.join(",")] : []),
         ...(timeline.filter.statuses.length > 0 ? ["--status", timeline.filter.statuses.join(",")] : []),
+        ...(timeline.filter.tickIds.length > 0 ? ["--tick", timeline.filter.tickIds.join(",")] : []),
+        ...(timeline.filter.advanceIds.length > 0 ? ["--advance", timeline.filter.advanceIds.join(",")] : []),
+        ...(timeline.filter.workerIds.length > 0 ? ["--worker", timeline.filter.workerIds.join(",")] : []),
+        ...(timeline.filter.executionIds.length > 0 ? ["--execution", timeline.filter.executionIds.join(",")] : []),
+        ...(timeline.filter.applyIds.length > 0 ? ["--apply", timeline.filter.applyIds.join(",")] : []),
+        ...(timeline.filter.runIds.length > 0 ? ["--run", timeline.filter.runIds.join(",")] : []),
       ],
     },
   };
@@ -12360,7 +12402,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--source tick,branch_recovery_execution] [--event tick_recorded,branch_recovery_executed] [--status executed,noop] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,branch_recovery_execution] [--event tick_recorded,branch_recovery_executed] [--status executed,noop] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

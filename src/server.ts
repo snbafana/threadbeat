@@ -914,6 +914,36 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         sources: parseOptionalList(query.source),
         events: parseOptionalList(query.event),
         statuses: parseOptionalList(query.status),
+        tickIds: [
+          ...parseOptionalList(query.tick),
+          ...parseOptionalList(query.tickId),
+          ...parseOptionalList(query.tickIds),
+        ],
+        advanceIds: [
+          ...parseOptionalList(query.advance),
+          ...parseOptionalList(query.advanceId),
+          ...parseOptionalList(query.advanceIds),
+        ],
+        workerIds: [
+          ...parseOptionalList(query.worker),
+          ...parseOptionalList(query.workerId),
+          ...parseOptionalList(query.workerIds),
+        ],
+        executionIds: [
+          ...parseOptionalList(query.execution),
+          ...parseOptionalList(query.executionId),
+          ...parseOptionalList(query.executionIds),
+        ],
+        applyIds: [
+          ...parseOptionalList(query.apply),
+          ...parseOptionalList(query.applyId),
+          ...parseOptionalList(query.applyIds),
+        ],
+        runIds: [
+          ...parseOptionalList(query.run),
+          ...parseOptionalList(query.runId),
+          ...parseOptionalList(query.runIds),
+        ],
       });
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -3129,23 +3159,56 @@ const timelineStringArray = (value: unknown): string[] | undefined => (
 const readWorkerSessionControlPlaneTimeline = async (
   settings: Settings,
   name: string,
-  options: { limit: number; lines: number; sources: string[]; events: string[]; statuses: string[] },
+  options: {
+    limit: number;
+    lines: number;
+    sources: string[];
+    events: string[];
+    statuses: string[];
+    tickIds: string[];
+    advanceIds: string[];
+    workerIds: string[];
+    executionIds: string[];
+    applyIds: string[];
+    runIds: string[];
+  },
 ): Promise<{
   ok: true;
   session: string;
-  filter: { sources: string[]; events: string[]; statuses: string[]; limit: number; lines: number };
+  filter: {
+    sources: string[];
+    events: string[];
+    statuses: string[];
+    tickIds: string[];
+    advanceIds: string[];
+    workerIds: string[];
+    executionIds: string[];
+    applyIds: string[];
+    runIds: string[];
+    limit: number;
+    lines: number;
+  };
   count: number;
   counts: Record<string, number>;
   decisions: WorkerSessionControlPlaneTimelineDecisionRollup;
   events: WorkerSessionControlPlaneTimelineEvent[];
 }> => {
+  const hasIdentityFilter = [
+    options.tickIds,
+    options.advanceIds,
+    options.workerIds,
+    options.executionIds,
+    options.applyIds,
+    options.runIds,
+  ].some((values) => values.length > 0);
+  const recordReadLimit = hasIdentityFilter ? Number.MAX_SAFE_INTEGER : options.limit;
   const [ticks, advances, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
-    listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, options.limit),
-    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, { limit: options.limit }),
+    listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, recordReadLimit),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, { limit: recordReadLimit }),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
-    listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, options.limit),
-    listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, options.limit),
+    listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, recordReadLimit),
+    listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, recordReadLimit),
   ]);
   const events: WorkerSessionControlPlaneTimelineEvent[] = [];
   for (const tick of ticks) {
@@ -3314,10 +3377,22 @@ const readWorkerSessionControlPlaneTimeline = async (
   const sourceFilter = options.sources.length > 0 ? new Set(options.sources) : null;
   const eventFilter = options.events.length > 0 ? new Set(options.events) : null;
   const statusFilter = options.statuses.length > 0 ? new Set(options.statuses) : null;
+  const tickIdFilter = options.tickIds.length > 0 ? new Set(options.tickIds) : null;
+  const advanceIdFilter = options.advanceIds.length > 0 ? new Set(options.advanceIds) : null;
+  const workerIdFilter = options.workerIds.length > 0 ? new Set(options.workerIds) : null;
+  const executionIdFilter = options.executionIds.length > 0 ? new Set(options.executionIds) : null;
+  const applyIdFilter = options.applyIds.length > 0 ? new Set(options.applyIds) : null;
+  const runIdFilter = options.runIds.length > 0 ? new Set(options.runIds) : null;
   const filteredEvents = events
     .filter((event) => !sourceFilter || sourceFilter.has(event.source))
     .filter((event) => !eventFilter || eventFilter.has(event.event))
-    .filter((event) => !statusFilter || (event.status && statusFilter.has(event.status)));
+    .filter((event) => !statusFilter || (event.status && statusFilter.has(event.status)))
+    .filter((event) => !tickIdFilter || (event.tickId && tickIdFilter.has(event.tickId)))
+    .filter((event) => !advanceIdFilter || (event.advanceId && advanceIdFilter.has(event.advanceId)))
+    .filter((event) => !workerIdFilter || (event.workerId && workerIdFilter.has(event.workerId)))
+    .filter((event) => !executionIdFilter || (event.executionId && executionIdFilter.has(event.executionId)))
+    .filter((event) => !applyIdFilter || (event.applyId && applyIdFilter.has(event.applyId)))
+    .filter((event) => !runIdFilter || (event.runIds ?? []).some((runId) => runIdFilter.has(runId)));
   const sorted = filteredEvents
     .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
     .slice(0, options.limit);
@@ -3328,6 +3403,12 @@ const readWorkerSessionControlPlaneTimeline = async (
       sources: options.sources,
       events: options.events,
       statuses: options.statuses,
+      tickIds: options.tickIds,
+      advanceIds: options.advanceIds,
+      workerIds: options.workerIds,
+      executionIds: options.executionIds,
+      applyIds: options.applyIds,
+      runIds: options.runIds,
       limit: options.limit,
       lines: options.lines,
     },
@@ -3752,6 +3833,12 @@ const readWorkerSessionControlPlaneAlerts = async (
       sources: [],
       events: [],
       statuses: ["failed", "noop"],
+      tickIds: [],
+      advanceIds: [],
+      workerIds: [],
+      executionIds: [],
+      applyIds: [],
+      runIds: [],
     }),
   ]);
   const workerRecoverySteps = [
