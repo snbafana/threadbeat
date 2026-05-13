@@ -29,6 +29,89 @@ const { app, db } = await buildServer(settings);
 let baseUrl: string | null = null;
 let sessionStarted = false;
 
+async function assertControlPlaneWorkerDrill(baseUrl: string, sessionName: string): Promise<void> {
+  const drillTickWorkerId = "detached-smoke-control-plane-drill-worker";
+  await cliJson(baseUrl, [
+    "runs",
+    "start-control-plane-tick-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    drillTickWorkerId,
+    "--dry-run",
+    "--max-ticks",
+    "50",
+    "--interval-ms",
+    "1000",
+    "--lines",
+    "5",
+  ]);
+  const controlPlaneWorkerDrill = await cliJson<{
+    ok?: true;
+    session: string;
+    kind: string;
+    workerId: string;
+    dryRun: boolean;
+    confirmed: boolean;
+    passed: boolean | null;
+    before: { worker: { workerId: string; alive: boolean; state: string | null } | null };
+    afterStop: { worker: { workerId: string; alive: boolean; state: string | null } | null; nextSteps: Array<{ kind: string; workerId: string; action: string; command: string[] }> } | null;
+    afterRestart: { worker: { workerId: string; alive: boolean; state: string | null } | null } | null;
+    checks: {
+      workerSeenBefore: boolean;
+      stopCount: number | null;
+      restartStepSeen: boolean;
+      restartCount: number | null;
+      workerSeenAfterRestart: boolean | null;
+      workerAliveAfterRestart: boolean | null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-drill",
+    sessionName,
+    "--server",
+    "--kind",
+    "control-plane-tick",
+    "--worker-id",
+    drillTickWorkerId,
+    "--confirm",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(controlPlaneWorkerDrill.ok, true);
+  assert.equal(controlPlaneWorkerDrill.session, sessionName);
+  assert.equal(controlPlaneWorkerDrill.kind, "control_plane_tick");
+  assert.equal(controlPlaneWorkerDrill.workerId, drillTickWorkerId);
+  assert.equal(controlPlaneWorkerDrill.dryRun, false);
+  assert.equal(controlPlaneWorkerDrill.confirmed, true);
+  assert.equal(controlPlaneWorkerDrill.passed, true);
+  assert.equal(controlPlaneWorkerDrill.before.worker?.workerId, drillTickWorkerId);
+  assert.equal(controlPlaneWorkerDrill.checks.workerSeenBefore, true);
+  assert.equal(controlPlaneWorkerDrill.checks.stopCount, 1);
+  assert.equal(controlPlaneWorkerDrill.checks.restartStepSeen, true);
+  assert.equal(controlPlaneWorkerDrill.checks.restartCount, 1);
+  assert.equal(controlPlaneWorkerDrill.checks.workerSeenAfterRestart, true);
+  assert.equal(controlPlaneWorkerDrill.checks.workerAliveAfterRestart, true);
+  assert.equal(controlPlaneWorkerDrill.afterStop?.worker?.state, "stopped");
+  assert.equal(controlPlaneWorkerDrill.afterStop?.nextSteps[0]?.workerId, drillTickWorkerId);
+  assert.equal(controlPlaneWorkerDrill.afterStop?.nextSteps[0]?.action, "restart_control_plane_tick_worker");
+  assert.equal(
+    controlPlaneWorkerDrill.afterStop?.nextSteps[0]?.command.join(" "),
+    `npm run cli -- runs restart-control-plane-tick-workers ${sessionName} --server --worker-id ${drillTickWorkerId}`,
+  );
+  assert.equal(controlPlaneWorkerDrill.afterRestart?.worker?.workerId, drillTickWorkerId);
+  assert.equal(controlPlaneWorkerDrill.afterRestart?.worker?.alive, true);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    drillTickWorkerId,
+    "--retire",
+  ]);
+}
+
 try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
@@ -3599,6 +3682,7 @@ try {
     controlPlaneTimelineSummary.commands.fullTimeline.join(" "),
     `npm run cli -- runs session-control-plane-timeline ${sessionName} --server`,
   );
+  await assertControlPlaneWorkerDrill(baseUrl, sessionName);
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };
