@@ -6966,6 +6966,15 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
     fullStatus: string[];
     timelineFailures: string[];
   } | null;
+  details: {
+    kind: "run_resume_inspection";
+    inspection: {
+      run: { id: string; status: string; resultCommit: string | null; branchName: string; workerId: string | null };
+      recovery: { ready: boolean; reason: string; runningSandboxes: Array<{ id: string; providerSandboxId: string | null }> };
+      links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
+      nextStep: { action: string; reason: string; command: string[] };
+    };
+  } | null;
   recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];
 };
 

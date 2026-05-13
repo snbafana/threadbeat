@@ -2465,83 +2465,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
 
   app.get("/api/runs/:id/resume-inspection", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const run = await db.getAgentRun(id);
-    if (!run) return reply.code(404).send({ ok: false, error: "run not found" });
-    const agent = await db.getAgent(run.agent_id);
-    if (!agent) return reply.code(404).send({ ok: false, error: "agent not found" });
-    const sandboxes = await db.listSandboxes({ runId: run.id });
-    const runningSandboxes = sandboxes.filter((sandbox) => sandbox.state === "running");
-    const branchLinks = deriveGitHubLinks(agent.repo_url, {
-      compareBaseRef: run.input_ref,
-      compareHeadRef: run.run_branch,
-      treeRef: run.run_branch,
-    });
-    const resultLinks = deriveGitHubLinks(agent.repo_url, {
-      commitRef: run.result_commit,
-      compareBaseRef: run.input_ref,
-      compareHeadRef: run.result_commit,
-      treeRef: run.result_commit,
-    });
-    const ready = run.status === "stopped" && run.result_commit === null && runningSandboxes.length === 0;
-    const reason = run.result_commit !== null
-      ? "result_commit_recorded"
-      : run.status !== "stopped"
-        ? `run_status_${run.status}`
-        : runningSandboxes.length > 0
-          ? "running_sandbox_present"
-          : "stopped_branch_without_result_commit";
-    const resumeBranch = ["npm", "run", "cli", "--", "runs", "resume-branch", run.id];
-    const inspectRun = ["npm", "run", "cli", "--", "runs", "inspect", run.id];
-    const inspectResult = ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"];
-    return {
-      ok: true,
-      run: {
-        id: run.id,
-        agentId: run.agent_id,
-        status: run.status,
-        objective: run.objective,
-        baseRef: run.input_ref,
-        branchName: run.run_branch,
-        resultCommit: run.result_commit,
-        workerId: run.worker_id,
-      },
-      repository: {
-        repoUrl: agent.repo_url,
-        repoWebUrl: branchLinks.repoUrl,
-      },
-      recovery: {
-        ready,
-        reason,
-        inspectionMode: "server_metadata",
-        runningSandboxes: runningSandboxes.map((sandbox) => ({
-          id: sandbox.id,
-          providerSandboxId: sandbox.provider_sandbox_id,
-        })),
-      },
-      links: {
-        branchTreeUrl: branchLinks.treeUrl,
-        branchCompareUrl: branchLinks.compareUrl,
-        resultTreeUrl: resultLinks.treeUrl,
-        resultCommitUrl: resultLinks.commitUrl,
-        resultCompareUrl: resultLinks.compareUrl,
-      },
-      commands: {
-        inspectRun,
-        inspectResult,
-        resumeBranch: ready ? resumeBranch : null,
-        resumeBranchDryRun: [...resumeBranch, "--dry-run"],
-        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `./checkouts/${run.id}`],
-        watchRun: ["npm", "run", "cli", "--", "runs", "watch", run.id],
-        resumeStoppedWorker: ["npm", "run", "cli", "--", "runs", "work", "--agent", run.agent_id, "--resume-stopped"],
-      },
-      nextStep: ready
-        ? { action: "resume_branch", reason, command: resumeBranch }
-        : {
-            action: run.result_commit ? "inspect_result" : "inspect_run",
-            reason,
-            command: run.result_commit ? inspectResult : inspectRun,
-          },
-    };
+    const inspection = await readRunResumeInspection(db, id);
+    if (!inspection) return reply.code(404).send({ ok: false, error: "run not found" });
+    return inspection;
   });
 
   app.post("/api/runs/:id/claim", async (request, reply) => {
@@ -3513,6 +3439,91 @@ const readWorkerSessionControlPlaneStatus = async (
 
 type WorkerSessionControlPlaneStatus = Awaited<ReturnType<typeof readWorkerSessionControlPlaneStatus>>;
 
+const readRunResumeInspection = async (
+  db: Database,
+  runId: string,
+) => {
+  const run = await db.getAgentRun(runId);
+  if (!run) return null;
+  const agent = await db.getAgent(run.agent_id);
+  if (!agent) return null;
+  const sandboxes = await db.listSandboxes({ runId: run.id });
+  const runningSandboxes = sandboxes.filter((sandbox) => sandbox.state === "running");
+  const branchLinks = deriveGitHubLinks(agent.repo_url, {
+    compareBaseRef: run.input_ref,
+    compareHeadRef: run.run_branch,
+    treeRef: run.run_branch,
+  });
+  const resultLinks = deriveGitHubLinks(agent.repo_url, {
+    commitRef: run.result_commit,
+    compareBaseRef: run.input_ref,
+    compareHeadRef: run.result_commit,
+    treeRef: run.result_commit,
+  });
+  const ready = run.status === "stopped" && run.result_commit === null && runningSandboxes.length === 0;
+  const reason = run.result_commit !== null
+    ? "result_commit_recorded"
+    : run.status !== "stopped"
+      ? `run_status_${run.status}`
+      : runningSandboxes.length > 0
+        ? "running_sandbox_present"
+        : "stopped_branch_without_result_commit";
+  const resumeBranch = ["npm", "run", "cli", "--", "runs", "resume-branch", run.id];
+  const inspectRun = ["npm", "run", "cli", "--", "runs", "inspect", run.id];
+  const inspectResult = ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"];
+  return {
+    ok: true,
+    run: {
+      id: run.id,
+      agentId: run.agent_id,
+      status: run.status,
+      objective: run.objective,
+      baseRef: run.input_ref,
+      branchName: run.run_branch,
+      resultCommit: run.result_commit,
+      workerId: run.worker_id,
+    },
+    repository: {
+      repoUrl: agent.repo_url,
+      repoWebUrl: branchLinks.repoUrl,
+    },
+    recovery: {
+      ready,
+      reason,
+      inspectionMode: "server_metadata",
+      runningSandboxes: runningSandboxes.map((sandbox) => ({
+        id: sandbox.id,
+        providerSandboxId: sandbox.provider_sandbox_id,
+      })),
+    },
+    links: {
+      branchTreeUrl: branchLinks.treeUrl,
+      branchCompareUrl: branchLinks.compareUrl,
+      resultTreeUrl: resultLinks.treeUrl,
+      resultCommitUrl: resultLinks.commitUrl,
+      resultCompareUrl: resultLinks.compareUrl,
+    },
+    commands: {
+      inspectRun,
+      inspectResult,
+      resumeBranch: ready ? resumeBranch : null,
+      resumeBranchDryRun: [...resumeBranch, "--dry-run"],
+      checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", `./checkouts/${run.id}`],
+      watchRun: ["npm", "run", "cli", "--", "runs", "watch", run.id],
+      resumeStoppedWorker: ["npm", "run", "cli", "--", "runs", "work", "--agent", run.agent_id, "--resume-stopped"],
+    },
+    nextStep: ready
+      ? { action: "resume_branch", reason, command: resumeBranch }
+      : {
+          action: run.result_commit ? "inspect_result" : "inspect_run",
+          reason,
+          command: run.result_commit ? inspectResult : inspectRun,
+        },
+  };
+};
+
+type RunResumeInspection = NonNullable<Awaited<ReturnType<typeof readRunResumeInspection>>>;
+
 type WorkerSessionControlPlaneAlert = {
   surface: "apply_action" | "drain_continuation" | "branch" | "stale_run" | "worker_recovery";
   severity: "error" | "warning";
@@ -3714,6 +3725,10 @@ const readWorkerSessionControlPlaneAlertPreview = async (
     fullStatus: string[];
     timelineFailures: string[];
   } | null;
+  details: {
+    kind: "run_resume_inspection";
+    inspection: RunResumeInspection;
+  } | null;
   recentTimeline: Awaited<ReturnType<typeof readWorkerSessionControlPlaneAlerts>>["recentTimeline"];
 }> => {
   const alerts = await readWorkerSessionControlPlaneAlerts(settings, db, name, {
@@ -3721,6 +3736,10 @@ const readWorkerSessionControlPlaneAlertPreview = async (
     limit: 1,
   });
   const alert = alerts.alerts[0] ?? null;
+  const runResumeInspection = alert?.runId
+    && (alert.surface === "branch" || alert.surface === "stale_run")
+    ? await readRunResumeInspection(db, alert.runId)
+    : null;
   return {
     ok: true,
     session: alerts.session,
@@ -3733,6 +3752,12 @@ const readWorkerSessionControlPlaneAlertPreview = async (
           command: alert.command,
           fullStatus: alerts.commands.fullStatus,
           timelineFailures: alerts.commands.timelineFailures,
+        }
+      : null,
+    details: runResumeInspection
+      ? {
+          kind: "run_resume_inspection",
+          inspection: runResumeInspection,
         }
       : null,
     recentTimeline: alerts.recentTimeline,

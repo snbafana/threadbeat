@@ -757,7 +757,8 @@ focus one failure class, add `--run`, `--worker`, `--apply`, `--execution`, or
 print the inspection or recovery commands directly. Use singular
 `runs session-control-plane-alert <name> --server` with the same filters to
 preview the first matching alert, its command, and recent failure/noop timeline
-context in one read-only response. Use `runs session-control-plane-advance <name> --server`
+context in one read-only response; run-backed branch and stale-run alerts also
+include the run resume-inspection snapshot. Use `runs session-control-plane-advance <name> --server`
 or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
 first priority next action from that status; add `--dry-run` to inspect the
 selected stale-run recovery, branch resume, apply action, drain continuation, or

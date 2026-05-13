@@ -3252,6 +3252,15 @@ try {
     matchCount: number;
     alert: typeof controlPlaneAlerts.alerts[number] | null;
     preview: { command: string[]; fullStatus: string[]; timelineFailures: string[] } | null;
+    details: {
+      kind: "run_resume_inspection";
+      inspection: {
+        run: { id: string; status: string; resultCommit: string | null; workerId: string | null };
+        recovery: { ready: boolean; reason: string; runningSandboxes: Array<{ id: string; providerSandboxId: string | null }> };
+        links: { branchTreeUrl: string | null };
+        nextStep: { action: string; reason: string; command: string[] };
+      };
+    } | null;
     recentTimeline: typeof controlPlaneAlerts.recentTimeline;
   }>(baseUrl, [
     "runs",
@@ -3279,6 +3288,16 @@ try {
   assert.equal(controlPlaneAlertPreview.alert?.action, "inspect_run");
   assert.equal(
     controlPlaneAlertPreview.preview?.command.join(" "),
+    `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
+  );
+  assert.equal(controlPlaneAlertPreview.details?.kind, "run_resume_inspection");
+  assert.equal(controlPlaneAlertPreview.details?.inspection.run.id, controlPlaneBlockedPlan.run.id);
+  assert.equal(controlPlaneAlertPreview.details?.inspection.run.status, "stopped");
+  assert.equal(controlPlaneAlertPreview.details?.inspection.recovery.ready, false);
+  assert.equal(controlPlaneAlertPreview.details?.inspection.recovery.reason, "running_sandbox_present");
+  assert.equal(controlPlaneAlertPreview.details?.inspection.nextStep.action, "inspect_run");
+  assert.equal(
+    controlPlaneAlertPreview.details?.inspection.nextStep.command.join(" "),
     `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
   );
   assert.ok(controlPlaneAlertPreview.recentTimeline.events.some((event) => (
