@@ -523,6 +523,36 @@ try {
     "--advance",
     recoverNextLoopDryRun.advanceId,
   ]);
+
+  const statusSummaryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(statusSummaryText, /control-plane status summary/);
+  assert.match(statusSummaryText, /next_recovery:/);
+  assert.match(statusSummaryText, /pending_confirmations: 1/);
+  assert.match(statusSummaryText, new RegExp(`advance: ${recoverNextLoopDryRun.advanceId}`));
+  assert.match(statusSummaryText, /inspect: npm run cli -- runs session-control-plane-advances/);
+
+  const statusSummaryShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  const statusSummaryShellLines = statusSummaryShell.trim().split("\n").filter(Boolean);
+  assert.ok(statusSummaryShellLines.some((line) => line.includes("session-control-plane-recover-next")));
+  assert.ok(statusSummaryShellLines.some((line) => line.includes("--dry-run")));
+  assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recoverNextLoopDryRun.advanceId}`)));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

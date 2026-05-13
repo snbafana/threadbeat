@@ -4519,16 +4519,42 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-control-plane-status") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-status requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-status --format must be json, text, or shell");
+    }
+    if (outputFormat !== "json" && options.summary !== "1") {
+      throw new Error("runs session-control-plane-status --format text|shell requires --summary");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-status --format shell requires --commands-only");
     }
     const status = await fetchWorkerSessionControlPlaneStatus(
       required(sessionName, "runs session-control-plane-status <session> --server"),
       { lines: parsePositiveInteger(options.lines ?? "5", "--lines") },
     );
-    await printJson(options.summary === "1"
-      ? summarizeWorkerSessionControlPlaneStatus(status)
-      : status);
+    if (options.summary === "1") {
+      const summary = summarizeWorkerSessionControlPlaneStatus(status);
+      if (options["commands-only"] === "1") {
+        const commands = workerSessionControlPlaneStatusSummaryCommands(summary);
+        if (outputFormat === "shell") {
+          printCommandQueueShell(commands);
+        } else {
+          await printJson({ ...summary, commands });
+        }
+        return;
+      }
+      if (outputFormat === "text") {
+        printWorkerSessionControlPlaneStatusSummaryText(summary);
+        return;
+      }
+      await printJson(summary);
+      return;
+    }
+    await printJson(status);
     return;
   }
   if (subcommandName === "session-control-plane-recover-next") {
@@ -8654,6 +8680,67 @@ function formatWorkerSessionControlPlaneAdvancesText(
     }
   }
   return lines;
+}
+
+function printWorkerSessionControlPlaneStatusSummaryText(
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+): void {
+  console.log(formatWorkerSessionControlPlaneStatusSummaryText(summary).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneStatusSummaryText(
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+): string[] {
+  const lines = [
+    "control-plane status summary",
+    `session: ${summary.session}`,
+    `needs_action: ${summary.needsAction}`,
+    `pending_confirmations: ${summary.queues.controlPlaneConfirmations.summary.commands}`,
+    `recover_next_attempts: total=${summary.recovery.recoverNext.attempts.total} dry_run=${summary.recovery.recoverNext.attempts.dryRun} executed=${summary.recovery.recoverNext.attempts.executed} failed=${summary.recovery.recoverNext.attempts.failed}`,
+  ];
+  if (summary.nextRecovery) {
+    lines.push(
+      "next_recovery:",
+      `  kind: ${summary.nextRecovery.kind}`,
+      `  action: ${summary.nextRecovery.action}`,
+      `  reason: ${summary.nextRecovery.reason}`,
+      `  count: ${summary.nextRecovery.count}`,
+      `  command: ${formatShellCommand(summary.nextRecovery.command)}`,
+      `  dry_run: ${formatShellCommand(summary.nextRecovery.dryRunCommand)}`,
+    );
+  } else {
+    lines.push("next_recovery: none");
+  }
+  if (summary.recovery.recoverNext.recent.length > 0) {
+    lines.push("recent_recover_next:");
+    for (const attempt of summary.recovery.recoverNext.recent) {
+      lines.push(
+        `  - advance: ${attempt.advanceId}`,
+        `    detail_command: ${attempt.detailCommand ?? ""}`,
+        `    dry_run: ${attempt.dryRun}`,
+        `    until_empty: ${attempt.untilEmpty}`,
+        `    stopped_reason: ${attempt.stoppedReason ?? ""}`,
+        `    executed_steps: ${attempt.executedSteps ?? ""}`,
+        `    selected: ${attempt.selectedKind ?? ""} ${attempt.selectedAction ?? ""}`.trimEnd(),
+        `    inspect: ${formatShellCommand(attempt.command)}`,
+      );
+    }
+  }
+  return lines;
+}
+
+function workerSessionControlPlaneStatusSummaryCommands(
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+): CommandQueueOutput["commands"] {
+  const commands: CommandQueueOutput["commands"] = [];
+  if (summary.nextRecovery) {
+    commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--dry-run"] });
+    commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--confirm"] });
+  }
+  for (const attempt of summary.recovery.recoverNext.recent) {
+    commands.push({ command: attempt.command });
+  }
+  return commands;
 }
 
 function selectWorkerSessionControlPlaneNextActions(
@@ -12828,7 +12915,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
-  runs session-control-plane-status <name> --server [--summary] [--lines 5]
+  runs session-control-plane-status <name> --server [--summary] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
