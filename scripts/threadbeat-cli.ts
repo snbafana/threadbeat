@@ -4544,6 +4544,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         severity: options.severity,
         surface: options.surface,
         reason: options.reason,
+        runId: options.run,
+        workerId: options.worker,
+        applyId: options.apply,
+        executionId: options.execution,
+        action: options.action,
       },
     );
     if (options["commands-only"] === "1") {
@@ -6861,7 +6866,19 @@ type WorkerSessionControlPlaneAlertsResponse = {
   session: string;
   observedAt: string;
   limit: number;
-  filter: { severities: string[]; surfaces: string[]; reasons: string[]; totalAlerts: number; visibleAlerts: number; hasMore: boolean };
+  filter: {
+    severities: string[];
+    surfaces: string[];
+    reasons: string[];
+    runIds: string[];
+    workerIds: string[];
+    applyIds: string[];
+    executionIds: string[];
+    actions: string[];
+    totalAlerts: number;
+    visibleAlerts: number;
+    hasMore: boolean;
+  };
   summary: { total: number; errors: number; warnings: number };
   alerts: Array<{
     surface: "apply_action" | "drain_continuation" | "branch" | "stale_run" | "worker_recovery";
@@ -7289,12 +7306,28 @@ async function fetchWorkerSessionControlPlaneStatus(
 
 async function fetchWorkerSessionControlPlaneAlerts(
   sessionName: string,
-  options: { limit: number; lines: number; severity?: string; surface?: string; reason?: string },
+  options: {
+    limit: number;
+    lines: number;
+    severity?: string;
+    surface?: string;
+    reason?: string;
+    runId?: string;
+    workerId?: string;
+    applyId?: string;
+    executionId?: string;
+    action?: string;
+  },
 ): Promise<WorkerSessionControlPlaneAlertsResponse> {
   const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
   if (options.severity) params.set("severity", options.severity);
   if (options.surface) params.set("surface", options.surface);
   if (options.reason) params.set("reason", options.reason);
+  if (options.runId) params.set("runId", options.runId);
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.applyId) params.set("applyId", options.applyId);
+  if (options.executionId) params.set("executionId", options.executionId);
+  if (options.action) params.set("action", options.action);
   return await requestJson(
     "GET",
     withQuery(
@@ -11320,7 +11353,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
-  runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--limit 20]

@@ -521,6 +521,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         severities: parseOptionalList(query.severity),
         surfaces: parseOptionalList(query.surface),
         reasons: parseOptionalList(query.reason),
+        runIds: parseOptionalList(query.runId),
+        workerIds: parseOptionalList(query.workerId),
+        applyIds: parseOptionalList(query.applyId),
+        executionIds: parseOptionalList(query.executionId),
+        actions: parseOptionalList(query.action),
       });
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
@@ -3505,13 +3510,36 @@ const readWorkerSessionControlPlaneAlerts = async (
   settings: Settings,
   db: Database,
   name: string,
-  options: { limit: number; lines: number; severities: string[]; surfaces: string[]; reasons: string[] },
+  options: {
+    limit: number;
+    lines: number;
+    severities: string[];
+    surfaces: string[];
+    reasons: string[];
+    runIds: string[];
+    workerIds: string[];
+    applyIds: string[];
+    executionIds: string[];
+    actions: string[];
+  },
 ): Promise<{
   ok: true;
   session: string;
   observedAt: string;
   limit: number;
-  filter: { severities: string[]; surfaces: string[]; reasons: string[]; totalAlerts: number; visibleAlerts: number; hasMore: boolean };
+  filter: {
+    severities: string[];
+    surfaces: string[];
+    reasons: string[];
+    runIds: string[];
+    workerIds: string[];
+    applyIds: string[];
+    executionIds: string[];
+    actions: string[];
+    totalAlerts: number;
+    visibleAlerts: number;
+    hasMore: boolean;
+  };
   summary: { total: number; errors: number; warnings: number };
   alerts: WorkerSessionControlPlaneAlert[];
   recentTimeline: {
@@ -3598,10 +3626,20 @@ const readWorkerSessionControlPlaneAlerts = async (
   const severityFilter = options.severities.length > 0 ? new Set(options.severities) : null;
   const surfaceFilter = options.surfaces.length > 0 ? new Set(options.surfaces) : null;
   const reasonFilter = options.reasons.length > 0 ? new Set(options.reasons) : null;
+  const runIdFilter = options.runIds.length > 0 ? new Set(options.runIds) : null;
+  const workerIdFilter = options.workerIds.length > 0 ? new Set(options.workerIds) : null;
+  const applyIdFilter = options.applyIds.length > 0 ? new Set(options.applyIds) : null;
+  const executionIdFilter = options.executionIds.length > 0 ? new Set(options.executionIds) : null;
+  const actionFilter = options.actions.length > 0 ? new Set(options.actions) : null;
   const filteredAlerts = allAlerts
     .filter((alert) => !severityFilter || severityFilter.has(alert.severity))
     .filter((alert) => !surfaceFilter || surfaceFilter.has(alert.surface))
-    .filter((alert) => !reasonFilter || reasonFilter.has(alert.reason));
+    .filter((alert) => !reasonFilter || reasonFilter.has(alert.reason))
+    .filter((alert) => !runIdFilter || (alert.runId ? runIdFilter.has(alert.runId) : false))
+    .filter((alert) => !workerIdFilter || (alert.workerId ? workerIdFilter.has(alert.workerId) : false))
+    .filter((alert) => !applyIdFilter || (alert.applyId ? applyIdFilter.has(alert.applyId) : false))
+    .filter((alert) => !executionIdFilter || (alert.executionId ? executionIdFilter.has(alert.executionId) : false))
+    .filter((alert) => !actionFilter || (alert.action ? actionFilter.has(alert.action) : false));
   const alerts = filteredAlerts.slice(0, options.limit);
   return {
     ok: true,
@@ -3612,6 +3650,11 @@ const readWorkerSessionControlPlaneAlerts = async (
       severities: options.severities,
       surfaces: options.surfaces,
       reasons: options.reasons,
+      runIds: options.runIds,
+      workerIds: options.workerIds,
+      applyIds: options.applyIds,
+      executionIds: options.executionIds,
+      actions: options.actions,
       totalAlerts: filteredAlerts.length,
       visibleAlerts: alerts.length,
       hasMore: filteredAlerts.length > alerts.length,

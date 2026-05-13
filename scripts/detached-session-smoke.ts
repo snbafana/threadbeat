@@ -3136,7 +3136,19 @@ try {
     ok?: true;
     session: string;
     limit: number;
-    filter: { severities: string[]; surfaces: string[]; reasons: string[]; totalAlerts: number; visibleAlerts: number; hasMore: boolean };
+    filter: {
+      severities: string[];
+      surfaces: string[];
+      reasons: string[];
+      runIds: string[];
+      workerIds: string[];
+      applyIds: string[];
+      executionIds: string[];
+      actions: string[];
+      totalAlerts: number;
+      visibleAlerts: number;
+      hasMore: boolean;
+    };
     summary: { total: number; errors: number; warnings: number };
     alerts: Array<{
       surface: string;
@@ -3144,6 +3156,7 @@ try {
       reason: string;
       count: number;
       runId?: string;
+      action?: string;
       command: string[];
     }>;
     recentTimeline: {
@@ -3168,6 +3181,11 @@ try {
   assert.deepEqual(controlPlaneAlerts.filter.severities, []);
   assert.deepEqual(controlPlaneAlerts.filter.surfaces, []);
   assert.deepEqual(controlPlaneAlerts.filter.reasons, []);
+  assert.deepEqual(controlPlaneAlerts.filter.runIds, []);
+  assert.deepEqual(controlPlaneAlerts.filter.workerIds, []);
+  assert.deepEqual(controlPlaneAlerts.filter.applyIds, []);
+  assert.deepEqual(controlPlaneAlerts.filter.executionIds, []);
+  assert.deepEqual(controlPlaneAlerts.filter.actions, []);
   assert.equal(controlPlaneAlerts.filter.visibleAlerts, controlPlaneAlerts.alerts.length);
   assert.ok(controlPlaneAlerts.summary.total > 0);
   assert.equal(controlPlaneAlerts.summary.total, controlPlaneAlerts.alerts.length);
@@ -3203,6 +3221,10 @@ try {
     "branch",
     "--reason",
     "running_sandbox_present",
+    "--run",
+    controlPlaneBlockedPlan.run.id,
+    "--action",
+    "inspect_run",
     "--limit",
     "5",
     "--lines",
@@ -3211,12 +3233,16 @@ try {
   assert.deepEqual(filteredBranchAlerts.filter.severities, ["warning"]);
   assert.deepEqual(filteredBranchAlerts.filter.surfaces, ["branch"]);
   assert.deepEqual(filteredBranchAlerts.filter.reasons, ["running_sandbox_present"]);
+  assert.deepEqual(filteredBranchAlerts.filter.runIds, [controlPlaneBlockedPlan.run.id]);
+  assert.deepEqual(filteredBranchAlerts.filter.actions, ["inspect_run"]);
   assert.equal(filteredBranchAlerts.limit, 5);
   assert.ok(filteredBranchAlerts.summary.total > 0);
   assert.ok(filteredBranchAlerts.alerts.every((alert) => (
     alert.severity === "warning"
     && alert.surface === "branch"
     && alert.reason === "running_sandbox_present"
+    && alert.runId === controlPlaneBlockedPlan.run.id
+    && alert.action === "inspect_run"
   )));
   assert.ok(filteredBranchAlerts.alerts.some((alert) => alert.runId === controlPlaneBlockedPlan.run.id));
   const controlPlaneAlertCommands = await cliText(baseUrl, [
@@ -3230,6 +3256,10 @@ try {
     "branch",
     "--reason",
     "running_sandbox_present",
+    "--run",
+    controlPlaneBlockedPlan.run.id,
+    "--action",
+    "inspect_run",
     "--commands-only",
     "--format",
     "shell",
