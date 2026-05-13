@@ -816,8 +816,9 @@ next steps. The tick-worker list also includes `lifecycle.state`,
 running, stopped, completed, retired, failed-stop, and unrecorded-exit workers
 without inferring state from raw timestamps.
 `runs session-control-plane-timeline <name> --server` joins recent tick records,
-tick-worker lifecycle events, apply-action executions, and branch-recovery
-executions for a durable session-level audit trail. Add `--summary` for a
+advance-worker lifecycle events, tick-worker lifecycle events, apply-action
+executions, and branch-recovery executions for a durable session-level audit
+trail. Add `--summary` for a
 compact operator view with event counts, the decision rollup, latest bounded
 events, and the command to fetch the full timeline. Its top-level `decisions`
 rollup summarizes recent tick statuses, status reasons, planned/executed/skipped

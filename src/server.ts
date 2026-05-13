@@ -2991,7 +2991,7 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution";
+  source: "tick" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution";
   event: "tick_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed";
   tickId?: string;
   workerId?: string;
@@ -3052,8 +3052,9 @@ const readWorkerSessionControlPlaneTimeline = async (
   decisions: WorkerSessionControlPlaneTimelineDecisionRollup;
   events: WorkerSessionControlPlaneTimelineEvent[];
 }> => {
-  const [ticks, workers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
+  const [ticks, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, options.limit),
+    listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, options.limit),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, options.limit),
@@ -3070,7 +3071,56 @@ const readWorkerSessionControlPlaneTimeline = async (
       executedCount: [tick.executed.branchRecovery, tick.executed.applyAction, tick.executed.drainContinuation].filter(Boolean).length,
     });
   }
-  for (const worker of workers) {
+  for (const worker of advanceWorkers) {
+    events.push({
+      observedAt: worker.startedAt,
+      source: "control_plane_advance_worker",
+      event: worker.restartedAt ? "worker_restarted" : "worker_started",
+      workerId: worker.workerId,
+      state: worker.lifecycle.state,
+      restartable: worker.lifecycle.restartable,
+      reason: worker.lifecycle.reason,
+      pid: worker.pid,
+      previousPid: worker.previousPid ?? null,
+    });
+    if (worker.stoppedAt) {
+      events.push({
+        observedAt: worker.stoppedAt,
+        source: "control_plane_advance_worker",
+        event: "worker_stopped",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        reason: worker.lifecycle.reason,
+        pid: worker.pid,
+      });
+    }
+    if (worker.completedAt) {
+      events.push({
+        observedAt: worker.completedAt,
+        source: "control_plane_advance_worker",
+        event: "worker_completed",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        reason: worker.lifecycle.reason,
+        pid: worker.pid,
+      });
+    }
+    if (worker.retiredAt) {
+      events.push({
+        observedAt: worker.retiredAt,
+        source: "control_plane_advance_worker",
+        event: "worker_retired",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        reason: worker.lifecycle.reason,
+        pid: worker.pid,
+      });
+    }
+  }
+  for (const worker of tickWorkers) {
     events.push({
       observedAt: worker.startedAt,
       source: "control_plane_tick_worker",

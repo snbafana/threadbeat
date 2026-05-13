@@ -2769,6 +2769,17 @@ try {
   assert.ok((controlPlaneTimeline.counts.tick_recorded ?? 0) >= 2);
   assert.ok((controlPlaneTimeline.counts.worker_completed ?? 0) >= 1);
   assert.ok((controlPlaneTimeline.counts.worker_retired ?? 0) >= 1);
+  assert.ok(controlPlaneTimeline.events.some((event) => (
+    event.source === "control_plane_advance_worker"
+    && event.event === "worker_restarted"
+    && event.workerId === "detached-smoke-control-plane-advance-worker"
+  )));
+  assert.ok(controlPlaneTimeline.events.some((event) => (
+    event.source === "control_plane_advance_worker"
+    && event.event === "worker_retired"
+    && event.workerId === "detached-smoke-control-plane-advance-worker"
+    && event.state === "retired"
+  )));
   assert.ok((controlPlaneTimeline.counts.apply_action_executed ?? 0) >= 1);
   assert.ok(controlPlaneTimeline.decisions.count >= 3);
   assert.ok((controlPlaneTimeline.decisions.statuses.dry_run ?? 0) >= 2);
