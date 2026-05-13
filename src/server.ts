@@ -114,6 +114,30 @@ type WorkerSessionControlPlaneRecoveryAttemptStatus = {
   command: string[];
 };
 
+type WorkerSessionControlPlaneConfirmationQueueStatus = {
+  summary: { advances: number; groups: number; commands: number };
+  groups: Array<{
+    surface: string | null;
+    action: string | null;
+    selectedReason: string | null;
+    detailCommand: string | null;
+    reason: string | null;
+    count: number;
+    commandCount: number;
+    advanceIds: string[];
+    runIds: string[];
+    workerIds: string[];
+    applyIds: string[];
+    executionIds: string[];
+    commands: Array<{ advanceId: string; command: string[] }>;
+  }>;
+  commands: {
+    inspectQueue: string[];
+    drainConfirmations: string[];
+    drainConfirmationsDryRun: string[];
+  };
+};
+
 export const buildServer = async (settings: Settings): Promise<AppParts> => {
   const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
   await db.initSchema();
@@ -3570,6 +3594,7 @@ const readWorkerSessionControlPlaneStatus = async (
       recent: Awaited<ReturnType<typeof listWorkerSessionApplyActionExecutionRecords>>;
       counts: ReturnType<typeof summarizeApplyActionExecutionStatuses>;
     };
+    controlPlaneConfirmations: WorkerSessionControlPlaneConfirmationQueueStatus;
     drainContinuations: ReturnType<typeof summarizeDrainContinuationStatuses>;
   };
   branches: Awaited<ReturnType<typeof summarizeWorkerSessionBranchRecovery>> & {
@@ -3606,6 +3631,7 @@ const readWorkerSessionControlPlaneStatus = async (
     branchRecoveryExecutions,
     applyActionExecutions,
     controlPlaneRecoveryAttempts,
+    controlPlaneConfirmationAdvances,
   ] = await Promise.all([
     listWorkerSessionApplyRecords(settings.projectRoot, name),
     listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
@@ -3627,6 +3653,11 @@ const readWorkerSessionControlPlaneStatus = async (
       limit: Number.MAX_SAFE_INTEGER,
       alertSurfaces: ["worker_recovery"],
     }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      blocked: true,
+      mutating: true,
+    }),
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
   return {
@@ -3646,6 +3677,7 @@ const readWorkerSessionControlPlaneStatus = async (
         recent: applyActionExecutions,
         counts: summarizeApplyActionExecutionStatuses(applyActionExecutions),
       },
+      controlPlaneConfirmations: summarizeWorkerSessionControlPlaneConfirmationQueue(name, controlPlaneConfirmationAdvances),
       drainContinuations: summarizeDrainContinuationStatuses(drainContinuations),
     },
     branches: {
@@ -3722,6 +3754,86 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
   };
 };
 
+const summarizeWorkerSessionControlPlaneConfirmationQueue = (
+  sessionName: string,
+  records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+): WorkerSessionControlPlaneConfirmationQueueStatus => {
+  const seen = new Set<string>();
+  const groups = new Map<string, WorkerSessionControlPlaneConfirmationQueueStatus["groups"][number]>();
+  let commandCount = 0;
+  for (const record of records) {
+    const safety = objectRecord(record.executionSafety);
+    const command = stringArrayRecordField(safety, "confirmationCommand");
+    if (!command) continue;
+    const key = command.join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    commandCount += 1;
+    const selected = objectRecord(record.selected);
+    const surface = stringRecordField(selected, "surface");
+    const action = stringRecordField(selected, "action");
+    const selectedReason = stringRecordField(selected, "reason");
+    const detailCommand = stringRecordField(safety, "detailCommand") ?? stringRecordField(selected, "detailCommand") ?? record.detailCommand ?? null;
+    const reason = stringRecordField(safety, "reason");
+    const groupKey = JSON.stringify([surface, action, selectedReason, detailCommand, reason]);
+    const group = groups.get(groupKey) ?? {
+      surface,
+      action,
+      selectedReason,
+      detailCommand,
+      reason,
+      count: 0,
+      commandCount: 0,
+      advanceIds: [],
+      runIds: [],
+      workerIds: [],
+      applyIds: [],
+      executionIds: [],
+      commands: [],
+    };
+    group.count += 1;
+    group.commandCount += 1;
+    group.advanceIds.push(record.advanceId);
+    pushUniqueString(group.runIds, stringRecordField(selected, "runId"));
+    pushUniqueString(group.workerIds, stringRecordField(selected, "workerId"));
+    pushUniqueString(group.applyIds, stringRecordField(selected, "applyId"));
+    pushUniqueString(group.executionIds, stringRecordField(selected, "executionId"));
+    group.commands.push({ advanceId: record.advanceId, command });
+    groups.set(groupKey, group);
+  }
+  const grouped = [...groups.values()].sort((left, right) => (
+    right.count - left.count
+    || String(left.surface).localeCompare(String(right.surface))
+    || String(left.action).localeCompare(String(right.action))
+    || String(left.detailCommand).localeCompare(String(right.detailCommand))
+  ));
+  const drainConfirmations = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--drain-confirmations",
+    "--confirm",
+  ];
+  return {
+    summary: {
+      advances: records.length,
+      groups: grouped.length,
+      commands: commandCount,
+    },
+    groups: grouped,
+    commands: {
+      inspectQueue: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--confirmation-queue"],
+      drainConfirmations,
+      drainConfirmationsDryRun: [...drainConfirmations, "--dry-run"],
+    },
+  };
+};
+
 const objectRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -3735,6 +3847,15 @@ const stringRecordField = (record: Record<string, unknown> | null, key: string):
 const booleanRecordField = (record: Record<string, unknown> | null, key: string): boolean | null => {
   const value = record?.[key];
   return typeof value === "boolean" ? value : null;
+};
+
+const stringArrayRecordField = (record: Record<string, unknown> | null, key: string): string[] | null => {
+  const value = record?.[key];
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
+};
+
+const pushUniqueString = (values: string[], value: string | null): void => {
+  if (value && !values.includes(value)) values.push(value);
 };
 
 const controlPlaneAdvanceExecutionFailed = (executed: unknown): boolean => {

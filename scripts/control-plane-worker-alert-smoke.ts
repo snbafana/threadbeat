@@ -252,6 +252,25 @@ try {
   assert.match(recoveryAttemptText, new RegExp(`target_worker: ${workerId}`));
 
   const statusSummary = await cliJson<{
+    queues: {
+      controlPlaneConfirmations: {
+        summary: { advances: number; groups: number; commands: number };
+        groups: Array<{
+          surface: string | null;
+          action: string | null;
+          detailCommand: string | null;
+          reason: string | null;
+          count: number;
+          workerIds: string[];
+          commands: Array<{ advanceId: string; command: string[] }>;
+        }>;
+        commands: {
+          inspectQueue: string[];
+          drainConfirmations: string[];
+          drainConfirmationsDryRun: string[];
+        };
+      };
+    };
     recovery: {
       attempts: {
         total: number;
@@ -289,6 +308,41 @@ try {
   assert.equal(statusSummary.recovery.attempts.failed, 0);
   assert.equal(statusSummary.recovery.attempts.blocked, 1);
   assert.equal(statusSummary.recovery.attempts.mutating, 2);
+  assert.equal(statusSummary.queues.controlPlaneConfirmations.summary.advances, 1);
+  assert.equal(statusSummary.queues.controlPlaneConfirmations.summary.groups, 1);
+  assert.equal(statusSummary.queues.controlPlaneConfirmations.summary.commands, 1);
+  assert.deepEqual(statusSummary.queues.controlPlaneConfirmations.commands.inspectQueue, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--confirmation-queue",
+  ]);
+  assert.deepEqual(statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmationsDryRun, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--drain-confirmations",
+    "--confirm",
+    "--dry-run",
+  ]);
+  const confirmationGroup = statusSummary.queues.controlPlaneConfirmations.groups[0];
+  assert.equal(confirmationGroup?.surface, "worker_recovery");
+  assert.equal(confirmationGroup?.action, "restart_worker_recovery");
+  assert.equal(confirmationGroup?.detailCommand, "restart_worker_recovery");
+  assert.equal(confirmationGroup?.reason, "mutating detail command requires confirm=true");
+  assert.equal(confirmationGroup?.count, 1);
+  assert.deepEqual(confirmationGroup?.workerIds, [workerId]);
+  assert.ok(confirmationGroup?.commands[0]?.command.includes("--confirm"));
   assert.equal(statusSummary.recovery.recentAttempts.length, 2);
   const statusConfirmedAttempt = statusSummary.recovery.recentAttempts.find((attempt) => (
     attempt.advanceId === confirmedDryRun.advanceId

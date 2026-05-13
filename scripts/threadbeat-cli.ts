@@ -7558,6 +7558,29 @@ type WorkerSessionControlPlaneStatusResponse = {
       counts: { recent: number; executed: number; failed: number };
       recent: WorkerSessionApplyActionExecutionRecord[];
     };
+    controlPlaneConfirmations: {
+      summary: { advances: number; groups: number; commands: number };
+      groups: Array<{
+        surface: string | null;
+        action: string | null;
+        selectedReason: string | null;
+        detailCommand: string | null;
+        reason: string | null;
+        count: number;
+        commandCount: number;
+        advanceIds: string[];
+        runIds: string[];
+        workerIds: string[];
+        applyIds: string[];
+        executionIds: string[];
+        commands: Array<{ advanceId: string; command: string[] }>;
+      }>;
+      commands: {
+        inspectQueue: string[];
+        drainConfirmations: string[];
+        drainConfirmationsDryRun: string[];
+      };
+    };
     drainContinuations: { total: number; queued: number; running: number; executed: number; failed: number };
   };
   branches: {
@@ -8577,6 +8600,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     applyActions: Pick<WorkerSessionControlPlaneStatusResponse["queues"]["applyActions"], "total" | "actionable" | "resumeNeeded" | "resetAudits" | "waiting" | "failed" | "pending">;
     drainContinuations: Pick<WorkerSessionControlPlaneStatusResponse["queues"]["drainContinuations"], "total" | "queued" | "running" | "failed">;
     applyActionExecutions: WorkerSessionControlPlaneStatusResponse["queues"]["applyActionExecutions"]["counts"];
+    controlPlaneConfirmations: WorkerSessionControlPlaneStatusResponse["queues"]["controlPlaneConfirmations"];
   };
   branches: {
     counts: WorkerSessionControlPlaneStatusResponse["branches"]["counts"];
@@ -8628,6 +8652,7 @@ function summarizeWorkerSessionControlPlaneStatus(
         failed: status.queues.drainContinuations.failed,
       },
       applyActionExecutions: status.queues.applyActionExecutions.counts,
+      controlPlaneConfirmations: status.queues.controlPlaneConfirmations,
     },
     branches: {
       counts: status.branches.counts,
