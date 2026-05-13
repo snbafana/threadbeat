@@ -250,6 +250,31 @@ try {
   assert.match(recoveryAttemptText, /detail_command: restart_worker_recovery/);
   assert.match(recoveryAttemptText, /alert: worker_recovery stopped_control_plane_advance_worker/);
   assert.match(recoveryAttemptText, new RegExp(`target_worker: ${workerId}`));
+
+  const statusSummary = await cliJson<{
+    recovery: {
+      attempts: {
+        total: number;
+        dryRun: number;
+        executed: number;
+        failed: number;
+        blocked: number;
+        mutating: number;
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusSummary.recovery.attempts.total, 2);
+  assert.equal(statusSummary.recovery.attempts.dryRun, 1);
+  assert.equal(statusSummary.recovery.attempts.executed, 0);
+  assert.equal(statusSummary.recovery.attempts.failed, 0);
+  assert.equal(statusSummary.recovery.attempts.blocked, 1);
+  assert.equal(statusSummary.recovery.attempts.mutating, 2);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

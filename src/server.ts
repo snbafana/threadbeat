@@ -3565,6 +3565,7 @@ const readWorkerSessionControlPlaneStatus = async (
   recovery: {
     count: number;
     actions: Record<string, number>;
+    attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
     nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
 }> => {
@@ -3586,6 +3587,7 @@ const readWorkerSessionControlPlaneStatus = async (
     staleRunRecovery,
     branchRecoveryExecutions,
     applyActionExecutions,
+    controlPlaneRecoveryAttempts,
   ] = await Promise.all([
     listWorkerSessionApplyRecords(settings.projectRoot, name),
     listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
@@ -3603,6 +3605,10 @@ const readWorkerSessionControlPlaneStatus = async (
     summarizeWorkerSessionStaleRunRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, lines),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      alertSurfaces: ["worker_recovery"],
+    }),
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
   return {
@@ -3641,6 +3647,7 @@ const readWorkerSessionControlPlaneStatus = async (
         ...controlPlaneAdvanceWorkerNextSteps.actions,
         ...controlPlaneTickWorkerNextSteps.actions,
       },
+      attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(controlPlaneRecoveryAttempts),
       nextSteps: {
         watchWorkers: watchWorkerNextSteps.nextSteps,
         drainWorkers: drainWorkerNextSteps.nextSteps,

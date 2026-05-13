@@ -7630,6 +7630,7 @@ type WorkerSessionControlPlaneStatusResponse = {
   recovery: {
     count: number;
     actions: Record<string, number>;
+    attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
     nextSteps: {
       watchWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       drainWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
@@ -8573,6 +8574,7 @@ function summarizeWorkerSessionControlPlaneStatus(
   recovery: {
     count: number;
     actions: Record<string, number>;
+    attempts: WorkerSessionControlPlaneStatusResponse["recovery"]["attempts"];
   };
   nextActions: WorkerSessionControlPlaneAdvanceAction[];
   commands: {
@@ -8622,6 +8624,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     recovery: {
       count: status.recovery.count,
       actions: status.recovery.actions,
+      attempts: status.recovery.attempts,
     },
     nextActions,
     commands: {
