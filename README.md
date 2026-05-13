@@ -342,6 +342,7 @@ npm run cli -- runs session-watch overnight --recoverable --include-stopped --ne
 npm run cli -- runs session-logs overnight --lines 40
 npm run cli -- runs recover-session overnight --dry-run
 npm run cli -- runs resume-session overnight --worker-id worker-a --dry-run
+npm run cli -- runs resume-session overnight --next
 npm run cli -- runs stop-session overnight --recover
 npm run cli -- runs restart-session overnight --recover
 npm run cli -- runs supervise --agents <agent>,<agent> --session overnight --workers 3 --recover --include-stopped
@@ -885,9 +886,11 @@ review the session when nothing changed.
 `runs resume-session <name>` is the branch-only bulk resume path for a detached
 worker session: it requeues stopped runs with no result commit while leaving
 completed result branches alone. Add `--worker-id <id>` to target only that
-worker's claimed stopped branches, or `--dry-run` to preview the requeue first.
-Like recovery, it returns the next wait/restart/review command to keep the
-operator flow attached to the durable branch session.
+worker's claimed stopped branches, `--dry-run` to preview the requeue first, or
+`--next`/`--limit <n>`/`--run <id[,id]>` for bounded server-side branch recovery
+from the control-plane queue. Like recovery, it returns the next
+wait/restart/review command to keep the operator flow attached to the durable
+branch session.
 `runs branches --session <name>` is the no-checkout branch ledger for a session:
 each row includes branch/result state, GitHub branch/result links, and exact
 checkout/review/inspect/resume commands. Add `--next` to return only the ordered
@@ -922,7 +925,8 @@ Use `runs resume-branch <run>` to requeue one of those stopped branch runs back 
 `POST /api/runs/:id/resume-branch`, so API clients can perform the same guarded
 single-branch resume without shelling out. `runs resume-session <name>` now uses
 `POST /api/worker-sessions/:name/resume-branches` for the same guarded resume
-logic across all resumable branches in a durable worker session.
+logic across all resumable branches in a durable worker session; add `--next`
+to execute only the first ready branch from that queue.
 `runs workers` groups running runs by the `worker_id` that claimed them.
 `runs stop-matching --status planned` cancels queued runs for one or more
 agents; include `running` in the status list to stop active run sandboxes too.

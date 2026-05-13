@@ -1441,7 +1441,7 @@ try {
     branches: {
       counts: { total: number; ready: number; blocked: number; stoppedBranchWithoutResultCommit: number; runningSandboxPresent: number };
       actions: { resume_branch: number; inspect_run: number };
-      commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+      commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
       nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
     };
     recovery: {
@@ -1476,6 +1476,7 @@ try {
   assert.equal(controlPlaneStatus.branches.actions.inspect_run, controlPlaneStatus.branches.counts.blocked);
   assert.equal(controlPlaneStatus.branches.commands.resumeSession.join(" "), `npm run cli -- runs resume-session ${sessionName}`);
   assert.equal(controlPlaneStatus.branches.commands.resumeSessionDryRun.join(" "), `npm run cli -- runs resume-session ${sessionName} --dry-run`);
+  assert.equal(controlPlaneStatus.branches.commands.resumeNext.join(" "), `npm run cli -- runs resume-session ${sessionName} --next`);
   assert.equal(controlPlaneStatus.branches.commands.inspectBranches.join(" "), `npm run cli -- runs session-branches ${sessionName} --server --resumable`);
   assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
     step.runId === controlPlaneResumePlan.run.id
@@ -1483,6 +1484,22 @@ try {
     && step.reason === "stopped_branch_without_result_commit"
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id}`
   )));
+  const controlPlaneResumeNext = await cliJson<{
+    resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+    nextStep: { action: string; count: number };
+  }>(baseUrl, [
+    "runs",
+    "resume-session",
+    sessionName,
+    "--next",
+    "--run",
+    controlPlaneResumePlan.run.id,
+  ]);
+  assert.deepEqual(controlPlaneResumeNext.resumed.map((run) => run.runId), [controlPlaneResumePlan.run.id]);
+  assert.equal(controlPlaneResumeNext.resumed[0].status, "planned");
+  assert.equal(controlPlaneResumeNext.resumed[0].workerId, null);
+  assert.equal(controlPlaneResumeNext.nextStep.action, "restart_session");
+  assert.equal(controlPlaneResumeNext.nextStep.count, 1);
   assert.ok(controlPlaneStatus.queues.applyActions.actionable >= 1);
   assert.ok(controlPlaneStatus.queues.applyActions.resetAudits >= 1);
   assert.ok(controlPlaneStatus.queues.drainContinuations.total >= 1);

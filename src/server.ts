@@ -2269,7 +2269,7 @@ const summarizeWorkerSessionBranchRecovery = async (
     runningSandboxPresent: number;
   };
   actions: { resume_branch: number; inspect_run: number };
-  commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+  commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
   nextSteps: Array<{
     action: "resume_branch" | "inspect_run";
     reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
@@ -2327,6 +2327,7 @@ const summarizeWorkerSessionBranchRecovery = async (
     commands: {
       resumeSession,
       resumeSessionDryRun: [...resumeSession, "--dry-run"],
+      resumeNext: [...resumeSession, "--next"],
       inspectBranches: ["npm", "run", "cli", "--", "runs", "session-branches", session.session, "--server", "--resumable"],
     },
     nextSteps: nextSteps.slice(0, nextStepLimit),

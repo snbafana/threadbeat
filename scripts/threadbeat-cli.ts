@@ -5134,10 +5134,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const requiredSessionName = required(sessionName, "runs resume-session <session>");
+    const next = options.next === "1";
+    const limit = options.limit
+      ? parsePositiveInteger(options.limit, "--limit")
+      : next ? 1 : undefined;
+    const runIds = options.run ? parseList(options.run) : undefined;
     await printJson(await requestJson("POST", `/api/worker-sessions/${encodeURIComponent(requiredSessionName)}/resume-branches`, {
       dryRun: options["dry-run"] === "1",
       ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
-      ...(options.concurrency ? { concurrency: parsePositiveInteger(options.concurrency, "--concurrency") } : {}),
+      ...(limit ? { limit } : {}),
+      ...(runIds ? { runIds } : {}),
     }));
     return;
   }
@@ -6441,7 +6447,7 @@ async function fetchWorkerSessionControlPlaneStatus(
       runningSandboxPresent: number;
     };
     actions: { resume_branch: number; inspect_run: number };
-    commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+    commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
     nextSteps: Array<{
       action: "resume_branch" | "inspect_run";
       reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
@@ -6492,7 +6498,7 @@ async function fetchWorkerSessionControlPlaneStatus(
         runningSandboxPresent: number;
       };
       actions: { resume_branch: number; inspect_run: number };
-      commands: { resumeSession: string[]; resumeSessionDryRun: string[]; inspectBranches: string[] };
+      commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
       nextSteps: Array<{
         action: "resume_branch" | "inspect_run";
         reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
@@ -9800,7 +9806,7 @@ Commands:
   runs session-logs <name> [--lines 80]
   runs stop-session <name> [--recover] [--include-stopped] [--concurrency 4]
   runs recover-session <name> [--include-stopped] [--dry-run] [--concurrency 4]
-  runs resume-session <name> [--worker-id worker-a] [--dry-run] [--concurrency 4]
+  runs resume-session <name> [--worker-id worker-a] [--dry-run] [--next] [--limit 1] [--run run_id[,run_id]]
   runs restart-session <name> [--recover] [--resume-stopped] [--no-bootstrap] [--wait] [--max-polls 60] [--concurrency 4]
   runs stop-matching --agent <agent>|--agents <agent,agent> [--status planned] [--concurrency 4]
   runs monitor --agent <agent>|--agents <agent,agent> [--status planned,running,stopped] [--next] [--checkout-dir ./checkouts/monitor] [--limit 3] [--interval-ms 2000] [--max-polls 1]
