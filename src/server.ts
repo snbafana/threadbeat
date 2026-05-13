@@ -542,6 +542,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         workerIds: parseOptionalList(query.workerId),
         applyIds: parseOptionalList(query.applyId),
         executionIds: parseOptionalList(query.executionId),
+        continuationIds: [
+          ...parseOptionalList(query.continuation),
+          ...parseOptionalList(query.continuationId),
+          ...parseOptionalList(query.continuationIds),
+        ],
         actions: parseOptionalList(query.action),
       });
     } catch (error) {
@@ -562,6 +567,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         workerIds: parseOptionalList(query.workerId),
         applyIds: parseOptionalList(query.applyId),
         executionIds: parseOptionalList(query.executionId),
+        continuationIds: [
+          ...parseOptionalList(query.continuation),
+          ...parseOptionalList(query.continuationId),
+          ...parseOptionalList(query.continuationIds),
+        ],
         actions: parseOptionalList(query.action),
       });
     } catch (error) {
@@ -590,6 +600,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           workerIds: parseOptionalList(body.workerId),
           applyIds: parseOptionalList(body.applyId),
           executionIds: parseOptionalList(body.executionId),
+          continuationIds: [
+            ...parseOptionalList(body.continuation),
+            ...parseOptionalList(body.continuationId),
+            ...parseOptionalList(body.continuationIds),
+          ],
           actions: parseOptionalList(body.action),
         },
       );
@@ -3718,6 +3733,7 @@ type WorkerSessionControlPlaneAlert = {
   workerId?: string;
   applyId?: string;
   executionId?: string;
+  continuationIds?: string[];
   action?: string;
 };
 
@@ -3784,17 +3800,25 @@ const readWorkerSessionControlPlaneAlertDetails = async (
   }
   if (alert.surface === "drain_continuation") {
     const continuations = await listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
-    const failed = continuations.filter((record) => record.status === "failed");
+    const continuationIdFilter = alert.continuationIds && alert.continuationIds.length > 0
+      ? new Set(alert.continuationIds)
+      : null;
+    const failed = continuations
+      .filter((record) => record.status === "failed")
+      .filter((record) => !continuationIdFilter || continuationIdFilter.has(record.continuationId));
     const selectedFailed = failed.slice(0, 5);
     const selectedFailedIds = selectedFailed.map((record) => record.continuationId);
+    const continuationSelection = alert.continuationIds && alert.continuationIds.length > 0
+      ? ["--continuation", alert.continuationIds.join(",")]
+      : [];
     return {
       kind: "drain_continuations",
       status: "failed",
       totalFailed: failed.length,
       continuations: selectedFailed,
       commands: {
-        inspectFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--status", "failed"],
-        resetFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--reset-failed"],
+        inspectFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--status", "failed", ...continuationSelection],
+        resetFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--reset-failed", ...continuationSelection],
         resetSelectedFailed: selectedFailedIds.length > 0
           ? ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--reset-failed", "--continuation", selectedFailedIds.join(",")]
           : null,
@@ -3818,6 +3842,7 @@ const readWorkerSessionControlPlaneAlerts = async (
     workerIds: string[];
     applyIds: string[];
     executionIds: string[];
+    continuationIds: string[];
     actions: string[];
   },
 ): Promise<{
@@ -3833,6 +3858,7 @@ const readWorkerSessionControlPlaneAlerts = async (
     workerIds: string[];
     applyIds: string[];
     executionIds: string[];
+    continuationIds: string[];
     actions: string[];
     totalAlerts: number;
     visibleAlerts: number;
@@ -3863,6 +3889,13 @@ const readWorkerSessionControlPlaneAlerts = async (
       runIds: [],
     }),
   ]);
+  const continuationIdFilter = options.continuationIds.length > 0 ? new Set(options.continuationIds) : null;
+  const failedDrainContinuations = status.queues.drainContinuations.failed > 0
+    ? (await listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER))
+      .filter((record) => record.status === "failed")
+      .filter((record) => !continuationIdFilter || continuationIdFilter.has(record.continuationId))
+    : [];
+  const failedDrainContinuationIds = failedDrainContinuations.map((record) => record.continuationId);
   const workerRecoverySteps = [
     ...status.recovery.nextSteps.watchWorkers,
     ...status.recovery.nextSteps.drainWorkers,
@@ -3884,12 +3917,25 @@ const readWorkerSessionControlPlaneAlerts = async (
         action: execution.action,
       })),
     ...(status.queues.drainContinuations.failed > 0
+      && (!continuationIdFilter || failedDrainContinuations.length > 0)
       ? [{
           surface: "drain_continuation" as const,
           severity: "error" as const,
           reason: "failed_drain_continuations",
-          count: status.queues.drainContinuations.failed,
-          command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--status", "failed"],
+          count: continuationIdFilter ? failedDrainContinuations.length : status.queues.drainContinuations.failed,
+          command: [
+            "npm",
+            "run",
+            "cli",
+            "--",
+            "runs",
+            "session-drain-continuations",
+            name,
+            "--status",
+            "failed",
+            ...(continuationIdFilter ? ["--continuation", failedDrainContinuationIds.join(",")] : []),
+          ],
+          ...(continuationIdFilter ? { continuationIds: failedDrainContinuationIds } : {}),
           action: "inspect_failed_drain_continuations",
         }]
       : []),
@@ -3943,6 +3989,7 @@ const readWorkerSessionControlPlaneAlerts = async (
     .filter((alert) => !workerIdFilter || (alert.workerId ? workerIdFilter.has(alert.workerId) : false))
     .filter((alert) => !applyIdFilter || (alert.applyId ? applyIdFilter.has(alert.applyId) : false))
     .filter((alert) => !executionIdFilter || (alert.executionId ? executionIdFilter.has(alert.executionId) : false))
+    .filter((alert) => !continuationIdFilter || (alert.continuationIds ? alert.continuationIds.some((continuationId) => continuationIdFilter.has(continuationId)) : false))
     .filter((alert) => !actionFilter || (alert.action ? actionFilter.has(alert.action) : false));
   const alerts = filteredAlerts.slice(0, options.limit);
   return {
@@ -3958,6 +4005,7 @@ const readWorkerSessionControlPlaneAlerts = async (
       workerIds: options.workerIds,
       applyIds: options.applyIds,
       executionIds: options.executionIds,
+      continuationIds: options.continuationIds,
       actions: options.actions,
       totalAlerts: filteredAlerts.length,
       visibleAlerts: alerts.length,
@@ -4037,6 +4085,7 @@ type WorkerSessionControlPlaneAdvanceAction = {
   workerId?: string;
   applyId?: string;
   executionId?: string;
+  continuationIds?: string[];
 };
 
 type WorkerSessionControlPlaneAlertDetailCommand =
@@ -4097,6 +4146,7 @@ type WorkerSessionControlPlaneAlertSelectionOptions = {
   workerIds: string[];
   applyIds: string[];
   executionIds: string[];
+  continuationIds: string[];
   actions: string[];
 };
 
@@ -4122,6 +4172,7 @@ const buildConfirmedControlPlaneAlertExecuteCommand = (
   appendControlPlaneAlertExecuteListOption(command, "--worker", options.workerIds);
   appendControlPlaneAlertExecuteListOption(command, "--apply", options.applyIds);
   appendControlPlaneAlertExecuteListOption(command, "--execution", options.executionIds);
+  appendControlPlaneAlertExecuteListOption(command, "--continuation", options.continuationIds);
   appendControlPlaneAlertExecuteListOption(command, "--action", options.actions);
   command.push("--detail-command", detailCommand, "--confirm", "--lines", String(options.lines));
   return command;
@@ -4179,6 +4230,7 @@ const controlPlaneAdvanceActionFromAlert = (
     workerId: alert.workerId,
     applyId: alert.applyId,
     executionId: alert.executionId,
+    continuationIds: alert.continuationIds,
   };
 };
 

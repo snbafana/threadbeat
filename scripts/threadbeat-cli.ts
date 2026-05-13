@@ -4555,6 +4555,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         workerId: options.worker,
         applyId: options.apply,
         executionId: options.execution,
+        continuationId: options.continuation,
         action: options.action,
       },
     );
@@ -4569,6 +4570,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         workerId: alert.workerId,
         applyId: alert.applyId,
         executionId: alert.executionId,
+        continuationIds: alert.continuationIds,
         action: alert.action,
         command: alert.command,
       }));
@@ -4607,6 +4609,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         workerId: options.worker,
         applyId: options.apply,
         executionId: options.execution,
+        continuationId: options.continuation,
         action: options.action,
       },
     );
@@ -4643,6 +4646,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         workerId: options.worker,
         applyId: options.apply,
         executionId: options.execution,
+        continuationId: options.continuation,
         action: options.action,
       },
     );
@@ -7629,6 +7633,7 @@ type WorkerSessionControlPlaneAlertsResponse = {
     workerIds: string[];
     applyIds: string[];
     executionIds: string[];
+    continuationIds: string[];
     actions: string[];
     totalAlerts: number;
     visibleAlerts: number;
@@ -7645,6 +7650,7 @@ type WorkerSessionControlPlaneAlertsResponse = {
     workerId?: string;
     applyId?: string;
     executionId?: string;
+    continuationIds?: string[];
     action?: string;
   }>;
   recentTimeline: {
@@ -7705,6 +7711,7 @@ type WorkerSessionControlPlaneAdvanceAction = {
   workerId?: string;
   applyId?: string;
   executionId?: string;
+  continuationIds?: string[];
 };
 
 type WorkerSessionControlPlaneAdvanceResponse = {
@@ -8158,6 +8165,7 @@ async function fetchWorkerSessionControlPlaneAlerts(
     workerId?: string;
     applyId?: string;
     executionId?: string;
+    continuationId?: string;
     action?: string;
   },
 ): Promise<WorkerSessionControlPlaneAlertsResponse> {
@@ -8169,6 +8177,7 @@ async function fetchWorkerSessionControlPlaneAlerts(
   if (options.workerId) params.set("workerId", options.workerId);
   if (options.applyId) params.set("applyId", options.applyId);
   if (options.executionId) params.set("executionId", options.executionId);
+  if (options.continuationId) params.set("continuationId", options.continuationId);
   if (options.action) params.set("action", options.action);
   return await requestJson(
     "GET",
@@ -8190,6 +8199,7 @@ async function fetchWorkerSessionControlPlaneAlertPreview(
     workerId?: string;
     applyId?: string;
     executionId?: string;
+    continuationId?: string;
     action?: string;
   },
 ): Promise<WorkerSessionControlPlaneAlertPreviewResponse> {
@@ -8201,6 +8211,7 @@ async function fetchWorkerSessionControlPlaneAlertPreview(
   if (options.workerId) params.set("workerId", options.workerId);
   if (options.applyId) params.set("applyId", options.applyId);
   if (options.executionId) params.set("executionId", options.executionId);
+  if (options.continuationId) params.set("continuationId", options.continuationId);
   if (options.action) params.set("action", options.action);
   return await requestJson(
     "GET",
@@ -8225,6 +8236,7 @@ async function executeWorkerSessionControlPlaneAlert(
     workerId?: string;
     applyId?: string;
     executionId?: string;
+    continuationId?: string;
     action?: string;
   },
 ): Promise<WorkerSessionControlPlaneAlertExecuteResponse> {
@@ -8243,6 +8255,7 @@ async function executeWorkerSessionControlPlaneAlert(
       workerId: options.workerId,
       applyId: options.applyId,
       executionId: options.executionId,
+      continuationId: options.continuationId,
       action: options.action,
     },
   ) as WorkerSessionControlPlaneAlertExecuteResponse;
@@ -8260,6 +8273,7 @@ function workerSessionControlPlaneAlertPreviewCommands(
   workerId?: string;
   applyId?: string;
   executionId?: string;
+  continuationIds?: string[];
   action?: string;
   command: string[];
 }> {
@@ -8274,6 +8288,7 @@ function workerSessionControlPlaneAlertPreviewCommands(
     workerId: preview.alert.workerId,
     applyId: preview.alert.applyId,
     executionId: preview.alert.executionId,
+    continuationIds: preview.alert.continuationIds,
   };
   const commands = [
     { ...base, action: preview.alert.action, command: preview.alert.command },
@@ -12425,9 +12440,9 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
-  runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
-  runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell]
-  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
+  runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
