@@ -6804,8 +6804,23 @@ async function fetchWorkerSessionControlPlaneStatus(
     nextSteps: Array<{
       action: "resume_branch" | "inspect_run";
       reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
+      agentId: string;
       runId: string;
+      objective: string;
+      status: string;
+      branchName: string;
+      resultCommit: string | null;
+      workerId: string | null;
       command: string[];
+      commands: {
+        inspectRun: string[];
+        checkoutBranch: string[];
+        reviewRun: string[];
+        watchRun: string[];
+        resumeBranch: string[] | null;
+        resumeBranchDryRun: string[];
+      };
+      runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
     }>;
     executions: {
       counts: { recent: number; executed: number; partial: number; noop: number };
@@ -6870,8 +6885,23 @@ async function fetchWorkerSessionControlPlaneStatus(
       nextSteps: Array<{
         action: "resume_branch" | "inspect_run";
         reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
+        agentId: string;
         runId: string;
+        objective: string;
+        status: string;
+        branchName: string;
+        resultCommit: string | null;
+        workerId: string | null;
         command: string[];
+        commands: {
+          inspectRun: string[];
+          checkoutBranch: string[];
+          reviewRun: string[];
+          watchRun: string[];
+          resumeBranch: string[] | null;
+          resumeBranchDryRun: string[];
+        };
+        runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
       }>;
       executions: {
         counts: { recent: number; executed: number; partial: number; noop: number };

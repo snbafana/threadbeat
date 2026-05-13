@@ -3262,10 +3262,20 @@ const summarizeWorkerSessionBranchRecovery = async (
     reason: "stopped_branch_without_result_commit" | "running_sandbox_present";
     agentId: string;
     runId: string;
+    objective: string;
     status: string;
     branchName: string;
+    resultCommit: string | null;
     workerId: string | null;
     command: string[];
+    commands: {
+      inspectRun: string[];
+      checkoutBranch: string[];
+      reviewRun: string[];
+      watchRun: string[];
+      resumeBranch: string[] | null;
+      resumeBranchDryRun: string[];
+    };
     runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
   }>;
 }> => {
@@ -3281,18 +3291,30 @@ const summarizeWorkerSessionBranchRecovery = async (
       .filter((sandbox) => sandbox.state === "running")
       .map((sandbox) => ({ id: sandbox.id, providerSandboxId: sandbox.provider_sandbox_id }));
     const ready = runningSandboxes.length === 0;
+    const checkoutDir = `./checkouts/${session.session}-control-plane/${run.id}`;
+    const resumeBranch = ["npm", "run", "cli", "--", "runs", "resume-branch", run.id];
     const command = ready
-      ? ["npm", "run", "cli", "--", "runs", "resume-branch", run.id]
+      ? resumeBranch
       : ["npm", "run", "cli", "--", "runs", "inspect", run.id];
     return {
       action: ready ? "resume_branch" as const : "inspect_run" as const,
       reason: ready ? "stopped_branch_without_result_commit" as const : "running_sandbox_present" as const,
       agentId,
       runId: run.id,
+      objective: run.objective,
       status: run.status,
       branchName: run.run_branch,
+      resultCommit: run.result_commit,
       workerId: run.worker_id,
       command,
+      commands: {
+        inspectRun: ["npm", "run", "cli", "--", "runs", "inspect", run.id],
+        checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", checkoutDir],
+        reviewRun: ["npm", "run", "cli", "--", "runs", "review", run.id, "--checkout-dir", checkoutDir],
+        watchRun: ["npm", "run", "cli", "--", "runs", "watch", run.id, "--checkout-dir", checkoutDir],
+        resumeBranch: ready ? resumeBranch : null,
+        resumeBranchDryRun: [...resumeBranch, "--dry-run"],
+      },
       runningSandboxes,
     };
   }));

@@ -747,7 +747,9 @@ continuations, control-plane tick workers, branch recovery, and recovery
 suggestions. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
 sandbox, and includes exact bulk resume, dry-run, and branch-inspection
-commands. Non-dry-run branch recovery writes durable records under
+commands. Each branch next-step row includes objective, branch name, worker
+ownership, running-sandbox blockers, and checkout/review/watch/resume commands
+for direct branch-native inspection. Non-dry-run branch recovery writes durable records under
 `.threadbeat/worker-sessions/branch-recovery-executions/<session>/`; inspect
 them with `runs session-branch-recovery-executions <name> --server` or
 `GET /api/worker-sessions/:name/branch-recovery-executions`. The aggregate

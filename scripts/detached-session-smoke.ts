@@ -1512,7 +1512,7 @@ try {
   assert.equal(stoppedServerDrainWorker.stopped[0]?.aliveBefore, false);
   assert.equal(stoppedServerDrainWorker.stopped[0]?.alive, false);
   assert.equal(typeof stoppedServerDrainWorker.stopped[0]?.stoppedAt, "string");
-  const controlPlaneResumePlan = await cliJson<{ run: { id: string } }>(baseUrl, [
+  const controlPlaneResumePlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
     "runs",
     "plan",
     "--agent",
@@ -1565,7 +1565,27 @@ try {
       counts: { total: number; ready: number; blocked: number; stoppedBranchWithoutResultCommit: number; runningSandboxPresent: number };
       actions: { resume_branch: number; inspect_run: number };
       commands: { resumeSession: string[]; resumeSessionDryRun: string[]; resumeNext: string[]; inspectBranches: string[] };
-      nextSteps: Array<{ action: string; reason: string; runId: string; command: string[] }>;
+      nextSteps: Array<{
+        action: string;
+        reason: string;
+        agentId: string;
+        runId: string;
+        objective: string;
+        status: string;
+        branchName: string;
+        resultCommit: string | null;
+        workerId: string | null;
+        command: string[];
+        commands: {
+          inspectRun: string[];
+          checkoutBranch: string[];
+          reviewRun: string[];
+          watchRun: string[];
+          resumeBranch: string[] | null;
+          resumeBranchDryRun: string[];
+        };
+        runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+      }>;
       executions: {
         counts: { recent: number; executed: number; partial: number; noop: number };
         recent: Array<{ executionId: string; status: string; resumed: Array<{ runId: string }> }>;
@@ -1632,6 +1652,28 @@ try {
     && step.action === "resume_branch"
     && step.reason === "stopped_branch_without_result_commit"
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id}`
+    && step.agentId === agent.agent.id
+    && step.objective === "detached session control plane branch recovery"
+    && step.status === "stopped"
+    && step.branchName === controlPlaneResumePlan.plan.branchName
+    && step.resultCommit === null
+    && step.workerId === "detached-smoke-worker-1"
+    && step.commands.resumeBranch?.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id}`
+    && step.commands.resumeBranchDryRun.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id} --dry-run`
+    && step.commands.inspectRun.join(" ") === `npm run cli -- runs inspect ${controlPlaneResumePlan.run.id}`
+    && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${controlPlaneResumePlan.run.id} --dir ./checkouts/${sessionName}-control-plane/${controlPlaneResumePlan.run.id}`
+    && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${controlPlaneResumePlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane/${controlPlaneResumePlan.run.id}`
+    && step.commands.watchRun.join(" ") === `npm run cli -- runs watch ${controlPlaneResumePlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane/${controlPlaneResumePlan.run.id}`
+    && step.runningSandboxes.length === 0
+  )));
+  assert.ok(controlPlaneStatus.branches.nextSteps.some((step) => (
+    step.runId === controlPlaneBlockedPlan.run.id
+    && step.action === "inspect_run"
+    && step.reason === "running_sandbox_present"
+    && step.command.join(" ") === `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`
+    && step.branchName === controlPlaneBlockedPlan.plan.branchName
+    && step.commands.resumeBranch === null
+    && step.runningSandboxes.length === 1
   )));
   const controlPlaneTickPreview = await cliJson<{
     ok?: true;
