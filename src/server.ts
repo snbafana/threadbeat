@@ -37,6 +37,7 @@ import {
 } from "./workerSessionBranchRecovery.js";
 import {
   listWorkerSessionControlPlaneTickRecords,
+  summarizeWorkerSessionControlPlaneTickDecision,
   writeWorkerSessionControlPlaneTickRecord,
 } from "./workerSessionControlPlaneTicks.js";
 import {
@@ -552,7 +553,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         ok: true,
         session: name,
         count: ticks.length,
-        ticks,
+        ticks: ticks.map((tick) => ({
+          ...tick,
+          decision: summarizeWorkerSessionControlPlaneTickDecision(tick),
+        })),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

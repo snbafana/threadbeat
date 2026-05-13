@@ -1923,7 +1923,20 @@ try {
     ok?: true;
     session: string;
     count: number;
-    ticks: Array<{ tickId: string; status: string; dryRun: boolean }>;
+    ticks: Array<{
+      tickId: string;
+      status: string;
+      dryRun: boolean;
+      decision: {
+        statusReason: string;
+        plannedCount: number;
+        executedCount: number;
+        planned: Array<{ surface: string; action: string; command?: string[] }>;
+        skipped: Array<{ surface: string; action: string; reason: string }>;
+        notPlanned: Array<{ surface: string; reason: string; readyCount: number | null }>;
+        before: { branchRecoveries: number | null; applyActions: number | null; drainContinuations: number | null };
+      };
+    }>;
   }>(baseUrl, [
     "runs",
     "session-control-plane-ticks",
@@ -1936,6 +1949,21 @@ try {
   assert.equal(controlPlaneTicks.ticks[0]?.tickId, controlPlaneTickLoopPreview.ticks[0]?.tickId);
   assert.equal(controlPlaneTicks.ticks[0]?.status, "dry_run");
   assert.equal(controlPlaneTicks.ticks[1]?.tickId, controlPlaneTickPreview.tick.tickId);
+  assert.equal(controlPlaneTicks.ticks[0]?.decision.statusReason, "dry_run");
+  assert.equal(controlPlaneTicks.ticks[0]?.decision.plannedCount, 3);
+  assert.equal(controlPlaneTicks.ticks[0]?.decision.executedCount, 0);
+  assert.deepEqual(
+    controlPlaneTicks.ticks[0]?.decision.planned.map((entry) => entry.surface),
+    ["branch_recovery", "apply_action", "drain_continuation"],
+  );
+  assert.equal(controlPlaneTicks.ticks[0]?.decision.planned[0]?.action, "resume_next_branch");
+  assert.equal(controlPlaneTicks.ticks[0]?.decision.planned[0]?.command?.join(" "), `npm run cli -- runs resume-session ${sessionName} --next`);
+  assert.equal(controlPlaneTicks.ticks[0]?.decision.skipped.length, 3);
+  assert.ok(controlPlaneTicks.ticks[0]?.decision.skipped.every((entry) => entry.reason === "dry_run"));
+  assert.deepEqual(controlPlaneTicks.ticks[0]?.decision.notPlanned, []);
+  assert.ok((controlPlaneTicks.ticks[0]?.decision.before.branchRecoveries ?? 0) >= 1);
+  assert.ok((controlPlaneTicks.ticks[0]?.decision.before.applyActions ?? 0) >= 1);
+  assert.ok((controlPlaneTicks.ticks[0]?.decision.before.drainContinuations ?? 0) >= 1);
   const controlPlaneStaleBranch = `threadbeat/runs/control-plane-stale-${Date.now().toString(36)}`;
   const controlPlaneStaleRun = await db.createAgentRun({
     agentId: agent.agent.id,

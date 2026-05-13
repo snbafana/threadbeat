@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveGitHubLinks } from "../src/gitLinks.js";
 import { listWorkerSessionBranchRecoveryExecutionRecords } from "../src/workerSessionBranchRecovery.js";
+import { summarizeWorkerSessionControlPlaneTickDecision } from "../src/workerSessionControlPlaneTicks.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
@@ -6506,6 +6507,10 @@ type WorkerSessionControlPlaneTickRecord = {
   after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
 };
 
+type WorkerSessionControlPlaneTickWithDecision = WorkerSessionControlPlaneTickRecord & {
+  decision: ReturnType<typeof summarizeWorkerSessionControlPlaneTickDecision>;
+};
+
 type ExecuteQueuedWorkerSessionDrainContinuationsResponse = {
   ok: true;
   session: string;
@@ -7039,7 +7044,7 @@ async function fetchWorkerSessionControlPlaneTicks(
   ok: true;
   session: string;
   count: number;
-  ticks: WorkerSessionControlPlaneTickRecord[];
+  ticks: WorkerSessionControlPlaneTickWithDecision[];
 }> {
   const params = new URLSearchParams({ limit: String(limit) });
   return await requestJson(
@@ -7049,7 +7054,7 @@ async function fetchWorkerSessionControlPlaneTicks(
     ok: true;
     session: string;
     count: number;
-    ticks: WorkerSessionControlPlaneTickRecord[];
+    ticks: WorkerSessionControlPlaneTickWithDecision[];
   };
 }
 
@@ -7060,7 +7065,7 @@ async function listWorkerSessionControlPlaneTickRecords(
   ok: true;
   session: string;
   count: number;
-  ticks: WorkerSessionControlPlaneTickRecord[];
+  ticks: WorkerSessionControlPlaneTickWithDecision[];
 }> {
   const tickDir = workerSessionControlPlaneTickDir(sessionName);
   try {
@@ -7077,7 +7082,11 @@ async function listWorkerSessionControlPlaneTickRecords(
       count: Math.min(ticks.length, limit),
       ticks: ticks
         .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
-        .slice(0, limit),
+        .slice(0, limit)
+        .map((tick) => ({
+          ...tick,
+          decision: summarizeWorkerSessionControlPlaneTickDecision(tick),
+        })),
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
