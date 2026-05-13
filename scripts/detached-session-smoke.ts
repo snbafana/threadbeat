@@ -2121,6 +2121,13 @@ try {
       completedAt?: string;
       completionResult?: { exitCode: number | null; signal: string | null };
       lifecycle: { state: string; restartable: boolean; reason: string };
+      latestResult: {
+        dryRun?: boolean;
+        stoppedReason?: string;
+        maxSteps?: number;
+        intervalMs?: number;
+        executedSteps?: number;
+      } | null;
     }>;
   };
   let completedControlPlaneAdvanceWorkers: ControlPlaneAdvanceWorkerListResponse | null = null;
@@ -2145,6 +2152,20 @@ try {
   assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.lifecycle.state, "completed");
   assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.lifecycle.restartable, false);
   assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.lifecycle.reason, "worker_completed");
+  assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.latestResult?.dryRun, true);
+  assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.latestResult?.stoppedReason, "dry_run");
+  assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.latestResult?.maxSteps, 1);
+  assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.latestResult?.intervalMs, 0);
+  assert.equal(completedControlPlaneAdvanceWorkers?.workers[0]?.latestResult?.executedSteps, 1);
+  const persistedControlPlaneAdvanceWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "control-plane-advance-workers",
+    sessionName,
+    "detached-smoke-control-plane-advance-worker.json",
+  ), "utf8")) as { latestResult?: ControlPlaneAdvanceWorkerListResponse["workers"][number]["latestResult"] };
+  assert.equal(persistedControlPlaneAdvanceWorker.latestResult?.stoppedReason, "dry_run");
+  assert.equal(persistedControlPlaneAdvanceWorker.latestResult?.executedSteps, 1);
   const stoppedControlPlaneAdvanceWorkers = await cliJson<{
     ok?: true;
     session: string;
@@ -3958,6 +3979,16 @@ try {
   assert.equal(completedConfirmationDrainWorkers?.workers[0]?.latestResult?.executedSteps, 1);
   assert.equal(completedConfirmationDrainWorkers?.workers[0]?.latestResult?.attemptedConfirmations, 1);
   assert.equal(completedConfirmationDrainWorkers?.workers[0]?.latestResult?.cycles, 1);
+  const persistedConfirmationDrainWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "control-plane-advance-workers",
+    sessionName,
+    "detached-smoke-confirmation-drain-worker.json",
+  ), "utf8")) as { latestResult?: ConfirmationDrainWorkerListResponse["workers"][number]["latestResult"] };
+  assert.equal(persistedConfirmationDrainWorker.latestResult?.stoppedReason, "dry_run");
+  assert.equal(persistedConfirmationDrainWorker.latestResult?.maxConfirmations, 1);
+  assert.equal(persistedConfirmationDrainWorker.latestResult?.attemptedConfirmations, 1);
   const confirmationDrainWorkerOutput = completedConfirmationDrainWorkers?.workers[0]?.stdout.lines.join("\n") ?? "";
   assert.match(confirmationDrainWorkerOutput, /"sourceAdvanceId":/);
   assert.match(confirmationDrainWorkerOutput, /"confirmed": true/);

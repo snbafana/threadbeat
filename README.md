@@ -817,8 +817,8 @@ advance loop: `runs start-control-plane-advance-worker <name> --server
 that mutating confirmation drain with the same worker lifecycle and log
 inspection commands; add `--until-empty` to make the detached confirmation
 worker poll across batches with the worker's `--max-steps` and `--interval-ms`
-settings. Worker inspection includes a parsed `latestResult` summary from the
-worker output, including the confirmation drain stop reason when available.
+settings. Worker inspection includes a persisted `latestResult` summary for
+completed workers, including the confirmation drain stop reason when available.
 `runs session-control-plane-status <name> --server`
 keeps the aggregate `workers.controlPlaneAdvance` totals and also breaks them
 out by `advance_loop` and `confirmation_drain` mode. It also includes

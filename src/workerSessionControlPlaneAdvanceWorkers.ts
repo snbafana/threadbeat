@@ -20,6 +20,7 @@ export type ControlPlaneAdvanceWorker = {
   previousPid?: number | null;
   completedAt?: string;
   completionResult?: { exitCode: number | null; signal: NodeJS.Signals | null };
+  latestResult?: ControlPlaneAdvanceWorkerLatestResult | null;
 };
 
 export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain";
@@ -133,6 +134,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
       pid: child.pid ?? null,
       stdoutPath,
       stderrPath,
+      latestResult: null,
     };
     await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
     recordControlPlaneAdvanceWorkerCompletion(projectRoot, child, worker);
@@ -168,7 +170,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
             ...worker,
             alive,
             lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive),
-            latestResult: await readLatestWorkerJsonResult(worker.stdoutPath),
+            latestResult: "latestResult" in worker ? worker.latestResult ?? null : await readLatestWorkerJsonResult(worker.stdoutPath),
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
           };
@@ -355,6 +357,7 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
       retiredAt: undefined,
       completedAt: undefined,
       completionResult: undefined,
+      latestResult: null,
       restartedAt,
       restartCount: (worker.restartCount ?? 0) + 1,
       previousPid: worker.pid,
@@ -405,10 +408,12 @@ function recordControlPlaneAdvanceWorkerCompletion(projectRoot: string, child: R
         throw error;
       });
       if (!current || current.pid !== child.pid || current.stoppedAt || current.retiredAt) return;
+      const latestResult = await readLatestWorkerJsonResult(current.stdoutPath);
       await writeControlPlaneAdvanceWorker(projectRoot, {
         ...current,
         completedAt: new Date().toISOString(),
         completionResult: { exitCode, signal },
+        latestResult,
       });
     })().catch((error) => {
       console.error(`failed to record control-plane advance worker completion: ${error instanceof Error ? error.message : String(error)}`);
