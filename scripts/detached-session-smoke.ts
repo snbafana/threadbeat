@@ -438,6 +438,7 @@ try {
     actions: { sessionWait: string[]; restartSession: string[] };
     nextStep: { action: string; reason: string; count: number; command: string[] };
     execution: {
+      executionId: string;
       status: string;
       selected: number;
       resumed: Array<{ runId: string; branchName: string; status?: string }>;
@@ -467,6 +468,52 @@ try {
   assert.deepEqual(serverRecovered.execution.skipped, []);
   assert.equal(serverRecovered.execution.filter.action, "recover_session");
   assert.deepEqual(serverRecovered.execution.filter.runIds, [serverRecoverRun.id]);
+  const watchedBranchRecoveryExecutions = await cliJson<{
+    summary: {
+      branchRecoveryExecutions: number;
+      branchRecoveryExecuted: number;
+      branchRecoveryPartial: number;
+      branchRecoveryNoop: number;
+    };
+    branchRecoveryExecutions: {
+      counts: { recent: number; executed: number; partial: number; noop: number };
+      recent: Array<{
+        executionId: string;
+        status: string;
+        resumed: Array<{ runId: string }>;
+        skipped: unknown[];
+      }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-watch",
+    sessionName,
+    "--recoverable",
+    "--include-stopped",
+    "--next",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.ok(watchedBranchRecoveryExecutions.summary.branchRecoveryExecutions >= 1);
+  assert.ok(watchedBranchRecoveryExecutions.summary.branchRecoveryExecuted >= 1);
+  assert.equal(watchedBranchRecoveryExecutions.summary.branchRecoveryPartial, 0);
+  assert.equal(watchedBranchRecoveryExecutions.summary.branchRecoveryNoop, 0);
+  assert.equal(
+    watchedBranchRecoveryExecutions.summary.branchRecoveryExecutions,
+    watchedBranchRecoveryExecutions.branchRecoveryExecutions.counts.recent,
+  );
+  assert.equal(
+    watchedBranchRecoveryExecutions.summary.branchRecoveryExecuted,
+    watchedBranchRecoveryExecutions.branchRecoveryExecutions.counts.executed,
+  );
+  assert.ok(watchedBranchRecoveryExecutions.branchRecoveryExecutions.recent.some((execution) => (
+    execution.executionId === serverRecovered.execution.executionId
+    && execution.status === "executed"
+    && execution.resumed.some((run) => run.runId === serverRecoverRun.id)
+    && execution.skipped.length === 0
+  )));
 
   const resumePreview = await cliJson<{
     session: string;

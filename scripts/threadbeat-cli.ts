@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveGitHubLinks } from "../src/gitLinks.js";
+import { listWorkerSessionBranchRecoveryExecutionRecords } from "../src/workerSessionBranchRecovery.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
@@ -5040,6 +5041,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           drainContinuationWorkerNextSteps(status.session.session),
           sessionWatchWorkerNextSteps(status.session.session),
         ]);
+        const branchRecoveryExecutions = await listWorkerSessionBranchRecoveryExecutionRecords(
+          process.cwd(),
+          status.session.session,
+          5,
+        );
+        const branchRecoveryExecutionCounts = summarizeBranchRecoveryExecutionStatuses(branchRecoveryExecutions);
         const drainContinuationResetNextSteps = await workerSessionDrainContinuationResetNextSteps(status.session.session);
         const drainContinuationResets = drainContinuationResetNextSteps.reduce((sum, step) => sum + step.count, 0);
         const applyQueueActions = applyActionFilter
@@ -5142,6 +5149,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             resumableBranches: resumableBranches.length,
             recoveryCandidates: recoverableActive + recoverableStopped,
             branchNextSteps: branchNextSteps.length,
+            branchRecoveryExecutions: branchRecoveryExecutionCounts.recent,
+            branchRecoveryExecuted: branchRecoveryExecutionCounts.executed,
+            branchRecoveryPartial: branchRecoveryExecutionCounts.partial,
+            branchRecoveryNoop: branchRecoveryExecutionCounts.noop,
             drainWorkerRestarts: drainWorkerNextSteps.length,
             watchWorkerRestarts: watchWorkerNextSteps.length,
             drainContinuationResets,
@@ -5165,6 +5176,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           ...(options["commands-only"] === "1" ? { commands: commandQueue } : {
             nextSteps,
             branchNextSteps,
+            branchRecoveryExecutions: {
+              counts: branchRecoveryExecutionCounts,
+              recent: branchRecoveryExecutions,
+            },
             drainWorkerNextSteps,
             watchWorkerNextSteps,
             drainContinuationResetNextSteps,
@@ -6109,6 +6124,20 @@ function printCommandQueueShell(commands: CommandQueueOutput["commands"]): void 
   for (const item of commands) {
     console.log(item.command.map(shellArg).join(" "));
   }
+}
+
+function summarizeBranchRecoveryExecutionStatuses<T extends { status: string }>(records: T[]): {
+  recent: number;
+  executed: number;
+  partial: number;
+  noop: number;
+} {
+  return {
+    recent: records.length,
+    executed: records.filter((record) => record.status === "executed").length,
+    partial: records.filter((record) => record.status === "partial").length,
+    noop: records.filter((record) => record.status === "noop").length,
+  };
 }
 
 function shellArg(value: string): string {
