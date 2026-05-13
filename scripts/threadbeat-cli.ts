@@ -4493,6 +4493,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-tick-loop") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-tick-loop requires --server");
+    }
+    await printJson(await executeWorkerSessionControlPlaneTickLoop(
+      required(sessionName, "runs session-control-plane-tick-loop <session> --server"),
+      {
+        dryRun: options["dry-run"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        maxTicks: parsePositiveInteger(options["max-ticks"] ?? "10", "--max-ticks"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-ticks") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6651,6 +6668,46 @@ async function executeWorkerSessionControlPlaneTick(
     executed: WorkerSessionControlPlaneTickRecord["executed"];
     before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
     after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
+  };
+}
+
+async function executeWorkerSessionControlPlaneTickLoop(
+  sessionName: string,
+  options: { dryRun: boolean; lines: number; maxTicks: number; intervalMs: number },
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  maxTicks: number;
+  intervalMs: number;
+  executedTicks: number;
+  stoppedReason: "noop" | "max_ticks";
+  tickIds: string[];
+  ticks: WorkerSessionControlPlaneTickRecord[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-loop`,
+    {
+      dryRun: options.dryRun,
+      lines: options.lines,
+      maxTicks: options.maxTicks,
+      intervalMs: options.intervalMs,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    observedAt: string;
+    completedAt: string;
+    dryRun: boolean;
+    maxTicks: number;
+    intervalMs: number;
+    executedTicks: number;
+    stoppedReason: "noop" | "max_ticks";
+    tickIds: string[];
+    ticks: WorkerSessionControlPlaneTickRecord[];
   };
 }
 
@@ -9995,6 +10052,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
+  runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
   runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]

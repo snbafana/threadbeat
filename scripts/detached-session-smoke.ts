@@ -1535,6 +1535,39 @@ try {
   assert.equal(controlPlaneTickPreview.executed.branchRecovery, null);
   assert.equal(controlPlaneTickPreview.executed.applyAction, null);
   assert.equal(controlPlaneTickPreview.executed.drainContinuation, null);
+  const controlPlaneTickLoopPreview = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    maxTicks: number;
+    intervalMs: number;
+    executedTicks: number;
+    stoppedReason: string;
+    tickIds: string[];
+    ticks: Array<{ tickId: string; status: string; dryRun: boolean }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-tick-loop",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--max-ticks",
+    "1",
+    "--interval-ms",
+    "0",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneTickLoopPreview.ok, true);
+  assert.equal(controlPlaneTickLoopPreview.session, sessionName);
+  assert.equal(controlPlaneTickLoopPreview.dryRun, true);
+  assert.equal(controlPlaneTickLoopPreview.maxTicks, 1);
+  assert.equal(controlPlaneTickLoopPreview.intervalMs, 0);
+  assert.equal(controlPlaneTickLoopPreview.executedTicks, 1);
+  assert.equal(controlPlaneTickLoopPreview.stoppedReason, "max_ticks");
+  assert.equal(controlPlaneTickLoopPreview.ticks[0]?.status, "dry_run");
+  assert.equal(controlPlaneTickLoopPreview.ticks[0]?.dryRun, true);
+  assert.equal(controlPlaneTickLoopPreview.tickIds[0], controlPlaneTickLoopPreview.ticks[0]?.tickId);
   const controlPlaneTicks = await cliJson<{
     ok?: true;
     session: string;
@@ -1548,9 +1581,10 @@ try {
   ]);
   assert.equal(controlPlaneTicks.ok, true);
   assert.equal(controlPlaneTicks.session, sessionName);
-  assert.equal(controlPlaneTicks.count, 1);
-  assert.equal(controlPlaneTicks.ticks[0]?.tickId, controlPlaneTickPreview.tick.tickId);
+  assert.equal(controlPlaneTicks.count, 2);
+  assert.equal(controlPlaneTicks.ticks[0]?.tickId, controlPlaneTickLoopPreview.ticks[0]?.tickId);
   assert.equal(controlPlaneTicks.ticks[0]?.status, "dry_run");
+  assert.equal(controlPlaneTicks.ticks[1]?.tickId, controlPlaneTickPreview.tick.tickId);
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };

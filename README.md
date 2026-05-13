@@ -758,7 +758,10 @@ branch, execute one queued apply action, and execute one queued drain
 continuation. Each tick writes a durable record under
 `.threadbeat/worker-sessions/control-plane-ticks/<session>/`; inspect recent
 ticks with `runs session-control-plane-ticks <name> --server` or
-`GET /api/worker-sessions/:name/control-plane-ticks`.
+`GET /api/worker-sessions/:name/control-plane-ticks`. Use `runs
+session-control-plane-tick-loop <name> --server --max-ticks 10` or
+`POST /api/worker-sessions/:name/control-plane-tick-loop` when the server
+should keep ticking until it reaches an empty/noop pass or the max tick count.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,

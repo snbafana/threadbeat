@@ -436,6 +436,27 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.post("/api/worker-sessions/:name/control-plane-tick-loop", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return await runWorkerSessionControlPlaneTickLoop(
+        settings,
+        db,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          dryRun: parseBoolean(body.dryRun, false),
+          lines: parseOptionalInteger(body.lines) ?? 5,
+          maxTicks: parseOptionalInteger(body.maxTicks) ?? 10,
+          intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
+        },
+      );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.get("/api/worker-sessions/:name/control-plane-ticks", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -2428,6 +2449,59 @@ const runWorkerSessionControlPlaneTick = async (
     executed,
     before,
     after,
+  };
+};
+
+const runWorkerSessionControlPlaneTickLoop = async (
+  settings: Settings,
+  db: Database,
+  baseUrl: string,
+  sessionName: string,
+  options: { dryRun: boolean; lines: number; maxTicks: number; intervalMs: number },
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  maxTicks: number;
+  intervalMs: number;
+  executedTicks: number;
+  stoppedReason: "noop" | "max_ticks";
+  tickIds: string[];
+  ticks: Array<Awaited<ReturnType<typeof runWorkerSessionControlPlaneTick>>["tick"]>;
+}> => {
+  if (options.maxTicks < 1) throw new Error("maxTicks must be at least 1");
+  if (options.intervalMs < 0) throw new Error("intervalMs must be non-negative");
+  const observedAt = new Date().toISOString();
+  const ticks = [];
+  let stoppedReason: "noop" | "max_ticks" = "max_ticks";
+  for (let tickIndex = 0; tickIndex < options.maxTicks; tickIndex += 1) {
+    const tick = await runWorkerSessionControlPlaneTick(settings, db, baseUrl, sessionName, {
+      dryRun: options.dryRun,
+      lines: options.lines,
+    });
+    ticks.push(tick.tick);
+    if (tick.tick.status === "noop") {
+      stoppedReason = "noop";
+      break;
+    }
+    if (tickIndex + 1 < options.maxTicks) {
+      await new Promise((resolve) => setTimeout(resolve, options.intervalMs));
+    }
+  }
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    maxTicks: options.maxTicks,
+    intervalMs: options.intervalMs,
+    executedTicks: ticks.length,
+    stoppedReason,
+    tickIds: ticks.map((tick) => tick.tickId),
+    ticks,
   };
 };
 
