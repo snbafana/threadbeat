@@ -1487,6 +1487,14 @@ try {
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };
+    executionPath: string;
+    execution: {
+      executionId: string;
+      status: string;
+      selected: number;
+      resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+      skipped: unknown[];
+    };
   }>(baseUrl, [
     "runs",
     "resume-session",
@@ -1500,6 +1508,28 @@ try {
   assert.equal(controlPlaneResumeNext.resumed[0].workerId, null);
   assert.equal(controlPlaneResumeNext.nextStep.action, "restart_session");
   assert.equal(controlPlaneResumeNext.nextStep.count, 1);
+  assert.match(controlPlaneResumeNext.executionPath, /worker-sessions\/branch-recovery-executions/);
+  assert.equal(controlPlaneResumeNext.execution.status, "executed");
+  assert.equal(controlPlaneResumeNext.execution.selected, 1);
+  assert.deepEqual(controlPlaneResumeNext.execution.resumed.map((run) => run.runId), [controlPlaneResumePlan.run.id]);
+  assert.deepEqual(controlPlaneResumeNext.execution.skipped, []);
+  const branchRecoveryExecutions = await cliJson<{
+    session: string;
+    count: number;
+    executions: Array<{ executionId: string; status: string; resumed: Array<{ runId: string }> }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-recovery-executions",
+    sessionName,
+    "--server",
+    "--run",
+    controlPlaneResumePlan.run.id,
+  ]);
+  assert.equal(branchRecoveryExecutions.session, sessionName);
+  assert.equal(branchRecoveryExecutions.count, 1);
+  assert.equal(branchRecoveryExecutions.executions[0]?.executionId, controlPlaneResumeNext.execution.executionId);
+  assert.equal(branchRecoveryExecutions.executions[0]?.status, "executed");
+  assert.deepEqual(branchRecoveryExecutions.executions[0]?.resumed.map((run) => run.runId), [controlPlaneResumePlan.run.id]);
   assert.ok(controlPlaneStatus.queues.applyActions.actionable >= 1);
   assert.ok(controlPlaneStatus.queues.applyActions.resetAudits >= 1);
   assert.ok(controlPlaneStatus.queues.drainContinuations.total >= 1);
@@ -1823,6 +1853,7 @@ async function cleanupSession(session: string): Promise<void> {
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-executions", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-workers", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuations", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", session), { recursive: true, force: true });
 }

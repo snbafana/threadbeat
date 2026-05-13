@@ -32,6 +32,10 @@ import {
   writeWorkerSessionApplyActionExecutionRecord,
 } from "./workerSessionDrains.js";
 import {
+  listWorkerSessionBranchRecoveryExecutionRecords,
+  writeWorkerSessionBranchRecoveryExecutionRecord,
+} from "./workerSessionBranchRecovery.js";
+import {
   listWorkerSessionApplyActionWorkerNextSteps,
   listWorkerSessionApplyActionWorkers,
   restartWorkerSessionApplyActionWorker,
@@ -320,6 +324,37 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           status: statusFilter ? [...statusFilter] : [],
           limit,
         },
+        executions,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/branch-recovery-executions", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const limit = parseOptionalInteger(query.limit) ?? 20;
+      const statusFilter = query.status ? new Set(parseOptionalBranchRecoveryExecutionStatuses(query.status)) : null;
+      const runIds = [
+        ...parseOptionalList(query.runId),
+        ...parseOptionalList(query.runIds),
+      ];
+      const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
+      const records = await listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
+      const executions = records
+        .filter((record) => !statusFilter || statusFilter.has(record.status))
+        .filter((record) => !runIdFilter || [
+          ...record.resumed.map((run) => run.runId),
+          ...record.skipped.map((run) => run.runId),
+        ].some((runId) => runIdFilter.has(runId)))
+        .slice(0, limit);
+      return {
+        ok: true,
+        session: name,
+        count: executions.length,
+        filter: { status: statusFilter ? [...statusFilter] : [], runIds, limit },
         executions,
       };
     } catch (error) {
@@ -1259,32 +1294,67 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         return { agentId, total: runs.length, statuses, resumableStopped, unassigned, otherWorkers };
       }));
       const aliveByWorkerId = new Map(logs.workers.map((worker) => [worker.workerId, worker.alive]));
+      const nextStep = changedRuns > 0 && aliveWorkers > 0
+        ? {
+          action: "wait_session",
+          reason: "resumed_runs_for_live_workers",
+          count: changedRuns,
+          command: actions.sessionWait,
+        }
+        : changedRuns > 0
+          ? {
+            action: "restart_session",
+            reason: "resumed_runs_without_live_workers",
+            count: changedRuns,
+            command: actions.restartSession,
+          }
+          : {
+            action: "review_session",
+            reason: "no_runs_resumed",
+            count: 0,
+            command: actions.sessionReview,
+          };
+      const observedAt = new Date().toISOString();
+      const execution = await writeWorkerSessionBranchRecoveryExecutionRecord(settings.projectRoot, {
+        session: session.session,
+        observedAt,
+        completedAt: new Date().toISOString(),
+        status: changedRuns === 0 ? "noop" : changedRuns === resumed.length ? "executed" : "partial",
+        filter: { dryRun, workerId: workerIdFilter, runIds, limit },
+        selected: resumed.length,
+        resumed: resumed
+          .filter((item) => !("skipped" in item))
+          .map((item) => ({
+            agentId: item.agentId,
+            runId: item.runId,
+            objective: item.objective,
+            branchName: item.branchName,
+            resultCommit: item.resultCommit,
+            workerId: item.workerId,
+            ...("status" in item ? { status: item.status } : {}),
+          })),
+        skipped: resumed
+          .filter((item): item is typeof item & { skipped: string } => "skipped" in item)
+          .map((item) => ({
+            agentId: item.agentId,
+            runId: item.runId,
+            objective: item.objective,
+            branchName: item.branchName,
+            resultCommit: item.resultCommit,
+            workerId: item.workerId,
+            reason: item.skipped,
+          })),
+        nextStep,
+      });
       return {
         ok: true,
         session: session.session,
         resumed,
         filter: { dryRun, workerId: workerIdFilter, runIds, limit },
         actions,
-        nextStep: changedRuns > 0 && aliveWorkers > 0
-          ? {
-            action: "wait_session",
-            reason: "resumed_runs_for_live_workers",
-            count: changedRuns,
-            command: actions.sessionWait,
-          }
-          : changedRuns > 0
-            ? {
-              action: "restart_session",
-              reason: "resumed_runs_without_live_workers",
-              count: changedRuns,
-              command: actions.restartSession,
-            }
-            : {
-              action: "review_session",
-              reason: "no_runs_resumed",
-              count: 0,
-              command: actions.sessionReview,
-            },
+        nextStep,
+        executionPath: execution.path,
+        execution: execution.record,
         status: {
           session: {
             ...session,
@@ -2219,6 +2289,15 @@ const parseOptionalApplyActionExecutionStatuses = (value: unknown): Array<"execu
     if (!allowed.has(status)) throw new Error(`unknown apply action execution status: ${status}`);
   }
   return statuses as Array<"executed" | "failed">;
+};
+
+const parseOptionalBranchRecoveryExecutionStatuses = (value: unknown): Array<"executed" | "partial" | "noop"> => {
+  const statuses = parseOptionalList(value);
+  const allowed = new Set(["executed", "partial", "noop"]);
+  for (const status of statuses) {
+    if (!allowed.has(status)) throw new Error(`unknown branch recovery execution status: ${status}`);
+  }
+  return statuses as Array<"executed" | "partial" | "noop">;
 };
 
 const parseCommand = (value: unknown): string[] => {

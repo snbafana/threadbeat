@@ -4478,6 +4478,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-branch-recovery-executions") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-branch-recovery-executions requires --server");
+    }
+    await printJson(await fetchWorkerSessionBranchRecoveryExecutions(
+      required(sessionName, "runs session-branch-recovery-executions <session> --server"),
+      {
+        runId: options.run,
+        status: options.status,
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-branches") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6160,6 +6176,27 @@ type WorkerSessionApplyActionExecutionsResponse = {
   executions: WorkerSessionApplyActionExecutionRecord[];
 };
 
+type WorkerSessionBranchRecoveryExecutionRecord = {
+  executionId: string;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  status: "executed" | "partial" | "noop";
+  filter: Record<string, unknown>;
+  selected: number;
+  resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+  skipped: Array<{ runId: string; reason: string; workerId: string | null }>;
+  nextStep?: unknown;
+};
+
+type WorkerSessionBranchRecoveryExecutionsResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  filter: Record<string, unknown>;
+  executions: WorkerSessionBranchRecoveryExecutionRecord[];
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -6308,6 +6345,20 @@ async function fetchWorkerSessionApplyActionExecutions(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/apply-action-executions`, params),
   ) as WorkerSessionApplyActionExecutionsResponse;
+}
+
+async function fetchWorkerSessionBranchRecoveryExecutions(
+  sessionName: string,
+  options: { runId?: string; status?: string; limit?: number | null },
+): Promise<WorkerSessionBranchRecoveryExecutionsResponse> {
+  const params = new URLSearchParams();
+  if (options.runId) params.set("runId", options.runId);
+  if (options.status) params.set("status", options.status);
+  if (options.limit) params.set("limit", String(options.limit));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/branch-recovery-executions`, params),
+  ) as WorkerSessionBranchRecoveryExecutionsResponse;
 }
 
 async function fetchWorkerSessionDrainWorkers(
@@ -9794,6 +9845,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]
+  runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
