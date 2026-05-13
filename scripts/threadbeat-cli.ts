@@ -4693,11 +4693,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-advances <session> --server");
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-advances requires --server");
     }
     if (outputFormat !== "json" && outputFormat !== "shell") {
       throw new Error("runs session-control-plane-advances --format must be json or shell");
+    }
+    if (options["execute-confirmation"] === "1" && outputFormat !== "json") {
+      throw new Error("runs session-control-plane-advances --execute-confirmation requires json output");
+    }
+    if (options["execute-confirmation"] === "1" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-advances --execute-confirmation cannot be combined with --commands-only");
+    }
+    if (options["execute-confirmation"] === "1" && options["confirmation-queue"] === "1") {
+      throw new Error("runs session-control-plane-advances --execute-confirmation cannot be combined with --confirmation-queue");
+    }
+    if (options["execute-confirmation"] === "1" && options.confirm !== "1") {
+      throw new Error("runs session-control-plane-advances --execute-confirmation requires --confirm");
     }
     if (options["confirmation-queue"] === "1" && outputFormat !== "json" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-advances --confirmation-queue requires json output unless --commands-only is used");
@@ -4705,14 +4718,34 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-advances --format shell requires --commands-only");
     }
+    const limit = parsePositiveInteger(
+      options.limit ?? (options["execute-confirmation"] === "1" ? "100" : "20"),
+      "--limit",
+    );
     const advances = await fetchWorkerSessionControlPlaneAdvances(
-      required(sessionName, "runs session-control-plane-advances <session> --server"),
+      requiredSessionName,
       {
-        limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
-        blocked: options.blocked === "1" || options["confirmation-queue"] === "1" ? true : undefined,
-        mutating: options.mutating === "1" || options["confirmation-queue"] === "1" ? true : undefined,
+        limit,
+        blocked: options.blocked === "1" || options["confirmation-queue"] === "1" || options["execute-confirmation"] === "1" ? true : undefined,
+        mutating: options.mutating === "1" || options["confirmation-queue"] === "1" || options["execute-confirmation"] === "1" ? true : undefined,
       },
     );
+    if (options["execute-confirmation"] === "1") {
+      const advanceId = required(options["advance-id"], "runs session-control-plane-advances --execute-confirmation requires --advance-id");
+      const advance = advances.advances.find((record) => record.advanceId === advanceId);
+      if (!advance) throw new Error(`blocked confirmation advance not found in the selected page: ${advanceId}`);
+      const response = await executeWorkerSessionControlPlaneAlert(
+        requiredSessionName,
+        workerSessionControlPlaneAdvanceConfirmationExecuteOptions(requiredSessionName, advance, {
+          dryRun: options["dry-run"] === "1",
+        }),
+      );
+      if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+        process.exitCode = 1;
+      }
+      await printJson({ ...response, sourceAdvanceId: advance.advanceId });
+      return;
+    }
     if (options["commands-only"] === "1") {
       const commands = workerSessionControlPlaneAdvanceConfirmationCommands(advances.advances);
       if (outputFormat === "shell") {
@@ -6407,7 +6440,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -6573,6 +6606,41 @@ function workerSessionControlPlaneAdvanceConfirmationQueue(
 
 function pushUnique(values: string[], value: string | null): void {
   if (value && !values.includes(value)) values.push(value);
+}
+
+function workerSessionControlPlaneAdvanceConfirmationExecuteOptions(
+  sessionName: string,
+  advance: WorkerSessionControlPlaneAdvancesResponse["advances"][number],
+  options: { dryRun: boolean },
+): Parameters<typeof executeWorkerSessionControlPlaneAlert>[1] {
+  const command = advance.executionSafety?.confirmationCommand;
+  if (!command) throw new Error(`control-plane advance ${advance.advanceId} does not have a confirmation command`);
+  const commandArgs = cliCommandArgs(command);
+  const [mode, subcommandName, commandSessionName, ...optionArgs] = commandArgs;
+  if (mode !== "runs" || subcommandName !== "session-control-plane-alert-execute") {
+    throw new Error(`control-plane advance ${advance.advanceId} confirmation command is not an alert execution command`);
+  }
+  if (commandSessionName !== sessionName) {
+    throw new Error(`control-plane advance ${advance.advanceId} confirmation command targets ${commandSessionName}, expected ${sessionName}`);
+  }
+  const commandOptions = parseOptions(optionArgs);
+  if (commandOptions.server !== "1" || commandOptions.confirm !== "1") {
+    throw new Error(`control-plane advance ${advance.advanceId} confirmation command is missing --server or --confirm`);
+  }
+  return {
+    dryRun: options.dryRun,
+    confirm: true,
+    lines: parsePositiveInteger(commandOptions.lines ?? "5", "--lines"),
+    detailCommand: commandOptions["detail-command"],
+    severity: commandOptions.severity,
+    surface: commandOptions.surface,
+    reason: commandOptions.reason,
+    runId: commandOptions.run,
+    workerId: commandOptions.worker,
+    applyId: commandOptions.apply,
+    executionId: commandOptions.execution,
+    action: commandOptions.action,
+  };
 }
 
 function summarizeBranchRecoveryExecutionStatuses<T extends { status: string }>(records: T[]): {
@@ -11777,7 +11845,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--limit 20] [--commands-only] [--format json|shell]
+  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
