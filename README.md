@@ -500,7 +500,10 @@ Run planning is intentionally server-side and Pi-free for now:
   stopped branches without result commits that belong to the session workers
   (plus unassigned stopped branches when no `workerId` is supplied), and accepts
   `{ "dryRun": true, "workerId": "...", "runIds": ["..."], "limit": 1 }` for
-  guarded previews or bounded action-queue execution.
+  guarded previews or bounded action-queue execution. Each row includes the
+  same `resumeInspection` readiness payload as `runs resume-branch --inspect`,
+  so bulk dry-runs and skipped branches expose their blocker reason before any
+  state changes.
 - `POST /api/runs/:id/sandbox` starts a sandbox on that run branch and tags
   sandbox/messages with the run id. Pass `{ "bootstrap": true }` to clone and
   checkout the repo immediately after the sandbox starts. Repeated calls return

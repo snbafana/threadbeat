@@ -672,7 +672,18 @@ try {
   assert.equal(apiSessionResumePreviewResponse.statusCode, 200);
   const apiSessionResumePreview = JSON.parse(apiSessionResumePreviewResponse.body) as {
     session: string;
-    resumed: Array<{ runId: string; branchName: string; workerId: string | null; currentStatus?: string; dryRun?: boolean }>;
+    resumed: Array<{
+      runId: string;
+      branchName: string;
+      workerId: string | null;
+      currentStatus?: string;
+      dryRun?: boolean;
+      resumeInspection: {
+        recovery: { ready: boolean; reason: string; inspectionMode: string; runningSandboxes: unknown[] };
+        nextStep: { action: string; reason: string; command: string[] };
+        commands: { resumeBranch: string[] | null; resumeBranchDryRun: string[] };
+      };
+    }>;
     nextStep: { action: string; reason: string; command: string[] };
   };
   assert.equal(apiSessionResumePreview.session, sessionName);
@@ -681,6 +692,14 @@ try {
   assert.equal(apiSessionResumePreview.resumed[0].workerId, "detached-smoke-worker-1");
   assert.equal(apiSessionResumePreview.resumed[0].currentStatus, "stopped");
   assert.equal(apiSessionResumePreview.resumed[0].dryRun, true);
+  assert.equal(apiSessionResumePreview.resumed[0].resumeInspection.recovery.ready, true);
+  assert.equal(apiSessionResumePreview.resumed[0].resumeInspection.recovery.reason, "stopped_branch_without_result_commit");
+  assert.equal(apiSessionResumePreview.resumed[0].resumeInspection.recovery.inspectionMode, "server_metadata");
+  assert.deepEqual(apiSessionResumePreview.resumed[0].resumeInspection.recovery.runningSandboxes, []);
+  assert.equal(apiSessionResumePreview.resumed[0].resumeInspection.nextStep.action, "resume_branch");
+  assert.equal(apiSessionResumePreview.resumed[0].resumeInspection.nextStep.command.join(" "), `npm run cli -- runs resume-branch ${apiSessionResumePlan.run.id}`);
+  assert.equal(apiSessionResumePreview.resumed[0].resumeInspection.commands.resumeBranch?.join(" "), `npm run cli -- runs resume-branch ${apiSessionResumePlan.run.id}`);
+  assert.equal(apiSessionResumePreview.resumed[0].resumeInspection.commands.resumeBranchDryRun.join(" "), `npm run cli -- runs resume-branch ${apiSessionResumePlan.run.id} --dry-run`);
   assert.equal(apiSessionResumePreview.nextStep.action, "resume_session");
   assert.equal(apiSessionResumePreview.nextStep.reason, "dry_run_preview");
   assert.equal(apiSessionResumePreview.nextStep.command.join(" "), `npm run cli -- runs resume-session ${sessionName} --worker-id detached-smoke-worker-1`);
@@ -692,7 +711,15 @@ try {
   assert.equal(apiSessionResumeResponse.statusCode, 200);
   const apiSessionResume = JSON.parse(apiSessionResumeResponse.body) as {
     session: string;
-    resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
+    resumed: Array<{
+      runId: string;
+      status?: string;
+      workerId: string | null;
+      resumeInspection: {
+        recovery: { ready: boolean; reason: string };
+        nextStep: { action: string; command: string[] };
+      };
+    }>;
     nextStep: { action: string; reason: string };
     status: { session: { session: string } };
   };
@@ -701,6 +728,10 @@ try {
   assert.deepEqual(apiSessionResume.resumed.map((run) => run.runId), [apiSessionResumePlan.run.id]);
   assert.equal(apiSessionResume.resumed[0].status, "planned");
   assert.equal(apiSessionResume.resumed[0].workerId, null);
+  assert.equal(apiSessionResume.resumed[0].resumeInspection.recovery.ready, true);
+  assert.equal(apiSessionResume.resumed[0].resumeInspection.recovery.reason, "stopped_branch_without_result_commit");
+  assert.equal(apiSessionResume.resumed[0].resumeInspection.nextStep.action, "resume_branch");
+  assert.equal(apiSessionResume.resumed[0].resumeInspection.nextStep.command.join(" "), `npm run cli -- runs resume-branch ${apiSessionResumePlan.run.id}`);
   assert.equal(apiSessionResume.nextStep.action, "restart_session");
   assert.equal(apiSessionResume.nextStep.reason, "resumed_runs_without_live_workers");
   const apiSessionResumeMessages = await cliJson<{ messages: Array<{ type: string; text: string | null }> }>(baseUrl, [

@@ -1124,6 +1124,33 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       }))).flat().slice(0, limit ?? undefined);
       const resumed = [];
       for (const { agentId, run } of candidates) {
+        const runningSandboxes = (await db.listSandboxes({ runId: run.id }))
+          .filter((sandbox) => sandbox.state === "running");
+        const resumeReady = runningSandboxes.length === 0;
+        const resumeReason = resumeReady
+          ? "stopped_branch_without_result_commit"
+          : "running_sandbox_present";
+        const resumeBranch = ["npm", "run", "cli", "--", "runs", "resume-branch", run.id];
+        const inspectRun = ["npm", "run", "cli", "--", "runs", "inspect", run.id];
+        const resumeInspection = {
+          recovery: {
+            ready: resumeReady,
+            reason: resumeReason,
+            inspectionMode: "server_metadata",
+            runningSandboxes: runningSandboxes.map((sandbox) => ({
+              id: sandbox.id,
+              providerSandboxId: sandbox.provider_sandbox_id,
+            })),
+          },
+          commands: {
+            resumeBranch: resumeReady ? resumeBranch : null,
+            resumeBranchDryRun: [...resumeBranch, "--dry-run"],
+            inspectRun,
+          },
+          nextStep: resumeReady
+            ? { action: "resume_branch", reason: resumeReason, command: resumeBranch }
+            : { action: "inspect_run", reason: resumeReason, command: inspectRun },
+        };
         const item = {
           agentId,
           runId: run.id,
@@ -1131,15 +1158,19 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           branchName: run.run_branch,
           resultCommit: run.result_commit,
           workerId: run.worker_id,
+          resumeInspection,
         };
         if (dryRun) {
-          resumed.push({ ...item, currentStatus: run.status, dryRun: true });
+          resumed.push({
+            ...item,
+            currentStatus: run.status,
+            dryRun: true,
+            ...(resumeReady ? {} : { skipped: resumeReason }),
+          });
           continue;
         }
-        const hasRunningSandbox = (await db.listSandboxes({ runId: run.id }))
-          .some((sandbox) => sandbox.state === "running");
-        if (hasRunningSandbox) {
-          resumed.push({ ...item, skipped: "run has a running sandbox" });
+        if (!resumeReady) {
+          resumed.push({ ...item, skipped: resumeReason });
           continue;
         }
         const requeued = await db.requeueAgentRun(run.id);
