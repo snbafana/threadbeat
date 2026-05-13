@@ -1920,6 +1920,8 @@ try {
   const controlPlaneAdvancePreview = await cliJson<{
     ok?: true;
     session: string;
+    advanceId: string;
+    advancePath: string;
     dryRun: boolean;
     selected: { surface: string; action: string; reason: string; count: number; command: string[] } | null;
     executed: null;
@@ -1936,6 +1938,8 @@ try {
   ]);
   assert.equal(controlPlaneAdvancePreview.ok, true);
   assert.equal(controlPlaneAdvancePreview.session, sessionName);
+  assert.match(controlPlaneAdvancePreview.advanceId, /^20/);
+  assert.match(controlPlaneAdvancePreview.advancePath, /control-plane-advances/);
   assert.equal(controlPlaneAdvancePreview.dryRun, true);
   assert.deepEqual(controlPlaneAdvancePreview.selected, controlPlaneStatusSummary.nextActions[0]);
   assert.equal(controlPlaneAdvancePreview.executed, null);
@@ -1952,6 +1956,8 @@ try {
     executedSteps: number;
     stoppedReason: string;
     advances: Array<{
+      advanceId: string;
+      advancePath: string;
       selected: { surface: string; action: string; reason: string; count: number; command: string[] } | null;
       executed: null;
     }>;
@@ -1976,8 +1982,30 @@ try {
   assert.equal(controlPlaneAdvanceLoopPreview.executedSteps, 1);
   assert.equal(controlPlaneAdvanceLoopPreview.stoppedReason, "dry_run");
   assert.equal(controlPlaneAdvanceLoopPreview.advances.length, 1);
+  assert.match(controlPlaneAdvanceLoopPreview.advances[0]?.advanceId ?? "", /^20/);
+  assert.match(controlPlaneAdvanceLoopPreview.advances[0]?.advancePath ?? "", /control-plane-advances/);
   assert.deepEqual(controlPlaneAdvanceLoopPreview.advances[0]?.selected, controlPlaneStatusSummary.nextActions[0]);
   assert.equal(controlPlaneAdvanceLoopPreview.advances[0]?.executed, null);
+  const controlPlaneAdvances = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    advances: Array<{ advanceId: string; dryRun: boolean; selected: { surface: string; action: string } | null; executed: null }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(controlPlaneAdvances.ok, true);
+  assert.equal(controlPlaneAdvances.session, sessionName);
+  assert.ok(controlPlaneAdvances.count >= 2);
+  assert.ok(controlPlaneAdvances.advances.some((advance) => advance.advanceId === controlPlaneAdvancePreview.advanceId));
+  assert.ok(controlPlaneAdvances.advances.some((advance) => advance.advanceId === controlPlaneAdvanceLoopPreview.advances[0]?.advanceId));
+  assert.ok(controlPlaneAdvances.advances.every((advance) => advance.dryRun));
+  assert.ok(controlPlaneAdvances.advances.every((advance) => advance.executed === null));
   const completedControlPlaneAdvanceWorker = await cliJson<{
     ok?: true;
     session: string;
@@ -3415,9 +3443,10 @@ async function cleanupSession(session: string): Promise<void> {
   await fs.rm(path.join(".threadbeat", "worker-sessions", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-executions", session), { recursive: true, force: true });
-  await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-workers", session), { recursive: true, force: true });
-  await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", session), { recursive: true, force: true });
-  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", session), { recursive: true, force: true });
+	  await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-workers", session), { recursive: true, force: true });
+	  await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", session), { recursive: true, force: true });
+	  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", session), { recursive: true, force: true });
+	  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-tick-workers", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-ticks", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuations", session), { recursive: true, force: true });

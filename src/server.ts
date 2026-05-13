@@ -36,6 +36,10 @@ import {
   writeWorkerSessionBranchRecoveryExecutionRecord,
 } from "./workerSessionBranchRecovery.js";
 import {
+  listWorkerSessionControlPlaneAdvanceRecords,
+  writeWorkerSessionControlPlaneAdvanceRecord,
+} from "./workerSessionControlPlaneAdvances.js";
+import {
   listWorkerSessionControlPlaneTickRecords,
   summarizeWorkerSessionControlPlaneTickDecision,
   writeWorkerSessionControlPlaneTickRecord,
@@ -542,6 +546,26 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
         },
       );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/control-plane-advances", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const advances = await listWorkerSessionControlPlaneAdvanceRecords(
+        settings.projectRoot,
+        name,
+        parseOptionalInteger(query.limit) ?? 20,
+      );
+      return {
+        ok: true,
+        session: name,
+        count: advances.length,
+        advances,
+      };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -3490,6 +3514,8 @@ const runWorkerSessionControlPlaneAdvance = async (
   observedAt: string;
   completedAt: string;
   dryRun: boolean;
+  advanceId: string;
+  advancePath: string;
   selected: WorkerSessionControlPlaneAdvanceAction | null;
   executed: TickCommandExecution | null;
   before: WorkerSessionControlPlaneStatus;
@@ -3502,12 +3528,24 @@ const runWorkerSessionControlPlaneAdvance = async (
     ? await runControlPlaneTickCommand(settings.projectRoot, baseUrl, selected.command)
     : null;
   const after = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
-  return {
-    ok: true,
+  const written = await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {
     session: sessionName,
     observedAt,
     completedAt: new Date().toISOString(),
     dryRun: options.dryRun,
+    selected,
+    executed,
+    before,
+    after,
+  });
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: written.record.completedAt,
+    dryRun: options.dryRun,
+    advanceId: written.record.advanceId,
+    advancePath: written.path,
     selected,
     executed,
     before,

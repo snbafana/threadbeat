@@ -4567,6 +4567,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "session-control-plane-advances") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-advances requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneAdvances(
+      required(sessionName, "runs session-control-plane-advances <session> --server"),
+      { limit: parsePositiveInteger(options.limit ?? "20", "--limit") },
+    ));
+    return;
+  }
   if (subcommandName === "start-control-plane-advance-worker") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6797,10 +6809,19 @@ type WorkerSessionControlPlaneAdvanceResponse = {
   observedAt: string;
   completedAt: string;
   dryRun: boolean;
+  advanceId: string;
+  advancePath: string;
   selected: WorkerSessionControlPlaneAdvanceAction | null;
   executed: { command: string[]; exitCode: number | null; stdout?: string; stderr?: string; output: unknown } | null;
   before: WorkerSessionControlPlaneStatusResponse;
   after: WorkerSessionControlPlaneStatusResponse;
+};
+
+type WorkerSessionControlPlaneAdvancesResponse = {
+  ok: true;
+  session: string;
+  count: number;
+  advances: Array<Omit<WorkerSessionControlPlaneAdvanceResponse, "ok" | "advancePath">>;
 };
 
 type WorkerSessionControlPlaneAdvanceLoopResponse = {
@@ -7348,6 +7369,16 @@ async function executeWorkerSessionControlPlaneAdvanceLoop(
       intervalMs: options.intervalMs,
     },
   ) as WorkerSessionControlPlaneAdvanceLoopResponse;
+}
+
+async function fetchWorkerSessionControlPlaneAdvances(
+  sessionName: string,
+  options: { limit: number },
+): Promise<WorkerSessionControlPlaneAdvancesResponse> {
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advances`, new URLSearchParams({ limit: String(options.limit) })),
+  ) as WorkerSessionControlPlaneAdvancesResponse;
 }
 
 async function startWorkerSessionControlPlaneAdvanceWorker(
@@ -11106,6 +11137,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
+  runs session-control-plane-advances <name> --server [--limit 20]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
