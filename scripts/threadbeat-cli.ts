@@ -4699,6 +4699,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat !== "json" && outputFormat !== "shell") {
       throw new Error("runs session-control-plane-advances --format must be json or shell");
     }
+    if (options["confirmation-queue"] === "1" && outputFormat !== "json" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-advances --confirmation-queue requires json output unless --commands-only is used");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-advances --format shell requires --commands-only");
     }
@@ -4706,35 +4709,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       required(sessionName, "runs session-control-plane-advances <session> --server"),
       {
         limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
-        blocked: options.blocked === "1" ? true : undefined,
-        mutating: options.mutating === "1" ? true : undefined,
+        blocked: options.blocked === "1" || options["confirmation-queue"] === "1" ? true : undefined,
+        mutating: options.mutating === "1" || options["confirmation-queue"] === "1" ? true : undefined,
       },
     );
     if (options["commands-only"] === "1") {
-      const seen = new Set<string>();
-      const commands = advances.advances.flatMap((advance) => {
-        const command = advance.executionSafety?.confirmationCommand;
-        if (!command) return [];
-        const key = commandKey(command);
-        if (seen.has(key)) return [];
-        seen.add(key);
-        return [{
-          scope: "control_plane_advance",
-          advanceId: advance.advanceId,
-          completedAt: advance.completedAt,
-          detailCommand: advance.executionSafety?.detailCommand,
-          blocked: advance.executionSafety?.blocked ?? false,
-          mutating: advance.executionSafety?.mutating ?? false,
-          reason: advance.executionSafety?.reason ?? null,
-          command,
-        }];
-      });
+      const commands = workerSessionControlPlaneAdvanceConfirmationCommands(advances.advances);
       if (outputFormat === "shell") {
         printCommandQueueShell(commands);
       } else {
         const { advances: _advances, ...rest } = advances;
         await printJson({ ...rest, commands });
       }
+      return;
+    }
+    if (options["confirmation-queue"] === "1") {
+      const { advances: _advances, ...rest } = advances;
+      await printJson({
+        ...rest,
+        confirmationQueue: workerSessionControlPlaneAdvanceConfirmationQueue(advances.advances),
+      });
       return;
     }
     await printJson(advances);
@@ -6413,7 +6407,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -6432,6 +6426,40 @@ function parseList(value: string): string[] {
 }
 
 type CommandQueueOutput = {
+  commands: Array<{ command: string[] }>;
+};
+
+type ControlPlaneAdvanceConfirmationCommand = {
+  scope: "control_plane_advance";
+  advanceId: string;
+  completedAt: string;
+  surface: WorkerSessionControlPlaneAdvanceAction["surface"] | null;
+  action: string | null;
+  selectedReason: string | null;
+  detailCommand: string | null;
+  blocked: boolean;
+  mutating: boolean;
+  reason: string | null;
+  runId: string | null;
+  workerId: string | null;
+  applyId: string | null;
+  executionId: string | null;
+  command: string[];
+};
+
+type ControlPlaneAdvanceConfirmationGroup = {
+  surface: WorkerSessionControlPlaneAdvanceAction["surface"] | null;
+  action: string | null;
+  selectedReason: string | null;
+  detailCommand: string | null;
+  reason: string | null;
+  count: number;
+  commandCount: number;
+  advanceIds: string[];
+  runIds: string[];
+  workerIds: string[];
+  applyIds: string[];
+  executionIds: string[];
   commands: Array<{ command: string[] }>;
 };
 
@@ -6460,6 +6488,91 @@ function printCommandQueueShell(commands: CommandQueueOutput["commands"]): void 
   for (const item of commands) {
     console.log(item.command.map(shellArg).join(" "));
   }
+}
+
+function workerSessionControlPlaneAdvanceConfirmationCommands(
+  advances: WorkerSessionControlPlaneAdvancesResponse["advances"],
+): ControlPlaneAdvanceConfirmationCommand[] {
+  const seen = new Set<string>();
+  return advances.flatMap((advance) => {
+    const command = advance.executionSafety?.confirmationCommand;
+    if (!command) return [];
+    const key = commandKey(command);
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{
+      scope: "control_plane_advance" as const,
+      advanceId: advance.advanceId,
+      completedAt: advance.completedAt,
+      surface: advance.selected?.surface ?? null,
+      action: advance.selected?.action ?? null,
+      selectedReason: advance.selected?.reason ?? null,
+      detailCommand: advance.executionSafety?.detailCommand ?? advance.selected?.detailCommand ?? null,
+      blocked: advance.executionSafety?.blocked ?? false,
+      mutating: advance.executionSafety?.mutating ?? false,
+      reason: advance.executionSafety?.reason ?? null,
+      runId: advance.selected?.runId ?? null,
+      workerId: advance.selected?.workerId ?? null,
+      applyId: advance.selected?.applyId ?? null,
+      executionId: advance.selected?.executionId ?? null,
+      command,
+    }];
+  });
+}
+
+function workerSessionControlPlaneAdvanceConfirmationQueue(
+  advances: WorkerSessionControlPlaneAdvancesResponse["advances"],
+): {
+  summary: { advances: number; groups: number; commands: number };
+  groups: ControlPlaneAdvanceConfirmationGroup[];
+} {
+  const commands = workerSessionControlPlaneAdvanceConfirmationCommands(advances);
+  const groups = new Map<string, ControlPlaneAdvanceConfirmationGroup>();
+  for (const item of commands) {
+    const key = JSON.stringify([item.surface, item.action, item.selectedReason, item.detailCommand, item.reason]);
+    const group = groups.get(key) ?? {
+      surface: item.surface,
+      action: item.action,
+      selectedReason: item.selectedReason,
+      detailCommand: item.detailCommand,
+      reason: item.reason,
+      count: 0,
+      commandCount: 0,
+      advanceIds: [],
+      runIds: [],
+      workerIds: [],
+      applyIds: [],
+      executionIds: [],
+      commands: [],
+    };
+    group.count += 1;
+    group.advanceIds.push(item.advanceId);
+    pushUnique(group.runIds, item.runId);
+    pushUnique(group.workerIds, item.workerId);
+    pushUnique(group.applyIds, item.applyId);
+    pushUnique(group.executionIds, item.executionId);
+    group.commands.push({ command: item.command });
+    group.commandCount = group.commands.length;
+    groups.set(key, group);
+  }
+  const grouped = [...groups.values()].sort((left, right) => (
+    right.count - left.count
+    || String(left.surface).localeCompare(String(right.surface))
+    || String(left.action).localeCompare(String(right.action))
+    || String(left.detailCommand).localeCompare(String(right.detailCommand))
+  ));
+  return {
+    summary: {
+      advances: advances.length,
+      groups: grouped.length,
+      commands: commands.length,
+    },
+    groups: grouped,
+  };
+}
+
+function pushUnique(values: string[], value: string | null): void {
+  if (value && !values.includes(value)) values.push(value);
 }
 
 function summarizeBranchRecoveryExecutionStatuses<T extends { status: string }>(records: T[]): {
@@ -11664,7 +11777,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--limit 20] [--commands-only] [--format json|shell]
+  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--limit 20] [--commands-only] [--format json|shell]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

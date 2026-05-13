@@ -784,7 +784,10 @@ worker restart without running it. Each advance writes a durable record under
 records with `runs session-control-plane-advances <name> --server` or
 `GET /api/worker-sessions/:name/control-plane-advances`; add `--blocked` and
 `--mutating` to list only blocked mutating attempts, include their summary
-counts, and recover the confirmation command. Add
+counts, and recover the confirmation command. Add `--confirmation-queue` to
+group blocked confirmations by surface, action, detail command, and reason so
+operators can see the pending confirmation work without scanning each advance
+record. Add
 `--commands-only --format shell` to print the deduplicated confirmation
 commands directly for shell review or execution. Use `runs
 session-control-plane-advance-loop <name> --server --max-steps 10` or

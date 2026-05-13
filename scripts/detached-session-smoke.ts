@@ -3624,6 +3624,52 @@ try {
   assert.ok(blockedMutatingControlPlaneAdvanceCommandLines.every((line) => line.includes("session-control-plane-alert-execute")));
   assert.ok(blockedMutatingControlPlaneAdvanceCommandLines.every((line) => line.includes("--confirm")));
   assert.ok(blockedMutatingControlPlaneAdvanceCommandLines.some((line) => line.includes(`--execution ${failedApplyActionExecutionId}`)));
+  const blockedMutatingControlPlaneAdvanceConfirmationQueue = await cliJson<{
+    ok: true;
+    session: string;
+    filter: { blocked: boolean | null; mutating: boolean | null };
+    confirmationQueue: {
+      summary: { advances: number; groups: number; commands: number };
+      groups: Array<{
+        surface: string | null;
+        action: string | null;
+        detailCommand: string | null;
+        reason: string | null;
+        count: number;
+        commandCount: number;
+        applyIds: string[];
+        executionIds: string[];
+        commands: Array<{ command: string[] }>;
+      }>;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--confirmation-queue",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(blockedMutatingControlPlaneAdvanceConfirmationQueue.ok, true);
+  assert.equal(blockedMutatingControlPlaneAdvanceConfirmationQueue.session, sessionName);
+  assert.equal(blockedMutatingControlPlaneAdvanceConfirmationQueue.filter.blocked, true);
+  assert.equal(blockedMutatingControlPlaneAdvanceConfirmationQueue.filter.mutating, true);
+  assert.ok(blockedMutatingControlPlaneAdvanceConfirmationQueue.confirmationQueue.summary.advances >= 1);
+  assert.ok(blockedMutatingControlPlaneAdvanceConfirmationQueue.confirmationQueue.summary.groups >= 1);
+  assert.ok(blockedMutatingControlPlaneAdvanceConfirmationQueue.confirmationQueue.summary.commands >= 1);
+  const applyActionConfirmationGroup = blockedMutatingControlPlaneAdvanceConfirmationQueue.confirmationQueue.groups.find((group) => (
+    group.surface === "apply_action"
+    && group.action === "execute_apply_action"
+    && group.detailCommand === "execute_apply_action"
+  ));
+  assert.ok(applyActionConfirmationGroup);
+  assert.equal(applyActionConfirmationGroup.reason, "mutating detail command requires confirm=true");
+  assert.ok(applyActionConfirmationGroup.count >= 1);
+  assert.ok(applyActionConfirmationGroup.commandCount >= 1);
+  assert.ok(applyActionConfirmationGroup.applyIds.includes("detached-session-api-backed-reset"));
+  assert.ok(applyActionConfirmationGroup.executionIds.includes(failedApplyActionExecutionId));
+  assert.ok(applyActionConfirmationGroup.commands.every((item) => item.command.includes("--confirm")));
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",
