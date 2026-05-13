@@ -3132,6 +3132,34 @@ try {
     && event.skippedRunIds?.includes(controlPlaneBlockedPlan.run.id)
     && event.skippedReasons?.includes("running_sandbox_present")
   )));
+  const failedApplyActionExecutionId = "detached-smoke-failed-apply-action";
+  await writeApplyActionExecution(sessionName, failedApplyActionExecutionId, {
+    status: "failed",
+    applyId: "detached-session-api-backed-reset",
+    source: "status",
+    action: "inspect_drain_continuation_resets",
+    command: [
+      "npm", "run", "cli", "--", "runs", "session-applies", sessionName, "--server", "--action-queue", "--execute-next",
+      "--apply-id", "detached-session-api-backed-reset", "--apply-action", "inspect_drain_continuation_resets",
+    ],
+    exitCode: 1,
+    stderr: "detached smoke failed apply action probe",
+  });
+  const failedDrainAlertContinuationId = "detached-smoke-alert-failed-drain";
+  await writeDrainContinuation(sessionName, failedDrainAlertContinuationId, {
+    status: "failed",
+    startedAt: new Date(Date.now() - 30_000).toISOString(),
+    completedAt: new Date().toISOString(),
+    error: "detached smoke failed drain alert probe",
+    continueDrains: { dryRun: false, selected: 1, succeeded: 0, failed: 1 },
+    drains: [{
+      prefix: "detached-smoke-alert-failed-drain",
+      nextApplyId: "detached-smoke-alert-failed-drain-002",
+      command: ["npm", "run", "cli", "--", "runs", "session-apply", sessionName, "--source", "watch"],
+      exitCode: 1,
+      stderr: "detached smoke failed drain alert probe",
+    }],
+  });
   const controlPlaneAlerts = await cliJson<{
     ok?: true;
     session: string;
@@ -3156,6 +3184,8 @@ try {
       reason: string;
       count: number;
       runId?: string;
+      applyId?: string;
+      executionId?: string;
       action?: string;
       command: string[];
     }>;
@@ -3189,7 +3219,19 @@ try {
   assert.equal(controlPlaneAlerts.filter.visibleAlerts, controlPlaneAlerts.alerts.length);
   assert.ok(controlPlaneAlerts.summary.total > 0);
   assert.equal(controlPlaneAlerts.summary.total, controlPlaneAlerts.alerts.length);
+  assert.ok(controlPlaneAlerts.summary.errors > 0);
   assert.ok(controlPlaneAlerts.summary.warnings > 0);
+  assert.ok(controlPlaneAlerts.alerts.some((alert) => (
+    alert.surface === "apply_action"
+    && alert.reason === "failed_apply_action_execution"
+    && alert.applyId === "detached-session-api-backed-reset"
+    && alert.executionId === failedApplyActionExecutionId
+  )));
+  assert.ok(controlPlaneAlerts.alerts.some((alert) => (
+    alert.surface === "drain_continuation"
+    && alert.reason === "failed_drain_continuations"
+    && alert.action === "inspect_failed_drain_continuations"
+  )));
   assert.ok(controlPlaneAlerts.alerts.some((alert) => (
     alert.surface === "branch"
     && alert.reason === "running_sandbox_present"
@@ -3245,14 +3287,14 @@ try {
     && alert.action === "inspect_run"
   )));
   assert.ok(filteredBranchAlerts.alerts.some((alert) => alert.runId === controlPlaneBlockedPlan.run.id));
-  const controlPlaneAlertPreview = await cliJson<{
+  type ControlPlaneAlertPreviewResponse = {
     ok?: true;
     session: string;
     filter: typeof controlPlaneAlerts.filter;
     matchCount: number;
     alert: typeof controlPlaneAlerts.alerts[number] | null;
     preview: { command: string[]; fullStatus: string[]; timelineFailures: string[] } | null;
-    details: {
+    details: ({
       kind: "run_resume_inspection";
       inspection: {
         run: { id: string; status: string; resultCommit: string | null; workerId: string | null };
@@ -3260,9 +3302,87 @@ try {
         links: { branchTreeUrl: string | null };
         nextStep: { action: string; reason: string; command: string[] };
       };
-    } | null;
+    } | {
+      kind: "apply_action_execution";
+      execution: {
+        executionId: string;
+        applyId: string;
+        action: string;
+        status: string;
+        exitCode: number | null;
+        stderr?: string;
+      };
+    } | {
+      kind: "drain_continuations";
+      status: "failed";
+      totalFailed: number;
+      continuations: Array<{ continuationId: string; status?: string; error?: string }>;
+      commands: { inspectFailed: string[]; resetFailed: string[] };
+    }) | null;
     recentTimeline: typeof controlPlaneAlerts.recentTimeline;
-  }>(baseUrl, [
+  };
+  const applyActionAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--severity",
+    "error",
+    "--surface",
+    "apply_action",
+    "--reason",
+    "failed_apply_action_execution",
+    "--apply",
+    "detached-session-api-backed-reset",
+    "--execution",
+    failedApplyActionExecutionId,
+    "--action",
+    "inspect_drain_continuation_resets",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(applyActionAlertPreview.alert?.surface, "apply_action");
+  assert.equal(applyActionAlertPreview.alert?.executionId, failedApplyActionExecutionId);
+  const applyActionAlertDetails = applyActionAlertPreview.details;
+  assert.equal(applyActionAlertDetails?.kind, "apply_action_execution");
+  if (!applyActionAlertDetails || applyActionAlertDetails.kind !== "apply_action_execution") {
+    throw new Error("expected apply action alert execution details");
+  }
+  assert.equal(applyActionAlertDetails.execution.executionId, failedApplyActionExecutionId);
+  assert.equal(applyActionAlertDetails.execution.status, "failed");
+  assert.equal(applyActionAlertDetails.execution.exitCode, 1);
+  const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--severity",
+    "error",
+    "--surface",
+    "drain_continuation",
+    "--reason",
+    "failed_drain_continuations",
+    "--action",
+    "inspect_failed_drain_continuations",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(drainContinuationAlertPreview.alert?.surface, "drain_continuation");
+  const drainContinuationAlertDetails = drainContinuationAlertPreview.details;
+  assert.equal(drainContinuationAlertDetails?.kind, "drain_continuations");
+  if (!drainContinuationAlertDetails || drainContinuationAlertDetails.kind !== "drain_continuations") {
+    throw new Error("expected drain continuation alert details");
+  }
+  assert.equal(drainContinuationAlertDetails.totalFailed, drainContinuationAlertPreview.alert?.count);
+  assert.ok(drainContinuationAlertDetails.continuations.some((continuation) => (
+    continuation.continuationId === failedDrainAlertContinuationId
+    && continuation.status === "failed"
+  )));
+  assert.equal(
+    drainContinuationAlertDetails.commands.resetFailed.join(" "),
+    `npm run cli -- runs session-drain-continuations ${sessionName} --reset-failed`,
+  );
+  const controlPlaneAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",
     sessionName,
@@ -3808,4 +3928,24 @@ async function writeDrainContinuation(
     ...overrides,
   }, null, 2)}\n`);
   return continuationPath;
+}
+
+async function writeApplyActionExecution(
+  session: string,
+  executionId: string,
+  overrides: Record<string, unknown>,
+): Promise<string> {
+  const executionDir = path.join(".threadbeat", "worker-sessions", "apply-action-executions", session);
+  const executionPath = path.join(executionDir, `${executionId}.json`);
+  const observedAt = new Date().toISOString();
+  await fs.mkdir(executionDir, { recursive: true });
+  await fs.writeFile(executionPath, `${JSON.stringify({
+    executionId,
+    session,
+    observedAt,
+    completedAt: observedAt,
+    filter: {},
+    ...overrides,
+  }, null, 2)}\n`);
+  return executionPath;
 }

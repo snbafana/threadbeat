@@ -3523,6 +3523,8 @@ const readRunResumeInspection = async (
 };
 
 type RunResumeInspection = NonNullable<Awaited<ReturnType<typeof readRunResumeInspection>>>;
+type ApplyActionExecutionRecord = Awaited<ReturnType<typeof listWorkerSessionApplyActionExecutionRecords>>[number];
+type DrainContinuationRecord = Awaited<ReturnType<typeof listWorkerSessionDrainContinuationRecords>>[number];
 
 type WorkerSessionControlPlaneAlert = {
   surface: "apply_action" | "drain_continuation" | "branch" | "stale_run" | "worker_recovery";
@@ -3535,6 +3537,64 @@ type WorkerSessionControlPlaneAlert = {
   applyId?: string;
   executionId?: string;
   action?: string;
+};
+
+type WorkerSessionControlPlaneAlertDetails =
+  | {
+    kind: "run_resume_inspection";
+    inspection: RunResumeInspection;
+  }
+  | {
+    kind: "apply_action_execution";
+    execution: ApplyActionExecutionRecord;
+  }
+  | {
+    kind: "drain_continuations";
+    status: "failed";
+    totalFailed: number;
+    continuations: DrainContinuationRecord[];
+    commands: {
+      inspectFailed: string[];
+      resetFailed: string[];
+    };
+  };
+
+const readWorkerSessionControlPlaneAlertDetails = async (
+  settings: Settings,
+  db: Database,
+  name: string,
+  alert: WorkerSessionControlPlaneAlert | null,
+): Promise<WorkerSessionControlPlaneAlertDetails | null> => {
+  if (!alert) return null;
+  if (alert.runId && (alert.surface === "branch" || alert.surface === "stale_run")) {
+    const inspection = await readRunResumeInspection(db, alert.runId);
+    return inspection ? { kind: "run_resume_inspection", inspection } : null;
+  }
+  if (alert.surface === "apply_action") {
+    const executions = await listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
+    const execution = executions.find((record) => (
+      (alert.executionId ? record.executionId === alert.executionId : true)
+      && (alert.applyId ? record.applyId === alert.applyId : true)
+      && (alert.action ? record.action === alert.action : true)
+      && record.status === "failed"
+    ));
+    return execution ? { kind: "apply_action_execution", execution } : null;
+  }
+  if (alert.surface === "drain_continuation") {
+    const continuations = await listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
+    const failed = continuations.filter((record) => record.status === "failed");
+    return {
+      kind: "drain_continuations",
+      status: "failed",
+      totalFailed: failed.length,
+      continuations: failed.slice(0, 5),
+      commands: {
+        inspectFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--status", "failed"],
+        resetFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--reset-failed"],
+      },
+    };
+  }
+  return null;
 };
 
 const readWorkerSessionControlPlaneAlerts = async (
@@ -3725,21 +3785,15 @@ const readWorkerSessionControlPlaneAlertPreview = async (
     fullStatus: string[];
     timelineFailures: string[];
   } | null;
-  details: {
-    kind: "run_resume_inspection";
-    inspection: RunResumeInspection;
-  } | null;
+  details: WorkerSessionControlPlaneAlertDetails | null;
   recentTimeline: Awaited<ReturnType<typeof readWorkerSessionControlPlaneAlerts>>["recentTimeline"];
 }> => {
   const alerts = await readWorkerSessionControlPlaneAlerts(settings, db, name, {
     ...options,
-    limit: 1,
+    limit: Math.max(options.lines, 20),
   });
   const alert = alerts.alerts[0] ?? null;
-  const runResumeInspection = alert?.runId
-    && (alert.surface === "branch" || alert.surface === "stale_run")
-    ? await readRunResumeInspection(db, alert.runId)
-    : null;
+  const details = await readWorkerSessionControlPlaneAlertDetails(settings, db, name, alert);
   return {
     ok: true,
     session: alerts.session,
@@ -3754,12 +3808,7 @@ const readWorkerSessionControlPlaneAlertPreview = async (
           timelineFailures: alerts.commands.timelineFailures,
         }
       : null,
-    details: runResumeInspection
-      ? {
-          kind: "run_resume_inspection",
-          inspection: runResumeInspection,
-        }
-      : null,
+    details,
     recentTimeline: alerts.recentTimeline,
   };
 };

@@ -6966,7 +6966,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
     fullStatus: string[];
     timelineFailures: string[];
   } | null;
-  details: {
+  details: ({
     kind: "run_resume_inspection";
     inspection: {
       run: { id: string; status: string; resultCommit: string | null; branchName: string; workerId: string | null };
@@ -6974,7 +6974,16 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
       links: { branchTreeUrl: string | null; resultCommitUrl: string | null };
       nextStep: { action: string; reason: string; command: string[] };
     };
-  } | null;
+  } | {
+    kind: "apply_action_execution";
+    execution: WorkerSessionApplyActionExecutionRecord;
+  } | {
+    kind: "drain_continuations";
+    status: "failed";
+    totalFailed: number;
+    continuations: WorkerSessionDrainContinuationRecord[];
+    commands: { inspectFailed: string[]; resetFailed: string[] };
+  }) | null;
   recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];
 };
 
