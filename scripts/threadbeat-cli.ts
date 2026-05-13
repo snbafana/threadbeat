@@ -3762,12 +3762,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       return;
     }
     if ((queueSource === "status" || queueSource === "branches") && branchActionFilter?.has("resume_branch") && !actionFilter && !applyActionFilter) {
-      await writeSessionApplyRecord({
+      const startedAt = existingApply?.startedAt ?? new Date().toISOString();
+      const initialRecord = {
         ...responseBase,
-        startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+        startedAt,
         updatedAt: new Date().toISOString(),
         executions: existingApply?.executions ?? [],
-      });
+      };
+      await writeSessionApplyRecord(initialRecord);
+      if (pendingCommands.length === 0) {
+        await printJson(initialRecord);
+        return;
+      }
       const resumeRunIds = pendingCommands.map((item) => required(item.runId, "resume_branch runId"));
       const resumePayload = {
         runIds: resumeRunIds,
@@ -3820,7 +3826,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       const allExecutions = [...(existingApply?.executions ?? []), ...executions];
       const record = {
         ...responseBase,
-        startedAt: existingApply?.startedAt ?? new Date().toISOString(),
+        startedAt,
         updatedAt: new Date().toISOString(),
         executions: allExecutions,
       };
