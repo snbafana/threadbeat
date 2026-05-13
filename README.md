@@ -760,7 +760,10 @@ preview the first matching alert, its command, and recent failure/noop timeline
 context in one read-only response; run-backed branch and stale-run alerts also
 include the run resume-inspection snapshot, while failed apply-action and
 failed drain-continuation alerts include their backing execution/continuation
-records. Use `runs session-control-plane-advance <name> --server`
+records plus exact inspect, retry, acknowledge, or selected-reset commands in
+the `details.commands` block. The singular `--commands-only --format shell`
+form prints those follow-up commands with duplicates removed. Use
+`runs session-control-plane-advance <name> --server`
 or `POST /api/worker-sessions/:name/control-plane-advance` to execute only the
 first priority next action from that status; add `--dry-run` to inspect the
 selected stale-run recovery, branch resume, apply action, drain continuation, or

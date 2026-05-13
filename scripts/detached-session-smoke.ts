@@ -3312,12 +3312,18 @@ try {
         exitCode: number | null;
         stderr?: string;
       };
+      commands: {
+        inspectApply: string[];
+        inspectApplyActionExecutions: string[];
+        executeAction: string[];
+        acknowledgeResetAudit?: string[];
+      };
     } | {
       kind: "drain_continuations";
       status: "failed";
       totalFailed: number;
       continuations: Array<{ continuationId: string; status?: string; error?: string }>;
-      commands: { inspectFailed: string[]; resetFailed: string[] };
+      commands: { inspectFailed: string[]; resetFailed: string[]; resetSelectedFailed: string[] | null };
     }) | null;
     recentTimeline: typeof controlPlaneAlerts.recentTimeline;
   };
@@ -3351,6 +3357,49 @@ try {
   assert.equal(applyActionAlertDetails.execution.executionId, failedApplyActionExecutionId);
   assert.equal(applyActionAlertDetails.execution.status, "failed");
   assert.equal(applyActionAlertDetails.execution.exitCode, 1);
+  assert.equal(
+    applyActionAlertDetails.commands.inspectApply.join(" "),
+    `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset`,
+  );
+  assert.equal(
+    applyActionAlertDetails.commands.executeAction.join(" "),
+    `npm run cli -- runs session-applies ${sessionName} --server --action-queue --execute-next --apply-id detached-session-api-backed-reset --apply-action inspect_drain_continuation_resets`,
+  );
+  assert.equal(
+    applyActionAlertDetails.commands.acknowledgeResetAudit?.join(" "),
+    `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset --ack-reset-audit`,
+  );
+  const applyActionAlertCommands = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--severity",
+    "error",
+    "--surface",
+    "apply_action",
+    "--reason",
+    "failed_apply_action_execution",
+    "--apply",
+    "detached-session-api-backed-reset",
+    "--execution",
+    failedApplyActionExecutionId,
+    "--action",
+    "inspect_drain_continuation_resets",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  const applyActionAlertCommandLines = applyActionAlertCommands.split("\n").filter(Boolean);
+  assert.ok(applyActionAlertCommandLines.includes(
+    `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset`,
+  ));
+  assert.ok(applyActionAlertCommandLines.includes(
+    `npm run cli -- runs session-applies ${sessionName} --server --action-queue --execute-next --apply-id detached-session-api-backed-reset --apply-action inspect_drain_continuation_resets`,
+  ));
+  assert.ok(applyActionAlertCommandLines.includes(
+    `npm run cli -- runs session-applies ${sessionName} --server --apply-id detached-session-api-backed-reset --ack-reset-audit`,
+  ));
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",
@@ -3382,6 +3431,39 @@ try {
     drainContinuationAlertDetails.commands.resetFailed.join(" "),
     `npm run cli -- runs session-drain-continuations ${sessionName} --reset-failed`,
   );
+  const drainContinuationResetSelectedFailed = drainContinuationAlertDetails.commands.resetSelectedFailed?.join(" ") ?? "";
+  assert.ok(drainContinuationResetSelectedFailed.startsWith(
+    `npm run cli -- runs session-drain-continuations ${sessionName} --reset-failed --continuation `,
+  ));
+  assert.ok(drainContinuationResetSelectedFailed.includes(failedDrainAlertContinuationId));
+  const drainContinuationAlertCommands = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--severity",
+    "error",
+    "--surface",
+    "drain_continuation",
+    "--reason",
+    "failed_drain_continuations",
+    "--action",
+    "inspect_failed_drain_continuations",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  const drainContinuationAlertCommandLines = drainContinuationAlertCommands.split("\n").filter(Boolean);
+  assert.ok(drainContinuationAlertCommandLines.includes(
+    `npm run cli -- runs session-drain-continuations ${sessionName} --status failed`,
+  ));
+  assert.ok(drainContinuationAlertCommandLines.includes(
+    `npm run cli -- runs session-drain-continuations ${sessionName} --reset-failed`,
+  ));
+  assert.ok(drainContinuationAlertCommandLines.some((line) => (
+    line.startsWith(`npm run cli -- runs session-drain-continuations ${sessionName} --reset-failed --continuation `)
+    && line.includes(failedDrainAlertContinuationId)
+  )));
   const controlPlaneAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

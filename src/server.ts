@@ -3547,6 +3547,12 @@ type WorkerSessionControlPlaneAlertDetails =
   | {
     kind: "apply_action_execution";
     execution: ApplyActionExecutionRecord;
+    commands: {
+      inspectApply: string[];
+      inspectApplyActionExecutions: string[];
+      executeAction: string[];
+      acknowledgeResetAudit?: string[];
+    };
   }
   | {
     kind: "drain_continuations";
@@ -3556,6 +3562,7 @@ type WorkerSessionControlPlaneAlertDetails =
     commands: {
       inspectFailed: string[];
       resetFailed: string[];
+      resetSelectedFailed: string[] | null;
     };
   };
 
@@ -3578,19 +3585,37 @@ const readWorkerSessionControlPlaneAlertDetails = async (
       && (alert.action ? record.action === alert.action : true)
       && record.status === "failed"
     ));
-    return execution ? { kind: "apply_action_execution", execution } : null;
+    return execution
+      ? {
+          kind: "apply_action_execution",
+          execution,
+          commands: {
+            inspectApply: ["npm", "run", "cli", "--", "runs", "session-applies", name, "--server", "--apply-id", execution.applyId],
+            inspectApplyActionExecutions: ["npm", "run", "cli", "--", "runs", "session-applies", name, "--server", "--action-executions", "--apply-id", execution.applyId],
+            executeAction: ["npm", "run", "cli", "--", "runs", "session-applies", name, "--server", "--action-queue", "--execute-next", "--apply-id", execution.applyId, "--apply-action", execution.action],
+            ...(execution.action === "inspect_drain_continuation_resets"
+              ? { acknowledgeResetAudit: ["npm", "run", "cli", "--", "runs", "session-applies", name, "--server", "--apply-id", execution.applyId, "--ack-reset-audit"] }
+              : {}),
+          },
+        }
+      : null;
   }
   if (alert.surface === "drain_continuation") {
     const continuations = await listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
     const failed = continuations.filter((record) => record.status === "failed");
+    const selectedFailed = failed.slice(0, 5);
+    const selectedFailedIds = selectedFailed.map((record) => record.continuationId);
     return {
       kind: "drain_continuations",
       status: "failed",
       totalFailed: failed.length,
-      continuations: failed.slice(0, 5),
+      continuations: selectedFailed,
       commands: {
         inspectFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--status", "failed"],
         resetFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--reset-failed"],
+        resetSelectedFailed: selectedFailedIds.length > 0
+          ? ["npm", "run", "cli", "--", "runs", "session-drain-continuations", name, "--reset-failed", "--continuation", selectedFailedIds.join(",")]
+          : null,
       },
     };
   }

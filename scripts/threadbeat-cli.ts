@@ -4604,21 +4604,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       },
     );
     if (options["commands-only"] === "1") {
-      const commands = alert.alert
-        ? [{
-            scope: "control_plane_alert",
-            surface: alert.alert.surface,
-            severity: alert.alert.severity,
-            reason: alert.alert.reason,
-            count: alert.alert.count,
-            runId: alert.alert.runId,
-            workerId: alert.alert.workerId,
-            applyId: alert.alert.applyId,
-            executionId: alert.alert.executionId,
-            action: alert.alert.action,
-            command: alert.alert.command,
-          }]
-        : [];
+      const commands = workerSessionControlPlaneAlertPreviewCommands(alert);
       if (outputFormat === "shell") {
         printCommandQueueShell(commands);
       } else {
@@ -6977,12 +6963,18 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
   } | {
     kind: "apply_action_execution";
     execution: WorkerSessionApplyActionExecutionRecord;
+    commands: {
+      inspectApply: string[];
+      inspectApplyActionExecutions: string[];
+      executeAction: string[];
+      acknowledgeResetAudit?: string[];
+    };
   } | {
     kind: "drain_continuations";
     status: "failed";
     totalFailed: number;
     continuations: WorkerSessionDrainContinuationRecord[];
-    commands: { inspectFailed: string[]; resetFailed: string[] };
+    commands: { inspectFailed: string[]; resetFailed: string[]; resetSelectedFailed: string[] | null };
   }) | null;
   recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];
 };
@@ -7454,6 +7446,64 @@ async function fetchWorkerSessionControlPlaneAlertPreview(
       params,
     ),
   ) as WorkerSessionControlPlaneAlertPreviewResponse;
+}
+
+function workerSessionControlPlaneAlertPreviewCommands(
+  preview: WorkerSessionControlPlaneAlertPreviewResponse,
+): Array<{
+  scope: "control_plane_alert";
+  surface: string;
+  severity: string;
+  reason: string;
+  count: number;
+  runId?: string;
+  workerId?: string;
+  applyId?: string;
+  executionId?: string;
+  action?: string;
+  command: string[];
+}> {
+  if (!preview.alert) return [];
+  const base = {
+    scope: "control_plane_alert" as const,
+    surface: preview.alert.surface,
+    severity: preview.alert.severity,
+    reason: preview.alert.reason,
+    count: preview.alert.count,
+    runId: preview.alert.runId,
+    workerId: preview.alert.workerId,
+    applyId: preview.alert.applyId,
+    executionId: preview.alert.executionId,
+  };
+  const commands = [
+    { ...base, action: preview.alert.action, command: preview.alert.command },
+  ];
+  if (preview.details?.kind === "apply_action_execution") {
+    commands.push(
+      { ...base, action: "inspect_apply", command: preview.details.commands.inspectApply },
+      { ...base, action: "inspect_apply_action_executions", command: preview.details.commands.inspectApplyActionExecutions },
+      { ...base, action: "execute_apply_action", command: preview.details.commands.executeAction },
+    );
+    if (preview.details.commands.acknowledgeResetAudit) {
+      commands.push({ ...base, action: "acknowledge_reset_audit", command: preview.details.commands.acknowledgeResetAudit });
+    }
+  }
+  if (preview.details?.kind === "drain_continuations") {
+    commands.push(
+      { ...base, action: "inspect_failed_drain_continuations", command: preview.details.commands.inspectFailed },
+      { ...base, action: "reset_failed_drain_continuations", command: preview.details.commands.resetFailed },
+    );
+    if (preview.details.commands.resetSelectedFailed) {
+      commands.push({ ...base, action: "reset_selected_failed_drain_continuations", command: preview.details.commands.resetSelectedFailed });
+    }
+  }
+  const seen = new Set<string>();
+  return commands.filter((entry) => {
+    const key = commandKey(entry.command);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function selectWorkerSessionControlPlaneNextActions(
