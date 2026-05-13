@@ -2188,6 +2188,18 @@ try {
   assert.equal(stoppedControlPlaneAdvanceWorkers.workers[0]?.lifecycle.state, "stopped");
   assert.equal(stoppedControlPlaneAdvanceWorkers.workers[0]?.lifecycle.restartable, true);
   assert.equal(stoppedControlPlaneAdvanceWorkers.workers[0]?.lifecycle.reason, "stopped_control_plane_advance_worker");
+  const persistedStoppedControlPlaneAdvanceWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "control-plane-advance-workers",
+    sessionName,
+    "detached-smoke-control-plane-advance-worker.json",
+  ), "utf8")) as Record<string, unknown>;
+  assert.equal(typeof persistedStoppedControlPlaneAdvanceWorker.stoppedAt, "string");
+  assert.equal("alive" in persistedStoppedControlPlaneAdvanceWorker, false);
+  assert.equal("lifecycle" in persistedStoppedControlPlaneAdvanceWorker, false);
+  assert.equal("stdout" in persistedStoppedControlPlaneAdvanceWorker, false);
+  assert.equal("stderr" in persistedStoppedControlPlaneAdvanceWorker, false);
   const controlPlaneAdvanceWorkerNext = await cliJson<{
     ok?: true;
     session: string;
@@ -2257,6 +2269,10 @@ try {
     "detached-smoke-control-plane-advance-worker.json",
   ), "utf8")) as { stdoutStartOffset?: number };
   assert.ok((persistedRestartedControlPlaneAdvanceWorker.stdoutStartOffset ?? 0) > 0);
+  assert.equal("alive" in persistedRestartedControlPlaneAdvanceWorker, false);
+  assert.equal("lifecycle" in persistedRestartedControlPlaneAdvanceWorker, false);
+  assert.equal("stdout" in persistedRestartedControlPlaneAdvanceWorker, false);
+  assert.equal("stderr" in persistedRestartedControlPlaneAdvanceWorker, false);
   const retiredControlPlaneAdvanceWorkers = await cliJson<typeof stoppedControlPlaneAdvanceWorkers>(baseUrl, [
     "runs",
     "stop-control-plane-advance-workers",

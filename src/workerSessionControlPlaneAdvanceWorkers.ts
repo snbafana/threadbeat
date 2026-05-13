@@ -461,7 +461,31 @@ async function readControlPlaneAdvanceWorker(projectRoot: string, sessionName: s
 }
 
 async function writeControlPlaneAdvanceWorker(projectRoot: string, worker: ControlPlaneAdvanceWorker): Promise<void> {
-  await fs.writeFile(controlPlaneAdvanceWorkerPath(projectRoot, worker.session, worker.workerId), `${JSON.stringify(worker, null, 2)}\n`);
+  await fs.writeFile(controlPlaneAdvanceWorkerPath(projectRoot, worker.session, worker.workerId), `${JSON.stringify(toStoredControlPlaneAdvanceWorker(worker), null, 2)}\n`);
+}
+
+function toStoredControlPlaneAdvanceWorker(worker: ControlPlaneAdvanceWorker): ControlPlaneAdvanceWorker {
+  return {
+    session: worker.session,
+    workerId: worker.workerId,
+    mode: worker.mode,
+    baseUrl: worker.baseUrl,
+    startedAt: worker.startedAt,
+    command: worker.command,
+    pid: worker.pid,
+    stdoutPath: worker.stdoutPath,
+    stderrPath: worker.stderrPath,
+    ...(worker.stdoutStartOffset !== undefined ? { stdoutStartOffset: worker.stdoutStartOffset } : {}),
+    ...(worker.stoppedAt !== undefined ? { stoppedAt: worker.stoppedAt } : {}),
+    ...(worker.stopResult !== undefined ? { stopResult: worker.stopResult } : {}),
+    ...(worker.retiredAt !== undefined ? { retiredAt: worker.retiredAt } : {}),
+    ...(worker.restartedAt !== undefined ? { restartedAt: worker.restartedAt } : {}),
+    ...(worker.restartCount !== undefined ? { restartCount: worker.restartCount } : {}),
+    ...(worker.previousPid !== undefined ? { previousPid: worker.previousPid } : {}),
+    ...(worker.completedAt !== undefined ? { completedAt: worker.completedAt } : {}),
+    ...(worker.completionResult !== undefined ? { completionResult: worker.completionResult } : {}),
+    ...(worker.latestResult !== undefined ? { latestResult: worker.latestResult } : {}),
+  };
 }
 
 async function stopProcessGroup(pid: number | null): Promise<StopProcessGroupResult> {
