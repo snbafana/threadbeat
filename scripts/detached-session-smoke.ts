@@ -1738,6 +1738,22 @@ try {
           advance_loop: { total: number; stopped: number; retired: number; completed: number };
           confirmation_drain: { total: number; stopped: number; retired: number; completed: number };
         };
+        latestResults: Array<{
+          workerId: string;
+          mode: "advance_loop" | "confirmation_drain";
+          lifecycle: { state: string; restartable: boolean; reason: string };
+          latestResult: {
+            dryRun?: boolean;
+            untilEmpty?: boolean;
+            stoppedReason?: string;
+            maxSteps?: number;
+            intervalMs?: number;
+            maxConfirmations?: number;
+            executedSteps?: number;
+            attemptedConfirmations?: number;
+            cycles?: number;
+          };
+        }>;
       };
       controlPlaneTick: { total: number; stopped: number; retired: number; completed: number };
     };
@@ -1849,6 +1865,7 @@ try {
   assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.completed, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.modes.advance_loop.total, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneAdvance.modes.confirmation_drain.total, 0);
+  assert.deepEqual(controlPlaneStatus.workers.controlPlaneAdvance.latestResults, []);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.total, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.stopped, 0);
   assert.equal(controlPlaneStatus.workers.controlPlaneTick.retired, 0);
@@ -3959,6 +3976,18 @@ try {
   assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.modes.advance_loop.retired, 1);
   assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.modes.confirmation_drain.total, 1);
   assert.equal(controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.modes.confirmation_drain.completed, 1);
+  const confirmationDrainLatestResult = controlPlaneStatusAfterConfirmationDrainWorker.workers.controlPlaneAdvance.latestResults.find((worker) => (
+    worker.workerId === "detached-smoke-confirmation-drain-worker"
+  ));
+  assert.equal(confirmationDrainLatestResult?.mode, "confirmation_drain");
+  assert.equal(confirmationDrainLatestResult?.lifecycle.state, "completed");
+  assert.equal(confirmationDrainLatestResult?.latestResult.dryRun, true);
+  assert.equal(confirmationDrainLatestResult?.latestResult.untilEmpty, true);
+  assert.equal(confirmationDrainLatestResult?.latestResult.stoppedReason, "dry_run");
+  assert.equal(confirmationDrainLatestResult?.latestResult.maxConfirmations, 1);
+  assert.equal(confirmationDrainLatestResult?.latestResult.executedSteps, 1);
+  assert.equal(confirmationDrainLatestResult?.latestResult.attemptedConfirmations, 1);
+  assert.equal(confirmationDrainLatestResult?.latestResult.cycles, 1);
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

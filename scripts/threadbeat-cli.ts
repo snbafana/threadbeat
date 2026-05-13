@@ -7183,6 +7183,28 @@ type WorkerSessionControlPlaneStatusResponse = {
         advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
       };
+      latestResults: Array<{
+        workerId: string;
+        mode: "advance_loop" | "confirmation_drain";
+        lifecycle: { state: string; restartable: boolean; reason: string };
+        latestResult: {
+          ok?: boolean;
+          session?: string;
+          dryRun?: boolean;
+          untilEmpty?: boolean;
+          stoppedReason?: string;
+          maxSteps?: number;
+          intervalMs?: number;
+          maxConfirmations?: number;
+          executedSteps?: number;
+          attemptedConfirmations?: number;
+          availableConfirmations?: number;
+          cycles?: number;
+          results?: number;
+          sourceAdvanceId?: string;
+          detailCommand?: string;
+        };
+      }>;
     };
     controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };

@@ -53,6 +53,8 @@ import {
   stopWorkerSessionControlPlaneTickWorkers,
 } from "./workerSessionControlPlaneTickWorkers.js";
 import {
+  type ControlPlaneAdvanceWorkerLatestResult,
+  type ControlPlaneAdvanceWorkerLifecycle,
   listWorkerSessionControlPlaneAdvanceWorkerNextSteps,
   listWorkerSessionControlPlaneAdvanceWorkers,
   restartWorkerSessionControlPlaneAdvanceWorker,
@@ -3393,6 +3395,12 @@ const readWorkerSessionControlPlaneStatus = async (
         advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
       };
+      latestResults: Array<{
+        workerId: string;
+        mode: "advance_loop" | "confirmation_drain";
+        lifecycle: ControlPlaneAdvanceWorkerLifecycle;
+        latestResult: ControlPlaneAdvanceWorkerLatestResult;
+      }>;
     };
     controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
@@ -4681,7 +4689,7 @@ const summarizeControlPlaneCompletedWorkers = <T extends { alive: boolean; retir
   completed: workers.filter((worker) => !worker.alive && Boolean(worker.completedAt) && !worker.stoppedAt && !worker.retiredAt).length,
 });
 
-const summarizeControlPlaneAdvanceWorkers = <T extends { alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string; mode?: "advance_loop" | "confirmation_drain" }>(workers: T[]): {
+const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string; mode?: "advance_loop" | "confirmation_drain"; lifecycle: ControlPlaneAdvanceWorkerLifecycle; latestResult: ControlPlaneAdvanceWorkerLatestResult | null }>(workers: T[]): {
   total: number;
   alive: number;
   stopped: number;
@@ -4691,12 +4699,26 @@ const summarizeControlPlaneAdvanceWorkers = <T extends { alive: boolean; retired
     advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
     confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
+  latestResults: Array<{
+    workerId: string;
+    mode: "advance_loop" | "confirmation_drain";
+    lifecycle: ControlPlaneAdvanceWorkerLifecycle;
+    latestResult: ControlPlaneAdvanceWorkerLatestResult;
+  }>;
 } => ({
   ...summarizeControlPlaneCompletedWorkers(workers),
   modes: {
     advance_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => (worker.mode ?? "advance_loop") === "advance_loop")),
     confirmation_drain: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "confirmation_drain")),
   },
+  latestResults: workers.flatMap((worker) => worker.latestResult
+    ? [{
+        workerId: worker.workerId,
+        mode: worker.mode ?? "advance_loop",
+        lifecycle: worker.lifecycle,
+        latestResult: worker.latestResult,
+      }]
+    : []),
 });
 
 const summarizeControlPlaneTickWorkers = summarizeControlPlaneCompletedWorkers;
