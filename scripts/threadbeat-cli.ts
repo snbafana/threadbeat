@@ -6779,6 +6779,12 @@ async function fetchWorkerSessionControlPlaneStatus(
       failed: number;
       pending: number;
     };
+    applyActionNextSteps: {
+      count: number;
+      nextSteps: Array<WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number] & {
+        executeCommand: string[];
+      }>;
+    };
     applyActionExecutions: {
       counts: { recent: number; executed: number; failed: number };
       recent: WorkerSessionApplyActionExecutionRecord[];
@@ -6838,6 +6844,12 @@ async function fetchWorkerSessionControlPlaneStatus(
         waiting: number;
         failed: number;
         pending: number;
+      };
+      applyActionNextSteps: {
+        count: number;
+        nextSteps: Array<WorkerSessionApplyActionsResponse["actionQueue"]["actions"][number] & {
+          executeCommand: string[];
+        }>;
       };
       applyActionExecutions: {
         counts: { recent: number; executed: number; failed: number };

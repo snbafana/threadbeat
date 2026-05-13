@@ -2752,6 +2752,7 @@ const readWorkerSessionControlPlaneStatus = async (
   };
   queues: {
     applyActions: ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["counts"];
+    applyActionNextSteps: ReturnType<typeof summarizeControlPlaneApplyActionNextSteps>;
     applyActionExecutions: {
       recent: Awaited<ReturnType<typeof listWorkerSessionApplyActionExecutionRecords>>;
       counts: ReturnType<typeof summarizeApplyActionExecutionStatuses>;
@@ -2812,6 +2813,7 @@ const readWorkerSessionControlPlaneStatus = async (
     },
     queues: {
       applyActions: applyActionQueue.counts,
+      applyActionNextSteps: summarizeControlPlaneApplyActionNextSteps(name, applyActionQueue.actions, lines),
       applyActionExecutions: {
         recent: applyActionExecutions,
         counts: summarizeApplyActionExecutionStatuses(applyActionExecutions),
@@ -3207,6 +3209,38 @@ const summarizeApplyActionExecutionStatuses = <T extends { status: string }>(rec
   recent: records.length,
   executed: records.filter((record) => record.status === "executed").length,
   failed: records.filter((record) => record.status === "failed").length,
+});
+
+const summarizeControlPlaneApplyActionNextSteps = (
+  sessionName: string,
+  actions: ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["actions"],
+  limit: number,
+): {
+  count: number;
+  nextSteps: Array<ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["actions"][number] & {
+    executeCommand: string[];
+  }>;
+} => ({
+  count: actions.length,
+  nextSteps: actions.slice(0, limit).map((action) => ({
+    ...action,
+    executeCommand: [
+      "npm",
+      "run",
+      "cli",
+      "--",
+      "runs",
+      "session-applies",
+      sessionName,
+      "--server",
+      "--action-queue",
+      "--execute-next",
+      "--apply-id",
+      action.applyId,
+      "--apply-action",
+      action.action,
+    ],
+  })),
 });
 
 const summarizeWorkerSessionBranchRecovery = async (

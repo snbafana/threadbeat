@@ -752,9 +752,11 @@ commands. Non-dry-run branch recovery writes durable records under
 them with `runs session-branch-recovery-executions <name> --server` or
 `GET /api/worker-sessions/:name/branch-recovery-executions`. The aggregate
 control-plane status also embeds recent branch-recovery executions and status
-counts plus recent apply-action execution counts and records, so operators can
-see recent resume, retry, reset-audit, and continuation attempts next to the
-current branch and apply queues. Bounded resume calls prioritize ready stopped
+counts plus recent apply-action execution counts and records. It also includes
+bounded `applyActionNextSteps` entries with exact server-backed execute commands
+for queued retry, resume, and reset-audit apply actions, so operators can see
+what will run next alongside the current branch and apply queues. Bounded resume
+calls prioritize ready stopped
 branches before applying their limit, so `runs resume-session <name> --next`
 does not get stuck on a blocked branch while a resumable branch is waiting
 behind it. Use `runs

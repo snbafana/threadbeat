@@ -1542,6 +1542,19 @@ try {
     };
     queues: {
       applyActions: { actionable: number; resetAudits: number };
+      applyActionNextSteps: {
+        count: number;
+        nextSteps: Array<{
+          applyId: string;
+          source: string;
+          action: string;
+          selected: number;
+          failed: number;
+          pending: number;
+          command: string[];
+          executeCommand: string[];
+        }>;
+      };
       applyActionExecutions: {
         counts: { recent: number; executed: number; failed: number };
         recent: Array<{ executionId: string; applyId: string; action: string; status: string; exitCode: number | null }>;
@@ -1596,6 +1609,13 @@ try {
     && execution.action === "inspect_drain_continuation_resets"
     && execution.status === "executed"
     && execution.exitCode === 0
+  )));
+  assert.equal(controlPlaneStatus.queues.applyActionNextSteps.count, controlPlaneStatus.queues.applyActions.actionable);
+  assert.ok(controlPlaneStatus.queues.applyActionNextSteps.nextSteps.length <= 20);
+  assert.ok(controlPlaneStatus.queues.applyActionNextSteps.nextSteps.some((step) => (
+    step.applyId === "detached-session-api-backed-reset"
+    && step.action === "inspect_drain_continuation_resets"
+    && step.executeCommand.join(" ") === `npm run cli -- runs session-applies ${sessionName} --server --action-queue --execute-next --apply-id detached-session-api-backed-reset --apply-action inspect_drain_continuation_resets`
   )));
   assert.ok(controlPlaneStatus.branches.counts.total >= 1);
   assert.ok(controlPlaneStatus.branches.counts.ready >= 1);
