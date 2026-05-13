@@ -794,8 +794,11 @@ commands directly for shell review or execution. Use
 confirmation through the server API, or `--execute-next-confirmation --confirm`
 to run the first blocked confirmation from the selected page. Use
 `--drain-confirmations --confirm --max-confirmations <n>` to execute a bounded
-set of unique stored confirmations from the selected page. Add `--dry-run` to
-verify selection without running the mutating command. Use `runs
+set of unique stored confirmations from the selected page. Add
+`--until-empty --max-steps <n> --interval-ms <ms>` to keep polling and draining
+confirmation batches until none remain, a command fails, or the step bound is
+hit. Add `--dry-run` to verify selection without running the mutating command.
+Use `runs
 session-control-plane-advance-loop <name> --server --max-steps 10` or
 `POST /api/worker-sessions/:name/control-plane-advance-loop` to repeat those
 single-step advances until the session is empty, an action fails, a dry-run
@@ -812,7 +815,9 @@ advance worker can also run a bounded confirmation drain instead of the
 advance loop: `runs start-control-plane-advance-worker <name> --server
 --drain-confirmations --confirm --max-confirmations <n>` records and supervises
 that mutating confirmation drain with the same worker lifecycle and log
-inspection commands. `runs session-control-plane-status <name> --server`
+inspection commands; add `--until-empty` to make the detached confirmation
+worker poll across batches with the worker's `--max-steps` and `--interval-ms`
+settings. `runs session-control-plane-status <name> --server`
 keeps the aggregate `workers.controlPlaneAdvance` totals and also breaks them
 out by `advance_loop` and `confirmation_drain` mode. The
 aggregate status includes `workers.controlPlaneAdvance` and advance-worker

@@ -3799,6 +3799,50 @@ try {
   assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.confirmed, true);
   assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.reason, null);
   assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.confirmationCommand, null);
+  const drainedBlockedConfirmationsUntilEmptyDryRun = await cliJson<{
+    ok: true;
+    session: string;
+    dryRun: boolean;
+    untilEmpty: boolean;
+    maxSteps: number;
+    intervalMs: number;
+    maxConfirmations: number;
+    executedSteps: number;
+    stoppedReason: "empty" | "dry_run" | "failed" | "max_steps";
+    attemptedConfirmations: number;
+    cycles: Array<{
+      stoppedReason: "empty" | "drained" | "failed" | "max_confirmations";
+      attemptedConfirmations: number;
+      results: Array<{ sourceAdvanceId: string; dryRun: boolean }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--drain-confirmations",
+    "--max-confirmations",
+    "1",
+    "--confirm",
+    "--until-empty",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "0",
+    "--dry-run",
+  ]);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.ok, true);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.session, sessionName);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.dryRun, true);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.untilEmpty, true);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.maxSteps, 2);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.intervalMs, 0);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.maxConfirmations, 1);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.executedSteps, 1);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.stoppedReason, "dry_run");
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.attemptedConfirmations, 1);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.cycles[0]?.results[0]?.sourceAdvanceId, blockedMutatingControlPlaneAdvances.advances[0]?.advanceId);
+  assert.equal(drainedBlockedConfirmationsUntilEmptyDryRun.cycles[0]?.results[0]?.dryRun, true);
   const confirmationDrainWorker = await cliJson<{
     ok?: true;
     session: string;
@@ -3821,6 +3865,11 @@ try {
     "--confirm",
     "--max-confirmations",
     "1",
+    "--until-empty",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "0",
     "--dry-run",
   ]);
   assert.equal(confirmationDrainWorker.ok, true);
@@ -3829,7 +3878,7 @@ try {
   assert.equal(confirmationDrainWorker.worker.mode, "confirmation_drain");
   assert.equal(
     confirmationDrainWorker.worker.command.join(" "),
-    `runs session-control-plane-advances ${sessionName} --server --drain-confirmations --confirm --max-confirmations 1 --dry-run`,
+    `runs session-control-plane-advances ${sessionName} --server --drain-confirmations --confirm --max-confirmations 1 --until-empty --max-steps 2 --interval-ms 0 --dry-run`,
   );
   assert.match(confirmationDrainWorker.worker.stdoutPath, /control-plane-advance-workers/);
   assert.match(confirmationDrainWorker.worker.stderrPath, /control-plane-advance-workers/);

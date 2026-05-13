@@ -76,6 +76,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     drainConfirmations?: boolean;
     confirm?: boolean;
     maxConfirmations?: number;
+    untilEmpty?: boolean;
   },
 ): Promise<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle }> {
   assertSafeWorkerSessionName(sessionName);
@@ -516,6 +517,7 @@ function buildControlPlaneAdvanceWorkerCommand(
     intervalMs: number;
     lines: number;
     maxConfirmations?: number;
+    untilEmpty?: boolean;
   },
 ): string[] {
   if (mode === "confirmation_drain") {
@@ -528,6 +530,13 @@ function buildControlPlaneAdvanceWorkerCommand(
       "--confirm",
       "--max-confirmations",
       String(options.maxConfirmations ?? 3),
+      ...(options.untilEmpty ? [
+        "--until-empty",
+        "--max-steps",
+        String(options.maxSteps),
+        "--interval-ms",
+        String(options.intervalMs),
+      ] : []),
       ...(options.dryRun ? ["--dry-run"] : []),
     ];
   }

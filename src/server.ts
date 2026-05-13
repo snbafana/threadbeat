@@ -705,6 +705,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           drainConfirmations: parseBoolean(body.drainConfirmations, false),
           confirm: parseBoolean(body.confirm, false),
           maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
+          untilEmpty: parseBoolean(body.untilEmpty, false),
         },
       );
       return { ok: true, session: name, worker };
@@ -777,6 +778,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           drainConfirmations,
           confirm: parseBoolean(body.confirm, false),
           maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
+          untilEmpty: parseBoolean(body.untilEmpty, false),
         },
       );
       return {

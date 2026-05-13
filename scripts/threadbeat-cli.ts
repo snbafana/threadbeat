@@ -4758,38 +4758,96 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (drainConfirmations) {
       const maxConfirmations = parsePositiveInteger(options["max-confirmations"] ?? "3", "--max-confirmations");
-      const commands = workerSessionControlPlaneAdvanceConfirmationCommands(advances.advances);
-      const selectedCommands = commands.slice(0, maxConfirmations);
-      const results: Array<WorkerSessionControlPlaneAlertExecuteResponse & { sourceAdvanceId: string }> = [];
-      let stoppedReason: "empty" | "drained" | "failed" | "max_confirmations" = selectedCommands.length === 0 ? "empty" : "drained";
-      for (const command of selectedCommands) {
-        const advance = workerSessionControlPlaneAdvanceById(advances.advances, command.advanceId);
-        const response = await executeWorkerSessionControlPlaneAlert(
-          requiredSessionName,
-          workerSessionControlPlaneAdvanceConfirmationExecuteOptions(requiredSessionName, advance, {
-            dryRun: options["dry-run"] === "1",
-          }),
-        );
-        results.push({ ...response, sourceAdvanceId: advance.advanceId });
-        if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
-          process.exitCode = 1;
-          stoppedReason = "failed";
-          break;
+      const drainPage = async (page: WorkerSessionControlPlaneAdvancesResponse): Promise<{
+        ok: true;
+        session: string;
+        dryRun: boolean;
+        maxConfirmations: number;
+        availableConfirmations: number;
+        attemptedConfirmations: number;
+        stoppedReason: "empty" | "drained" | "failed" | "max_confirmations";
+        results: Array<WorkerSessionControlPlaneAlertExecuteResponse & { sourceAdvanceId: string }>;
+      }> => {
+        const commands = workerSessionControlPlaneAdvanceConfirmationCommands(page.advances);
+        const selectedCommands = commands.slice(0, maxConfirmations);
+        const results: Array<WorkerSessionControlPlaneAlertExecuteResponse & { sourceAdvanceId: string }> = [];
+        let stoppedReason: "empty" | "drained" | "failed" | "max_confirmations" = selectedCommands.length === 0 ? "empty" : "drained";
+        for (const command of selectedCommands) {
+          const advance = workerSessionControlPlaneAdvanceById(page.advances, command.advanceId);
+          const response = await executeWorkerSessionControlPlaneAlert(
+            requiredSessionName,
+            workerSessionControlPlaneAdvanceConfirmationExecuteOptions(requiredSessionName, advance, {
+              dryRun: options["dry-run"] === "1",
+            }),
+          );
+          results.push({ ...response, sourceAdvanceId: advance.advanceId });
+          if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+            process.exitCode = 1;
+            stoppedReason = "failed";
+            break;
+          }
         }
+        if (stoppedReason === "drained" && commands.length > selectedCommands.length) {
+          stoppedReason = "max_confirmations";
+        }
+        return {
+          ok: true,
+          session: requiredSessionName,
+          dryRun: options["dry-run"] === "1",
+          maxConfirmations,
+          availableConfirmations: commands.length,
+          attemptedConfirmations: results.length,
+          stoppedReason,
+          results,
+        };
+      };
+      if (options["until-empty"] === "1") {
+        const maxSteps = parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps");
+        const intervalMs = parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+        const cycles: Array<Awaited<ReturnType<typeof drainPage>>> = [];
+        let stoppedReason: "empty" | "dry_run" | "failed" | "max_steps" = "max_steps";
+        let page = advances;
+        for (let stepIndex = 0; stepIndex < maxSteps; stepIndex += 1) {
+          const cycle = await drainPage(page);
+          cycles.push(cycle);
+          if (cycle.stoppedReason === "empty") {
+            stoppedReason = "empty";
+            break;
+          }
+          if (cycle.stoppedReason === "failed") {
+            stoppedReason = "failed";
+            break;
+          }
+          if (options["dry-run"] === "1") {
+            stoppedReason = "dry_run";
+            break;
+          }
+          if (stepIndex + 1 < maxSteps) {
+            await new Promise((resolve) => setTimeout(resolve, intervalMs));
+            page = await fetchWorkerSessionControlPlaneAdvances(requiredSessionName, {
+              limit,
+              blocked: true,
+              mutating: true,
+            });
+          }
+        }
+        await printJson({
+          ok: true,
+          session: requiredSessionName,
+          dryRun: options["dry-run"] === "1",
+          untilEmpty: true,
+          maxSteps,
+          intervalMs,
+          maxConfirmations,
+          executedSteps: cycles.length,
+          stoppedReason,
+          availableConfirmations: cycles.at(-1)?.availableConfirmations ?? 0,
+          attemptedConfirmations: cycles.reduce((total, cycle) => total + cycle.attemptedConfirmations, 0),
+          cycles,
+        });
+        return;
       }
-      if (stoppedReason === "drained" && commands.length > selectedCommands.length) {
-        stoppedReason = "max_confirmations";
-      }
-      await printJson({
-        ok: true,
-        session: requiredSessionName,
-        dryRun: options["dry-run"] === "1",
-        maxConfirmations,
-        availableConfirmations: commands.length,
-        attemptedConfirmations: results.length,
-        stoppedReason,
-        results,
-      });
+      await printJson(await drainPage(advances));
       return;
     }
     if (options["commands-only"] === "1") {
@@ -4830,6 +4888,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         drainConfirmations: options["drain-confirmations"] === "1",
         confirm: options.confirm === "1",
         maxConfirmations: parsePositiveInteger(options["max-confirmations"] ?? "3", "--max-confirmations"),
+        untilEmpty: options["until-empty"] === "1",
       },
     ));
     return;
@@ -4851,6 +4910,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         drainConfirmations: options["drain-confirmations"] === "1",
         confirm: options.confirm === "1",
         maxConfirmations: parsePositiveInteger(options["max-confirmations"] ?? "3", "--max-confirmations"),
+        untilEmpty: options["until-empty"] === "1",
       },
     ));
     return;
@@ -8099,7 +8159,7 @@ async function fetchWorkerSessionControlPlaneAdvances(
 
 async function startWorkerSessionControlPlaneAdvanceWorker(
   sessionName: string,
-  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number },
+  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number; untilEmpty?: boolean },
 ): Promise<{
   ok: true;
   session: string;
@@ -8117,13 +8177,14 @@ async function startWorkerSessionControlPlaneAdvanceWorker(
       drainConfirmations: options.drainConfirmations ?? false,
       confirm: options.confirm ?? false,
       maxConfirmations: options.maxConfirmations ?? 3,
+      untilEmpty: options.untilEmpty ?? false,
     },
   ) as { ok: true; session: string; worker: unknown };
 }
 
 async function ensureWorkerSessionControlPlaneAdvanceWorker(
   sessionName: string,
-  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number },
+  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number; untilEmpty?: boolean },
 ): Promise<{
   ok: true;
   session: string;
@@ -8144,6 +8205,7 @@ async function ensureWorkerSessionControlPlaneAdvanceWorker(
       drainConfirmations: options.drainConfirmations ?? false,
       confirm: options.confirm ?? false,
       maxConfirmations: options.maxConfirmations ?? 3,
+      untilEmpty: options.untilEmpty ?? false,
     },
   ) as {
     ok: true;
@@ -11931,9 +11993,9 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
-  runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3]
-  runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3]
+  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
+  runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
+  runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server
   runs restart-control-plane-advance-workers <name> --server --worker-id id [--include-retired] [--lines 20]
