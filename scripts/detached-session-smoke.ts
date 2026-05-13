@@ -3705,6 +3705,38 @@ try {
   assert.equal(executedBlockedConfirmationDryRun.executionSafety.confirmed, true);
   assert.equal(executedBlockedConfirmationDryRun.executionSafety.reason, null);
   assert.equal(executedBlockedConfirmationDryRun.executionSafety.confirmationCommand, null);
+  const executedNextBlockedConfirmationDryRun = await cliJson<{
+    ok: true;
+    session: string;
+    sourceAdvanceId: string;
+    dryRun: boolean;
+    detailCommand: string;
+    selected: { action: string; detailCommand?: string } | null;
+    executed: null;
+    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null; confirmationCommand: string[] | null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--execute-next-confirmation",
+    "--confirm",
+    "--dry-run",
+  ]);
+  assert.equal(executedNextBlockedConfirmationDryRun.ok, true);
+  assert.equal(executedNextBlockedConfirmationDryRun.session, sessionName);
+  assert.equal(executedNextBlockedConfirmationDryRun.sourceAdvanceId, blockedMutatingControlPlaneAdvances.advances[0]?.advanceId);
+  assert.equal(executedNextBlockedConfirmationDryRun.dryRun, true);
+  assert.equal(executedNextBlockedConfirmationDryRun.detailCommand, "execute_apply_action");
+  assert.equal(executedNextBlockedConfirmationDryRun.selected?.action, "execute_apply_action");
+  assert.equal(executedNextBlockedConfirmationDryRun.selected?.detailCommand, "execute_apply_action");
+  assert.equal(executedNextBlockedConfirmationDryRun.executed, null);
+  assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.blocked, false);
+  assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.mutating, true);
+  assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.confirmationRequired, true);
+  assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.confirmed, true);
+  assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.reason, null);
+  assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.confirmationCommand, null);
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

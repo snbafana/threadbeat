@@ -4700,17 +4700,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat !== "json" && outputFormat !== "shell") {
       throw new Error("runs session-control-plane-advances --format must be json or shell");
     }
-    if (options["execute-confirmation"] === "1" && outputFormat !== "json") {
-      throw new Error("runs session-control-plane-advances --execute-confirmation requires json output");
+    const executeConfirmation = options["execute-confirmation"] === "1";
+    const executeNextConfirmation = options["execute-next-confirmation"] === "1";
+    if (executeConfirmation && executeNextConfirmation) {
+      throw new Error("runs session-control-plane-advances cannot combine --execute-confirmation and --execute-next-confirmation");
     }
-    if (options["execute-confirmation"] === "1" && options["commands-only"] === "1") {
-      throw new Error("runs session-control-plane-advances --execute-confirmation cannot be combined with --commands-only");
+    if ((executeConfirmation || executeNextConfirmation) && outputFormat !== "json") {
+      throw new Error("runs session-control-plane-advances confirmation execution requires json output");
     }
-    if (options["execute-confirmation"] === "1" && options["confirmation-queue"] === "1") {
-      throw new Error("runs session-control-plane-advances --execute-confirmation cannot be combined with --confirmation-queue");
+    if ((executeConfirmation || executeNextConfirmation) && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-advances confirmation execution cannot be combined with --commands-only");
     }
-    if (options["execute-confirmation"] === "1" && options.confirm !== "1") {
-      throw new Error("runs session-control-plane-advances --execute-confirmation requires --confirm");
+    if ((executeConfirmation || executeNextConfirmation) && options["confirmation-queue"] === "1") {
+      throw new Error("runs session-control-plane-advances confirmation execution cannot be combined with --confirmation-queue");
+    }
+    if ((executeConfirmation || executeNextConfirmation) && options.confirm !== "1") {
+      throw new Error("runs session-control-plane-advances confirmation execution requires --confirm");
     }
     if (options["confirmation-queue"] === "1" && outputFormat !== "json" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-advances --confirmation-queue requires json output unless --commands-only is used");
@@ -4719,21 +4724,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs session-control-plane-advances --format shell requires --commands-only");
     }
     const limit = parsePositiveInteger(
-      options.limit ?? (options["execute-confirmation"] === "1" ? "100" : "20"),
+      options.limit ?? (executeConfirmation || executeNextConfirmation ? "100" : "20"),
       "--limit",
     );
     const advances = await fetchWorkerSessionControlPlaneAdvances(
       requiredSessionName,
       {
         limit,
-        blocked: options.blocked === "1" || options["confirmation-queue"] === "1" || options["execute-confirmation"] === "1" ? true : undefined,
-        mutating: options.mutating === "1" || options["confirmation-queue"] === "1" || options["execute-confirmation"] === "1" ? true : undefined,
+        blocked: options.blocked === "1" || options["confirmation-queue"] === "1" || executeConfirmation || executeNextConfirmation ? true : undefined,
+        mutating: options.mutating === "1" || options["confirmation-queue"] === "1" || executeConfirmation || executeNextConfirmation ? true : undefined,
       },
     );
-    if (options["execute-confirmation"] === "1") {
-      const advanceId = required(options["advance-id"], "runs session-control-plane-advances --execute-confirmation requires --advance-id");
-      const advance = advances.advances.find((record) => record.advanceId === advanceId);
-      if (!advance) throw new Error(`blocked confirmation advance not found in the selected page: ${advanceId}`);
+    if (executeConfirmation || executeNextConfirmation) {
+      const advance = executeConfirmation
+        ? workerSessionControlPlaneAdvanceById(
+          advances.advances,
+          required(options["advance-id"], "runs session-control-plane-advances --execute-confirmation requires --advance-id"),
+        )
+        : workerSessionControlPlaneNextConfirmationAdvance(advances.advances);
       const response = await executeWorkerSessionControlPlaneAlert(
         requiredSessionName,
         workerSessionControlPlaneAdvanceConfirmationExecuteOptions(requiredSessionName, advance, {
@@ -6440,7 +6448,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -6606,6 +6614,23 @@ function workerSessionControlPlaneAdvanceConfirmationQueue(
 
 function pushUnique(values: string[], value: string | null): void {
   if (value && !values.includes(value)) values.push(value);
+}
+
+function workerSessionControlPlaneAdvanceById(
+  advances: WorkerSessionControlPlaneAdvancesResponse["advances"],
+  advanceId: string,
+): WorkerSessionControlPlaneAdvancesResponse["advances"][number] {
+  const advance = advances.find((record) => record.advanceId === advanceId);
+  if (!advance) throw new Error(`blocked confirmation advance not found in the selected page: ${advanceId}`);
+  return advance;
+}
+
+function workerSessionControlPlaneNextConfirmationAdvance(
+  advances: WorkerSessionControlPlaneAdvancesResponse["advances"],
+): WorkerSessionControlPlaneAdvancesResponse["advances"][number] {
+  const advance = advances.find((record) => record.executionSafety?.confirmationCommand);
+  if (!advance) throw new Error("no blocked confirmation advance found in the selected page");
+  return advance;
 }
 
 function workerSessionControlPlaneAdvanceConfirmationExecuteOptions(
@@ -11845,7 +11870,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
+  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

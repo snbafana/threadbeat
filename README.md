@@ -791,8 +791,9 @@ record. Add
 `--commands-only --format shell` to print the deduplicated confirmation
 commands directly for shell review or execution. Use
 `--execute-confirmation --advance-id <id> --confirm` to replay one stored
-confirmation through the server API, and add `--dry-run` to verify selection
-without running the mutating command. Use `runs
+confirmation through the server API, or `--execute-next-confirmation --confirm`
+to run the first blocked confirmation from the selected page. Add `--dry-run`
+to verify selection without running the mutating command. Use `runs
 session-control-plane-advance-loop <name> --server --max-steps 10` or
 `POST /api/worker-sessions/:name/control-plane-advance-loop` to repeat those
 single-step advances until the session is empty, an action fails, a dry-run
