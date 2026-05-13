@@ -748,7 +748,9 @@ them with `runs session-branch-recovery-executions <name> --server` or
 `GET /api/worker-sessions/:name/branch-recovery-executions`. The aggregate
 control-plane status also embeds recent branch-recovery executions and status
 counts so operators can see recent resume attempts next to the current branch
-queue.
+queue. Bounded resume calls prioritize ready stopped branches before applying
+their limit, so `runs resume-session <name> --next` does not get stuck on a
+blocked branch while a resumable branch is waiting behind it.
 Server-executed actions are also written to
 durable execution records, and `runs session-applies <name> --server
 --action-executions` lists those records,

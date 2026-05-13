@@ -24,7 +24,7 @@ const settings: Settings = {
   githubOwner: "threadbeat-detached-session-smoke",
 };
 
-const { app } = await buildServer(settings);
+const { app, db } = await buildServer(settings);
 let baseUrl: string | null = null;
 let sessionStarted = false;
 
@@ -1427,6 +1427,16 @@ try {
   ]);
   await cliJson(baseUrl, ["runs", "claim", controlPlaneResumePlan.run.id, "--worker-id", "detached-smoke-worker-1"]);
   await cliJson(baseUrl, ["runs", "stop", controlPlaneResumePlan.run.id]);
+  const controlPlaneBlockedPlan = await cliJson<{ run: { id: string }; plan: { branchName: string } }>(baseUrl, [
+    "runs",
+    "plan",
+    "--agent",
+    agent.agent.id,
+    "--objective",
+    "detached session blocked branch recovery",
+  ]);
+  await cliJson(baseUrl, ["runs", "sandbox", controlPlaneBlockedPlan.run.id]);
+  await db.updateAgentRunCompleted({ id: controlPlaneBlockedPlan.run.id, status: "stopped" });
   const controlPlaneStatus = await cliJson<{
     ok?: true;
     session: string;
@@ -1491,6 +1501,15 @@ try {
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };
+    candidateSelection: {
+      ready: number;
+      blocked: number;
+      selected: number;
+      selectedReady: number;
+      selectedBlocked: number;
+      deprioritizedBlocked: number;
+      limit: number | null;
+    };
     executionPath: string;
     execution: {
       executionId: string;
@@ -1505,11 +1524,18 @@ try {
     sessionName,
     "--next",
     "--run",
-    controlPlaneResumePlan.run.id,
+    `${controlPlaneBlockedPlan.run.id},${controlPlaneResumePlan.run.id}`,
   ]);
   assert.deepEqual(controlPlaneResumeNext.resumed.map((run) => run.runId), [controlPlaneResumePlan.run.id]);
   assert.equal(controlPlaneResumeNext.resumed[0].status, "planned");
   assert.equal(controlPlaneResumeNext.resumed[0].workerId, null);
+  assert.equal(controlPlaneResumeNext.candidateSelection.limit, 1);
+  assert.ok(controlPlaneResumeNext.candidateSelection.ready >= 1);
+  assert.ok(controlPlaneResumeNext.candidateSelection.blocked >= 1);
+  assert.equal(controlPlaneResumeNext.candidateSelection.selected, 1);
+  assert.equal(controlPlaneResumeNext.candidateSelection.selectedReady, 1);
+  assert.equal(controlPlaneResumeNext.candidateSelection.selectedBlocked, 0);
+  assert.ok(controlPlaneResumeNext.candidateSelection.deprioritizedBlocked >= 1);
   assert.equal(controlPlaneResumeNext.nextStep.action, "restart_session");
   assert.equal(controlPlaneResumeNext.nextStep.count, 1);
   assert.match(controlPlaneResumeNext.executionPath, /worker-sessions\/branch-recovery-executions/);

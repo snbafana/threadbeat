@@ -1168,15 +1168,37 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           .filter((run) => !runIdFilter || runIdFilter.has(run.id))
           .filter((run) => run.worker_id === null ? includeUnassigned : selectedWorkerIds.has(run.worker_id))
           .map((run) => ({ agentId, run }));
-      }))).flat().slice(0, limit ?? undefined);
-      const resumed = [];
-      for (const { agentId, run } of candidates) {
+      }))).flat();
+      const inspectedCandidates = await Promise.all(candidates.map(async ({ agentId, run }) => {
         const runningSandboxes = (await db.listSandboxes({ runId: run.id }))
           .filter((sandbox) => sandbox.state === "running");
         const resumeReady = runningSandboxes.length === 0;
         const resumeReason = resumeReady
           ? "stopped_branch_without_result_commit"
           : "running_sandbox_present";
+        return { agentId, run, runningSandboxes, resumeReady, resumeReason };
+      }));
+      const readyCandidates = inspectedCandidates.filter((candidate) => candidate.resumeReady);
+      const blockedCandidates = inspectedCandidates.filter((candidate) => !candidate.resumeReady);
+      const selectedReadyCandidates = limit === null ? readyCandidates : readyCandidates.slice(0, limit);
+      const selectedBlockedCandidates = limit === null
+        ? blockedCandidates
+        : blockedCandidates.slice(0, Math.max(limit - selectedReadyCandidates.length, 0));
+      const selectedCandidates = limit === null
+        ? inspectedCandidates
+        : [...selectedReadyCandidates, ...selectedBlockedCandidates];
+      const candidateSelection = {
+        candidates: inspectedCandidates.length,
+        ready: readyCandidates.length,
+        blocked: blockedCandidates.length,
+        selected: selectedCandidates.length,
+        selectedReady: selectedReadyCandidates.length,
+        selectedBlocked: selectedBlockedCandidates.length,
+        deprioritizedBlocked: Math.max(blockedCandidates.length - selectedBlockedCandidates.length, 0),
+        limit,
+      };
+      const resumed = [];
+      for (const { agentId, run, runningSandboxes, resumeReady, resumeReason } of selectedCandidates) {
         const resumeBranch = ["npm", "run", "cli", "--", "runs", "resume-branch", run.id];
         const inspectRun = ["npm", "run", "cli", "--", "runs", "inspect", run.id];
         const resumeInspection = {
@@ -1249,6 +1271,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           session: session.session,
           resumed,
           filter: { dryRun, workerId: workerIdFilter, runIds, limit },
+          candidateSelection,
           actions,
           nextStep: {
             action: "resume_session",
@@ -1328,7 +1351,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         observedAt,
         completedAt: new Date().toISOString(),
         status: changedRuns === 0 ? "noop" : changedRuns === resumed.length ? "executed" : "partial",
-        filter: { dryRun, workerId: workerIdFilter, runIds, limit },
+        filter: { dryRun, workerId: workerIdFilter, runIds, limit, candidateSelection },
         selected: resumed.length,
         resumed: resumed
           .filter((item) => !("skipped" in item))
@@ -1359,6 +1382,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: session.session,
         resumed,
         filter: { dryRun, workerId: workerIdFilter, runIds, limit },
+        candidateSelection,
         actions,
         nextStep,
         executionPath: execution.path,
