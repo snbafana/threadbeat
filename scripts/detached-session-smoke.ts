@@ -1585,6 +1585,78 @@ try {
   assert.equal(controlPlaneTicks.ticks[0]?.tickId, controlPlaneTickLoopPreview.ticks[0]?.tickId);
   assert.equal(controlPlaneTicks.ticks[0]?.status, "dry_run");
   assert.equal(controlPlaneTicks.ticks[1]?.tickId, controlPlaneTickPreview.tick.tickId);
+  const controlPlaneTickWorker = await cliJson<{
+    ok?: true;
+    session: string;
+    worker: {
+      workerId: string;
+      command: string[];
+      pid: number | null;
+      alive: boolean;
+      stdoutPath: string;
+      stderrPath: string;
+    };
+  }>(baseUrl, [
+    "runs",
+    "start-control-plane-tick-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-control-plane-worker",
+    "--dry-run",
+    "--max-ticks",
+    "1",
+    "--interval-ms",
+    "0",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneTickWorker.ok, true);
+  assert.equal(controlPlaneTickWorker.session, sessionName);
+  assert.equal(controlPlaneTickWorker.worker.workerId, "detached-smoke-control-plane-worker");
+  assert.equal(
+    controlPlaneTickWorker.worker.command.join(" "),
+    `runs session-control-plane-tick-loop ${sessionName} --server --max-ticks 1 --interval-ms 0 --lines 20 --dry-run`,
+  );
+  assert.match(controlPlaneTickWorker.worker.stdoutPath, /control-plane-tick-workers/);
+  assert.match(controlPlaneTickWorker.worker.stderrPath, /control-plane-tick-workers/);
+  const controlPlaneTickWorkers = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    workers: Array<{ workerId: string; command: string[]; pid: number | null; stdout: { lines: string[] }; stderr: { lines: string[] } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-control-plane-worker",
+  ]);
+  assert.equal(controlPlaneTickWorkers.ok, true);
+  assert.equal(controlPlaneTickWorkers.session, sessionName);
+  assert.equal(controlPlaneTickWorkers.count, 1);
+  assert.equal(controlPlaneTickWorkers.workers[0]?.workerId, "detached-smoke-control-plane-worker");
+  const stoppedControlPlaneTickWorkers = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    stopped: Array<{ workerId: string; stoppedAt: string; retiredAt?: string }>;
+    workers: Array<{ workerId: string; retiredAt?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "stop-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    "detached-smoke-control-plane-worker",
+    "--retire",
+  ]);
+  assert.equal(stoppedControlPlaneTickWorkers.ok, true);
+  assert.equal(stoppedControlPlaneTickWorkers.session, sessionName);
+  assert.equal(stoppedControlPlaneTickWorkers.count, 1);
+  assert.equal(stoppedControlPlaneTickWorkers.stopped[0]?.workerId, "detached-smoke-control-plane-worker");
+  assert.ok(stoppedControlPlaneTickWorkers.stopped[0]?.retiredAt);
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };
@@ -1986,6 +2058,7 @@ async function cleanupSession(session: string): Promise<void> {
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-executions", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-workers", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", session), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-tick-workers", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-ticks", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuations", session), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "drain-continuation-workers", session), { recursive: true, force: true });

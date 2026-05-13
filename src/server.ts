@@ -40,6 +40,11 @@ import {
   writeWorkerSessionControlPlaneTickRecord,
 } from "./workerSessionControlPlaneTicks.js";
 import {
+  listWorkerSessionControlPlaneTickWorkers,
+  startWorkerSessionControlPlaneTickWorker,
+  stopWorkerSessionControlPlaneTickWorkers,
+} from "./workerSessionControlPlaneTickWorkers.js";
+import {
   listWorkerSessionApplyActionWorkerNextSteps,
   listWorkerSessionApplyActionWorkers,
   restartWorkerSessionApplyActionWorker,
@@ -471,6 +476,65 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         session: name,
         count: ticks.length,
         ticks,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/control-plane-tick-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const workers = await listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, {
+        sessionName: name,
+        ...(query.workerId ? { workerId: query.workerId } : {}),
+        includeRetired: parseBoolean(query.includeRetired, false),
+      }, parseOptionalInteger(query.lines) ?? 20);
+      return {
+        ok: true,
+        session: name,
+        count: workers.length,
+        workers,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-tick-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const worker = await startWorkerSessionControlPlaneTickWorker(
+        settings.projectRoot,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          dryRun: parseBoolean(body.dryRun, false),
+          maxTicks: parseOptionalInteger(body.maxTicks) ?? 10,
+          intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
+          lines: parseOptionalInteger(body.lines) ?? 5,
+        },
+      );
+      return { ok: true, session: name, worker };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-tick-workers/stop", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await stopWorkerSessionControlPlaneTickWorkers(settings.projectRoot, name, {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          retire: parseBoolean(body.retire, false),
+          lines: parseOptionalInteger(body.lines) ?? 20,
+        }),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

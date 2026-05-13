@@ -4520,6 +4520,56 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : await listWorkerSessionControlPlaneTickRecords(requiredSessionName, limit));
     return;
   }
+  if (subcommandName === "start-control-plane-tick-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs start-control-plane-tick-worker requires --server");
+    }
+    await printJson(await startWorkerSessionControlPlaneTickWorker(
+      required(sessionName, "runs start-control-plane-tick-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun: options["dry-run"] === "1",
+        maxTicks: parsePositiveInteger(options["max-ticks"] ?? "10", "--max-ticks"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "session-control-plane-tick-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-tick-workers requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneTickWorkers(
+      required(sessionName, "runs session-control-plane-tick-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "stop-control-plane-tick-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs stop-control-plane-tick-workers requires --server");
+    }
+    await printJson(await stopWorkerSessionControlPlaneTickWorkers(
+      required(sessionName, "runs stop-control-plane-tick-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        retire: options.retire === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-branch-recovery-executions") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6764,6 +6814,67 @@ async function listWorkerSessionControlPlaneTickRecords(
     }
     throw error;
   }
+}
+
+async function startWorkerSessionControlPlaneTickWorker(
+  sessionName: string,
+  options: { workerId?: string; dryRun: boolean; maxTicks: number; intervalMs: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  worker: unknown;
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      dryRun: options.dryRun,
+      maxTicks: options.maxTicks,
+      intervalMs: options.intervalMs,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; worker: unknown };
+}
+
+async function fetchWorkerSessionControlPlaneTickWorkers(
+  sessionName: string,
+  options: { workerId?: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  workers: unknown[];
+}> {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.includeRetired) params.set("includeRetired", "1");
+  params.set("lines", String(options.lines));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers`, params),
+  ) as { ok: true; session: string; count: number; workers: unknown[] };
+}
+
+async function stopWorkerSessionControlPlaneTickWorkers(
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  stopped: unknown[];
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers/stop`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      retire: options.retire,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; count: number; stopped: unknown[]; workers: unknown[] };
 }
 
 async function fetchWorkerSessionBranches(
@@ -10054,6 +10165,9 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
+  runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
+  runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
+  runs stop-control-plane-tick-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
