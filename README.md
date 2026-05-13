@@ -755,7 +755,17 @@ worker restart without running it. Use `runs session-control-plane-advance-loop
 <name> --server --max-steps 10` or
 `POST /api/worker-sessions/:name/control-plane-advance-loop` to repeat those
 single-step advances until the session is empty, an action fails, a dry-run
-preview is returned, or the step bound is reached. The `branches` block
+preview is returned, or the step bound is reached. Use `runs
+start-control-plane-advance-worker <name> --server` to detach that loop into a
+durable worker record, `runs ensure-control-plane-advance-worker <name>
+--server` for idempotent supervision, `runs
+session-control-plane-advance-workers <name> --server` to inspect stored PIDs
+and log tails, `runs session-control-plane-advance-workers-next <name> --server`
+to list stopped restartable advance workers, and
+`runs stop-control-plane-advance-workers` or
+`runs restart-control-plane-advance-workers` for lifecycle recovery. The
+aggregate status includes `workers.controlPlaneAdvance` and advance-worker
+restart next steps alongside the other worker recovery surfaces. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
 sandbox, and includes exact bulk resume, dry-run, and branch-inspection
 commands. Each branch next-step row includes objective, branch name, worker

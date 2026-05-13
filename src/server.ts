@@ -48,6 +48,13 @@ import {
   stopWorkerSessionControlPlaneTickWorkers,
 } from "./workerSessionControlPlaneTickWorkers.js";
 import {
+  listWorkerSessionControlPlaneAdvanceWorkerNextSteps,
+  listWorkerSessionControlPlaneAdvanceWorkers,
+  restartWorkerSessionControlPlaneAdvanceWorker,
+  startWorkerSessionControlPlaneAdvanceWorker,
+  stopWorkerSessionControlPlaneAdvanceWorkers,
+} from "./workerSessionControlPlaneAdvanceWorkers.js";
+import {
   listWorkerSessionApplyActionWorkerNextSteps,
   listWorkerSessionApplyActionWorkers,
   restartWorkerSessionApplyActionWorker,
@@ -535,6 +542,172 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
         },
       );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/control-plane-advance-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const workers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
+        sessionName: name,
+        ...(query.workerId ? { workerId: query.workerId } : {}),
+        includeRetired: parseBoolean(query.includeRetired, false),
+      }, parseOptionalInteger(query.lines) ?? 20);
+      return {
+        ok: true,
+        session: name,
+        count: workers.length,
+        workers,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/control-plane-advance-workers/next", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      return {
+        ok: true,
+        ...await listWorkerSessionControlPlaneAdvanceWorkerNextSteps(settings.projectRoot, name),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-advance-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const worker = await startWorkerSessionControlPlaneAdvanceWorker(
+        settings.projectRoot,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          dryRun: parseBoolean(body.dryRun, false),
+          maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
+          intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
+          lines: parseOptionalInteger(body.lines) ?? 5,
+        },
+      );
+      return { ok: true, session: name, worker };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-advance-workers/ensure", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const baseUrl = requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]);
+      const workerId = parseOptionalString(body.workerId);
+      const lines = parseOptionalInteger(body.lines) ?? 20;
+      const existingWorkers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
+        sessionName: name,
+        ...(workerId ? { workerId } : {}),
+        includeRetired: Boolean(workerId),
+      }, lines);
+      const runningWorker = existingWorkers.find((worker) => worker.alive);
+      if (runningWorker) {
+        return {
+          ok: true,
+          session: name,
+          action: "existing",
+          reason: "running_worker_exists",
+          worker: runningWorker,
+          workers: existingWorkers,
+        };
+      }
+      const restartableWorker = existingWorkers.find((worker) => worker.lifecycle.restartable);
+      if (restartableWorker) {
+        const restarted = await restartWorkerSessionControlPlaneAdvanceWorker(settings.projectRoot, baseUrl, name, {
+          workerId: restartableWorker.workerId,
+          includeRetired: false,
+          lines,
+        });
+        return {
+          ok: true,
+          action: "restarted",
+          reason: "restartable_worker_exists",
+          ...restarted,
+          worker: restarted.workers[0] ?? null,
+        };
+      }
+      if (workerId && existingWorkers.length > 0) {
+        return {
+          ok: true,
+          session: name,
+          action: "blocked",
+          reason: "existing_worker_not_restartable",
+          worker: existingWorkers[0],
+          workers: existingWorkers,
+        };
+      }
+      const worker = await startWorkerSessionControlPlaneAdvanceWorker(
+        settings.projectRoot,
+        baseUrl,
+        name,
+        {
+          ...(workerId ? { workerId } : {}),
+          dryRun: parseBoolean(body.dryRun, false),
+          maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
+          intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
+          lines,
+        },
+      );
+      return {
+        ok: true,
+        session: name,
+        action: "started",
+        reason: "no_running_or_restartable_worker",
+        worker,
+        workers: [worker],
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-advance-workers/restart", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await restartWorkerSessionControlPlaneAdvanceWorker(
+          settings.projectRoot,
+          requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+          name,
+          {
+            workerId: parseString(body.workerId, "workerId"),
+            includeRetired: parseBoolean(body.includeRetired, false),
+            lines: parseOptionalInteger(body.lines) ?? 20,
+          },
+        ),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/control-plane-advance-workers/stop", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await stopWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, name, {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          retire: parseBoolean(body.retire, false),
+          lines: parseOptionalInteger(body.lines) ?? 20,
+        }),
+      };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -3047,6 +3220,7 @@ const readWorkerSessionControlPlaneStatus = async (
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
+    controlPlaneAdvance: { total: number; alive: number; stopped: number; retired: number; completed: number };
     controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   queues: {
@@ -3068,7 +3242,7 @@ const readWorkerSessionControlPlaneStatus = async (
   recovery: {
     count: number;
     actions: Record<string, number>;
-    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
+    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
 }> => {
   const session = await readWorkerSession(settings.projectRoot, name);
@@ -3081,6 +3255,8 @@ const readWorkerSessionControlPlaneStatus = async (
     drainWorkerNextSteps,
     applyActionWorkers,
     applyActionWorkerNextSteps,
+    controlPlaneAdvanceWorkers,
+    controlPlaneAdvanceWorkerNextSteps,
     controlPlaneTickWorkers,
     controlPlaneTickWorkerNextSteps,
     branchRecovery,
@@ -3096,6 +3272,8 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
     listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
+    listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+    listWorkerSessionControlPlaneAdvanceWorkerNextSteps(settings.projectRoot, name),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
@@ -3111,6 +3289,7 @@ const readWorkerSessionControlPlaneStatus = async (
       watch: summarizeControlPlaneWorkers(watchWorkers),
       drain: summarizeControlPlaneWorkers(drainWorkers),
       applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
+      controlPlaneAdvance: summarizeControlPlaneCompletedWorkers(controlPlaneAdvanceWorkers),
       controlPlaneTick: summarizeControlPlaneTickWorkers(controlPlaneTickWorkers),
     },
     queues: {
@@ -3131,17 +3310,19 @@ const readWorkerSessionControlPlaneStatus = async (
     },
     staleRuns: staleRunRecovery,
     recovery: {
-      count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count,
+      count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneAdvanceWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count,
       actions: {
         ...watchWorkerNextSteps.actions,
         ...drainWorkerNextSteps.actions,
         ...applyActionWorkerNextSteps.actions,
+        ...controlPlaneAdvanceWorkerNextSteps.actions,
         ...controlPlaneTickWorkerNextSteps.actions,
       },
       nextSteps: {
         watchWorkers: watchWorkerNextSteps.nextSteps,
         drainWorkers: drainWorkerNextSteps.nextSteps,
         applyActionWorkers: applyActionWorkerNextSteps.nextSteps,
+        controlPlaneAdvanceWorkers: controlPlaneAdvanceWorkerNextSteps.nextSteps,
         controlPlaneTickWorkers: controlPlaneTickWorkerNextSteps.nextSteps,
       },
     },
@@ -3231,6 +3412,7 @@ const selectWorkerSessionControlPlaneAdvanceAction = (
     ...status.recovery.nextSteps.watchWorkers,
     ...status.recovery.nextSteps.drainWorkers,
     ...status.recovery.nextSteps.applyActionWorkers,
+    ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
   ].find(isWorkerSessionControlPlaneWorkerRecoveryStep);
   if (workerRecovery) {
@@ -3677,7 +3859,7 @@ const summarizeControlPlaneWorkers = <T extends { alive: boolean; retiredAt?: st
   retired: workers.filter((worker) => Boolean(worker.retiredAt)).length,
 });
 
-const summarizeControlPlaneTickWorkers = <T extends { alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string }>(workers: T[]): {
+const summarizeControlPlaneCompletedWorkers = <T extends { alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string }>(workers: T[]): {
   total: number;
   alive: number;
   stopped: number;
@@ -3687,6 +3869,8 @@ const summarizeControlPlaneTickWorkers = <T extends { alive: boolean; retiredAt?
   ...summarizeControlPlaneWorkers(workers),
   completed: workers.filter((worker) => !worker.alive && Boolean(worker.completedAt) && !worker.stoppedAt && !worker.retiredAt).length,
 });
+
+const summarizeControlPlaneTickWorkers = summarizeControlPlaneCompletedWorkers;
 
 const summarizeDrainContinuationStatuses = <T extends { status?: string }>(records: T[]): {
   total: number;

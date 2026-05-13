@@ -4567,6 +4567,101 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "start-control-plane-advance-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs start-control-plane-advance-worker requires --server");
+    }
+    await printJson(await startWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs start-control-plane-advance-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun: options["dry-run"] === "1",
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "ensure-control-plane-advance-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-advance-worker requires --server");
+    }
+    await printJson(await ensureWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs ensure-control-plane-advance-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun: options["dry-run"] === "1",
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "session-control-plane-advance-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-advance-workers requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneAdvanceWorkers(
+      required(sessionName, "runs session-control-plane-advance-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "session-control-plane-advance-workers-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-advance-workers-next requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(
+      required(sessionName, "runs session-control-plane-advance-workers-next <session> --server"),
+    ));
+    return;
+  }
+  if (subcommandName === "restart-control-plane-advance-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs restart-control-plane-advance-workers requires --server");
+    }
+    await printJson(await restartWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs restart-control-plane-advance-workers <session> --server"),
+      {
+        workerId: required(options["worker-id"], "runs restart-control-plane-advance-workers <session> --server --worker-id <id>"),
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "stop-control-plane-advance-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs stop-control-plane-advance-workers requires --server");
+    }
+    await printJson(await stopWorkerSessionControlPlaneAdvanceWorkers(
+      required(sessionName, "runs stop-control-plane-advance-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        retire: options.retire === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-tick") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6578,6 +6673,7 @@ type WorkerSessionControlPlaneStatusResponse = {
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
+    controlPlaneAdvance: { total: number; alive: number; stopped: number; retired: number; completed: number };
     controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   queues: {
@@ -6678,6 +6774,7 @@ type WorkerSessionControlPlaneStatusResponse = {
       watchWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       drainWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       applyActionWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
+      controlPlaneAdvanceWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       controlPlaneTickWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
     };
   };
@@ -7122,6 +7219,7 @@ function selectWorkerSessionControlPlaneNextActions(
     ...status.recovery.nextSteps.watchWorkers,
     ...status.recovery.nextSteps.drainWorkers,
     ...status.recovery.nextSteps.applyActionWorkers,
+    ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
   ][0];
   if (workerRecovery) {
@@ -7250,6 +7348,140 @@ async function executeWorkerSessionControlPlaneAdvanceLoop(
       intervalMs: options.intervalMs,
     },
   ) as WorkerSessionControlPlaneAdvanceLoopResponse;
+}
+
+async function startWorkerSessionControlPlaneAdvanceWorker(
+  sessionName: string,
+  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  worker: unknown;
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      dryRun: options.dryRun,
+      maxSteps: options.maxSteps,
+      intervalMs: options.intervalMs,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; worker: unknown };
+}
+
+async function ensureWorkerSessionControlPlaneAdvanceWorker(
+  sessionName: string,
+  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  action: "existing" | "restarted" | "started" | "blocked";
+  reason: string;
+  worker: unknown;
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers/ensure`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      dryRun: options.dryRun,
+      maxSteps: options.maxSteps,
+      intervalMs: options.intervalMs,
+      lines: options.lines,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    action: "existing" | "restarted" | "started" | "blocked";
+    reason: string;
+    worker: unknown;
+    workers: unknown[];
+  };
+}
+
+async function fetchWorkerSessionControlPlaneAdvanceWorkers(
+  sessionName: string,
+  options: { workerId?: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  workers: unknown[];
+}> {
+  const params = new URLSearchParams();
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.includeRetired) params.set("includeRetired", "1");
+  params.set("lines", String(options.lines));
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers`, params),
+  ) as { ok: true; session: string; count: number; workers: unknown[] };
+}
+
+async function fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(
+  sessionName: string,
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  nextSteps: unknown[];
+  actions: { restart_control_plane_advance_worker: number };
+}> {
+  return await requestJson(
+    "GET",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers/next`,
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    nextSteps: unknown[];
+    actions: { restart_control_plane_advance_worker: number };
+  };
+}
+
+async function restartWorkerSessionControlPlaneAdvanceWorker(
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  restarted: unknown[];
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers/restart`,
+    {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; count: number; restarted: unknown[]; workers: unknown[] };
+}
+
+async function stopWorkerSessionControlPlaneAdvanceWorkers(
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  stopped: unknown[];
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advance-workers/stop`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      retire: options.retire,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; count: number; stopped: unknown[]; workers: unknown[] };
 }
 
 async function executeWorkerSessionControlPlaneTick(
@@ -10874,6 +11106,12 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
+  runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
+  runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
+  runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
+  runs session-control-plane-advance-workers-next <name> --server
+  runs restart-control-plane-advance-workers <name> --server --worker-id id [--include-retired] [--lines 20]
+  runs stop-control-plane-advance-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
