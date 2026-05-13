@@ -764,7 +764,10 @@ session-control-plane-tick-loop <name> --server --max-ticks 10` or
 `POST /api/worker-sessions/:name/control-plane-tick-loop` when the server
 should keep ticking until it reaches an empty/noop pass or the max tick count.
 Use `runs start-control-plane-tick-worker <name> --server` to detach that loop
-into a durable worker record, inspect it with `runs
+into a durable worker record. Use `runs ensure-control-plane-tick-worker <name>
+--server` for idempotent supervision: it reuses a running worker, restarts a
+stopped restartable worker, starts one when none exists, or reports a blocked
+non-restartable record. Inspect workers with `runs
 session-control-plane-tick-workers <name> --server`, list stopped tick workers
 with `runs session-control-plane-tick-workers-next <name> --server`, restart one
 with `runs restart-control-plane-tick-workers <name> --server --worker-id <id>`,

@@ -4553,6 +4553,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "ensure-control-plane-tick-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-tick-worker requires --server");
+    }
+    await printJson(await ensureWorkerSessionControlPlaneTickWorker(
+      required(sessionName, "runs ensure-control-plane-tick-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun: options["dry-run"] === "1",
+        maxTicks: parsePositiveInteger(options["max-ticks"] ?? "10", "--max-ticks"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-tick-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6940,6 +6958,37 @@ async function startWorkerSessionControlPlaneTickWorker(
       lines: options.lines,
     },
   ) as { ok: true; session: string; worker: unknown };
+}
+
+async function ensureWorkerSessionControlPlaneTickWorker(
+  sessionName: string,
+  options: { workerId?: string; dryRun: boolean; maxTicks: number; intervalMs: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  action: "existing" | "restarted" | "started" | "blocked";
+  reason: string;
+  worker: unknown;
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-tick-workers/ensure`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      dryRun: options.dryRun,
+      maxTicks: options.maxTicks,
+      intervalMs: options.intervalMs,
+      lines: options.lines,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    action: "existing" | "restarted" | "started" | "blocked";
+    reason: string;
+    worker: unknown;
+    workers: unknown[];
+  };
 }
 
 async function fetchWorkerSessionControlPlaneTickWorkers(
@@ -10314,6 +10363,7 @@ Commands:
   runs session-control-plane-ticks <name> [--server] [--limit 20]
   runs session-control-plane-timeline <name> --server [--limit 20] [--lines 5]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
+  runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-tick-workers-next <name> --server
   runs restart-control-plane-tick-workers <name> --server --worker-id id [--include-retired] [--lines 20]
