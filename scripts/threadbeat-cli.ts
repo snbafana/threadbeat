@@ -8589,6 +8589,41 @@ function selectWorkerSessionControlPlaneNextActions(
   return nextActions;
 }
 
+function selectWorkerSessionControlPlaneNextRecovery(
+  status: WorkerSessionControlPlaneStatusResponse,
+  nextActions: WorkerSessionControlPlaneAdvanceAction[],
+): {
+  kind: "confirmation_queue" | "control_plane_action";
+  action: string;
+  reason: string;
+  count: number;
+  command: string[];
+  dryRunCommand: string[];
+  surface?: WorkerSessionControlPlaneAdvanceAction["surface"];
+} | null {
+  if (status.queues.controlPlaneConfirmations.summary.commands > 0) {
+    return {
+      kind: "confirmation_queue",
+      action: "drain_control_plane_confirmations",
+      reason: "blocked_mutating_control_plane_confirmations",
+      count: status.queues.controlPlaneConfirmations.summary.commands,
+      command: status.queues.controlPlaneConfirmations.commands.drainConfirmations,
+      dryRunCommand: status.queues.controlPlaneConfirmations.commands.drainConfirmationsDryRun,
+    };
+  }
+  const nextAction = nextActions[0];
+  if (!nextAction) return null;
+  return {
+    kind: "control_plane_action",
+    surface: nextAction.surface,
+    action: nextAction.action,
+    reason: nextAction.reason,
+    count: nextAction.count,
+    command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
+    dryRunCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
+  };
+}
+
 function summarizeWorkerSessionControlPlaneStatus(
   status: WorkerSessionControlPlaneStatusResponse,
 ): {
@@ -8617,6 +8652,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     attempts: WorkerSessionControlPlaneStatusResponse["recovery"]["attempts"];
     recentAttempts: WorkerSessionControlPlaneStatusResponse["recovery"]["recentAttempts"];
   };
+  nextRecovery: ReturnType<typeof selectWorkerSessionControlPlaneNextRecovery>;
   nextActions: WorkerSessionControlPlaneAdvanceAction[];
   commands: {
     fullStatus: string[];
@@ -8630,10 +8666,11 @@ function summarizeWorkerSessionControlPlaneStatus(
   };
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
+  const nextRecovery = selectWorkerSessionControlPlaneNextRecovery(status, nextActions);
   return {
     ok: true,
     session: status.session,
-    needsAction: nextActions.length > 0,
+    needsAction: nextRecovery !== null,
     workers: status.workers,
     queues: {
       applyActions: {
@@ -8669,6 +8706,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       attempts: status.recovery.attempts,
       recentAttempts: status.recovery.recentAttempts,
     },
+    nextRecovery,
     nextActions,
     commands: {
       fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],

@@ -271,6 +271,15 @@ try {
         };
       };
     };
+    needsAction: boolean;
+    nextRecovery: {
+      kind: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      dryRunCommand: string[];
+    } | null;
     recovery: {
       attempts: {
         total: number;
@@ -311,6 +320,11 @@ try {
   assert.equal(statusSummary.queues.controlPlaneConfirmations.summary.advances, 1);
   assert.equal(statusSummary.queues.controlPlaneConfirmations.summary.groups, 1);
   assert.equal(statusSummary.queues.controlPlaneConfirmations.summary.commands, 1);
+  assert.equal(statusSummary.needsAction, true);
+  assert.equal(statusSummary.nextRecovery?.kind, "confirmation_queue");
+  assert.equal(statusSummary.nextRecovery?.action, "drain_control_plane_confirmations");
+  assert.equal(statusSummary.nextRecovery?.reason, "blocked_mutating_control_plane_confirmations");
+  assert.equal(statusSummary.nextRecovery?.count, 1);
   assert.deepEqual(statusSummary.queues.controlPlaneConfirmations.commands.inspectQueue, [
     "npm",
     "run",
@@ -335,6 +349,8 @@ try {
     "--confirm",
     "--dry-run",
   ]);
+  assert.deepEqual(statusSummary.nextRecovery?.command, statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmations);
+  assert.deepEqual(statusSummary.nextRecovery?.dryRunCommand, statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmationsDryRun);
   const confirmationGroup = statusSummary.queues.controlPlaneConfirmations.groups[0];
   assert.equal(confirmationGroup?.surface, "worker_recovery");
   assert.equal(confirmationGroup?.action, "restart_worker_recovery");
