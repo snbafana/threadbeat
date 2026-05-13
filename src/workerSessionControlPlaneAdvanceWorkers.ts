@@ -12,6 +12,7 @@ export type ControlPlaneAdvanceWorker = {
   pid: number | null;
   stdoutPath: string;
   stderrPath: string;
+  stdoutStartOffset?: number;
   stoppedAt?: string;
   stopResult?: StopProcessGroupResult & { aliveBefore: boolean };
   retiredAt?: string;
@@ -114,6 +115,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     throw new Error("control-plane confirmation drain workers require --confirm");
   }
   const command = buildControlPlaneAdvanceWorkerCommand(sessionName, mode, options);
+  const stdoutStartOffset = await fileSize(stdoutPath);
   const stdout = await fs.open(stdoutPath, "a");
   const stderr = await fs.open(stderrPath, "a");
   try {
@@ -134,6 +136,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
       pid: child.pid ?? null,
       stdoutPath,
       stderrPath,
+      stdoutStartOffset,
       latestResult: null,
     };
     await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
@@ -170,7 +173,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
             ...worker,
             alive,
             lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive),
-            latestResult: "latestResult" in worker ? worker.latestResult ?? null : await readLatestWorkerJsonResult(worker.stdoutPath),
+            latestResult: "latestResult" in worker ? worker.latestResult ?? null : await readLatestWorkerJsonResult(worker.stdoutPath, worker.stdoutStartOffset ?? 0),
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
           };
@@ -343,6 +346,7 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
   if (worker.session !== sessionName || worker.workerId !== options.workerId) {
     throw new Error(`control-plane advance worker record mismatch for '${options.workerId}'`);
   }
+  const stdoutStartOffset = await fileSize(worker.stdoutPath);
   const stdout = await fs.open(worker.stdoutPath, "a");
   const stderr = await fs.open(worker.stderrPath, "a");
   try {
@@ -357,6 +361,7 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
       retiredAt: undefined,
       completedAt: undefined,
       completionResult: undefined,
+      stdoutStartOffset,
       latestResult: null,
       restartedAt,
       restartCount: (worker.restartCount ?? 0) + 1,
@@ -408,7 +413,7 @@ function recordControlPlaneAdvanceWorkerCompletion(projectRoot: string, child: R
         throw error;
       });
       if (!current || current.pid !== child.pid || current.stoppedAt || current.retiredAt) return;
-      const latestResult = await readLatestWorkerJsonResult(current.stdoutPath);
+      const latestResult = await readLatestWorkerJsonResult(current.stdoutPath, current.stdoutStartOffset ?? 0);
       await writeControlPlaneAdvanceWorker(projectRoot, {
         ...current,
         completedAt: new Date().toISOString(),
@@ -504,10 +509,21 @@ async function tailFileLines(filePath: string, lineCount: number): Promise<strin
   }
 }
 
-async function readLatestWorkerJsonResult(filePath: string): Promise<ControlPlaneAdvanceWorkerLatestResult | null> {
+async function fileSize(filePath: string): Promise<number> {
+  try {
+    return (await fs.stat(filePath)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    throw error;
+  }
+}
+
+async function readLatestWorkerJsonResult(filePath: string, startOffset: number): Promise<ControlPlaneAdvanceWorkerLatestResult | null> {
   let text: string;
   try {
-    text = await fs.readFile(filePath, "utf8");
+    const buffer = await fs.readFile(filePath);
+    if (startOffset >= buffer.length) return null;
+    text = buffer.subarray(startOffset).toString("utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;

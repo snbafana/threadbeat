@@ -2163,7 +2163,8 @@ try {
     "control-plane-advance-workers",
     sessionName,
     "detached-smoke-control-plane-advance-worker.json",
-  ), "utf8")) as { latestResult?: ControlPlaneAdvanceWorkerListResponse["workers"][number]["latestResult"] };
+  ), "utf8")) as { stdoutStartOffset?: number; latestResult?: ControlPlaneAdvanceWorkerListResponse["workers"][number]["latestResult"] };
+  assert.equal(persistedControlPlaneAdvanceWorker.stdoutStartOffset, 0);
   assert.equal(persistedControlPlaneAdvanceWorker.latestResult?.stoppedReason, "dry_run");
   assert.equal(persistedControlPlaneAdvanceWorker.latestResult?.executedSteps, 1);
   const stoppedControlPlaneAdvanceWorkers = await cliJson<{
@@ -2248,6 +2249,14 @@ try {
     restartedControlPlaneAdvanceWorker.restarted[0]?.command.join(" "),
     `runs session-control-plane-advance-loop ${sessionName} --server --max-steps 1 --interval-ms 0 --lines 20 --dry-run`,
   );
+  const persistedRestartedControlPlaneAdvanceWorker = JSON.parse(await fs.readFile(path.join(
+    ".threadbeat",
+    "worker-sessions",
+    "control-plane-advance-workers",
+    sessionName,
+    "detached-smoke-control-plane-advance-worker.json",
+  ), "utf8")) as { stdoutStartOffset?: number };
+  assert.ok((persistedRestartedControlPlaneAdvanceWorker.stdoutStartOffset ?? 0) > 0);
   const retiredControlPlaneAdvanceWorkers = await cliJson<typeof stoppedControlPlaneAdvanceWorkers>(baseUrl, [
     "runs",
     "stop-control-plane-advance-workers",

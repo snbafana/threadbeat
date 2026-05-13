@@ -819,6 +819,8 @@ inspection commands; add `--until-empty` to make the detached confirmation
 worker poll across batches with the worker's `--max-steps` and `--interval-ms`
 settings. Worker inspection includes a persisted `latestResult` summary for
 completed workers, including the confirmation drain stop reason when available.
+Restarted workers keep log history but persist a fresh stdout boundary so the
+new completion result cannot inherit JSON from the previous process attempt.
 `runs session-control-plane-status <name> --server`
 keeps the aggregate `workers.controlPlaneAdvance` totals and also breaks them
 out by `advance_loop` and `confirmation_drain` mode. It also includes
