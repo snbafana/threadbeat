@@ -160,6 +160,7 @@ try {
 
   const confirmedDryRun = await cliJson<{
     dryRun: boolean;
+    advanceId: string;
     detailCommand: string;
     selected: { action: string; workerId?: string; command: string[] } | null;
     executed: null;
@@ -189,6 +190,39 @@ try {
   assert.equal(confirmedDryRun.executionSafety.blocked, false);
   assert.equal(confirmedDryRun.executionSafety.mutating, true);
   assert.equal(confirmedDryRun.executionSafety.confirmed, true);
+
+  const recoveryAttemptHistory = await cliJson<{
+    advances: Array<{
+      advanceId: string;
+      alert?: { surface: string; workerId?: string } | null;
+      details?: {
+        kind: string;
+        workerId?: string;
+        target?: { kind: string; worker?: { workerId: string } | null };
+      } | null;
+      detailCommand?: string;
+      executionSafety?: { mutating: boolean; confirmed: boolean; blocked: boolean };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--advance",
+    confirmedDryRun.advanceId,
+  ]);
+  const recoveryAttempt = recoveryAttemptHistory.advances[0];
+  assert.equal(recoveryAttempt?.advanceId, confirmedDryRun.advanceId);
+  assert.equal(recoveryAttempt?.alert?.surface, "worker_recovery");
+  assert.equal(recoveryAttempt?.alert?.workerId, workerId);
+  assert.equal(recoveryAttempt?.details?.kind, "worker_recovery");
+  assert.equal(recoveryAttempt?.details?.workerId, workerId);
+  assert.equal(recoveryAttempt?.details?.target?.kind, "control_plane_advance_worker");
+  assert.equal(recoveryAttempt?.details?.target?.worker?.workerId, workerId);
+  assert.equal(recoveryAttempt?.detailCommand, "restart_worker_recovery");
+  assert.equal(recoveryAttempt?.executionSafety?.mutating, true);
+  assert.equal(recoveryAttempt?.executionSafety?.confirmed, true);
+  assert.equal(recoveryAttempt?.executionSafety?.blocked, false);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
