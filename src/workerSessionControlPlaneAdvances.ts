@@ -15,10 +15,25 @@ export type WorkerSessionControlPlaneAdvanceRecord = {
   after: unknown;
 };
 
+export type WorkerSessionControlPlaneAdvanceListOptions = {
+  limit?: number;
+  blocked?: boolean;
+  mutating?: boolean;
+};
+
+export type WorkerSessionControlPlaneAdvanceSummary = {
+  total: number;
+  dryRun: number;
+  executed: number;
+  failed: number;
+  blocked: number;
+  mutating: number;
+};
+
 export async function listWorkerSessionControlPlaneAdvanceRecords(
   projectRoot: string,
   sessionName: string,
-  limit = 20,
+  options: WorkerSessionControlPlaneAdvanceListOptions = {},
 ): Promise<WorkerSessionControlPlaneAdvanceRecord[]> {
   assertSafeWorkerSessionName(sessionName);
   const advanceDir = workerSessionControlPlaneAdvanceDir(projectRoot, sessionName);
@@ -31,12 +46,26 @@ export async function listWorkerSessionControlPlaneAdvanceRecords(
         return JSON.parse(text) as WorkerSessionControlPlaneAdvanceRecord;
       }));
     return records
+      .filter((record) => matchesWorkerSessionControlPlaneAdvanceFilters(record, options))
       .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
-      .slice(0, limit);
+      .slice(0, options.limit ?? 20);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+export function summarizeWorkerSessionControlPlaneAdvanceRecords(
+  records: WorkerSessionControlPlaneAdvanceRecord[],
+): WorkerSessionControlPlaneAdvanceSummary {
+  return {
+    total: records.length,
+    dryRun: records.filter((record) => record.dryRun).length,
+    executed: records.filter((record) => Boolean(record.executed)).length,
+    failed: records.filter((record) => hasFailedExecution(record)).length,
+    blocked: records.filter((record) => executionSafetyBoolean(record, "blocked") === true).length,
+    mutating: records.filter((record) => executionSafetyBoolean(record, "mutating") === true).length,
+  };
 }
 
 export async function writeWorkerSessionControlPlaneAdvanceRecord(
@@ -68,6 +97,32 @@ function workerSessionControlPlaneAdvancePath(projectRoot: string, sessionName: 
 
 function createControlPlaneAdvanceId(observedAt: string): string {
   return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${crypto.randomBytes(4).toString("hex")}`;
+}
+
+function matchesWorkerSessionControlPlaneAdvanceFilters(
+  record: WorkerSessionControlPlaneAdvanceRecord,
+  options: WorkerSessionControlPlaneAdvanceListOptions,
+): boolean {
+  if (options.blocked !== undefined && executionSafetyBoolean(record, "blocked") !== options.blocked) return false;
+  if (options.mutating !== undefined && executionSafetyBoolean(record, "mutating") !== options.mutating) return false;
+  return true;
+}
+
+function executionSafetyBoolean(
+  record: WorkerSessionControlPlaneAdvanceRecord,
+  key: "blocked" | "mutating",
+): boolean | undefined {
+  const safety = record.executionSafety;
+  if (!safety || typeof safety !== "object" || Array.isArray(safety)) return undefined;
+  const value = (safety as Record<string, unknown>)[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function hasFailedExecution(record: WorkerSessionControlPlaneAdvanceRecord): boolean {
+  const executed = record.executed;
+  if (!executed || typeof executed !== "object" || Array.isArray(executed)) return false;
+  const exitCode = (executed as Record<string, unknown>).exitCode;
+  return typeof exitCode === "number" && exitCode !== 0;
 }
 
 function assertSafeWorkerSessionName(name: string): void {

@@ -37,6 +37,7 @@ import {
 } from "./workerSessionBranchRecovery.js";
 import {
   listWorkerSessionControlPlaneAdvanceRecords,
+  summarizeWorkerSessionControlPlaneAdvanceRecords,
   writeWorkerSessionControlPlaneAdvanceRecord,
 } from "./workerSessionControlPlaneAdvances.js";
 import {
@@ -625,15 +626,29 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { name } = request.params as { name: string };
       const query = request.query as Record<string, string | undefined>;
+      const filter = {
+        blocked: query.blocked === undefined ? undefined : parseBoolean(query.blocked, false),
+        mutating: query.mutating === undefined ? undefined : parseBoolean(query.mutating, false),
+      };
       const advances = await listWorkerSessionControlPlaneAdvanceRecords(
         settings.projectRoot,
         name,
-        parseOptionalInteger(query.limit) ?? 20,
+        {
+          limit: parseOptionalInteger(query.limit) ?? 20,
+          blocked: filter.blocked,
+          mutating: filter.mutating,
+        },
       );
       return {
         ok: true,
         session: name,
+        filter: {
+          limit: parseOptionalInteger(query.limit) ?? 20,
+          blocked: filter.blocked ?? null,
+          mutating: filter.mutating ?? null,
+        },
         count: advances.length,
+        summary: summarizeWorkerSessionControlPlaneAdvanceRecords(advances),
         advances,
       };
     } catch (error) {
@@ -3107,7 +3122,7 @@ const readWorkerSessionControlPlaneTimeline = async (
 }> => {
   const [ticks, advances, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, options.limit),
-    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, options.limit),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, { limit: options.limit }),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, options.limit),

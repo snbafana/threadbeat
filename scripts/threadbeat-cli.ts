@@ -4697,7 +4697,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     await printJson(await fetchWorkerSessionControlPlaneAdvances(
       required(sessionName, "runs session-control-plane-advances <session> --server"),
-      { limit: parsePositiveInteger(options.limit ?? "20", "--limit") },
+      {
+        limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
+        blocked: options.blocked === "1" ? true : undefined,
+        mutating: options.mutating === "1" ? true : undefined,
+      },
     ));
     return;
   }
@@ -6374,7 +6378,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -7053,8 +7057,19 @@ type WorkerSessionControlPlaneAlertExecuteResponse = WorkerSessionControlPlaneAd
 type WorkerSessionControlPlaneAdvancesResponse = {
   ok: true;
   session: string;
+  filter: { limit: number; blocked: boolean | null; mutating: boolean | null };
   count: number;
-  advances: Array<Omit<WorkerSessionControlPlaneAdvanceResponse, "ok" | "advancePath">>;
+  summary: {
+    total: number;
+    dryRun: number;
+    executed: number;
+    failed: number;
+    blocked: number;
+    mutating: number;
+  };
+  advances: Array<Omit<WorkerSessionControlPlaneAdvanceResponse, "ok" | "advancePath"> & {
+    executionSafety?: WorkerSessionControlPlaneAlertExecuteResponse["executionSafety"];
+  }>;
 };
 
 type WorkerSessionControlPlaneAdvanceLoopResponse = {
@@ -7774,11 +7789,14 @@ async function executeWorkerSessionControlPlaneAdvanceLoop(
 
 async function fetchWorkerSessionControlPlaneAdvances(
   sessionName: string,
-  options: { limit: number },
+  options: { limit: number; blocked?: boolean; mutating?: boolean },
 ): Promise<WorkerSessionControlPlaneAdvancesResponse> {
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.blocked !== undefined) params.set("blocked", String(options.blocked));
+  if (options.mutating !== undefined) params.set("mutating", String(options.mutating));
   return await requestJson(
     "GET",
-    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advances`, new URLSearchParams({ limit: String(options.limit) })),
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advances`, params),
   ) as WorkerSessionControlPlaneAdvancesResponse;
 }
 
@@ -11610,7 +11628,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--limit 20]
+  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--limit 20]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

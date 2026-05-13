@@ -3518,6 +3518,81 @@ try {
   assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.confirmationRequired, true);
   assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.confirmed, false);
   assert.equal(applyActionAlertMutatingDetailBlocked.executionSafety.reason, "mutating detail command requires confirm=true");
+  const applyActionAlertMutatingDetailConfirmedDryRun = await cliJson<{
+    ok: true;
+    session: string;
+    dryRun: boolean;
+    detailCommand: string;
+    selected: { action: string; detailCommand?: string } | null;
+    executed: null;
+    executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--severity",
+    "error",
+    "--surface",
+    "apply_action",
+    "--reason",
+    "failed_apply_action_execution",
+    "--apply",
+    "detached-session-api-backed-reset",
+    "--execution",
+    failedApplyActionExecutionId,
+    "--action",
+    "inspect_drain_continuation_resets",
+    "--detail-command",
+    "execute_apply_action",
+    "--dry-run",
+    "--confirm",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.ok, true);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.session, sessionName);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.dryRun, true);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.detailCommand, "execute_apply_action");
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.selected?.action, "execute_apply_action");
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.selected?.detailCommand, "execute_apply_action");
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executed, null);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.blocked, false);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.mutating, true);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.confirmationRequired, true);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.confirmed, true);
+  assert.equal(applyActionAlertMutatingDetailConfirmedDryRun.executionSafety.reason, null);
+  const blockedMutatingControlPlaneAdvances = await cliJson<{
+    ok: true;
+    session: string;
+    filter: { limit: number; blocked: boolean | null; mutating: boolean | null };
+    count: number;
+    summary: { blocked: number; mutating: number; executed: number };
+    advances: Array<{
+      executed: null;
+      executionSafety?: { blocked: boolean; mutating: boolean; reason: string | null };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--blocked",
+    "--mutating",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(blockedMutatingControlPlaneAdvances.ok, true);
+  assert.equal(blockedMutatingControlPlaneAdvances.session, sessionName);
+  assert.equal(blockedMutatingControlPlaneAdvances.filter.blocked, true);
+  assert.equal(blockedMutatingControlPlaneAdvances.filter.mutating, true);
+  assert.ok(blockedMutatingControlPlaneAdvances.count >= 1);
+  assert.equal(blockedMutatingControlPlaneAdvances.summary.blocked, blockedMutatingControlPlaneAdvances.count);
+  assert.equal(blockedMutatingControlPlaneAdvances.summary.mutating, blockedMutatingControlPlaneAdvances.count);
+  assert.equal(blockedMutatingControlPlaneAdvances.summary.executed, 0);
+  assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executed === null));
+  assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.blocked === true));
+  assert.ok(blockedMutatingControlPlaneAdvances.advances.every((advance) => advance.executionSafety?.mutating === true));
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",
