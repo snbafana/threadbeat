@@ -36,6 +36,24 @@ export type ControlPlaneAdvanceWorkerLifecycle = {
     | "worker_exited_without_stop_or_completion_record";
 };
 
+export type ControlPlaneAdvanceWorkerLatestResult = {
+  ok?: boolean;
+  session?: string;
+  dryRun?: boolean;
+  untilEmpty?: boolean;
+  stoppedReason?: string;
+  maxSteps?: number;
+  intervalMs?: number;
+  maxConfirmations?: number;
+  executedSteps?: number;
+  attemptedConfirmations?: number;
+  availableConfirmations?: number;
+  cycles?: number;
+  results?: number;
+  sourceAdvanceId?: string;
+  detailCommand?: string;
+};
+
 type StopProcessGroupResult = {
   stopped: boolean;
   signalSent: boolean;
@@ -130,7 +148,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
   projectRoot: string,
   options: { sessionName?: string; workerId?: string; includeRetired?: boolean },
   lines: number,
-): Promise<Array<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
+): Promise<Array<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle; latestResult: ControlPlaneAdvanceWorkerLatestResult | null; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
   const sessionNames = options.sessionName ? [options.sessionName] : await listControlPlaneAdvanceWorkerSessionNames(projectRoot);
   const workers = await Promise.all(sessionNames.map(async (sessionName) => {
     assertSafeWorkerSessionName(sessionName);
@@ -150,6 +168,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
             ...worker,
             alive,
             lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive),
+            latestResult: await readLatestWorkerJsonResult(worker.stdoutPath),
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
           };
@@ -478,6 +497,55 @@ async function tailFileLines(filePath: string, lineCount: number): Promise<strin
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+async function readLatestWorkerJsonResult(filePath: string): Promise<ControlPlaneAdvanceWorkerLatestResult | null> {
+  let text: string;
+  try {
+    text = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const parsed = parseLastJsonObject(text);
+  if (!isRecord(parsed)) return null;
+  return summarizeLatestWorkerJsonResult(parsed);
+}
+
+function parseLastJsonObject(text: string): unknown {
+  const trimmed = text.trim();
+  for (let index = trimmed.lastIndexOf("{"); index >= 0; index = trimmed.lastIndexOf("{", index - 1)) {
+    try {
+      return JSON.parse(trimmed.slice(index));
+    } catch {
+      // Keep scanning for the outer brace of the final pretty-printed JSON object.
+    }
+  }
+  return null;
+}
+
+function summarizeLatestWorkerJsonResult(value: Record<string, unknown>): ControlPlaneAdvanceWorkerLatestResult {
+  return {
+    ...(typeof value.ok === "boolean" ? { ok: value.ok } : {}),
+    ...(typeof value.session === "string" ? { session: value.session } : {}),
+    ...(typeof value.dryRun === "boolean" ? { dryRun: value.dryRun } : {}),
+    ...(typeof value.untilEmpty === "boolean" ? { untilEmpty: value.untilEmpty } : {}),
+    ...(typeof value.stoppedReason === "string" ? { stoppedReason: value.stoppedReason } : {}),
+    ...(typeof value.maxSteps === "number" ? { maxSteps: value.maxSteps } : {}),
+    ...(typeof value.intervalMs === "number" ? { intervalMs: value.intervalMs } : {}),
+    ...(typeof value.maxConfirmations === "number" ? { maxConfirmations: value.maxConfirmations } : {}),
+    ...(typeof value.executedSteps === "number" ? { executedSteps: value.executedSteps } : {}),
+    ...(typeof value.attemptedConfirmations === "number" ? { attemptedConfirmations: value.attemptedConfirmations } : {}),
+    ...(typeof value.availableConfirmations === "number" ? { availableConfirmations: value.availableConfirmations } : {}),
+    ...(Array.isArray(value.cycles) ? { cycles: value.cycles.length } : {}),
+    ...(Array.isArray(value.results) ? { results: value.results.length } : {}),
+    ...(typeof value.sourceAdvanceId === "string" ? { sourceAdvanceId: value.sourceAdvanceId } : {}),
+    ...(typeof value.detailCommand === "string" ? { detailCommand: value.detailCommand } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
