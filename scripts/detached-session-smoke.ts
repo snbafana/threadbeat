@@ -3737,6 +3737,52 @@ try {
   assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.confirmed, true);
   assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.reason, null);
   assert.equal(executedNextBlockedConfirmationDryRun.executionSafety.confirmationCommand, null);
+  const drainedBlockedConfirmationsDryRun = await cliJson<{
+    ok: true;
+    session: string;
+    dryRun: boolean;
+    maxConfirmations: number;
+    availableConfirmations: number;
+    attemptedConfirmations: number;
+    stoppedReason: "empty" | "drained" | "failed" | "max_confirmations";
+    results: Array<{
+      sourceAdvanceId: string;
+      dryRun: boolean;
+      detailCommand: string;
+      selected: { action: string; detailCommand?: string } | null;
+      executed: null;
+      executionSafety: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean; reason: string | null; confirmationCommand: string[] | null };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--drain-confirmations",
+    "--max-confirmations",
+    "1",
+    "--confirm",
+    "--dry-run",
+  ]);
+  assert.equal(drainedBlockedConfirmationsDryRun.ok, true);
+  assert.equal(drainedBlockedConfirmationsDryRun.session, sessionName);
+  assert.equal(drainedBlockedConfirmationsDryRun.dryRun, true);
+  assert.equal(drainedBlockedConfirmationsDryRun.maxConfirmations, 1);
+  assert.ok(drainedBlockedConfirmationsDryRun.availableConfirmations >= 1);
+  assert.equal(drainedBlockedConfirmationsDryRun.attemptedConfirmations, 1);
+  assert.ok(["drained", "max_confirmations"].includes(drainedBlockedConfirmationsDryRun.stoppedReason));
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.sourceAdvanceId, blockedMutatingControlPlaneAdvances.advances[0]?.advanceId);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.dryRun, true);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.detailCommand, "execute_apply_action");
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.selected?.action, "execute_apply_action");
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.selected?.detailCommand, "execute_apply_action");
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executed, null);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.blocked, false);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.mutating, true);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.confirmationRequired, true);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.confirmed, true);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.reason, null);
+  assert.equal(drainedBlockedConfirmationsDryRun.results[0]?.executionSafety.confirmationCommand, null);
   const drainContinuationAlertPreview = await cliJson<ControlPlaneAlertPreviewResponse>(baseUrl, [
     "runs",
     "session-control-plane-alert",

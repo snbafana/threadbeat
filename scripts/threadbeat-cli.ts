@@ -4702,19 +4702,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const executeConfirmation = options["execute-confirmation"] === "1";
     const executeNextConfirmation = options["execute-next-confirmation"] === "1";
-    if (executeConfirmation && executeNextConfirmation) {
-      throw new Error("runs session-control-plane-advances cannot combine --execute-confirmation and --execute-next-confirmation");
+    const drainConfirmations = options["drain-confirmations"] === "1";
+    const confirmationExecutionModes = [executeConfirmation, executeNextConfirmation, drainConfirmations].filter(Boolean).length;
+    if (confirmationExecutionModes > 1) {
+      throw new Error("runs session-control-plane-advances confirmation execution modes are mutually exclusive");
     }
-    if ((executeConfirmation || executeNextConfirmation) && outputFormat !== "json") {
+    if (confirmationExecutionModes > 0 && outputFormat !== "json") {
       throw new Error("runs session-control-plane-advances confirmation execution requires json output");
     }
-    if ((executeConfirmation || executeNextConfirmation) && options["commands-only"] === "1") {
+    if (confirmationExecutionModes > 0 && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-advances confirmation execution cannot be combined with --commands-only");
     }
-    if ((executeConfirmation || executeNextConfirmation) && options["confirmation-queue"] === "1") {
+    if (confirmationExecutionModes > 0 && options["confirmation-queue"] === "1") {
       throw new Error("runs session-control-plane-advances confirmation execution cannot be combined with --confirmation-queue");
     }
-    if ((executeConfirmation || executeNextConfirmation) && options.confirm !== "1") {
+    if (confirmationExecutionModes > 0 && options.confirm !== "1") {
       throw new Error("runs session-control-plane-advances confirmation execution requires --confirm");
     }
     if (options["confirmation-queue"] === "1" && outputFormat !== "json" && options["commands-only"] !== "1") {
@@ -4724,15 +4726,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs session-control-plane-advances --format shell requires --commands-only");
     }
     const limit = parsePositiveInteger(
-      options.limit ?? (executeConfirmation || executeNextConfirmation ? "100" : "20"),
+      options.limit ?? (confirmationExecutionModes > 0 ? "100" : "20"),
       "--limit",
     );
     const advances = await fetchWorkerSessionControlPlaneAdvances(
       requiredSessionName,
       {
         limit,
-        blocked: options.blocked === "1" || options["confirmation-queue"] === "1" || executeConfirmation || executeNextConfirmation ? true : undefined,
-        mutating: options.mutating === "1" || options["confirmation-queue"] === "1" || executeConfirmation || executeNextConfirmation ? true : undefined,
+        blocked: options.blocked === "1" || options["confirmation-queue"] === "1" || confirmationExecutionModes > 0 ? true : undefined,
+        mutating: options.mutating === "1" || options["confirmation-queue"] === "1" || confirmationExecutionModes > 0 ? true : undefined,
       },
     );
     if (executeConfirmation || executeNextConfirmation) {
@@ -4752,6 +4754,42 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         process.exitCode = 1;
       }
       await printJson({ ...response, sourceAdvanceId: advance.advanceId });
+      return;
+    }
+    if (drainConfirmations) {
+      const maxConfirmations = parsePositiveInteger(options["max-confirmations"] ?? "3", "--max-confirmations");
+      const commands = workerSessionControlPlaneAdvanceConfirmationCommands(advances.advances);
+      const selectedCommands = commands.slice(0, maxConfirmations);
+      const results: Array<WorkerSessionControlPlaneAlertExecuteResponse & { sourceAdvanceId: string }> = [];
+      let stoppedReason: "empty" | "drained" | "failed" | "max_confirmations" = selectedCommands.length === 0 ? "empty" : "drained";
+      for (const command of selectedCommands) {
+        const advance = workerSessionControlPlaneAdvanceById(advances.advances, command.advanceId);
+        const response = await executeWorkerSessionControlPlaneAlert(
+          requiredSessionName,
+          workerSessionControlPlaneAdvanceConfirmationExecuteOptions(requiredSessionName, advance, {
+            dryRun: options["dry-run"] === "1",
+          }),
+        );
+        results.push({ ...response, sourceAdvanceId: advance.advanceId });
+        if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+          process.exitCode = 1;
+          stoppedReason = "failed";
+          break;
+        }
+      }
+      if (stoppedReason === "drained" && commands.length > selectedCommands.length) {
+        stoppedReason = "max_confirmations";
+      }
+      await printJson({
+        ok: true,
+        session: requiredSessionName,
+        dryRun: options["dry-run"] === "1",
+        maxConfirmations,
+        availableConfirmations: commands.length,
+        attemptedConfirmations: results.length,
+        stoppedReason,
+        results,
+      });
       return;
     }
     if (options["commands-only"] === "1") {
@@ -6448,7 +6486,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -11870,7 +11908,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--detail-command inspect_apply|execute_apply_action|reset_selected_failed_drain_continuations] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
+  runs session-control-plane-advances <name> --server [--blocked] [--mutating] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--dry-run] [--limit 20] [--commands-only] [--format json|shell]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
