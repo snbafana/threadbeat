@@ -5019,9 +5019,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const options = parseOptions(optionArgs);
     const requiredSessionName = required(sessionName, "runs session-control-plane-ticks <session>");
     const limit = options.limit ? parsePositiveInteger(options.limit, "--limit") : 20;
+    const tickIds = options.tick ? parseList(options.tick) : [];
     await printJson(options.server === "1"
-      ? await fetchWorkerSessionControlPlaneTicks(requiredSessionName, limit)
-      : await listWorkerSessionControlPlaneTickRecords(requiredSessionName, limit));
+      ? await fetchWorkerSessionControlPlaneTicks(requiredSessionName, { limit, tickIds })
+      : await listWorkerSessionControlPlaneTickRecords(requiredSessionName, { limit, tickIds }));
     return;
   }
   if (subcommandName === "session-control-plane-timeline") {
@@ -6815,7 +6816,19 @@ function workerSessionControlPlaneTimelineCommands(
       return [{
         ...common,
         action: "inspect_tick" as const,
-        command: ["npm", "run", "cli", "--", "runs", "session-control-plane-ticks", timeline.session, "--server", "--limit", String(timeline.filter.limit)],
+        command: [
+          "npm",
+          "run",
+          "cli",
+          "--",
+          "runs",
+          "session-control-plane-ticks",
+          timeline.session,
+          "--server",
+          ...(event.tickId ? ["--tick", event.tickId] : []),
+          "--limit",
+          String(timeline.filter.limit),
+        ],
       }];
     }
     if (event.source === "advance") {
@@ -8709,20 +8722,23 @@ async function executeWorkerSessionControlPlaneTickLoop(
 
 async function fetchWorkerSessionControlPlaneTicks(
   sessionName: string,
-  limit = 20,
+  options: { limit?: number; tickIds?: string[] } = {},
 ): Promise<{
   ok: true;
   session: string;
+  filter?: { tickIds: string[] };
   count: number;
   ticks: WorkerSessionControlPlaneTickWithDecision[];
 }> {
-  const params = new URLSearchParams({ limit: String(limit) });
+  const params = new URLSearchParams({ limit: String(options.limit ?? 20) });
+  if (options.tickIds && options.tickIds.length > 0) params.set("tickId", options.tickIds.join(","));
   return await requestJson(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-ticks`, params),
   ) as {
     ok: true;
     session: string;
+    filter?: { tickIds: string[] };
     count: number;
     ticks: WorkerSessionControlPlaneTickWithDecision[];
   };
@@ -8730,13 +8746,16 @@ async function fetchWorkerSessionControlPlaneTicks(
 
 async function listWorkerSessionControlPlaneTickRecords(
   sessionName: string,
-  limit = 20,
+  options: { limit?: number; tickIds?: string[] } = {},
 ): Promise<{
   ok: true;
   session: string;
+  filter: { tickIds: string[] };
   count: number;
   ticks: WorkerSessionControlPlaneTickWithDecision[];
 }> {
+  const limit = options.limit ?? 20;
+  const tickIdFilter = options.tickIds && options.tickIds.length > 0 ? new Set(options.tickIds) : null;
   const tickDir = workerSessionControlPlaneTickDir(sessionName);
   try {
     const entries = await fs.readdir(tickDir, { withFileTypes: true });
@@ -8746,11 +8765,13 @@ async function listWorkerSessionControlPlaneTickRecords(
         const text = await fs.readFile(path.join(tickDir, entry.name), "utf8");
         return JSON.parse(text) as WorkerSessionControlPlaneTickRecord;
       }));
+    const filteredTicks = ticks.filter((tick) => !tickIdFilter || tickIdFilter.has(tick.tickId));
     return {
       ok: true,
       session: sessionName,
-      count: Math.min(ticks.length, limit),
-      ticks: ticks
+      filter: { tickIds: options.tickIds ?? [] },
+      count: Math.min(filteredTicks.length, limit),
+      ticks: filteredTicks
         .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
         .slice(0, limit)
         .map((tick) => ({
@@ -8760,7 +8781,7 @@ async function listWorkerSessionControlPlaneTickRecords(
     };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { ok: true, session: sessionName, count: 0, ticks: [] };
+      return { ok: true, session: sessionName, filter: { tickIds: options.tickIds ?? [] }, count: 0, ticks: [] };
     }
     throw error;
   }
@@ -12418,7 +12439,7 @@ Commands:
   runs stop-control-plane-advance-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-ticks <name> [--server] [--limit 20]
+  runs session-control-plane-ticks <name> [--server] [--tick tick_id[,tick_id]] [--limit 20]
   runs session-control-plane-timeline <name> --server [--summary] [--source tick,branch_recovery_execution] [--event tick_recorded,branch_recovery_executed] [--status executed,noop] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]

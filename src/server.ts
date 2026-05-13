@@ -900,14 +900,21 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     try {
       const { name } = request.params as { name: string };
       const query = request.query as Record<string, string | undefined>;
+      const tickIds = [
+        ...parseOptionalList(query.tick),
+        ...parseOptionalList(query.tickId),
+        ...parseOptionalList(query.tickIds),
+      ];
       const ticks = await listWorkerSessionControlPlaneTickRecords(
         settings.projectRoot,
         name,
         parseOptionalInteger(query.limit) ?? 20,
+        { tickIds },
       );
       return {
         ok: true,
         session: name,
+        filter: { tickIds },
         count: ticks.length,
         ticks: ticks.map((tick) => ({
           ...tick,

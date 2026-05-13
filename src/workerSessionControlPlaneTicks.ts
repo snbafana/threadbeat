@@ -155,8 +155,15 @@ export async function listWorkerSessionControlPlaneTickRecords(
   projectRoot: string,
   sessionName: string,
   limit = 20,
+  options: { tickIds?: string[] } = {},
 ): Promise<WorkerSessionControlPlaneTickRecord[]> {
   assertSafeWorkerSessionName(sessionName);
+  const tickIdFilter = options.tickIds && options.tickIds.length > 0
+    ? new Set(options.tickIds)
+    : null;
+  if (tickIdFilter) {
+    for (const tickId of tickIdFilter) assertSafeWorkerSessionName(tickId);
+  }
   const tickDir = workerSessionControlPlaneTickDir(projectRoot, sessionName);
   try {
     const entries = await fs.readdir(tickDir, { withFileTypes: true });
@@ -167,6 +174,7 @@ export async function listWorkerSessionControlPlaneTickRecords(
         return JSON.parse(text) as WorkerSessionControlPlaneTickRecord;
       }));
     return records
+      .filter((record) => !tickIdFilter || tickIdFilter.has(record.tickId))
       .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
       .slice(0, limit);
   } catch (error) {

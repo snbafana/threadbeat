@@ -23,6 +23,7 @@
     "smoke:detached-session": "tsx scripts/detached-session-smoke.ts",
     "smoke:session-apply-resume": "tsx scripts/session-apply-resume-smoke.ts",
     "smoke:branch-recovery-executions": "tsx scripts/branch-recovery-executions-smoke.ts",
+    "smoke:control-plane-ticks": "tsx scripts/control-plane-ticks-smoke.ts",
     "smoke:control-plane-advances": "tsx scripts/control-plane-advances-smoke.ts",
     "smoke:apply-action-executions": "tsx scripts/apply-action-executions-smoke.ts",
     "smoke:worker-records": "tsx scripts/worker-record-sanitization-smoke.ts",
