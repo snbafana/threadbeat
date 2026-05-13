@@ -1820,6 +1820,39 @@ try {
   assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.total, 2);
   assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.retired, 1);
   assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.completed, 1);
+  const controlPlaneTimeline = await cliJson<{
+    ok?: true;
+    session: string;
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{ event: string; source: string; tickId?: string; workerId?: string; status?: string; state?: string; reason?: string; restartable?: boolean }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--limit",
+    "20",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(controlPlaneTimeline.ok, true);
+  assert.equal(controlPlaneTimeline.session, sessionName);
+  assert.ok(controlPlaneTimeline.count >= 5);
+  assert.ok((controlPlaneTimeline.counts.tick_recorded ?? 0) >= 2);
+  assert.ok((controlPlaneTimeline.counts.worker_completed ?? 0) >= 1);
+  assert.ok((controlPlaneTimeline.counts.worker_retired ?? 0) >= 1);
+  assert.ok(controlPlaneTimeline.events.some((event) => event.event === "tick_recorded" && event.status === "dry_run"));
+  assert.ok(controlPlaneTimeline.events.some((event) => (
+    event.event === "worker_completed"
+    && event.workerId === "detached-smoke-control-plane-complete-worker"
+    && event.reason === "worker_completed"
+  )));
+  assert.ok(controlPlaneTimeline.events.some((event) => (
+    event.event === "worker_retired"
+    && event.workerId === "detached-smoke-control-plane-worker"
+    && event.state === "retired"
+  )));
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };

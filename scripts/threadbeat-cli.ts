@@ -4520,6 +4520,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       : await listWorkerSessionControlPlaneTickRecords(requiredSessionName, limit));
     return;
   }
+  if (subcommandName === "session-control-plane-timeline") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-timeline requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneTimeline(
+      required(sessionName, "runs session-control-plane-timeline <session> --server"),
+      {
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 20,
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "start-control-plane-tick-worker") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6843,6 +6858,49 @@ async function listWorkerSessionControlPlaneTickRecords(
     }
     throw error;
   }
+}
+
+async function fetchWorkerSessionControlPlaneTimeline(
+  sessionName: string,
+  options: { limit: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  counts: Record<string, number>;
+  events: Array<{
+    observedAt: string;
+    source: string;
+    event: string;
+    tickId?: string;
+    workerId?: string;
+    status?: string;
+    state?: string;
+    restartable?: boolean;
+    reason?: string;
+  }>;
+}> {
+  const params = new URLSearchParams({ limit: String(options.limit), lines: String(options.lines) });
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-timeline`, params),
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{
+      observedAt: string;
+      source: string;
+      event: string;
+      tickId?: string;
+      workerId?: string;
+      status?: string;
+      state?: string;
+      restartable?: boolean;
+      reason?: string;
+    }>;
+  };
 }
 
 async function startWorkerSessionControlPlaneTickWorker(
@@ -10236,6 +10294,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--limit 20]
+  runs session-control-plane-timeline <name> --server [--limit 20] [--lines 5]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-tick-workers-next <name> --server

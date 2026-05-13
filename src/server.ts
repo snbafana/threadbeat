@@ -484,6 +484,19 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.get("/api/worker-sessions/:name/control-plane-timeline", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      return await readWorkerSessionControlPlaneTimeline(settings, name, {
+        limit: parseOptionalInteger(query.limit) ?? 20,
+        lines: parseOptionalInteger(query.lines) ?? 5,
+      });
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.get("/api/worker-sessions/:name/control-plane-tick-workers", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -2345,6 +2358,113 @@ const requestBody = (body: unknown): Record<string, unknown> => {
     return body as Record<string, unknown>;
   }
   return {};
+};
+
+type WorkerSessionControlPlaneTimelineEvent = {
+  observedAt: string;
+  source: "tick" | "control_plane_tick_worker";
+  event: "tick_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired";
+  tickId?: string;
+  workerId?: string;
+  status?: string;
+  state?: string;
+  restartable?: boolean;
+  reason?: string;
+  pid?: number | null;
+  previousPid?: number | null;
+  plannedCount?: number;
+  executedCount?: number;
+};
+
+const readWorkerSessionControlPlaneTimeline = async (
+  settings: Settings,
+  name: string,
+  options: { limit: number; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  counts: Record<string, number>;
+  events: WorkerSessionControlPlaneTimelineEvent[];
+}> => {
+  const [ticks, workers] = await Promise.all([
+    listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, options.limit),
+    listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
+  ]);
+  const events: WorkerSessionControlPlaneTimelineEvent[] = [];
+  for (const tick of ticks) {
+    events.push({
+      observedAt: tick.observedAt,
+      source: "tick",
+      event: "tick_recorded",
+      tickId: tick.tickId,
+      status: tick.status,
+      plannedCount: [tick.planned.branchRecovery, tick.planned.applyAction, tick.planned.drainContinuation].filter(Boolean).length,
+      executedCount: [tick.executed.branchRecovery, tick.executed.applyAction, tick.executed.drainContinuation].filter(Boolean).length,
+    });
+  }
+  for (const worker of workers) {
+    events.push({
+      observedAt: worker.startedAt,
+      source: "control_plane_tick_worker",
+      event: worker.restartedAt ? "worker_restarted" : "worker_started",
+      workerId: worker.workerId,
+      state: worker.lifecycle.state,
+      restartable: worker.lifecycle.restartable,
+      reason: worker.lifecycle.reason,
+      pid: worker.pid,
+      previousPid: worker.previousPid ?? null,
+    });
+    if (worker.stoppedAt) {
+      events.push({
+        observedAt: worker.stoppedAt,
+        source: "control_plane_tick_worker",
+        event: "worker_stopped",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        reason: worker.lifecycle.reason,
+        pid: worker.pid,
+      });
+    }
+    if (worker.completedAt) {
+      events.push({
+        observedAt: worker.completedAt,
+        source: "control_plane_tick_worker",
+        event: "worker_completed",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        reason: worker.lifecycle.reason,
+        pid: worker.pid,
+      });
+    }
+    if (worker.retiredAt) {
+      events.push({
+        observedAt: worker.retiredAt,
+        source: "control_plane_tick_worker",
+        event: "worker_retired",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        reason: worker.lifecycle.reason,
+        pid: worker.pid,
+      });
+    }
+  }
+  const sorted = events
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+    .slice(0, options.limit);
+  return {
+    ok: true,
+    session: name,
+    count: sorted.length,
+    counts: sorted.reduce<Record<string, number>>((counts, event) => {
+      counts[event.event] = (counts[event.event] ?? 0) + 1;
+      return counts;
+    }, {}),
+    events: sorted,
+  };
 };
 
 const readWorkerSessionControlPlaneStatus = async (
