@@ -532,6 +532,26 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
     }
   });
 
+  app.get("/api/worker-sessions/:name/control-plane-alert", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      return await readWorkerSessionControlPlaneAlertPreview(settings, db, name, {
+        lines: parseOptionalInteger(query.lines) ?? 5,
+        severities: parseOptionalList(query.severity),
+        surfaces: parseOptionalList(query.surface),
+        reasons: parseOptionalList(query.reason),
+        runIds: parseOptionalList(query.runId),
+        workerIds: parseOptionalList(query.workerId),
+        applyIds: parseOptionalList(query.applyId),
+        executionIds: parseOptionalList(query.executionId),
+        actions: parseOptionalList(query.action),
+      });
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
   app.post("/api/worker-sessions/:name/control-plane-advance", async (request, reply) => {
     try {
       const { name } = request.params as { name: string };
@@ -3674,6 +3694,48 @@ const readWorkerSessionControlPlaneAlerts = async (
       fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", name, "--server"],
       timelineFailures: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", name, "--server", "--status", "failed,noop"],
     },
+  };
+};
+
+const readWorkerSessionControlPlaneAlertPreview = async (
+  settings: Settings,
+  db: Database,
+  name: string,
+  options: Omit<Parameters<typeof readWorkerSessionControlPlaneAlerts>[3], "limit">,
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  filter: Awaited<ReturnType<typeof readWorkerSessionControlPlaneAlerts>>["filter"];
+  matchCount: number;
+  alert: WorkerSessionControlPlaneAlert | null;
+  preview: {
+    command: string[];
+    fullStatus: string[];
+    timelineFailures: string[];
+  } | null;
+  recentTimeline: Awaited<ReturnType<typeof readWorkerSessionControlPlaneAlerts>>["recentTimeline"];
+}> => {
+  const alerts = await readWorkerSessionControlPlaneAlerts(settings, db, name, {
+    ...options,
+    limit: 1,
+  });
+  const alert = alerts.alerts[0] ?? null;
+  return {
+    ok: true,
+    session: alerts.session,
+    observedAt: alerts.observedAt,
+    filter: alerts.filter,
+    matchCount: alerts.filter.totalAlerts,
+    alert,
+    preview: alert
+      ? {
+          command: alert.command,
+          fullStatus: alerts.commands.fullStatus,
+          timelineFailures: alerts.commands.timelineFailures,
+        }
+      : null,
+    recentTimeline: alerts.recentTimeline,
   };
 };
 

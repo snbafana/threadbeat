@@ -3245,6 +3245,47 @@ try {
     && alert.action === "inspect_run"
   )));
   assert.ok(filteredBranchAlerts.alerts.some((alert) => alert.runId === controlPlaneBlockedPlan.run.id));
+  const controlPlaneAlertPreview = await cliJson<{
+    ok?: true;
+    session: string;
+    filter: typeof controlPlaneAlerts.filter;
+    matchCount: number;
+    alert: typeof controlPlaneAlerts.alerts[number] | null;
+    preview: { command: string[]; fullStatus: string[]; timelineFailures: string[] } | null;
+    recentTimeline: typeof controlPlaneAlerts.recentTimeline;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--severity",
+    "warning",
+    "--surface",
+    "branch",
+    "--reason",
+    "running_sandbox_present",
+    "--run",
+    controlPlaneBlockedPlan.run.id,
+    "--action",
+    "inspect_run",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneAlertPreview.ok, true);
+  assert.equal(controlPlaneAlertPreview.session, sessionName);
+  assert.equal(controlPlaneAlertPreview.matchCount, filteredBranchAlerts.filter.totalAlerts);
+  assert.deepEqual(controlPlaneAlertPreview.filter.runIds, [controlPlaneBlockedPlan.run.id]);
+  assert.equal(controlPlaneAlertPreview.alert?.runId, controlPlaneBlockedPlan.run.id);
+  assert.equal(controlPlaneAlertPreview.alert?.action, "inspect_run");
+  assert.equal(
+    controlPlaneAlertPreview.preview?.command.join(" "),
+    `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
+  );
+  assert.ok(controlPlaneAlertPreview.recentTimeline.events.some((event) => (
+    event.source === "branch_recovery_execution"
+    && event.status === "noop"
+    && event.skippedRunIds?.includes(controlPlaneBlockedPlan.run.id)
+  )));
   const controlPlaneAlertCommands = await cliText(baseUrl, [
     "runs",
     "session-control-plane-alerts",
@@ -3267,6 +3308,29 @@ try {
   assert.ok(controlPlaneAlertCommands.split("\n").filter(Boolean).includes(
     `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
   ));
+  const controlPlaneAlertPreviewCommand = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--severity",
+    "warning",
+    "--surface",
+    "branch",
+    "--reason",
+    "running_sandbox_present",
+    "--run",
+    controlPlaneBlockedPlan.run.id,
+    "--action",
+    "inspect_run",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.equal(
+    controlPlaneAlertPreviewCommand.trim(),
+    `npm run cli -- runs inspect ${controlPlaneBlockedPlan.run.id}`,
+  );
   const controlPlaneStatusAfterResume = await cliJson<typeof controlPlaneStatus>(baseUrl, [
     "runs",
     "session-control-plane-status",

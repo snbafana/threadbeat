@@ -4576,6 +4576,60 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(alerts);
     return;
   }
+  if (subcommandName === "session-control-plane-alert") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-alert requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-alert --format must be json or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-alert --format shell requires --commands-only");
+    }
+    const alert = await fetchWorkerSessionControlPlaneAlertPreview(
+      required(sessionName, "runs session-control-plane-alert <session> --server"),
+      {
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        severity: options.severity,
+        surface: options.surface,
+        reason: options.reason,
+        runId: options.run,
+        workerId: options.worker,
+        applyId: options.apply,
+        executionId: options.execution,
+        action: options.action,
+      },
+    );
+    if (options["commands-only"] === "1") {
+      const commands = alert.alert
+        ? [{
+            scope: "control_plane_alert",
+            surface: alert.alert.surface,
+            severity: alert.alert.severity,
+            reason: alert.alert.reason,
+            count: alert.alert.count,
+            runId: alert.alert.runId,
+            workerId: alert.alert.workerId,
+            applyId: alert.alert.applyId,
+            executionId: alert.alert.executionId,
+            action: alert.alert.action,
+            command: alert.alert.command,
+          }]
+        : [];
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        const { alert: _alert, preview: _preview, ...rest } = alert;
+        await printJson({ ...rest, commands });
+      }
+      return;
+    }
+    await printJson(alert);
+    return;
+  }
   if (subcommandName === "session-control-plane-advance") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6900,6 +6954,21 @@ type WorkerSessionControlPlaneAlertsResponse = {
   commands: { fullStatus: string[]; timelineFailures: string[] };
 };
 
+type WorkerSessionControlPlaneAlertPreviewResponse = {
+  ok: true;
+  session: string;
+  observedAt: string;
+  filter: WorkerSessionControlPlaneAlertsResponse["filter"];
+  matchCount: number;
+  alert: WorkerSessionControlPlaneAlertsResponse["alerts"][number] | null;
+  preview: {
+    command: string[];
+    fullStatus: string[];
+    timelineFailures: string[];
+  } | null;
+  recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];
+};
+
 type WorkerSessionControlPlaneAdvanceAction = {
   surface: "stale_run" | "branch" | "apply_action" | "drain_continuation" | "worker_recovery";
   action: string;
@@ -7335,6 +7404,38 @@ async function fetchWorkerSessionControlPlaneAlerts(
       params,
     ),
   ) as WorkerSessionControlPlaneAlertsResponse;
+}
+
+async function fetchWorkerSessionControlPlaneAlertPreview(
+  sessionName: string,
+  options: {
+    lines: number;
+    severity?: string;
+    surface?: string;
+    reason?: string;
+    runId?: string;
+    workerId?: string;
+    applyId?: string;
+    executionId?: string;
+    action?: string;
+  },
+): Promise<WorkerSessionControlPlaneAlertPreviewResponse> {
+  const params = new URLSearchParams({ lines: String(options.lines) });
+  if (options.severity) params.set("severity", options.severity);
+  if (options.surface) params.set("surface", options.surface);
+  if (options.reason) params.set("reason", options.reason);
+  if (options.runId) params.set("runId", options.runId);
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.applyId) params.set("applyId", options.applyId);
+  if (options.executionId) params.set("executionId", options.executionId);
+  if (options.action) params.set("action", options.action);
+  return await requestJson(
+    "GET",
+    withQuery(
+      `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-alert`,
+      params,
+    ),
+  ) as WorkerSessionControlPlaneAlertPreviewResponse;
 }
 
 function selectWorkerSessionControlPlaneNextActions(
@@ -11354,6 +11455,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--limit 20]
