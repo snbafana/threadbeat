@@ -5173,6 +5173,47 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-workers requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-workers --format must be json or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-workers --format shell requires --commands-only");
+    }
+    const aggregate = await fetchWorkerSessionControlPlaneWorkers(
+      required(sessionName, "runs session-control-plane-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    );
+    if (options["commands-only"] === "1") {
+      const commands = aggregate.nextSteps.map((step) => ({
+        scope: "control_plane_worker",
+        kind: step.kind,
+        action: step.action,
+        reason: step.reason,
+        workerId: step.workerId,
+        command: step.command,
+      })).filter((step) => step.command.length > 0);
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        const { workers: _workers, nextSteps: _nextSteps, ...rest } = aggregate;
+        await printJson({ ...rest, commands });
+      }
+      return;
+    }
+    await printJson(aggregate);
+    return;
+  }
   if (subcommandName === "session-control-plane-advance-workers-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -9886,6 +9927,201 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   };
 }
 
+type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_tick";
+
+type ControlPlaneWorkerSummary = {
+  total: number;
+  alive: number;
+  stopped: number;
+  completed: number;
+  retired: number;
+  restartable: number;
+};
+
+type ControlPlaneWorkerAggregateNextStep = Record<string, unknown> & {
+  kind: ControlPlaneWorkerKind;
+  action: string | null;
+  reason: string | null;
+  workerId: string | null;
+  command: string[];
+};
+
+async function fetchWorkerSessionControlPlaneWorkers(
+  sessionName: string,
+  options: { workerId?: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  filter: { workerId: string | null; includeRetired: boolean; lines: number };
+  summary: ControlPlaneWorkerSummary & {
+    advance: ControlPlaneWorkerSummary;
+    tick: ControlPlaneWorkerSummary;
+  };
+  workers: Array<Record<string, unknown> & {
+    kind: ControlPlaneWorkerKind;
+    workerId: string | null;
+    alive: boolean;
+    state: string | null;
+    restartable: boolean;
+    reason: string | null;
+    commands: {
+      inspect: string[];
+      restart: string[];
+      stop: string[];
+      retire: string[];
+    } | null;
+  }>;
+  nextSteps: ControlPlaneWorkerAggregateNextStep[];
+  commands: {
+    inspectAdvanceWorkers: string[];
+    inspectTickWorkers: string[];
+    restartNext: string[] | null;
+  };
+}> {
+  const [advanceWorkers, tickWorkers, advanceNextSteps, tickNextSteps] = await Promise.all([
+    fetchWorkerSessionControlPlaneAdvanceWorkers(sessionName, options),
+    fetchWorkerSessionControlPlaneTickWorkers(sessionName, options),
+    fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(sessionName, { workerId: options.workerId }),
+    fetchWorkerSessionControlPlaneTickWorkerNextSteps(sessionName, { workerId: options.workerId }),
+  ]);
+  const workers = [
+    ...advanceWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_advance", sessionName, worker, options.includeRetired)),
+    ...tickWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_tick", sessionName, worker, options.includeRetired)),
+  ];
+  const nextSteps = [
+    ...advanceNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_advance", step)),
+    ...tickNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_tick", step)),
+  ];
+  const advanceSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_advance"));
+  const tickSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_tick"));
+  const allSummary = summarizeControlPlaneWorkers(workers);
+  return {
+    ok: true,
+    session: sessionName,
+    filter: {
+      workerId: options.workerId ?? null,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+    },
+    summary: {
+      ...allSummary,
+      advance: advanceSummary,
+      tick: tickSummary,
+    },
+    workers,
+    nextSteps,
+    commands: {
+      inspectAdvanceWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-advance-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      inspectTickWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-tick-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      restartNext: nextSteps[0]?.command ?? null,
+    },
+  };
+}
+
+function normalizeControlPlaneWorker(
+  kind: ControlPlaneWorkerKind,
+  sessionName: string,
+  worker: unknown,
+  includeRetired: boolean,
+): Record<string, unknown> & {
+  kind: ControlPlaneWorkerKind;
+  workerId: string | null;
+  alive: boolean;
+  state: string | null;
+  restartable: boolean;
+  reason: string | null;
+  commands: {
+    inspect: string[];
+    restart: string[];
+    stop: string[];
+    retire: string[];
+  } | null;
+} {
+  const record = plainRecord(worker) ?? {};
+  const lifecycle = plainRecord(record.lifecycle);
+  const workerId = stringFromUnknown(record.workerId);
+  const state = stringFromUnknown(lifecycle?.state) ?? (record.alive === true ? "running" : null);
+  const restartable = lifecycle?.restartable === true;
+  return {
+    ...record,
+    kind,
+    workerId,
+    alive: record.alive === true,
+    state,
+    restartable,
+    reason: stringFromUnknown(lifecycle?.reason),
+    commands: workerId ? controlPlaneWorkerCommands(kind, sessionName, workerId, includeRetired) : null,
+  };
+}
+
+function normalizeControlPlaneWorkerNextStep(kind: ControlPlaneWorkerKind, step: unknown): ControlPlaneWorkerAggregateNextStep {
+  const record = plainRecord(step) ?? {};
+  return {
+    ...record,
+    kind,
+    action: stringFromUnknown(record.action),
+    reason: stringFromUnknown(record.reason),
+    workerId: stringFromUnknown(record.workerId),
+    command: stringListFromUnknown(record.command),
+  };
+}
+
+function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean }>): ControlPlaneWorkerSummary {
+  return {
+    total: workers.length,
+    alive: workers.filter((worker) => worker.alive).length,
+    stopped: workers.filter((worker) => worker.state === "stopped").length,
+    completed: workers.filter((worker) => worker.state === "completed").length,
+    retired: workers.filter((worker) => worker.state === "retired").length,
+    restartable: workers.filter((worker) => worker.restartable).length,
+  };
+}
+
+function controlPlaneWorkerCommands(
+  kind: ControlPlaneWorkerKind,
+  sessionName: string,
+  workerId: string,
+  includeRetired: boolean,
+): {
+  inspect: string[];
+  restart: string[];
+  stop: string[];
+  retire: string[];
+} {
+  const nouns = kind === "control_plane_advance" ? "control-plane-advance-workers" : "control-plane-tick-workers";
+  return {
+    inspect: [
+      "npm", "run", "cli", "--", "runs", `session-${nouns}`, sessionName, "--server",
+      "--worker-id", workerId,
+      ...(includeRetired ? ["--include-retired"] : []),
+    ],
+    restart: [
+      "npm", "run", "cli", "--", "runs", `restart-${nouns}`, sessionName, "--server",
+      "--worker-id", workerId,
+      ...(includeRetired ? ["--include-retired"] : []),
+    ],
+    stop: [
+      "npm", "run", "cli", "--", "runs", `stop-${nouns}`, sessionName, "--server",
+      "--worker-id", workerId,
+    ],
+    retire: [
+      "npm", "run", "cli", "--", "runs", `stop-${nouns}`, sessionName, "--server",
+      "--worker-id", workerId,
+      "--retire",
+    ],
+  };
+}
+
 async function restartWorkerSessionControlPlaneTickWorker(
   sessionName: string,
   options: { workerId: string; includeRetired: boolean; lines: number },
@@ -13333,6 +13569,7 @@ Commands:
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
+  runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|shell]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]
   runs restart-control-plane-advance-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-advance-workers <name> --server [--worker-id id] [--retire] [--lines 20]
