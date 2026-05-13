@@ -6587,6 +6587,7 @@ async function fetchWorkerSessionControlPlaneStatus(
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
+    controlPlaneTick: { total: number; alive: number; stopped: number; retired: number };
   };
   queues: {
     applyActions: {
@@ -6642,6 +6643,7 @@ async function fetchWorkerSessionControlPlaneStatus(
       watch: { total: number; alive: number; stopped: number; retired: number };
       drain: { total: number; alive: number; stopped: number; retired: number };
       applyAction: { total: number; alive: number; stopped: number; retired: number };
+      controlPlaneTick: { total: number; alive: number; stopped: number; retired: number };
     };
     queues: {
       applyActions: {

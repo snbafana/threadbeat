@@ -2323,6 +2323,7 @@ const readWorkerSessionControlPlaneStatus = async (
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
+    controlPlaneTick: { total: number; alive: number; stopped: number; retired: number };
   };
   queues: {
     applyActions: ReturnType<typeof summarizeWorkerSessionApplyActionQueue>["counts"];
@@ -2350,6 +2351,7 @@ const readWorkerSessionControlPlaneStatus = async (
     drainWorkerNextSteps,
     applyActionWorkers,
     applyActionWorkerNextSteps,
+    controlPlaneTickWorkers,
     branchRecovery,
     branchRecoveryExecutions,
   ] = await Promise.all([
@@ -2361,6 +2363,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
     listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
+    listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
   ]);
@@ -2372,6 +2375,7 @@ const readWorkerSessionControlPlaneStatus = async (
       watch: summarizeControlPlaneWorkers(watchWorkers),
       drain: summarizeControlPlaneWorkers(drainWorkers),
       applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
+      controlPlaneTick: summarizeControlPlaneWorkers(controlPlaneTickWorkers),
     },
     queues: {
       applyActions: applyActionQueue.counts,

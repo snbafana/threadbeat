@@ -1443,6 +1443,7 @@ try {
     workers: {
       drain: { total: number; stopped: number; retired: number };
       applyAction: { total: number; stopped: number; retired: number };
+      controlPlaneTick: { total: number; stopped: number; retired: number };
     };
     queues: {
       applyActions: { actionable: number; resetAudits: number };
@@ -1482,6 +1483,9 @@ try {
   assert.equal(controlPlaneStatus.workers.applyAction.total, 1);
   assert.equal(controlPlaneStatus.workers.applyAction.stopped, 1);
   assert.equal(controlPlaneStatus.workers.applyAction.retired, 0);
+  assert.equal(controlPlaneStatus.workers.controlPlaneTick.total, 0);
+  assert.equal(controlPlaneStatus.workers.controlPlaneTick.stopped, 0);
+  assert.equal(controlPlaneStatus.workers.controlPlaneTick.retired, 0);
   assert.ok(controlPlaneStatus.branches.counts.total >= 1);
   assert.ok(controlPlaneStatus.branches.counts.ready >= 1);
   assert.equal(controlPlaneStatus.branches.counts.stoppedBranchWithoutResultCommit, controlPlaneStatus.branches.counts.ready);
@@ -1657,6 +1661,16 @@ try {
   assert.equal(stoppedControlPlaneTickWorkers.count, 1);
   assert.equal(stoppedControlPlaneTickWorkers.stopped[0]?.workerId, "detached-smoke-control-plane-worker");
   assert.ok(stoppedControlPlaneTickWorkers.stopped[0]?.retiredAt);
+  const controlPlaneStatusAfterTickWorker = await cliJson<typeof controlPlaneStatus>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.total, 1);
+  assert.equal(controlPlaneStatusAfterTickWorker.workers.controlPlaneTick.retired, 1);
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };
