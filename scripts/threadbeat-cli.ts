@@ -4478,6 +4478,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-tick") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-tick requires --server");
+    }
+    await printJson(await runWorkerSessionControlPlaneTick(
+      required(sessionName, "runs session-control-plane-tick <session> --server"),
+      {
+        dryRun: options["dry-run"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-branch-recovery-executions") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -6570,6 +6585,88 @@ async function fetchWorkerSessionControlPlaneStatus(
       actions: { restart_session_watch_worker: number; restart_drain_worker: number; restart_apply_action_worker: number };
       nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[] };
     };
+  };
+}
+
+async function runWorkerSessionControlPlaneTick(
+  sessionName: string,
+  options: { dryRun: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  planned: {
+    branchRecovery: null | { action: "resume_next_branch"; runIds: string[]; command: string[] };
+    applyAction: null | { action: "execute_next_apply_action"; actionable: number };
+    drainContinuation: null | { action: "execute_next_drain_continuation"; queued: number };
+  };
+  executed: {
+    branchRecovery: unknown | null;
+    applyAction: ExecuteNextWorkerSessionApplyActionResponse | null;
+    drainContinuation: ExecuteNextWorkerSessionDrainContinuationResponse | null;
+  };
+  before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
+  after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneStatus>>;
+}> {
+  const observedAt = new Date().toISOString();
+  const before = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: options.lines });
+  const branchRunIds = before.branches.nextSteps
+    .filter((step) => step.action === "resume_branch")
+    .map((step) => step.runId);
+  const planned = {
+    branchRecovery: branchRunIds.length > 0
+      ? {
+        action: "resume_next_branch" as const,
+        runIds: branchRunIds.slice(0, 1),
+        command: before.branches.commands.resumeNext,
+      }
+      : null,
+    applyAction: before.queues.applyActions.actionable > 0
+      ? {
+        action: "execute_next_apply_action" as const,
+        actionable: before.queues.applyActions.actionable,
+      }
+      : null,
+    drainContinuation: before.queues.drainContinuations.queued > 0
+      ? {
+        action: "execute_next_drain_continuation" as const,
+        queued: before.queues.drainContinuations.queued,
+      }
+      : null,
+  };
+  const executed = {
+    branchRecovery: null as unknown | null,
+    applyAction: null as ExecuteNextWorkerSessionApplyActionResponse | null,
+    drainContinuation: null as ExecuteNextWorkerSessionDrainContinuationResponse | null,
+  };
+  if (!options.dryRun) {
+    if (planned.branchRecovery) {
+      executed.branchRecovery = await requestJson(
+        "POST",
+        `/api/worker-sessions/${encodeURIComponent(sessionName)}/resume-branches`,
+        { limit: 1 },
+      );
+    }
+    if (planned.applyAction) {
+      executed.applyAction = await executeNextWorkerSessionApplyAction(sessionName, {});
+    }
+    if (planned.drainContinuation) {
+      executed.drainContinuation = await executeNextWorkerSessionDrainContinuation(sessionName);
+    }
+  }
+  const after = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: options.lines });
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    planned,
+    executed,
+    before,
+    after,
   };
 }
 
@@ -9853,6 +9950,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs session-control-plane-status <name> --server [--lines 5]
+  runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-branch-recovery-executions <name> --server [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]

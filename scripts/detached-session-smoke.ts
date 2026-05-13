@@ -1498,6 +1498,38 @@ try {
     && step.reason === "stopped_branch_without_result_commit"
     && step.command.join(" ") === `npm run cli -- runs resume-branch ${controlPlaneResumePlan.run.id}`
   )));
+  const controlPlaneTickPreview = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    planned: {
+      branchRecovery: { action: string; runIds: string[]; command: string[] } | null;
+      applyAction: { action: string; actionable: number } | null;
+      drainContinuation: { action: string; queued: number } | null;
+    };
+    executed: { branchRecovery: null; applyAction: null; drainContinuation: null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-tick",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--lines",
+    "20",
+  ]);
+  assert.equal(controlPlaneTickPreview.ok, true);
+  assert.equal(controlPlaneTickPreview.session, sessionName);
+  assert.equal(controlPlaneTickPreview.dryRun, true);
+  assert.equal(controlPlaneTickPreview.planned.branchRecovery?.action, "resume_next_branch");
+  assert.ok(controlPlaneTickPreview.planned.branchRecovery?.runIds.includes(controlPlaneResumePlan.run.id));
+  assert.equal(controlPlaneTickPreview.planned.branchRecovery?.command.join(" "), `npm run cli -- runs resume-session ${sessionName} --next`);
+  assert.equal(controlPlaneTickPreview.planned.applyAction?.action, "execute_next_apply_action");
+  assert.ok((controlPlaneTickPreview.planned.applyAction?.actionable ?? 0) >= 1);
+  assert.equal(controlPlaneTickPreview.planned.drainContinuation?.action, "execute_next_drain_continuation");
+  assert.ok((controlPlaneTickPreview.planned.drainContinuation?.queued ?? 0) >= 1);
+  assert.equal(controlPlaneTickPreview.executed.branchRecovery, null);
+  assert.equal(controlPlaneTickPreview.executed.applyAction, null);
+  assert.equal(controlPlaneTickPreview.executed.drainContinuation, null);
   const controlPlaneResumeNext = await cliJson<{
     resumed: Array<{ runId: string; status?: string; workerId: string | null }>;
     nextStep: { action: string; count: number };
