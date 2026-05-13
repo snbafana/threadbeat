@@ -5263,6 +5263,33 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "ensure-control-plane-core-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-core-workers requires --server");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (dryRun === confirm) {
+      throw new Error("runs ensure-control-plane-core-workers requires exactly one of --confirm or --dry-run");
+    }
+    await printJson(await ensureWorkerSessionControlPlaneCoreWorkers(
+      required(sessionName, "runs ensure-control-plane-core-workers <session> --server"),
+      {
+        advanceWorkerId: options["advance-worker-id"] ?? "threadbeat-control-plane-advance",
+        tickWorkerId: options["tick-worker-id"] ?? "threadbeat-control-plane-tick",
+        workerDryRun: options["worker-dry-run"] === "1",
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        maxTicks: parsePositiveInteger(options["max-ticks"] ?? "10", "--max-ticks"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        dryRun,
+        confirm,
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-advance-workers-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -10502,6 +10529,284 @@ async function reconcileWorkerSessionControlPlaneWorkers(
   };
 }
 
+type ControlPlaneCoreWorkerPlanStep = {
+  kind: Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_tick">;
+  workerId: string;
+  action: "existing" | "ensure_control_plane_advance_worker" | "ensure_control_plane_tick_worker" | "blocked";
+  reason: "running_worker_exists" | "restartable_worker_exists" | "no_worker_record" | "existing_worker_not_restartable";
+  command: string[];
+  worker: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>["workers"][number] | null;
+};
+
+function controlPlaneCoreWorkerEnsureCommand(
+  sessionName: string,
+  step: Pick<ControlPlaneCoreWorkerPlanStep, "kind" | "workerId">,
+  options: {
+    workerDryRun: boolean;
+    maxSteps: number;
+    maxTicks: number;
+    intervalMs: number;
+    lines: number;
+  },
+): string[] {
+  if (step.kind === "control_plane_advance") {
+    return [
+      "npm", "run", "cli", "--", "runs", "ensure-control-plane-advance-worker", sessionName, "--server",
+      "--worker-id", step.workerId,
+      "--max-steps", String(options.maxSteps),
+      "--interval-ms", String(options.intervalMs),
+      "--lines", String(options.lines),
+      ...(options.workerDryRun ? ["--dry-run"] : []),
+    ];
+  }
+  return [
+    "npm", "run", "cli", "--", "runs", "ensure-control-plane-tick-worker", sessionName, "--server",
+    "--worker-id", step.workerId,
+    "--max-ticks", String(options.maxTicks),
+    "--interval-ms", String(options.intervalMs),
+    "--lines", String(options.lines),
+    ...(options.workerDryRun ? ["--dry-run"] : []),
+  ];
+}
+
+function controlPlaneCoreWorkerPlan(
+  sessionName: string,
+  aggregate: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>,
+  options: {
+    advanceWorkerId: string;
+    tickWorkerId: string;
+    workerDryRun: boolean;
+    maxSteps: number;
+    maxTicks: number;
+    intervalMs: number;
+    lines: number;
+  },
+): ControlPlaneCoreWorkerPlanStep[] {
+  return [
+    { kind: "control_plane_advance" as const, workerId: options.advanceWorkerId },
+    { kind: "control_plane_tick" as const, workerId: options.tickWorkerId },
+  ].map((desired) => {
+    const worker = aggregate.workers.find((candidate) => candidate.kind === desired.kind && candidate.workerId === desired.workerId) ?? null;
+    const command = controlPlaneCoreWorkerEnsureCommand(sessionName, desired, options);
+    if (worker?.alive === true) {
+      return {
+        ...desired,
+        action: "existing",
+        reason: "running_worker_exists",
+        command: [],
+        worker,
+      };
+    }
+    if (worker?.restartable === true) {
+      return {
+        ...desired,
+        action: desired.kind === "control_plane_advance" ? "ensure_control_plane_advance_worker" : "ensure_control_plane_tick_worker",
+        reason: "restartable_worker_exists",
+        command,
+        worker,
+      };
+    }
+    if (worker) {
+      return {
+        ...desired,
+        action: "blocked",
+        reason: "existing_worker_not_restartable",
+        command: [],
+        worker,
+      };
+    }
+    return {
+      ...desired,
+      action: desired.kind === "control_plane_advance" ? "ensure_control_plane_advance_worker" : "ensure_control_plane_tick_worker",
+      reason: "no_worker_record",
+      command,
+      worker,
+    };
+  });
+}
+
+async function executeControlPlaneCoreWorkerEnsureStep(
+  sessionName: string,
+  step: ControlPlaneCoreWorkerPlanStep,
+  options: {
+    workerDryRun: boolean;
+    maxSteps: number;
+    maxTicks: number;
+    intervalMs: number;
+    lines: number;
+  },
+): Promise<unknown> {
+  if (step.kind === "control_plane_advance") {
+    return await ensureWorkerSessionControlPlaneAdvanceWorker(sessionName, {
+      workerId: step.workerId,
+      dryRun: options.workerDryRun,
+      maxSteps: options.maxSteps,
+      intervalMs: options.intervalMs,
+      lines: options.lines,
+      drainConfirmations: false,
+      confirm: false,
+      maxConfirmations: 3,
+      untilEmpty: false,
+    });
+  }
+  return await ensureWorkerSessionControlPlaneTickWorker(sessionName, {
+    workerId: step.workerId,
+    dryRun: options.workerDryRun,
+    maxTicks: options.maxTicks,
+    intervalMs: options.intervalMs,
+    lines: options.lines,
+  });
+}
+
+async function ensureWorkerSessionControlPlaneCoreWorkers(
+  sessionName: string,
+  options: {
+    advanceWorkerId: string;
+    tickWorkerId: string;
+    workerDryRun: boolean;
+    maxSteps: number;
+    maxTicks: number;
+    intervalMs: number;
+    lines: number;
+    dryRun: boolean;
+    confirm: boolean;
+  },
+): Promise<{
+  ok: true;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  passed: boolean | null;
+  observedAt: string;
+  completedAt: string;
+  desired: {
+    advanceWorkerId: string;
+    tickWorkerId: string;
+    workerDryRun: boolean;
+    maxSteps: number;
+    maxTicks: number;
+    intervalMs: number;
+    lines: number;
+  };
+  before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>;
+  after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>> | null;
+  plan: {
+    expected: number;
+    actionable: number;
+    blocked: number;
+    existing: number;
+    steps: ControlPlaneCoreWorkerPlanStep[];
+    commands: string[][];
+  };
+  executed: Array<ControlPlaneCoreWorkerPlanStep & {
+    result: unknown;
+    actionResult: string | null;
+  }>;
+  checks: {
+    expectedCount: number;
+    actionableCount: number;
+    blockedCount: number;
+    executedCount: number | null;
+    runningAfterCount: number | null;
+  };
+}> {
+  const observedAt = new Date().toISOString();
+  const desired = {
+    advanceWorkerId: options.advanceWorkerId,
+    tickWorkerId: options.tickWorkerId,
+    workerDryRun: options.workerDryRun,
+    maxSteps: options.maxSteps,
+    maxTicks: options.maxTicks,
+    intervalMs: options.intervalMs,
+    lines: options.lines,
+  };
+  const before = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    includeRetired: true,
+    lines: options.lines,
+  });
+  const steps = controlPlaneCoreWorkerPlan(sessionName, before, desired);
+  const actionableSteps = steps.filter((step) => step.command.length > 0);
+  const blockedSteps = steps.filter((step) => step.action === "blocked");
+  const existingSteps = steps.filter((step) => step.action === "existing");
+  const basePlan = {
+    expected: steps.length,
+    actionable: actionableSteps.length,
+    blocked: blockedSteps.length,
+    existing: existingSteps.length,
+    steps,
+    commands: actionableSteps.map((step) => step.command),
+  };
+  if (options.dryRun || !options.confirm) {
+    return {
+      ok: true,
+      session: sessionName,
+      dryRun: options.dryRun,
+      confirmed: options.confirm,
+      passed: null,
+      observedAt,
+      completedAt: new Date().toISOString(),
+      desired,
+      before,
+      after: null,
+      plan: basePlan,
+      executed: [],
+      checks: {
+        expectedCount: steps.length,
+        actionableCount: actionableSteps.length,
+        blockedCount: blockedSteps.length,
+        executedCount: null,
+        runningAfterCount: null,
+      },
+    };
+  }
+  const executed: Array<ControlPlaneCoreWorkerPlanStep & { result: unknown; actionResult: string | null }> = [];
+  if (blockedSteps.length === 0) {
+    for (const step of actionableSteps) {
+      const result = await executeControlPlaneCoreWorkerEnsureStep(sessionName, step, desired);
+      executed.push({
+        ...step,
+        result,
+        actionResult: stringFromUnknown(plainRecord(result)?.action),
+      });
+    }
+  }
+  const after = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    includeRetired: true,
+    lines: options.lines,
+  });
+  const runningAfter = [
+    { kind: "control_plane_advance" as const, workerId: options.advanceWorkerId },
+    { kind: "control_plane_tick" as const, workerId: options.tickWorkerId },
+  ].filter((desiredWorker) => after.workers.some((worker) => (
+    worker.kind === desiredWorker.kind
+    && worker.workerId === desiredWorker.workerId
+    && worker.alive === true
+  )));
+  return {
+    ok: true,
+    session: sessionName,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    passed: blockedSteps.length === 0
+      && executed.length === actionableSteps.length
+      && executed.every((step) => step.actionResult === "started" || step.actionResult === "restarted" || step.actionResult === "existing"),
+    observedAt,
+    completedAt: new Date().toISOString(),
+    desired,
+    before,
+    after,
+    plan: basePlan,
+    executed,
+    checks: {
+      expectedCount: steps.length,
+      actionableCount: actionableSteps.length,
+      blockedCount: blockedSteps.length,
+      executedCount: executed.length,
+      runningAfterCount: runningAfter.length,
+    },
+  };
+}
+
 async function executeWorkerSessionControlPlaneWorkerDrill(
   sessionName: string,
   options: {
@@ -14135,6 +14440,7 @@ Commands:
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|shell]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
   runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--lines 20]
+  runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]
   runs restart-control-plane-advance-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-advance-workers <name> --server [--worker-id id] [--retire] [--lines 20]

@@ -232,6 +232,134 @@ async function assertControlPlaneWorkerReconcile(baseUrl: string, sessionName: s
   ]);
 }
 
+async function assertControlPlaneCoreWorkerEnsure(baseUrl: string, sessionName: string): Promise<void> {
+  const advanceWorkerId = "detached-smoke-core-advance-worker";
+  const tickWorkerId = "detached-smoke-core-tick-worker";
+  const commonArgs = [
+    "runs",
+    "ensure-control-plane-core-workers",
+    sessionName,
+    "--server",
+    "--advance-worker-id",
+    advanceWorkerId,
+    "--tick-worker-id",
+    tickWorkerId,
+    "--worker-dry-run",
+    "1",
+    "--max-steps",
+    "50",
+    "--max-ticks",
+    "50",
+    "--interval-ms",
+    "1000",
+    "--lines",
+    "5",
+  ];
+  const dryRunCoreWorkers = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    confirmed: boolean;
+    passed: boolean | null;
+    desired: { advanceWorkerId: string; tickWorkerId: string; workerDryRun: boolean };
+    plan: {
+      expected: number;
+      actionable: number;
+      blocked: number;
+      existing: number;
+      steps: Array<{ kind: string; workerId: string; action: string; reason: string; command: string[] }>;
+      commands: string[][];
+    };
+    executed: unknown[];
+    after: null;
+    checks: { expectedCount: number; actionableCount: number; blockedCount: number; executedCount: number | null; runningAfterCount: number | null };
+  }>(baseUrl, [...commonArgs, "--dry-run"]);
+  assert.equal(dryRunCoreWorkers.ok, true);
+  assert.equal(dryRunCoreWorkers.session, sessionName);
+  assert.equal(dryRunCoreWorkers.dryRun, true);
+  assert.equal(dryRunCoreWorkers.confirmed, false);
+  assert.equal(dryRunCoreWorkers.passed, null);
+  assert.equal(dryRunCoreWorkers.desired.advanceWorkerId, advanceWorkerId);
+  assert.equal(dryRunCoreWorkers.desired.tickWorkerId, tickWorkerId);
+  assert.equal(dryRunCoreWorkers.desired.workerDryRun, true);
+  assert.equal(dryRunCoreWorkers.plan.expected, 2);
+  assert.equal(dryRunCoreWorkers.plan.actionable, 2);
+  assert.equal(dryRunCoreWorkers.plan.blocked, 0);
+  assert.equal(dryRunCoreWorkers.plan.existing, 0);
+  assert.deepEqual(
+    dryRunCoreWorkers.plan.steps.map((step) => [step.kind, step.workerId, step.action, step.reason]),
+    [
+      ["control_plane_advance", advanceWorkerId, "ensure_control_plane_advance_worker", "no_worker_record"],
+      ["control_plane_tick", tickWorkerId, "ensure_control_plane_tick_worker", "no_worker_record"],
+    ],
+  );
+  assert.equal(
+    dryRunCoreWorkers.plan.commands[0]?.join(" "),
+    `npm run cli -- runs ensure-control-plane-advance-worker ${sessionName} --server --worker-id ${advanceWorkerId} --max-steps 50 --interval-ms 1000 --lines 5 --dry-run`,
+  );
+  assert.equal(
+    dryRunCoreWorkers.plan.commands[1]?.join(" "),
+    `npm run cli -- runs ensure-control-plane-tick-worker ${sessionName} --server --worker-id ${tickWorkerId} --max-ticks 50 --interval-ms 1000 --lines 5 --dry-run`,
+  );
+  assert.equal(dryRunCoreWorkers.executed.length, 0);
+  assert.equal(dryRunCoreWorkers.after, null);
+  assert.equal(dryRunCoreWorkers.checks.expectedCount, 2);
+  assert.equal(dryRunCoreWorkers.checks.actionableCount, 2);
+  assert.equal(dryRunCoreWorkers.checks.blockedCount, 0);
+  assert.equal(dryRunCoreWorkers.checks.executedCount, null);
+  assert.equal(dryRunCoreWorkers.checks.runningAfterCount, null);
+
+  const confirmedCoreWorkers = await cliJson<{
+    ok?: true;
+    session: string;
+    dryRun: boolean;
+    confirmed: boolean;
+    passed: boolean;
+    plan: { expected: number; actionable: number; blocked: number };
+    executed: Array<{ kind: string; workerId: string; actionResult: string | null }>;
+    checks: { expectedCount: number; actionableCount: number; blockedCount: number; executedCount: number; runningAfterCount: number };
+  }>(baseUrl, [...commonArgs, "--confirm"]);
+  assert.equal(confirmedCoreWorkers.ok, true);
+  assert.equal(confirmedCoreWorkers.session, sessionName);
+  assert.equal(confirmedCoreWorkers.dryRun, false);
+  assert.equal(confirmedCoreWorkers.confirmed, true);
+  assert.equal(confirmedCoreWorkers.passed, true);
+  assert.equal(confirmedCoreWorkers.plan.expected, 2);
+  assert.equal(confirmedCoreWorkers.plan.actionable, 2);
+  assert.equal(confirmedCoreWorkers.plan.blocked, 0);
+  assert.equal(confirmedCoreWorkers.executed.length, 2);
+  assert.deepEqual(
+    confirmedCoreWorkers.executed.map((step) => [step.kind, step.workerId, step.actionResult]),
+    [
+      ["control_plane_advance", advanceWorkerId, "started"],
+      ["control_plane_tick", tickWorkerId, "started"],
+    ],
+  );
+  assert.equal(confirmedCoreWorkers.checks.expectedCount, 2);
+  assert.equal(confirmedCoreWorkers.checks.actionableCount, 2);
+  assert.equal(confirmedCoreWorkers.checks.blockedCount, 0);
+  assert.equal(confirmedCoreWorkers.checks.executedCount, 2);
+  assert.ok(confirmedCoreWorkers.checks.runningAfterCount >= 1);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-advance-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    advanceWorkerId,
+    "--retire",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-tick-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    tickWorkerId,
+    "--retire",
+  ]);
+}
+
 try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
@@ -5441,6 +5569,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(deadWorkerStoppedRun?.run.status, "running");
+  await assertControlPlaneCoreWorkerEnsure(baseUrl, sessionName);
 } finally {
   if (sessionStarted && baseUrl !== null) {
     try {
