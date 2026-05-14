@@ -9294,6 +9294,14 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   } else {
     lines.push("next_recovery: none");
   }
+  lines.push(
+    "control_plane_topology:",
+    `  inspect: ${formatShellCommand(summary.commands.inspectTopology)}`,
+    `  ensure_dry_run: ${formatShellCommand(summary.commands.ensureTopologyDryRun)}`,
+    `  ensure_confirm: ${formatShellCommand(summary.commands.ensureTopologyConfirm)}`,
+    `  ensure_loop_dry_run: ${formatShellCommand(summary.commands.ensureTopologyLoopDryRun)}`,
+    `  ensure_loop_confirm: ${formatShellCommand(summary.commands.ensureTopologyLoopConfirm)}`,
+  );
   if (summary.branches.inspection.count > 0) {
     lines.push(
       "branch_inspection:",
@@ -9372,6 +9380,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--dry-run"] });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--confirm"] });
   }
+  commands.push({ command: summary.commands.inspectTopology });
+  commands.push({ command: summary.commands.ensureTopologyLoopDryRun });
+  commands.push({ command: summary.commands.ensureTopologyLoopConfirm });
   for (const step of summary.branches.inspection.nextSteps) {
     commands.push({ command: step.commands.inspectResult });
     commands.push({ command: step.commands.reviewRun });
@@ -9566,6 +9577,11 @@ function summarizeWorkerSessionControlPlaneStatus(
   nextActions: WorkerSessionControlPlaneAdvanceAction[];
   commands: {
     fullStatus: string[];
+    inspectTopology: string[];
+    ensureTopologyDryRun: string[];
+    ensureTopologyConfirm: string[];
+    ensureTopologyLoopDryRun: string[];
+    ensureTopologyLoopConfirm: string[];
     advance: string[];
     advanceDryRun: string[];
     advanceLoop: string[];
@@ -9667,6 +9683,17 @@ function summarizeWorkerSessionControlPlaneStatus(
     nextActions,
     commands: {
       fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],
+      inspectTopology: ["npm", "run", "cli", "--", "runs", "session-control-plane-topology", status.session, "--server"],
+      ensureTopologyDryRun: ["npm", "run", "cli", "--", "runs", "ensure-control-plane-topology", status.session, "--server", "--dry-run"],
+      ensureTopologyConfirm: ["npm", "run", "cli", "--", "runs", "ensure-control-plane-topology", status.session, "--server", "--confirm"],
+      ensureTopologyLoopDryRun: [
+        "npm", "run", "cli", "--", "runs", "ensure-control-plane-topology-loop", status.session, "--server",
+        "--dry-run", "--max-iterations", "3", "--loop-interval-ms", "2000",
+      ],
+      ensureTopologyLoopConfirm: [
+        "npm", "run", "cli", "--", "runs", "ensure-control-plane-topology-loop", status.session, "--server",
+        "--confirm", "--max-iterations", "3", "--loop-interval-ms", "2000",
+      ],
       advance: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
       advanceDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
       advanceLoop: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance-loop", status.session, "--server"],
