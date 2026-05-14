@@ -3302,7 +3302,7 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
   source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
-  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
+  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
   tickId?: string;
   advanceId?: string;
   workerId?: string;
@@ -3534,6 +3534,20 @@ const readWorkerSessionControlPlaneTimeline = async (
         pid: worker.pid,
       });
     }
+    if (worker.lifecycle.state === "exited_unrecorded") {
+      events.push({
+        observedAt: worker.startedAt,
+        source: "control_plane_advance_worker",
+        event: "worker_exited_unrecorded",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        status: worker.lifecycle.state,
+        reason: worker.lifecycle.reason,
+        mode: worker.mode,
+        pid: worker.pid,
+      });
+    }
     if (worker.retiredAt) {
       events.push({
         observedAt: worker.retiredAt,
@@ -3579,6 +3593,19 @@ const readWorkerSessionControlPlaneTimeline = async (
         workerId: worker.workerId,
         state: worker.lifecycle.state,
         restartable: worker.lifecycle.restartable,
+        reason: worker.lifecycle.reason,
+        pid: worker.pid,
+      });
+    }
+    if (worker.lifecycle.state === "exited_unrecorded") {
+      events.push({
+        observedAt: worker.startedAt,
+        source: "control_plane_tick_worker",
+        event: "worker_exited_unrecorded",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        status: worker.lifecycle.state,
         reason: worker.lifecycle.reason,
         pid: worker.pid,
       });

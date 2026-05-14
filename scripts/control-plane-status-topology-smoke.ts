@@ -297,7 +297,7 @@ try {
   ]);
   assert.match(aggregateTextBeforeStop, /^control_plane_workers:$/m);
   assert.match(aggregateTextBeforeStop, new RegExp(`session: ${sessionName}`));
-  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 restartable=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 exited_unrecorded=0 restartable=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_topology: npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`));
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_progress: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
 
@@ -358,7 +358,7 @@ try {
     "--format",
     "text",
   ]);
-  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 restartable=1 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 exited_unrecorded=0 restartable=1 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextAfterStop, new RegExp(`restart_next: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
   assert.match(aggregateTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
 
@@ -468,7 +468,7 @@ try {
     "--format",
     "text",
   ]);
-  assert.match(liveAggregateText, /topology: total=1 alive=1 stopped=0 completed=0 retired=0 restartable=0 latest_results=count=1,recorded=0,progress=1,recent_progress=1,iterations=1,core=0,mutation=0/);
+  assert.match(liveAggregateText, /topology: total=1 alive=1 stopped=0 completed=0 retired=0 exited_unrecorded=0 restartable=0 latest_results=count=1,recorded=0,progress=1,recent_progress=1,iterations=1,core=0,mutation=0/);
   await cliJson(baseUrl, [
     "runs",
     "stop-control-plane-topology-worker",

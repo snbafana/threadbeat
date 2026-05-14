@@ -82,6 +82,23 @@ try {
     advanceExited.nextSteps[0]?.command.join(" "),
     `npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${exitedAdvanceWorkerId}`,
   );
+  const advanceExitedTimeline = await cliJson<WorkerTimelineResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--event",
+    "worker_exited_unrecorded",
+    "--worker",
+    exitedAdvanceWorkerId,
+  ]);
+  assert.equal(advanceExitedTimeline.count, 1);
+  assert.equal(advanceExitedTimeline.counts.worker_exited_unrecorded, 1);
+  assert.equal(advanceExitedTimeline.events[0]?.source, "control_plane_advance_worker");
+  assert.equal(advanceExitedTimeline.events[0]?.event, "worker_exited_unrecorded");
+  assert.equal(advanceExitedTimeline.events[0]?.state, "exited_unrecorded");
+  assert.equal(advanceExitedTimeline.events[0]?.restartable, true);
+  assert.equal(advanceExitedTimeline.events[0]?.reason, "worker_exited_without_stop_or_completion_record");
 
   const tickAll = await cliJson<WorkerNextResponse>(baseUrl, [
     "runs",
@@ -121,6 +138,44 @@ try {
     tickExited.nextSteps[0]?.command.join(" "),
     `npm run cli -- runs restart-control-plane-tick-workers ${sessionName} --server --worker-id ${exitedTickWorkerId}`,
   );
+  const tickExitedTimeline = await cliJson<WorkerTimelineResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--event",
+    "worker_exited_unrecorded",
+    "--worker",
+    exitedTickWorkerId,
+  ]);
+  assert.equal(tickExitedTimeline.count, 1);
+  assert.equal(tickExitedTimeline.counts.worker_exited_unrecorded, 1);
+  assert.equal(tickExitedTimeline.events[0]?.source, "control_plane_tick_worker");
+  assert.equal(tickExitedTimeline.events[0]?.event, "worker_exited_unrecorded");
+  assert.equal(tickExitedTimeline.events[0]?.state, "exited_unrecorded");
+  assert.equal(tickExitedTimeline.events[0]?.restartable, true);
+  assert.equal(tickExitedTimeline.events[0]?.reason, "worker_exited_without_stop_or_completion_record");
+
+  const aggregate = await cliJson<WorkerAggregateResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(aggregate.summary.exitedUnrecorded, 2);
+  assert.equal(aggregate.summary.advance.exitedUnrecorded, 1);
+  assert.equal(aggregate.summary.tick.exitedUnrecorded, 1);
+  const aggregateText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateText, /all: total=6 alive=0 stopped=4 completed=0 retired=0 exited_unrecorded=2 restartable=6/);
+  assert.match(aggregateText, /advance: total=3 alive=0 stopped=2 completed=0 retired=0 exited_unrecorded=1 restartable=3/);
+  assert.match(aggregateText, /tick: total=3 alive=0 stopped=2 completed=0 retired=0 exited_unrecorded=1 restartable=3/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
@@ -134,6 +189,26 @@ type WorkerNextResponse = {
   count: number;
   actions: Record<string, number>;
   nextSteps: Array<{ workerId: string; reason: string; command: string[] }>;
+};
+
+type WorkerTimelineResponse = {
+  count: number;
+  counts: Record<string, number>;
+  events: Array<{
+    source: string;
+    event: string;
+    state?: string;
+    restartable?: boolean;
+    reason?: string;
+  }>;
+};
+
+type WorkerAggregateResponse = {
+  summary: {
+    exitedUnrecorded: number;
+    advance: { exitedUnrecorded: number };
+    tick: { exitedUnrecorded: number };
+  };
 };
 
 async function writeAdvanceWorker(workerId: string, options: { stopped?: boolean } = {}): Promise<void> {
@@ -195,4 +270,13 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     maxBuffer: 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
+}
+
+async function cliText(baseUrl: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout;
 }

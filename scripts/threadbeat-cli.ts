@@ -10497,6 +10497,7 @@ type ControlPlaneWorkerSummary = {
   stopped: number;
   completed: number;
   retired: number;
+  exitedUnrecorded: number;
   restartable: number;
   latestResults: {
     count: number;
@@ -10702,6 +10703,7 @@ function formatControlPlaneWorkerSummary(summary: ControlPlaneWorkerSummary): st
     `stopped=${summary.stopped}`,
     `completed=${summary.completed}`,
     `retired=${summary.retired}`,
+    `exited_unrecorded=${summary.exitedUnrecorded}`,
     `restartable=${summary.restartable}`,
     `latest_results=${formatControlPlaneWorkerLatestResults(summary.latestResults)}`,
   ].join(" ");
@@ -10789,6 +10791,7 @@ function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: st
     stopped: workers.filter((worker) => worker.state === "stopped").length,
     completed: workers.filter((worker) => worker.state === "completed").length,
     retired: workers.filter((worker) => worker.state === "retired").length,
+    exitedUnrecorded: workers.filter((worker) => worker.state === "exited_unrecorded").length,
     restartable: workers.filter((worker) => worker.restartable).length,
     latestResults: summarizeControlPlaneWorkerLatestResults(workers),
   };
@@ -15824,7 +15827,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--tick tick_id[,tick_id]] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--source tick,control_plane_advance_worker,branch_recovery_execution,result_review] [--event tick_recorded,worker_progress_recorded,branch_recovery_executed,result_review_recorded] [--status executed,noop,running,reviewed,skipped] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,control_plane_advance_worker,branch_recovery_execution,result_review] [--event tick_recorded,worker_progress_recorded,worker_exited_unrecorded,branch_recovery_executed,result_review_recorded] [--status executed,noop,running,reviewed,skipped] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
