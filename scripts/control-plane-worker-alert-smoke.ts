@@ -471,6 +471,57 @@ try {
   ]);
   assert.match(workerRestartQueueShell, new RegExp(`restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
 
+  const workerRestartQueueDryRun = await cliJson<{
+    count: number;
+    reconciliation: {
+      result: {
+        dryRun: boolean;
+        confirmed: boolean;
+        plan: { count: number };
+        executed: unknown[];
+      };
+      record: { reconciliationId: string; status: string; path: string };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-restart-queue",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "5",
+    "--limit",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(workerRestartQueueDryRun.count, 1);
+  assert.equal(workerRestartQueueDryRun.reconciliation.result.dryRun, true);
+  assert.equal(workerRestartQueueDryRun.reconciliation.result.confirmed, false);
+  assert.equal(workerRestartQueueDryRun.reconciliation.result.plan.count, 1);
+  assert.equal(workerRestartQueueDryRun.reconciliation.result.executed.length, 0);
+  assert.equal(workerRestartQueueDryRun.reconciliation.record.status, "dry_run");
+  assert.match(workerRestartQueueDryRun.reconciliation.record.reconciliationId, /^\d{8}T\d{9}Z-[a-f0-9]+$/);
+  assert.match(workerRestartQueueDryRun.reconciliation.record.path, /worker-sessions/);
+
+  const workerRestartQueueDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-restart-queue",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "5",
+    "--limit",
+    "1",
+    "--dry-run",
+    "--format",
+    "text",
+  ]);
+  assert.match(workerRestartQueueDryRunText, /control_plane_worker_restart_queue:/);
+  assert.match(workerRestartQueueDryRunText, /reconciliation:/);
+  assert.match(workerRestartQueueDryRunText, /status: dry_run/);
+  assert.match(workerRestartQueueDryRunText, /control_plane_worker_reconcile:/);
+
   const recoverNextMissingMode = await cliFailure(baseUrl, [
     "runs",
     "session-control-plane-recover-next",

@@ -6167,21 +6167,74 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
       throw new Error("runs session-control-plane-worker-restart-queue --format must be json, text, or shell");
     }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    const shouldReconcile = dryRun || confirm;
+    if (dryRun && confirm) {
+      throw new Error("runs session-control-plane-worker-restart-queue accepts only one of --dry-run or --confirm");
+    }
+    if ((options["until-empty"] === "1" || options["max-steps"] || options["interval-ms"] || options.limit) && !shouldReconcile) {
+      throw new Error("runs session-control-plane-worker-restart-queue reconciliation options require --dry-run or --confirm");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-worker-restart-queue --format shell requires --commands-only");
     }
     if (outputFormat === "text" && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-worker-restart-queue --format text cannot be combined with --commands-only");
     }
+    if (shouldReconcile && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-worker-restart-queue cannot combine --dry-run or --confirm with --commands-only");
+    }
+    if (shouldReconcile && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-worker-restart-queue --dry-run or --confirm supports --format json or text");
+    }
+    const requiredSessionName = required(sessionName, "runs session-control-plane-worker-restart-queue <session> --server");
+    const lines = parsePositiveInteger(options.lines ?? "20", "--lines");
     const aggregate = await fetchWorkerSessionControlPlaneWorkers(
-      required(sessionName, "runs session-control-plane-worker-restart-queue <session> --server"),
+      requiredSessionName,
       {
         workerId: options["worker-id"],
         includeRetired: options["include-retired"] === "1",
-        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        lines,
       },
     );
     const queue = workerSessionControlPlaneWorkerRestartQueue(aggregate);
+    if (shouldReconcile) {
+      const reconcileOptions = {
+        workerId: options["worker-id"],
+        kind: null as ControlPlaneWorkerKind | null,
+        includeRetired: options["include-retired"] === "1",
+        lines,
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+        dryRun,
+        confirm,
+      };
+      const result = options["until-empty"] === "1"
+        ? await reconcileWorkerSessionControlPlaneWorkersLoop(requiredSessionName, {
+          ...reconcileOptions,
+          maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+          intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        })
+        : await reconcileWorkerSessionControlPlaneWorkers(requiredSessionName, reconcileOptions);
+      const written = await recordWorkerSessionControlPlaneWorkerReconciliation(requiredSessionName, result);
+      const output = {
+        ...queue,
+        reconciliation: {
+          result,
+          record: {
+            path: written.path,
+            reconciliationId: written.record.reconciliationId,
+            status: written.record.status,
+          },
+        },
+      };
+      if (outputFormat === "text") {
+        printWorkerSessionControlPlaneWorkerRestartQueueReconcileText(output);
+      } else {
+        await printJson(output);
+      }
+      return;
+    }
     if (options["commands-only"] === "1") {
       const commands = queue.workers.map((worker) => ({
         scope: "control_plane_worker_restart",
@@ -13774,6 +13827,28 @@ function printWorkerSessionControlPlaneWorkerRestartQueueText(
   console.log(formatWorkerSessionControlPlaneWorkerRestartQueueText(response).join("\n"));
 }
 
+function printWorkerSessionControlPlaneWorkerRestartQueueReconcileText(
+  response: WorkerSessionControlPlaneWorkerRestartQueueResponse & {
+    reconciliation: {
+      result: ControlPlaneWorkerReconcileResult | ControlPlaneWorkerReconcileLoopResult;
+      record: {
+        path: string;
+        reconciliationId: string;
+        status: string;
+      };
+    };
+  },
+): void {
+  console.log([
+    ...formatWorkerSessionControlPlaneWorkerRestartQueueText(response),
+    "  reconciliation:",
+    `    record: ${response.reconciliation.record.reconciliationId}`,
+    `    status: ${response.reconciliation.record.status}`,
+    `    path: ${response.reconciliation.record.path}`,
+    ...formatWorkerSessionControlPlaneReconcileText(response.reconciliation.result).map((line) => `    ${line}`),
+  ].join("\n"));
+}
+
 function formatWorkerSessionControlPlaneWorkerRestartQueueText(
   response: WorkerSessionControlPlaneWorkerRestartQueueResponse,
 ): string[] {
@@ -20433,7 +20508,7 @@ Commands:
   runs stop-control-plane-result-review-worker <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
-  runs session-control-plane-worker-restart-queue <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-worker-restart-queue <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--dry-run|--confirm] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--format json|text|shell]
   runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
   runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
