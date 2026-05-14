@@ -752,6 +752,57 @@ try {
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--reconciliation ${workerRestartQueueDryRun.reconciliation.record.reconciliationId}`)));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--source worker_reconcile_execution --execution ${workerRestartQueueDryRun.reconciliation.record.reconciliationId}`)));
 
+  const statusReconcileDryRun = await cliJson<{
+    reconciliation: {
+      result: { dryRun: boolean; confirmed: boolean; plan: { count: number }; executed: unknown[] };
+      record: { reconciliationId: string; status: string; path: string };
+    };
+    afterSummary: {
+      recovery: { workerReconciliations: { counts: { total: number; dryRun: number } } };
+      commands: { latestWorkerReconciliation: string[] | null; latestWorkerReconciliationTimeline: string[] | null };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--reconcile-workers",
+    "--include-retired",
+    "--limit",
+    "1",
+    "--dry-run",
+  ]);
+  assert.equal(statusReconcileDryRun.reconciliation.result.dryRun, true);
+  assert.equal(statusReconcileDryRun.reconciliation.result.confirmed, false);
+  assert.equal(statusReconcileDryRun.reconciliation.result.plan.count, 1);
+  assert.equal(statusReconcileDryRun.reconciliation.result.executed.length, 0);
+  assert.equal(statusReconcileDryRun.reconciliation.record.status, "dry_run");
+  assert.ok(statusReconcileDryRun.afterSummary.recovery.workerReconciliations.counts.total >= 3);
+  assert.ok(statusReconcileDryRun.afterSummary.recovery.workerReconciliations.counts.dryRun >= 3);
+  assert.ok(statusReconcileDryRun.afterSummary.commands.latestWorkerReconciliation?.includes(statusReconcileDryRun.reconciliation.record.reconciliationId));
+  assert.ok(statusReconcileDryRun.afterSummary.commands.latestWorkerReconciliationTimeline?.includes(statusReconcileDryRun.reconciliation.record.reconciliationId));
+
+  const statusReconcileDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--reconcile-workers",
+    "--include-retired",
+    "--limit",
+    "1",
+    "--dry-run",
+    "--format",
+    "text",
+  ]);
+  assert.match(statusReconcileDryRunText, /status_reconciliation:/);
+  assert.match(statusReconcileDryRunText, /control_plane_worker_reconcile:/);
+  assert.match(statusReconcileDryRunText, /after_status:/);
+  assert.match(statusReconcileDryRunText, /latest_reconciliation: npm run cli -- runs session-control-plane-worker-reconciliations/);
+  assert.match(statusReconcileDryRunText, /latest_reconciliation_timeline: npm run cli -- runs session-control-plane-timeline/);
+
   await fs.rm(recoverNextLoopDryRun.advancePath, { force: true });
   const statusAfterRecoverNextInterruption = await cliJson<{
     recovery: {
