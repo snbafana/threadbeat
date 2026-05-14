@@ -2948,6 +2948,7 @@ try {
       tickDryRun: string[];
       timelineSummary: string[];
       resultInspections: string[];
+      nextResultReview: string[];
       pendingResultInspections: string[];
       reviewedResultInspections: string[];
       skippedResultInspections: string[];

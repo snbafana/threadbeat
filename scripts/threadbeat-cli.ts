@@ -9655,6 +9655,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     );
     if (summary.results.counts.pending > 0) {
       lines.push(`  inspect_next: ${formatShellCommand(summary.commands.nextResultInspection)}`);
+      lines.push(`  review_next: ${formatShellCommand(summary.commands.nextResultReview)}`);
     }
     if (summary.results.counts.reviewed > 0) {
       lines.push(`  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`);
@@ -9784,6 +9785,7 @@ function workerSessionControlPlaneStatusSummaryCommands(
   commands.push({ command: summary.commands.resultInspections });
   if (summary.results.counts.pending > 0) {
     commands.push({ command: summary.commands.nextResultInspection });
+    commands.push({ command: summary.commands.nextResultReview });
     commands.push({ command: summary.commands.pendingResultInspections });
   }
   if (summary.results.counts.reviewed > 0) {
@@ -10153,6 +10155,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     timelineSummary: string[];
     resultInspections: string[];
     nextResultInspection: string[];
+    nextResultReview: string[];
     pendingResultInspections: string[];
     reviewedResultInspections: string[];
     skippedResultInspections: string[];
@@ -10280,6 +10283,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       timelineSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server", "--summary"],
       resultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server"],
       nextResultInspection: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--next"],
+      nextResultReview: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server"],
       pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
       reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
       skippedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped"],
