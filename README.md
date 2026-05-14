@@ -747,7 +747,9 @@ view across watch workers, apply-action workers, apply queues, drain
 continuations, control-plane tick workers, branch recovery, and recovery
 suggestions. Add `--summary` for a compact operator checkpoint with worker
 health, queue pressure, branch/stale-run recovery counts, restart counts, and
-next-action commands. Use `runs session-control-plane-alerts <name> --server`
+next-action commands. Add `--watch --max-polls <n> --interval-ms <ms>` to keep
+emitting those summaries as newline-delimited JSON or repeated text snapshots
+while long-running control-plane workers advance. Use `runs session-control-plane-alerts <name> --server`
 or `GET /api/worker-sessions/:name/control-plane-alerts` for a compact
 actionable-failures queue across failed apply executions, failed drain
 continuations, blocked branch/stale-run resumes, stopped workers, and recent

@@ -104,6 +104,48 @@ try {
   assert.match(text, /topology_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
   assert.match(text, /^control_plane_worker_progress:$/m);
   assert.match(text, /latest_results: count=0 recorded=0 progress=0 recent_progress=0/);
+  const watchedSummary = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedSummaryLines = watchedSummary.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    ok: boolean;
+    session: string;
+    poll: number;
+    summary: { session: string; workers: { controlPlaneAdvance: { latestResults: unknown[] } } };
+  });
+  assert.equal(watchedSummaryLines.length, 2);
+  assert.equal(watchedSummaryLines[0]?.ok, true);
+  assert.equal(watchedSummaryLines[0]?.session, sessionName);
+  assert.equal(watchedSummaryLines[0]?.poll, 1);
+  assert.equal(watchedSummaryLines[1]?.poll, 2);
+  assert.equal(watchedSummaryLines[0]?.summary.session, sessionName);
+  assert.deepEqual(watchedSummaryLines[0]?.summary.workers.controlPlaneAdvance.latestResults, []);
+  const watchedText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(watchedText, /^control-plane status watch poll=1 observed_at=/m);
+  assert.match(watchedText, /^control-plane status summary$/m);
+  assert.match(watchedText, /^control_plane_worker_progress:$/m);
 
   const workerId = "status-topology-worker";
   const started = await cliJson<{ worker: { workerId: string; mode: string; command: string[] } }>(baseUrl, [

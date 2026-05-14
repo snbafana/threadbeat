@@ -4521,6 +4521,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const outputFormat = options.format ?? "json";
+    const watch = options.watch === "1";
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-status requires --server");
     }
@@ -4533,10 +4534,53 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-status --format shell requires --commands-only");
     }
-    const status = await fetchWorkerSessionControlPlaneStatus(
-      required(sessionName, "runs session-control-plane-status <session> --server"),
-      { lines: parsePositiveInteger(options.lines ?? "5", "--lines") },
-    );
+    if (watch && options.summary !== "1") {
+      throw new Error("runs session-control-plane-status --watch requires --summary");
+    }
+    if (watch && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-status --watch does not support --format shell");
+    }
+    if (watch && outputFormat !== "json" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-status --watch --commands-only requires json output");
+    }
+    const requiredSessionName = required(sessionName, "runs session-control-plane-status <session> --server");
+    const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    if (watch) {
+      const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+      const maxPolls = options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null;
+      let polls = 0;
+      while (true) {
+        const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
+        const summary = summarizeWorkerSessionControlPlaneStatus(status);
+        const observedAt = new Date().toISOString();
+        if (outputFormat === "text") {
+          console.log([
+            `control-plane status watch poll=${polls + 1} observed_at=${observedAt}`,
+            ...formatWorkerSessionControlPlaneStatusSummaryText(summary),
+          ].join("\n"));
+        } else if (options["commands-only"] === "1") {
+          console.log(JSON.stringify({
+            ok: true,
+            session: summary.session,
+            poll: polls + 1,
+            observedAt,
+            commands: workerSessionControlPlaneStatusSummaryCommands(summary),
+          }));
+        } else {
+          console.log(JSON.stringify({
+            ok: true,
+            session: summary.session,
+            poll: polls + 1,
+            observedAt,
+            summary,
+          }));
+        }
+        polls += 1;
+        if (maxPolls !== null && polls >= maxPolls) return;
+        await sleep(intervalMs);
+      }
+    }
+    const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
     if (options.summary === "1") {
       const summary = summarizeWorkerSessionControlPlaneStatus(status);
       if (options["commands-only"] === "1") {
@@ -7410,7 +7454,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -16773,7 +16817,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
-  runs session-control-plane-status <name> --server [--summary] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-status <name> --server [--summary] [--watch] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
