@@ -9421,6 +9421,7 @@ type WorkerSessionControlPlaneStatusResponse = {
           resumeCommand: string[];
           inspectLastStepCommand: string[];
           inspectHistoryCommand: string[];
+          executeResumeCommand: string[];
         }>;
       };
     };
@@ -9688,6 +9689,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
       resumeLoop: string[];
       inspectLastStep: string[];
       inspectHistory: string[];
+      executeResumeHistory: string[];
       inspectStatus: string[];
     };
   }) | null;
@@ -9807,6 +9809,7 @@ type RecoverNextLoopHistoryResponse = {
   commands: {
     inspectRaw: string[];
     resumeLoop: string[] | null;
+    executeResume: string[] | null;
   };
   records: RecoverNextLoopHistoryRecord[];
 };
@@ -10610,6 +10613,7 @@ function workerSessionControlPlaneAlertPreviewCommands(
       { ...base, action: "resume_recover_next_loop", command: preview.details.commands.resumeLoop },
       { ...base, action: "inspect_recover_next_loop_step", command: preview.details.commands.inspectLastStep },
       { ...base, action: "inspect_recover_next_loop_history", command: preview.details.commands.inspectHistory },
+      { ...base, action: "execute_recover_next_loop_history_resume", command: preview.details.commands.executeResumeHistory },
       { ...base, action: "inspect_control_plane_status", command: preview.details.commands.inspectStatus },
     );
   }
@@ -10731,6 +10735,7 @@ function formatRecoverNextAlertDetails(
     `    resume_recover_next_loop: ${formatShellCommand(details.commands.resumeLoop)}`,
     `    inspect_recover_next_loop_step: ${formatShellCommand(details.commands.inspectLastStep)}`,
     `    inspect_recover_next_loop_history: ${formatShellCommand(details.commands.inspectHistory)}`,
+    `    execute_recover_next_loop_history_resume: ${formatShellCommand(details.commands.executeResumeHistory)}`,
     `    inspect_control_plane_status: ${formatShellCommand(details.commands.inspectStatus)}`,
   ];
 }
@@ -10806,6 +10811,9 @@ function summarizeRecoverNextLoopHistory(
     commands: {
       inspectRaw: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId],
       resumeLoop,
+      executeResume: resumeLoop
+        ? ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--recover-next-loop-history", "--execute-resume", "--confirm"]
+        : null,
     },
     records,
   };
@@ -10899,6 +10907,7 @@ function formatRecoverNextLoopHistoryText(history: RecoverNextLoopHistoryRespons
     "commands:",
     `  inspect_raw: ${formatShellCommand(history.commands.inspectRaw)}`,
     ...(history.commands.resumeLoop ? [`  resume: ${formatShellCommand(history.commands.resumeLoop)}`] : []),
+    ...(history.commands.executeResume ? [`  execute_resume: ${formatShellCommand(history.commands.executeResume)}`] : []),
     "records:",
   ];
   if (history.records.length === 0) {
@@ -11354,6 +11363,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    resume: ${formatShellCommand(loop.resumeCommand)}`,
         `    inspect_last_step: ${formatShellCommand(loop.inspectLastStepCommand)}`,
         `    inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+        `    execute_resume: ${formatShellCommand(loop.executeResumeCommand)}`,
       );
     }
   }
@@ -11541,6 +11551,8 @@ function workerSessionControlPlaneStatusSummaryCommands(
   for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
     commands.push({ command: loop.resumeCommand });
     commands.push({ command: loop.inspectLastStepCommand });
+    commands.push({ command: loop.inspectHistoryCommand });
+    commands.push({ command: loop.executeResumeCommand });
   }
   if (summary.recovery.statusWatchExecutions.attempts.total > 0) {
     commands.push({ command: summary.commands.statusWatchExecutions });

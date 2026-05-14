@@ -218,6 +218,7 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
       resumeCommand: string[];
       inspectLastStepCommand: string[];
       inspectHistoryCommand: string[];
+      executeResumeCommand: string[];
     }>;
   };
 };
@@ -4545,6 +4546,7 @@ const summarizeIncompleteRecoverNextLoops = (
       ],
       inspectLastStepCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", last.advanceId],
       inspectHistoryCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--recover-next-loop-history"],
+      executeResumeCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--recover-next-loop-history", "--execute-resume", "--confirm"],
     };
   }).sort((left, right) => right.lastObservedAt.localeCompare(left.lastObservedAt));
   return {
@@ -4761,6 +4763,7 @@ type WorkerSessionControlPlaneAlertDetails =
       resumeLoop: string[];
       inspectLastStep: string[];
       inspectHistory: string[];
+      executeResumeHistory: string[];
       inspectStatus: string[];
     };
   };
@@ -4909,6 +4912,7 @@ const readWorkerSessionControlPlaneAlertDetails = async (
             resumeLoop: loop.resumeCommand,
             inspectLastStep: loop.inspectLastStepCommand,
             inspectHistory: loop.inspectHistoryCommand,
+            executeResumeHistory: loop.executeResumeCommand,
             inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", name, "--server", "--summary"],
           },
         }
