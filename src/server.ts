@@ -167,6 +167,12 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
     intervalMs: number | null;
     selectedAction: string | null;
     selectedKind: string | null;
+    selectedSurface: string | null;
+    selectedReason: string | null;
+    selectedCommand: string[] | null;
+    selectedDryRunCommand: string[] | null;
+    executedCommand: string[] | null;
+    executedExitCode: number | null;
     command: string[];
   }>;
 };
@@ -4216,6 +4222,7 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
     recent: records.slice(0, lines).map((record) => {
       const recovery = objectRecord(record.recovery);
       const selected = objectRecord(record.selected);
+      const executed = objectRecord(record.executed);
       return {
         advanceId: record.advanceId,
         observedAt: record.observedAt,
@@ -4229,6 +4236,12 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
         intervalMs: numberRecordField(recovery, "intervalMs"),
         selectedAction: stringRecordField(selected, "action"),
         selectedKind: stringRecordField(selected, "kind"),
+        selectedSurface: stringRecordField(selected, "surface"),
+        selectedReason: stringRecordField(selected, "reason"),
+        selectedCommand: stringArrayRecordField(selected, "command"),
+        selectedDryRunCommand: stringArrayRecordField(selected, "dryRunCommand"),
+        executedCommand: stringArrayRecordField(executed, "command"),
+        executedExitCode: numberRecordField(executed, "exitCode"),
         command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", record.advanceId],
       };
     }),

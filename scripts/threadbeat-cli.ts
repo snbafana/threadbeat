@@ -4970,7 +4970,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       selected: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["nextRecovery"];
       command: string[] | null;
       result: unknown;
-      executed?: { exitCode: number | null; stdout: string; stderr: string };
+      executed?: { command: string[]; exitCode: number | null; stdout: string; stderr: string };
     }> => {
       const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
       const summary = summarizeWorkerSessionControlPlaneStatus(status);
@@ -4986,6 +4986,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       const command = dryRun ? summary.nextRecovery.dryRunCommand : summary.nextRecovery.command;
       const executed = await runCliWorker(cliCommandArgs(command));
+      const executedWithCommand = { command, ...executed };
       return {
         ok: executed.exitCode === 0,
         session: requiredSessionName,
@@ -4993,7 +4994,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         selected: summary.nextRecovery,
         command,
         result: parseJsonMaybe(executed.stdout),
-        executed,
+        executed: executedWithCommand,
       };
     };
     if (options["until-empty"] === "1") {
@@ -8744,6 +8745,12 @@ type WorkerSessionControlPlaneStatusResponse = {
         intervalMs: number | null;
         selectedAction: string | null;
         selectedKind: string | null;
+        selectedSurface: string | null;
+        selectedReason: string | null;
+        selectedCommand: string[] | null;
+        selectedDryRunCommand: string[] | null;
+        executedCommand: string[] | null;
+        executedExitCode: number | null;
         command: string[];
       }>;
     };
@@ -10160,7 +10167,11 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    until_empty: ${attempt.untilEmpty}`,
         `    stopped_reason: ${attempt.stoppedReason ?? ""}`,
         `    executed_steps: ${attempt.executedSteps ?? ""}`,
-        `    selected: ${attempt.selectedKind ?? ""} ${attempt.selectedAction ?? ""}`.trimEnd(),
+        `    selected: ${attempt.selectedKind ?? ""} ${attempt.selectedSurface ?? ""} ${attempt.selectedAction ?? ""}`.trimEnd(),
+        `    reason: ${attempt.selectedReason ?? ""}`,
+        `    selected_command: ${formatShellCommand(attempt.selectedCommand ?? [])}`,
+        `    executed_exit_code: ${attempt.executedExitCode ?? ""}`,
+        `    executed_command: ${formatShellCommand(attempt.executedCommand ?? [])}`,
         `    inspect: ${formatShellCommand(attempt.command)}`,
       );
     }
