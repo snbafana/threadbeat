@@ -4606,6 +4606,46 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(topology);
     return;
   }
+  if (subcommandName === "ensure-control-plane-topology") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-topology requires --server");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (dryRun === confirm) {
+      throw new Error("runs ensure-control-plane-topology requires exactly one of --confirm or --dry-run");
+    }
+    await printJson(await ensureWorkerSessionControlPlaneTopology(
+      required(sessionName, "runs ensure-control-plane-topology <session> --server"),
+      {
+        advanceWorkerId: options["advance-worker-id"] ?? "threadbeat-control-plane-advance",
+        tickWorkerId: options["tick-worker-id"] ?? "threadbeat-control-plane-tick",
+        workerDryRun: options["worker-dry-run"] === "1",
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        maxTicks: parsePositiveInteger(options["max-ticks"] ?? "10", "--max-ticks"),
+        intervalMs: parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        applyWorkerId: options["apply-worker-id"] ?? "threadbeat-apply-action",
+        drainWorkerId: options["drain-worker-id"] ?? "threadbeat-drain",
+        applyId: options["apply-id"],
+        source: options.source,
+        action: options["apply-action"],
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+        maxActions: options["max-actions"] ? parsePositiveInteger(options["max-actions"], "--max-actions") : null,
+        continueOnFailure: options["continue-on-failure"] === "1",
+        untilEmpty: options["until-empty"] === "1",
+        maxPolls: options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null,
+        applyIntervalMs: options["apply-interval-ms"] ? parsePositiveInteger(options["apply-interval-ms"], "--apply-interval-ms") : null,
+        maxContinuations: options["max-continuations"] ? parsePositiveInteger(options["max-continuations"], "--max-continuations") : null,
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        includeMutationWorkers: options["include-mutation-workers"] === "1",
+        dryRun,
+        confirm,
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-result-reviews") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -7045,7 +7085,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -11297,6 +11337,129 @@ function controlPlaneMutationTopologyCommand(
   ];
 }
 
+async function ensureWorkerSessionControlPlaneTopology(
+  sessionName: string,
+  options: ControlPlaneTopologyOptions & {
+    includeMutationWorkers: boolean;
+    dryRun: boolean;
+    confirm: boolean;
+  },
+) {
+  const observedAt = new Date().toISOString();
+  const before = await inspectWorkerSessionControlPlaneTopology(sessionName, options);
+  const core = await ensureWorkerSessionControlPlaneCoreWorkers(sessionName, {
+    advanceWorkerId: options.advanceWorkerId,
+    tickWorkerId: options.tickWorkerId,
+    workerDryRun: options.workerDryRun,
+    maxSteps: options.maxSteps,
+    maxTicks: options.maxTicks,
+    intervalMs: options.intervalMs,
+    lines: options.lines,
+    dryRun: options.dryRun,
+    confirm: options.confirm,
+  });
+  const mutation = await ensureWorkerSessionControlPlaneMutationWorkers(sessionName, {
+    applyWorkerId: options.applyWorkerId,
+    drainWorkerId: options.drainWorkerId,
+    applyId: options.applyId,
+    source: options.source,
+    action: options.action,
+    limit: options.limit,
+    maxActions: options.maxActions,
+    continueOnFailure: options.continueOnFailure,
+    untilEmpty: options.untilEmpty,
+    maxPolls: options.maxPolls,
+    applyIntervalMs: options.applyIntervalMs,
+    maxContinuations: options.maxContinuations,
+    lines: options.lines,
+    dryRun: options.dryRun || !options.includeMutationWorkers,
+    confirm: options.confirm && options.includeMutationWorkers,
+  });
+  const after = options.confirm
+    ? await inspectWorkerSessionControlPlaneTopology(sessionName, options)
+    : null;
+  const mutationSkipped = options.confirm && !options.includeMutationWorkers;
+  const corePassed = core.passed;
+  const mutationPassed = options.includeMutationWorkers ? mutation.passed : null;
+  return {
+    ok: true,
+    session: sessionName,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    includeMutationWorkers: options.includeMutationWorkers,
+    mutationSkipped,
+    passed: options.dryRun
+      ? null
+      : corePassed === true && (!options.includeMutationWorkers || mutationPassed === true),
+    observedAt,
+    completedAt: new Date().toISOString(),
+    before,
+    after,
+    core,
+    mutation,
+    plan: {
+      expected: before.plan.expected,
+      coreExpected: core.plan.expected,
+      mutationExpected: mutation.plan.expected,
+      actionable: core.plan.actionable + (options.includeMutationWorkers || options.dryRun ? mutation.plan.actionable : 0),
+      blocked: core.plan.blocked + (options.includeMutationWorkers || options.dryRun ? mutation.plan.blocked : 0),
+      skippedMutationActions: options.includeMutationWorkers || options.dryRun ? 0 : mutation.plan.actionable,
+      commands: [
+        ...core.plan.commands,
+        ...(options.includeMutationWorkers || options.dryRun ? mutation.plan.commands : []),
+      ],
+    },
+    checks: {
+      corePassed,
+      mutationPassed,
+      mutationSkipped,
+      coreExecutedCount: core.checks.executedCount,
+      mutationExecutedCount: mutation.checks.executedCount,
+      beforeReady: before.checks.ready,
+      afterReady: after?.checks.ready ?? null,
+      afterRunningCount: after?.checks.runningCount ?? null,
+    },
+    commands: {
+      inspectTopology: ["npm", "run", "cli", "--", "runs", "session-control-plane-topology", sessionName, "--server", "--lines", String(options.lines)],
+      ensureTopologyDryRun: controlPlaneEnsureTopologyCommand(sessionName, options, true, options.includeMutationWorkers),
+      ensureTopologyConfirm: controlPlaneEnsureTopologyCommand(sessionName, options, false, options.includeMutationWorkers),
+      ensureTopologyConfirmWithMutationWorkers: controlPlaneEnsureTopologyCommand(sessionName, options, false, true),
+    },
+  };
+}
+
+function controlPlaneEnsureTopologyCommand(
+  sessionName: string,
+  options: ControlPlaneTopologyOptions,
+  dryRun: boolean,
+  includeMutationWorkers: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "ensure-control-plane-topology", sessionName, "--server",
+    "--advance-worker-id", options.advanceWorkerId,
+    "--tick-worker-id", options.tickWorkerId,
+    ...(options.workerDryRun ? ["--worker-dry-run", "1"] : []),
+    "--max-steps", String(options.maxSteps),
+    "--max-ticks", String(options.maxTicks),
+    "--interval-ms", String(options.intervalMs),
+    "--apply-worker-id", options.applyWorkerId,
+    "--drain-worker-id", options.drainWorkerId,
+    ...(options.applyId ? ["--apply-id", options.applyId] : []),
+    ...(options.source ? ["--source", options.source] : []),
+    ...(options.action ? ["--apply-action", options.action] : []),
+    ...(options.limit !== null ? ["--limit", String(options.limit)] : []),
+    ...(options.maxActions !== null ? ["--max-actions", String(options.maxActions)] : []),
+    ...(options.continueOnFailure ? ["--continue-on-failure"] : []),
+    ...(options.untilEmpty ? ["--until-empty"] : []),
+    ...(options.maxPolls !== null ? ["--max-polls", String(options.maxPolls)] : []),
+    ...(options.applyIntervalMs !== null ? ["--apply-interval-ms", String(options.applyIntervalMs)] : []),
+    ...(options.maxContinuations !== null ? ["--max-continuations", String(options.maxContinuations)] : []),
+    "--lines", String(options.lines),
+    ...(includeMutationWorkers ? ["--include-mutation-workers"] : []),
+    dryRun ? "--dry-run" : "--confirm",
+  ];
+}
+
 async function executeWorkerSessionControlPlaneWorkerDrill(
   sessionName: string,
   options: {
@@ -14916,6 +15079,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
+  runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--commands-only] [--format json|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
