@@ -595,7 +595,21 @@ try {
   assert.match(watchActionAdvancesText, /detail_commands=status_watch_execute_action/);
   assert.match(watchActionAdvancesText, /detail_command: status_watch_execute_action/);
   const summaryAfterWatchExecution = await cliJson<{
-    recovery: { statusWatchExecutions: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; command: string[] }> } };
+    recovery: {
+      statusWatchExecutions: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number };
+        recent: Array<{
+          advanceId: string;
+          command: string[];
+          selectedSurface: string | null;
+          selectedAction: string | null;
+          selectedReason: string | null;
+          selectedCommand: string[] | null;
+          executedCommand: string[] | null;
+          executedExitCode: number | null;
+        }>;
+      };
+    };
     commands: { statusWatchExecutions: string[] };
   }>(baseUrl, [
     "runs",
@@ -609,6 +623,12 @@ try {
   assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.executed, 1);
   assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.failed, 0);
   assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedSurface, "worker_recovery");
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedAction, "reconcile_control_plane_workers");
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedReason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedCommand, workerRecoveryReconcileDryRunCommand);
+  assert.deepEqual(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.executedCommand, workerRecoveryReconcileDryRunCommand);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.executedExitCode, 0);
   assert.deepEqual(summaryAfterWatchExecution.commands.statusWatchExecutions, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions"]);
   const summaryTextAfterWatchExecution = await cliText(baseUrl, [
     "runs",
@@ -622,6 +642,10 @@ try {
   assert.match(summaryTextAfterWatchExecution, /status_watch_executions: total=1 dry_run=1 executed=1 failed=0/);
   assert.match(summaryTextAfterWatchExecution, new RegExp(`inspect: npm run cli -- runs session-control-plane-advances ${sessionName} --server --status-watch-executions`));
   assert.match(summaryTextAfterWatchExecution, /recent_status_watch_executions:/);
+  assert.match(summaryTextAfterWatchExecution, /selected: worker_recovery reconcile_control_plane_workers/);
+  assert.match(summaryTextAfterWatchExecution, /selected_reason: control_plane_action:reconcile_control_plane_workers/);
+  assert.match(summaryTextAfterWatchExecution, new RegExp(`selected_command: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --dry-run`));
+  assert.match(summaryTextAfterWatchExecution, /executed_exit_code: 0/);
   const statusWatchTimeline = await cliJson<{
     count: number;
     counts: Record<string, number>;

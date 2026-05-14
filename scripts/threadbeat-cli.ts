@@ -9345,6 +9345,12 @@ type WorkerSessionControlPlaneStatusResponse = {
       workerId: string | null;
       action: string | null;
       reason: string | null;
+      selectedSurface: string | null;
+      selectedAction: string | null;
+      selectedReason: string | null;
+      selectedCommand: string[] | null;
+      executedCommand: string[] | null;
+      executedExitCode: number | null;
       dryRun: boolean;
       executed: boolean;
       failed: boolean;
@@ -9425,6 +9431,12 @@ type WorkerSessionControlPlaneStatusResponse = {
         workerId: string | null;
         action: string | null;
         reason: string | null;
+        selectedSurface: string | null;
+        selectedAction: string | null;
+        selectedReason: string | null;
+        selectedCommand: string[] | null;
+        executedCommand: string[] | null;
+        executedExitCode: number | null;
         dryRun: boolean;
         executed: boolean;
         failed: boolean;
@@ -9441,6 +9453,12 @@ type WorkerSessionControlPlaneStatusResponse = {
         workerId: string | null;
         action: string | null;
         reason: string | null;
+        selectedSurface: string | null;
+        selectedAction: string | null;
+        selectedReason: string | null;
+        selectedCommand: string[] | null;
+        executedCommand: string[] | null;
+        executedExitCode: number | null;
         dryRun: boolean;
         executed: boolean;
         failed: boolean;
@@ -9459,6 +9477,12 @@ type WorkerSessionControlPlaneStatusResponse = {
           workerId: string | null;
           action: string | null;
           reason: string | null;
+          selectedSurface: string | null;
+          selectedAction: string | null;
+          selectedReason: string | null;
+          selectedCommand: string[] | null;
+          executedCommand: string[] | null;
+          executedExitCode: number | null;
           dryRun: boolean;
           executed: boolean;
           failed: boolean;
@@ -11330,6 +11354,11 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    failed: ${attempt.failed}`,
         `    action: ${attempt.action ?? ""}`,
         `    reason: ${attempt.reason ?? ""}`,
+        `    selected: ${attempt.selectedSurface ?? ""} ${attempt.selectedAction ?? ""}`.trimEnd(),
+        `    selected_reason: ${attempt.selectedReason ?? ""}`,
+        `    selected_command: ${formatShellCommand(attempt.selectedCommand ?? [])}`,
+        `    executed_exit_code: ${attempt.executedExitCode ?? ""}`,
+        `    executed_command: ${formatShellCommand(attempt.executedCommand ?? [])}`,
         `    inspect: ${formatShellCommand(attempt.command)}`,
       );
     }
@@ -11342,6 +11371,11 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    observed_at: ${attempt.observedAt}`,
         `    action: ${attempt.action ?? ""}`,
         `    reason: ${attempt.reason ?? ""}`,
+        `    selected: ${attempt.selectedSurface ?? ""} ${attempt.selectedAction ?? ""}`.trimEnd(),
+        `    selected_reason: ${attempt.selectedReason ?? ""}`,
+        `    selected_command: ${formatShellCommand(attempt.selectedCommand ?? [])}`,
+        `    executed_exit_code: ${attempt.executedExitCode ?? ""}`,
+        `    executed_command: ${formatShellCommand(attempt.executedCommand ?? [])}`,
         `    inspect: ${formatShellCommand(attempt.command)}`,
       );
     }

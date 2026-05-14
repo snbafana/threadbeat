@@ -120,6 +120,12 @@ type WorkerSessionControlPlaneRecoveryAttemptStatus = {
   workerId: string | null;
   action: string | null;
   reason: string | null;
+  selectedSurface: string | null;
+  selectedAction: string | null;
+  selectedReason: string | null;
+  selectedCommand: string[] | null;
+  executedCommand: string[] | null;
+  executedExitCode: number | null;
   dryRun: boolean;
   executed: boolean;
   failed: boolean;
@@ -4290,6 +4296,7 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
   const alert = objectRecord(record.alert);
   const selected = objectRecord(record.selected);
   const safety = objectRecord(record.executionSafety);
+  const executedRecord = objectRecord(record.executed);
   const detailCommand = record.detailCommand ?? null;
   const alertSurface = stringRecordField(alert, "surface");
   const command = [
@@ -4315,6 +4322,12 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
     workerId: stringRecordField(alert, "workerId") ?? stringRecordField(selected, "workerId"),
     action: stringRecordField(alert, "action") ?? stringRecordField(selected, "action"),
     reason: stringRecordField(alert, "reason") ?? stringRecordField(selected, "reason"),
+    selectedSurface: stringRecordField(selected, "surface"),
+    selectedAction: stringRecordField(selected, "action"),
+    selectedReason: stringRecordField(selected, "reason"),
+    selectedCommand: stringArrayRecordField(selected, "command"),
+    executedCommand: stringArrayRecordField(executedRecord, "command"),
+    executedExitCode: numberRecordField(executedRecord, "exitCode"),
     dryRun: record.dryRun,
     executed: Boolean(record.executed),
     failed: controlPlaneAdvanceExecutionFailed(record.executed),
