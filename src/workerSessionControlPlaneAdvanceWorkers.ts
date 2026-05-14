@@ -186,7 +186,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
             ...worker,
             alive,
             lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive),
-            latestResult: "latestResult" in worker ? worker.latestResult ?? null : await readLatestWorkerJsonResult(worker.stdoutPath, worker.stdoutStartOffset ?? 0),
+            latestResult: worker.latestResult ?? await readLatestWorkerJsonResult(worker.stdoutPath, worker.stdoutStartOffset ?? 0),
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
           };
@@ -684,6 +684,7 @@ function buildControlPlaneAdvanceWorkerCommand(
       String(options.loopIntervalMs ?? options.intervalMs),
       "--lines",
       String(options.lines),
+      "--progress-json",
       ...(options.includeMutationWorkers ? ["--include-mutation-workers"] : []),
     ];
   }

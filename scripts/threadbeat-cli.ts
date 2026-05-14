@@ -4684,6 +4684,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         confirm,
         maxIterations: parsePositiveInteger(options["max-iterations"] ?? "3", "--max-iterations"),
         loopIntervalMs: parseNonNegativeInteger(options["loop-interval-ms"] ?? "2000", "--loop-interval-ms"),
+        progressJson: options["progress-json"] === "1",
       },
     ));
     return;
@@ -7257,7 +7258,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait") {
       options[key] = "1";
       continue;
     }
@@ -11839,6 +11840,7 @@ async function ensureWorkerSessionControlPlaneTopologyLoop(
     confirm: boolean;
     maxIterations: number;
     loopIntervalMs: number;
+    progressJson?: boolean;
   },
 ) {
   const startedAt = new Date().toISOString();
@@ -11856,6 +11858,9 @@ async function ensureWorkerSessionControlPlaneTopologyLoop(
       core: result.core,
       mutation: result.mutation,
     });
+    if (options.progressJson) {
+      printJson(workerSessionControlPlaneTopologyLoopProgress(sessionName, options, startedAt, iterations, "running"));
+    }
     if (result.passed === false) {
       stoppedReason = "failed";
       break;
@@ -11899,6 +11904,49 @@ async function ensureWorkerSessionControlPlaneTopologyLoop(
         maxIterations: options.maxIterations,
         loopIntervalMs: options.loopIntervalMs,
       }),
+    },
+  };
+}
+
+function workerSessionControlPlaneTopologyLoopProgress(
+  sessionName: string,
+  options: {
+    dryRun: boolean;
+    confirm: boolean;
+    includeMutationWorkers: boolean;
+    maxIterations: number;
+    loopIntervalMs: number;
+  },
+  startedAt: string,
+  iterations: Array<{
+    passed: boolean | null;
+    plan: { actionable: number; skippedMutationActions: number };
+    core: { executed: unknown[] };
+    mutation: { executed: unknown[] };
+  }>,
+  stoppedReason: "running" | "max_iterations" | "failed",
+) {
+  const last = iterations.at(-1) ?? null;
+  return {
+    ok: stoppedReason !== "failed",
+    session: sessionName,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    includeMutationWorkers: options.includeMutationWorkers,
+    maxIterations: options.maxIterations,
+    loopIntervalMs: options.loopIntervalMs,
+    startedAt,
+    observedAt: new Date().toISOString(),
+    stoppedReason,
+    progress: true,
+    summary: {
+      iterations: iterations.length,
+      passed: stoppedReason === "running" || options.dryRun ? null : iterations.every((iteration) => iteration.passed === true),
+      lastPassed: last?.passed ?? null,
+      lastActionable: last?.plan.actionable ?? null,
+      lastSkippedMutationActions: last?.plan.skippedMutationActions ?? null,
+      totalCoreExecuted: iterations.reduce((total, iteration) => total + iteration.core.executed.length, 0),
+      totalMutationExecuted: iterations.reduce((total, iteration) => total + iteration.mutation.executed.length, 0),
     },
   };
 }

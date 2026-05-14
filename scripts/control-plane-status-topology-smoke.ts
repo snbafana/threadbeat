@@ -121,6 +121,7 @@ try {
     "0",
     "--lines",
     "5",
+    "--progress-json",
   ]);
   const inspected = await cliJson<{ count: number; workers: Array<{ workerId: string; mode: string }> }>(baseUrl, [
     "runs",
@@ -135,7 +136,7 @@ try {
   assert.equal(inspected.count, 1);
   assert.equal(inspected.workers[0]?.workerId, workerId);
   assert.equal(inspected.workers[0]?.mode, "topology_loop");
-  const completedTopologyWorker = await waitForTopologyWorkerResult(baseUrl, workerId);
+  const completedTopologyWorker = await waitForTopologyWorkerResult(baseUrl, workerId, { iterations: 1, state: "completed" });
   assert.equal(completedTopologyWorker.latestResult?.iterations, 1);
   assert.equal(completedTopologyWorker.latestResult?.totalCoreExecuted, 0);
   assert.equal(completedTopologyWorker.latestResult?.totalMutationExecuted, 0);
@@ -269,6 +270,49 @@ try {
     "--lines",
     "1",
   ]);
+
+  const liveWorkerId = "status-topology-live-worker";
+  await cliJson(baseUrl, [
+    "runs",
+    "start-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--dry-run",
+    "--max-iterations",
+    "2",
+    "--loop-interval-ms",
+    "5000",
+    "--lines",
+    "1",
+  ]);
+  const liveTopologyWorker = await waitForTopologyWorkerResult(baseUrl, liveWorkerId, { iterations: 1, alive: true, state: "running" });
+  assert.equal(liveTopologyWorker.alive, true);
+  assert.equal(liveTopologyWorker.latestResult?.iterations, 1);
+  assert.equal(liveTopologyWorker.latestResult?.stoppedReason, "running");
+  const liveAggregateText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(liveAggregateText, /topology: total=1 alive=1 stopped=0 completed=0 retired=0 restartable=0 latest_results=count=1,iterations=1,core=0,mutation=0/);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
@@ -292,15 +336,22 @@ async function cliText(baseUrl: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-async function waitForTopologyWorkerResult(baseUrl: string, workerId: string): Promise<{
+async function waitForTopologyWorkerResult(
+  baseUrl: string,
+  workerId: string,
+  options: { iterations?: number; alive?: boolean; state?: string } = {},
+): Promise<{
+  alive: boolean;
+  lifecycle: { state: string };
   latestResult: {
     iterations?: number;
+    stoppedReason?: string;
     totalCoreExecuted?: number;
     totalMutationExecuted?: number;
   } | null;
 }> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const inspected = await cliJson<{ workers: Array<{ latestResult: { iterations?: number; totalCoreExecuted?: number; totalMutationExecuted?: number } | null }> }>(baseUrl, [
+    const inspected = await cliJson<{ workers: Array<{ alive: boolean; lifecycle: { state: string }; latestResult: { iterations?: number; stoppedReason?: string; totalCoreExecuted?: number; totalMutationExecuted?: number } | null }> }>(baseUrl, [
       "runs",
       "session-control-plane-topology-workers",
       sessionName,
@@ -312,7 +363,14 @@ async function waitForTopologyWorkerResult(baseUrl: string, workerId: string): P
       "1",
     ]);
     const worker = inspected.workers[0];
-    if (worker?.latestResult) return worker;
+    if (
+      worker?.latestResult
+      && (options.iterations === undefined || worker.latestResult.iterations === options.iterations)
+      && (options.alive === undefined || worker.alive === options.alive)
+      && (options.state === undefined || worker.lifecycle.state === options.state)
+    ) {
+      return worker;
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`topology worker ${workerId} did not record latestResult`);
