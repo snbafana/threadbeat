@@ -173,6 +173,35 @@ try {
     aggregate.commands.reconcileConfirm.join(" "),
     `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --confirm`,
   );
+  assert.equal(
+    aggregate.commands.reconcileUntilEmptyConfirm.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`,
+  );
+  const reconcileLoopPreview = await cliJson<WorkerReconcileLoopResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--until-empty",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(reconcileLoopPreview.ok, true);
+  assert.equal(reconcileLoopPreview.untilEmpty, true);
+  assert.equal(reconcileLoopPreview.dryRun, true);
+  assert.equal(reconcileLoopPreview.confirmed, false);
+  assert.equal(reconcileLoopPreview.passed, null);
+  assert.equal(reconcileLoopPreview.stoppedReason, "dry_run");
+  assert.equal(reconcileLoopPreview.summary.iterations, 1);
+  assert.equal(reconcileLoopPreview.summary.lastPlannedCount, 6);
+  assert.equal(reconcileLoopPreview.summary.totalExecuted, 0);
+  assert.equal(
+    reconcileLoopPreview.commands.confirm.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 3 --interval-ms 1 --confirm`,
+  );
   const aggregateText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-workers",
@@ -186,6 +215,7 @@ try {
   assert.match(aggregateText, /tick: total=3 alive=0 stopped=2 completed=0 retired=0 exited_unrecorded=1 restartable=3/);
   assert.match(aggregateText, new RegExp(`reconcile_dry_run: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --dry-run`));
   assert.match(aggregateText, new RegExp(`reconcile_confirm: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --confirm`));
+  assert.match(aggregateText, new RegExp(`reconcile_until_empty_confirm: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
@@ -222,6 +252,24 @@ type WorkerAggregateResponse = {
   commands: {
     reconcileDryRun: string[];
     reconcileConfirm: string[];
+    reconcileUntilEmptyConfirm: string[];
+  };
+};
+
+type WorkerReconcileLoopResponse = {
+  ok: true;
+  untilEmpty: true;
+  dryRun: boolean;
+  confirmed: boolean;
+  passed: boolean | null;
+  stoppedReason: string;
+  summary: {
+    iterations: number;
+    lastPlannedCount: number | null;
+    totalExecuted: number;
+  };
+  commands: {
+    confirm: string[];
   };
 };
 

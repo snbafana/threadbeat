@@ -5491,18 +5491,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (!dryRun && !confirm) {
       throw new Error("runs session-control-plane-reconcile-workers requires --confirm or --dry-run");
     }
-    await printJson(await reconcileWorkerSessionControlPlaneWorkers(
-      required(sessionName, "runs session-control-plane-reconcile-workers <session> --server"),
-      {
-        workerId: options["worker-id"],
-        kind: options.kind ? parseControlPlaneWorkerKind(options.kind) : null,
-        includeRetired: options["include-retired"] === "1",
-        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
-        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
-        dryRun,
-        confirm,
-      },
-    ));
+    const reconcileOptions = {
+      workerId: options["worker-id"],
+      kind: options.kind ? parseControlPlaneWorkerKind(options.kind) : null,
+      includeRetired: options["include-retired"] === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+      dryRun,
+      confirm,
+    };
+    const requiredSessionName = required(sessionName, "runs session-control-plane-reconcile-workers <session> --server");
+    await printJson(options["until-empty"] === "1"
+      ? await reconcileWorkerSessionControlPlaneWorkersLoop(requiredSessionName, {
+        ...reconcileOptions,
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+      })
+      : await reconcileWorkerSessionControlPlaneWorkers(requiredSessionName, reconcileOptions));
     return;
   }
   if (subcommandName === "ensure-control-plane-core-workers") {
@@ -10559,6 +10564,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     inspectProgress: string[];
     reconcileDryRun: string[];
     reconcileConfirm: string[];
+    reconcileUntilEmptyConfirm: string[];
     restartNext: string[] | null;
   };
 }> {
@@ -10662,6 +10668,16 @@ async function fetchWorkerSessionControlPlaneWorkers(
         "--lines", String(options.lines),
         "--confirm",
       ],
+      reconcileUntilEmptyConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+        "--until-empty",
+        "--max-steps", "10",
+        "--interval-ms", "2000",
+        "--confirm",
+      ],
       restartNext: nextSteps[0]?.command ?? null,
     },
   };
@@ -10695,6 +10711,7 @@ function formatWorkerSessionControlPlaneWorkersText(
     `    inspect_progress: ${formatShellCommand(response.commands.inspectProgress)}`,
     `    reconcile_dry_run: ${formatShellCommand(response.commands.reconcileDryRun)}`,
     `    reconcile_confirm: ${formatShellCommand(response.commands.reconcileConfirm)}`,
+    `    reconcile_until_empty_confirm: ${formatShellCommand(response.commands.reconcileUntilEmptyConfirm)}`,
     `    restart_next: ${response.commands.restartNext ? formatShellCommand(response.commands.restartNext) : "none"}`,
   ];
   if (response.nextSteps.length === 0) {
@@ -11010,6 +11027,14 @@ function parseControlPlaneWorkerKind(value: string): ControlPlaneWorkerKind {
   throw new Error(`Unsupported control-plane worker kind: ${value}`);
 }
 
+function controlPlaneWorkerKindFlag(kind: ControlPlaneWorkerKind): string {
+  if (kind === "control_plane_advance") return "control-plane-advance";
+  if (kind === "control_plane_topology") return "control-plane-topology";
+  if (kind === "control_plane_tick") return "control-plane-tick";
+  if (kind === "apply_action") return "apply-action";
+  return "drain";
+}
+
 type ControlPlaneWorkerDrillSnapshot = {
   summary: ControlPlaneWorkerSummary;
   worker: (Record<string, unknown> & {
@@ -11227,6 +11252,130 @@ async function reconcileWorkerSessionControlPlaneWorkers(
       plannedCount: plan.planned.length,
       executedCount: executed.length,
       remainingCount: remaining.length,
+    },
+  };
+}
+
+type ControlPlaneWorkerReconcileResult = Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkers>>;
+
+async function reconcileWorkerSessionControlPlaneWorkersLoop(
+  sessionName: string,
+  options: {
+    workerId?: string;
+    kind: ControlPlaneWorkerKind | null;
+    includeRetired: boolean;
+    lines: number;
+    limit: number | null;
+    dryRun: boolean;
+    confirm: boolean;
+    maxSteps: number;
+    intervalMs: number;
+  },
+): Promise<{
+  ok: true;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  untilEmpty: true;
+  passed: boolean | null;
+  startedAt: string;
+  completedAt: string;
+  stoppedReason: "empty" | "dry_run" | "failed" | "max_steps";
+  maxSteps: number;
+  intervalMs: number;
+  filter: ControlPlaneWorkerReconcileResult["filter"];
+  iterations: Array<{ step: number; result: ControlPlaneWorkerReconcileResult; nextPlannedCount: number | null }>;
+  summary: {
+    iterations: number;
+    totalPlanned: number;
+    totalExecuted: number;
+    lastPlannedCount: number | null;
+    lastNextPlannedCount: number | null;
+    lastRemainingCount: number | null;
+  };
+  commands: {
+    inspectWorkers: string[];
+    dryRun: string[];
+    confirm: string[];
+  };
+}> {
+  const startedAt = new Date().toISOString();
+  const iterations: Array<{ step: number; result: ControlPlaneWorkerReconcileResult; nextPlannedCount: number | null }> = [];
+  let stoppedReason: "empty" | "dry_run" | "failed" | "max_steps" = "max_steps";
+
+  for (let step = 1; step <= options.maxSteps; step += 1) {
+    const result = await reconcileWorkerSessionControlPlaneWorkers(sessionName, options);
+    const nextPlannedCount = result.after
+      ? controlPlaneWorkerReconcilePlan(result.after.nextSteps, options).planned.length
+      : null;
+    iterations.push({ step, result, nextPlannedCount });
+
+    if (options.dryRun || !options.confirm) {
+      stoppedReason = "dry_run";
+      break;
+    }
+    if (result.passed === false) {
+      stoppedReason = "failed";
+      break;
+    }
+    if (result.plan.count === 0 || nextPlannedCount === 0) {
+      stoppedReason = "empty";
+      break;
+    }
+    if (step < options.maxSteps) {
+      await sleep(options.intervalMs);
+    }
+  }
+
+  const last = iterations.at(-1) ?? null;
+  const commandBase = [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+    ...(options.workerId ? ["--worker-id", options.workerId] : []),
+    ...(options.kind ? ["--kind", controlPlaneWorkerKindFlag(options.kind)] : []),
+    ...(options.includeRetired ? ["--include-retired"] : []),
+    ...(options.limit !== null ? ["--limit", String(options.limit)] : []),
+    "--lines", String(options.lines),
+    "--until-empty",
+    "--max-steps", String(options.maxSteps),
+    "--interval-ms", String(options.intervalMs),
+  ];
+  return {
+    ok: true,
+    session: sessionName,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    untilEmpty: true,
+    passed: options.dryRun || !options.confirm ? null : stoppedReason === "empty",
+    startedAt,
+    completedAt: new Date().toISOString(),
+    stoppedReason,
+    maxSteps: options.maxSteps,
+    intervalMs: options.intervalMs,
+    filter: last?.result.filter ?? {
+      workerId: options.workerId ?? null,
+      kind: options.kind,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+      limit: options.limit,
+    },
+    iterations,
+    summary: {
+      iterations: iterations.length,
+      totalPlanned: iterations.reduce((total, iteration) => total + iteration.result.plan.count, 0),
+      totalExecuted: iterations.reduce((total, iteration) => total + iteration.result.executed.length, 0),
+      lastPlannedCount: last?.result.plan.count ?? null,
+      lastNextPlannedCount: last?.nextPlannedCount ?? null,
+      lastRemainingCount: last?.result.checks.remainingCount ?? null,
+    },
+    commands: {
+      inspectWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      dryRun: [...commandBase, "--dry-run"],
+      confirm: [...commandBase, "--confirm"],
     },
   };
 }
@@ -15836,7 +15985,7 @@ Commands:
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
-  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs ensure-control-plane-mutation-workers <name> --server (--confirm|--dry-run) [--apply-worker-id id] [--drain-worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--apply-interval-ms n] [--max-continuations n] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]
