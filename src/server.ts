@@ -210,6 +210,7 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
       stoppedReason: string | null;
       resumeCommand: string[];
       inspectLastStepCommand: string[];
+      inspectHistoryCommand: string[];
     }>;
   };
 };
@@ -4404,6 +4405,7 @@ const summarizeIncompleteRecoverNextLoops = (
         dryRun ? "--dry-run" : "--confirm",
       ],
       inspectLastStepCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", last.advanceId],
+      inspectHistoryCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId],
     };
   }).sort((left, right) => right.lastObservedAt.localeCompare(left.lastObservedAt));
   return {
@@ -4617,6 +4619,7 @@ type WorkerSessionControlPlaneAlertDetails =
     commands: {
       resumeLoop: string[];
       inspectLastStep: string[];
+      inspectHistory: string[];
       inspectStatus: string[];
     };
   };
@@ -4748,6 +4751,7 @@ const readWorkerSessionControlPlaneAlertDetails = async (
           commands: {
             resumeLoop: loop.resumeCommand,
             inspectLastStep: loop.inspectLastStepCommand,
+            inspectHistory: loop.inspectHistoryCommand,
             inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", name, "--server", "--summary"],
           },
         }

@@ -8852,6 +8852,7 @@ type WorkerSessionControlPlaneStatusResponse = {
           stoppedReason: string | null;
           resumeCommand: string[];
           inspectLastStepCommand: string[];
+          inspectHistoryCommand: string[];
         }>;
       };
     };
@@ -9061,6 +9062,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
     commands: {
       resumeLoop: string[];
       inspectLastStep: string[];
+      inspectHistory: string[];
       inspectStatus: string[];
     };
   }) | null;
@@ -9844,6 +9846,7 @@ function workerSessionControlPlaneAlertPreviewCommands(
     commands.push(
       { ...base, action: "resume_recover_next_loop", command: preview.details.commands.resumeLoop },
       { ...base, action: "inspect_recover_next_loop_step", command: preview.details.commands.inspectLastStep },
+      { ...base, action: "inspect_recover_next_loop_history", command: preview.details.commands.inspectHistory },
       { ...base, action: "inspect_control_plane_status", command: preview.details.commands.inspectStatus },
     );
   }
@@ -9962,6 +9965,7 @@ function formatRecoverNextAlertDetails(
     "  commands:",
     `    resume_recover_next_loop: ${formatShellCommand(details.commands.resumeLoop)}`,
     `    inspect_recover_next_loop_step: ${formatShellCommand(details.commands.inspectLastStep)}`,
+    `    inspect_recover_next_loop_history: ${formatShellCommand(details.commands.inspectHistory)}`,
     `    inspect_control_plane_status: ${formatShellCommand(details.commands.inspectStatus)}`,
   ];
 }
@@ -10384,6 +10388,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    stopped_reason: ${loop.stoppedReason ?? ""}`,
         `    resume: ${formatShellCommand(loop.resumeCommand)}`,
         `    inspect_last_step: ${formatShellCommand(loop.inspectLastStepCommand)}`,
+        `    inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
       );
     }
   }

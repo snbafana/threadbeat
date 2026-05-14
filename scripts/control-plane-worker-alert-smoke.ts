@@ -619,6 +619,7 @@ try {
             intervalMs: number | null;
             resumeCommand: string[];
             inspectLastStepCommand: string[];
+            inspectHistoryCommand: string[];
           }>;
         };
       };
@@ -657,6 +658,18 @@ try {
     "--dry-run",
   ]);
   assert.deepEqual(interruptedLoop?.inspectLastStepCommand, recentRecoverLoopStep?.command);
+  assert.deepEqual(interruptedLoop?.inspectHistoryCommand, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+  ]);
 
   const recoverNextAlerts = await cliJson<{
     summary: { total: number; errors: number; warnings: number };
@@ -693,7 +706,7 @@ try {
     details: {
       kind: "recover_next_loop";
       loop: { loopAdvanceId: string; steps: number; dryRun: boolean; lastStepIndex: number | null };
-      commands: { resumeLoop: string[]; inspectLastStep: string[]; inspectStatus: string[] };
+      commands: { resumeLoop: string[]; inspectLastStep: string[]; inspectHistory: string[]; inspectStatus: string[] };
     } | null;
   }>(baseUrl, [
     "runs",
@@ -714,6 +727,7 @@ try {
   assert.equal(recoverNextAlertPreview.details?.loop.lastStepIndex, 1);
   assert.deepEqual(recoverNextAlertPreview.details?.commands.resumeLoop, interruptedLoop?.resumeCommand);
   assert.deepEqual(recoverNextAlertPreview.details?.commands.inspectLastStep, interruptedLoop?.inspectLastStepCommand);
+  assert.deepEqual(recoverNextAlertPreview.details?.commands.inspectHistory, interruptedLoop?.inspectHistoryCommand);
   assert.deepEqual(recoverNextAlertPreview.details?.commands.inspectStatus, [
     "npm",
     "run",
@@ -747,6 +761,11 @@ try {
     && command.loopAdvanceId === recoverNextLoopDryRun.advanceId
     && command.command.join(" ") === interruptedLoop?.inspectLastStepCommand.join(" ")
   )));
+  assert.ok(recoverNextAlertCommands.commands.some((command) => (
+    command.action === "inspect_recover_next_loop_history"
+    && command.loopAdvanceId === recoverNextLoopDryRun.advanceId
+    && command.command.join(" ") === interruptedLoop?.inspectHistoryCommand.join(" ")
+  )));
 
   const recoverNextAlertText = await cliText(baseUrl, [
     "runs",
@@ -763,6 +782,7 @@ try {
   assert.match(recoverNextAlertText, new RegExp(`loop: ${recoverNextLoopDryRun.advanceId}`));
   assert.match(recoverNextAlertText, /recover_next_loop:/);
   assert.match(recoverNextAlertText, /resume_recover_next_loop: npm run cli -- runs session-control-plane-recover-next/);
+  assert.match(recoverNextAlertText, /inspect_recover_next_loop_history: npm run cli -- runs session-control-plane-advances/);
 
   const recoverNextResumeDryRun = await cliJson<{
     advanceId: string;
@@ -866,6 +886,7 @@ try {
   assert.match(interruptedSummaryText, /recover_next_incomplete_loops: 1/);
   assert.match(interruptedSummaryText, /incomplete_recover_next_loops:/);
   assert.match(interruptedSummaryText, new RegExp(`resume: npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --until-empty --resume-loop ${recoverNextLoopDryRun.advanceId}`));
+  assert.match(interruptedSummaryText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${recoverNextLoopDryRun.advanceId}`));
   const interruptedSummaryShell = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
