@@ -135,11 +135,23 @@ try {
   assert.equal(inspected.count, 1);
   assert.equal(inspected.workers[0]?.workerId, workerId);
   assert.equal(inspected.workers[0]?.mode, "topology_loop");
+  const completedTopologyWorker = await waitForTopologyWorkerResult(baseUrl, workerId);
+  assert.equal(completedTopologyWorker.latestResult?.iterations, 1);
+  assert.equal(completedTopologyWorker.latestResult?.totalCoreExecuted, 0);
+  assert.equal(completedTopologyWorker.latestResult?.totalMutationExecuted, 0);
 
   const aggregateBeforeStop = await cliJson<{
     summary: {
-      topology: { total: number };
-      advance: { total: number };
+      topology: {
+        total: number;
+        latestResults: {
+          count: number;
+          iterations: number;
+          totalCoreExecuted: number;
+          totalMutationExecuted: number;
+        };
+      };
+      advance: { total: number; latestResults: { count: number } };
     };
     workers: Array<{ kind: string; workerId: string | null; commands: { restart: string[] } | null }>;
     commands: { inspectTopologyWorkers: string[] };
@@ -153,7 +165,12 @@ try {
     "1",
   ]);
   assert.equal(aggregateBeforeStop.summary.topology.total, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.count, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.iterations, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.totalCoreExecuted, 0);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.totalMutationExecuted, 0);
   assert.equal(aggregateBeforeStop.summary.advance.total, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.latestResults.count, 0);
   const aggregateTopologyWorker = aggregateBeforeStop.workers.find((worker) => worker.workerId === workerId);
   assert.equal(aggregateTopologyWorker?.kind, "control_plane_topology");
   assert.equal(
@@ -244,6 +261,32 @@ async function cliText(baseUrl: string, args: string[]): Promise<string> {
     maxBuffer: 1024 * 1024,
   });
   return stdout;
+}
+
+async function waitForTopologyWorkerResult(baseUrl: string, workerId: string): Promise<{
+  latestResult: {
+    iterations?: number;
+    totalCoreExecuted?: number;
+    totalMutationExecuted?: number;
+  } | null;
+}> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const inspected = await cliJson<{ workers: Array<{ latestResult: { iterations?: number; totalCoreExecuted?: number; totalMutationExecuted?: number } | null }> }>(baseUrl, [
+      "runs",
+      "session-control-plane-topology-workers",
+      sessionName,
+      "--server",
+      "--worker-id",
+      workerId,
+      "--include-retired",
+      "--lines",
+      "1",
+    ]);
+    const worker = inspected.workers[0];
+    if (worker?.latestResult) return worker;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`topology worker ${workerId} did not record latestResult`);
 }
 
 async function writeWorkerSessionRecord(): Promise<void> {

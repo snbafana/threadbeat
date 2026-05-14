@@ -10446,6 +10446,15 @@ type ControlPlaneWorkerSummary = {
   completed: number;
   retired: number;
   restartable: number;
+  latestResults: {
+    count: number;
+    iterations: number;
+    totalCoreExecuted: number;
+    totalMutationExecuted: number;
+    executedSteps: number;
+    attemptedConfirmations: number;
+    availableConfirmations: number;
+  };
 };
 
 type ControlPlaneWorkerAggregateNextStep = Record<string, unknown> & {
@@ -10639,7 +10648,7 @@ function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWork
   return record.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
 }
 
-function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean }>): ControlPlaneWorkerSummary {
+function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean; latestResult?: unknown }>): ControlPlaneWorkerSummary {
   return {
     total: workers.length,
     alive: workers.filter((worker) => worker.alive).length,
@@ -10647,6 +10656,23 @@ function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: st
     completed: workers.filter((worker) => worker.state === "completed").length,
     retired: workers.filter((worker) => worker.state === "retired").length,
     restartable: workers.filter((worker) => worker.restartable).length,
+    latestResults: summarizeControlPlaneWorkerLatestResults(workers),
+  };
+}
+
+function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?: unknown }>): ControlPlaneWorkerSummary["latestResults"] {
+  const latestResults = workers
+    .map((worker) => plainRecord(worker.latestResult))
+    .filter((latestResult): latestResult is Record<string, unknown> => latestResult !== null);
+  const sumNumber = (field: string): number => latestResults.reduce((total, latestResult) => total + (numberFromUnknown(latestResult[field]) ?? 0), 0);
+  return {
+    count: latestResults.length,
+    iterations: sumNumber("iterations"),
+    totalCoreExecuted: sumNumber("totalCoreExecuted"),
+    totalMutationExecuted: sumNumber("totalMutationExecuted"),
+    executedSteps: sumNumber("executedSteps"),
+    attemptedConfirmations: sumNumber("attemptedConfirmations"),
+    availableConfirmations: sumNumber("availableConfirmations"),
   };
 }
 
