@@ -408,6 +408,69 @@ try {
   assert.equal(statusBlockedAttempt?.workerId, workerId);
   assert.equal(statusBlockedAttempt?.confirmed, false);
 
+  const workerRestartQueue = await cliJson<{
+    count: number;
+    groups: Record<string, number>;
+    workers: Array<{ kind: string; workerId: string | null; action: string | null; reason: string | null; command: string[] }>;
+    commands: { reconcileConfirm: string[]; reconcileUntilEmptyConfirm: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-restart-queue",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(workerRestartQueue.count, 1);
+  assert.equal(workerRestartQueue.groups.control_plane_advance, 1);
+  assert.equal(workerRestartQueue.workers[0]?.kind, "control_plane_advance");
+  assert.equal(workerRestartQueue.workers[0]?.workerId, workerId);
+  assert.equal(workerRestartQueue.workers[0]?.action, "restart_control_plane_advance_worker");
+  assert.equal(workerRestartQueue.workers[0]?.reason, "stopped_control_plane_advance_worker");
+  assert.deepEqual(workerRestartQueue.workers[0]?.command, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "restart-control-plane-advance-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+  ]);
+  assert.ok(workerRestartQueue.commands.reconcileConfirm.includes("--confirm"));
+  assert.ok(workerRestartQueue.commands.reconcileUntilEmptyConfirm.includes("--until-empty"));
+
+  const workerRestartQueueText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-restart-queue",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(workerRestartQueueText, /control_plane_worker_restart_queue:/);
+  assert.match(workerRestartQueueText, /groups: control_plane_advance=1/);
+  assert.match(workerRestartQueueText, new RegExp(`worker: ${workerId}`));
+  assert.match(workerRestartQueueText, /restart-control-plane-advance-workers/);
+
+  const workerRestartQueueShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-restart-queue",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(workerRestartQueueShell, new RegExp(`restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
+
   const recoverNextMissingMode = await cliFailure(baseUrl, [
     "runs",
     "session-control-plane-recover-next",
@@ -607,6 +670,7 @@ try {
   assert.match(statusSummaryText, /next_actions:/);
   assert.match(statusSummaryText, /surface: worker_recovery/);
   assert.match(statusSummaryText, new RegExp(`command: npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
+  assert.match(statusSummaryText, /restart_queue: npm run cli -- runs session-control-plane-worker-restart-queue/);
   assert.match(statusSummaryText, /pending_confirmations: 1/);
   assert.match(statusSummaryText, /recover_next_loop_steps: total=1 dry_run=1 executed=1 failed=0/);
   assert.match(statusSummaryText, /recent_recover_next_loop_steps:/);
