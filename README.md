@@ -758,18 +758,21 @@ selected command immediately after the watch finds it and persist that handoff
 in the advance ledger. Use `runs session-control-plane-alerts <name> --server`
 or `GET /api/worker-sessions/:name/control-plane-alerts` for a compact
 actionable-failures queue across failed apply executions, failed drain
-continuations, blocked branch/stale-run resumes, stopped workers, and recent
-failed/noop timeline records; add `--severity`, `--surface`, or `--reason` to
+continuations, failed status-watch executions, blocked branch/stale-run
+resumes, stopped workers, and recent failed/noop timeline records; add
+`--severity`, `--surface`, or `--reason` to
 focus one failure class, add `--run`, `--worker`, `--apply`, `--execution`, or
 `--action` to target one entity, and add `--commands-only --format shell` to
 print the inspection or recovery commands directly. Use singular
 `runs session-control-plane-alert <name> --server` with the same filters to
 preview the first matching alert, its command, and recent failure/noop timeline
 context in one read-only response; run-backed branch and stale-run alerts also
-include the run resume-inspection snapshot, while failed apply-action and
-failed drain-continuation alerts include their backing execution/continuation
-records plus exact inspect, retry, acknowledge, or selected-reset commands in
-the `details.commands` block. The singular `--commands-only --format shell`
+include the run resume-inspection snapshot, failed status-watch alerts include
+the backing advance record plus exact timeline and selected-command follow-up
+commands, while failed apply-action and failed drain-continuation alerts include
+their backing execution/continuation records plus exact inspect, retry,
+acknowledge, or selected-reset commands in the `details.commands` block. The
+singular `--commands-only --format shell`
 form prints those follow-up commands with duplicates removed. Use
 `runs session-control-plane-alert-execute <name> --server` with the same
 filters, or `POST /api/worker-sessions/:name/control-plane-alert/execute`, to

@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 
 import type { Settings } from "../src/config.js";
 import { buildServer } from "../src/server.js";
+import { writeWorkerSessionControlPlaneAdvanceRecord } from "../src/workerSessionControlPlaneAdvances.js";
 
 const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-status-topology-smoke-"));
@@ -578,6 +579,102 @@ try {
     command.action === "run_selected_command"
     && command.command.join(" ") === `npm run cli -- runs session-control-plane-advance ${sessionName} --server --dry-run`
   )));
+  const failedStatusWatch = await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {
+    session: sessionName,
+    observedAt: "2026-05-14T00:00:02.000Z",
+    completedAt: "2026-05-14T00:00:03.000Z",
+    dryRun: false,
+    detailCommand: "status_watch_execute_action",
+    selected: {
+      surface: "status_watch",
+      action: "execute_action",
+      reason: "control_plane_action:failed_status_watch_smoke",
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+    },
+    executed: {
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+      exitCode: 1,
+      stdout: "",
+      stderr: "status watch failed",
+      output: null,
+    },
+    before: null,
+    after: null,
+  });
+  const statusWatchAlerts = await cliJson<{
+    summary: { total: number; errors: number };
+    alerts: Array<{ surface: string; severity: string; reason: string; advanceId: string; action: string; command: string[] }>;
+    recentTimeline: { counts: Record<string, number> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+  ]);
+  assert.equal(statusWatchAlerts.summary.total, 1);
+  assert.equal(statusWatchAlerts.summary.errors, 1);
+  assert.equal(statusWatchAlerts.alerts[0]?.surface, "status_watch");
+  assert.equal(statusWatchAlerts.alerts[0]?.severity, "error");
+  assert.equal(statusWatchAlerts.alerts[0]?.reason, "failed_status_watch_execution");
+  assert.equal(statusWatchAlerts.alerts[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(statusWatchAlerts.alerts[0]?.action, "inspect_status_watch_execution");
+  assert.deepEqual(statusWatchAlerts.alerts[0]?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions", "--advance", failedStatusWatch.record.advanceId]);
+  assert.equal(statusWatchAlerts.recentTimeline.counts.status_watch_executed, 1);
+  const statusWatchAlertPreview = await cliJson<{
+    alert: { surface: string; advanceId: string } | null;
+    details: {
+      kind: string;
+      advance: { advanceId: string; detailCommand: string; executed: { exitCode: number | null } | null };
+      commands: { inspectStatusWatchExecution: string[]; timelineStatusWatchExecution: string[]; runSelectedCommand: string[] | null };
+    } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+  ]);
+  assert.equal(statusWatchAlertPreview.alert?.surface, "status_watch");
+  assert.equal(statusWatchAlertPreview.alert?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(statusWatchAlertPreview.details?.kind, "status_watch_execution");
+  assert.equal(statusWatchAlertPreview.details?.advance.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(statusWatchAlertPreview.details?.advance.detailCommand, "status_watch_execute_action");
+  assert.equal(statusWatchAlertPreview.details?.advance.executed?.exitCode, 1);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.inspectStatusWatchExecution, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions", "--advance", failedStatusWatch.record.advanceId]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.timelineStatusWatchExecution, ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server", "--source", "status_watch_execution", "--advance", failedStatusWatch.record.advanceId]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.runSelectedCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"]);
+  const statusWatchAlertCommands = await cliJson<{ commands: Array<{ action: string; advanceId?: string; command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--commands-only",
+  ]);
+  assert.ok(statusWatchAlertCommands.commands.some((command) => (
+    command.action === "inspect_status_watch_execution"
+    && command.advanceId === failedStatusWatch.record.advanceId
+  )));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "timeline_status_watch_execution"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "run_selected_command"));
+  const statusWatchAlertText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--format",
+    "text",
+  ]);
+  assert.match(statusWatchAlertText, /surface: status_watch/);
+  assert.match(statusWatchAlertText, new RegExp(`advance: ${failedStatusWatch.record.advanceId}`));
+  assert.match(statusWatchAlertText, /status_watch_execution:/);
+  assert.match(statusWatchAlertText, /inspect_status_watch_execution: npm run cli -- runs session-control-plane-advances/);
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
@@ -761,6 +858,7 @@ try {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
