@@ -502,6 +502,34 @@ try {
   ]);
   assert.match(watchActionAdvancesText, /detail_commands=status_watch_execute_action/);
   assert.match(watchActionAdvancesText, /detail_command: status_watch_execute_action/);
+  const summaryAfterWatchExecution = await cliJson<{
+    recovery: { statusWatchExecutions: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; command: string[] }> } };
+    commands: { statusWatchExecutions: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.total, 1);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.dryRun, 1);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.executed, 1);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.failed, 0);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  assert.deepEqual(summaryAfterWatchExecution.commands.statusWatchExecutions, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions"]);
+  const summaryTextAfterWatchExecution = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(summaryTextAfterWatchExecution, /status_watch_executions: total=1 dry_run=1 executed=1 failed=0/);
+  assert.match(summaryTextAfterWatchExecution, new RegExp(`inspect: npm run cli -- runs session-control-plane-advances ${sessionName} --server --status-watch-executions`));
+  assert.match(summaryTextAfterWatchExecution, /recent_status_watch_executions:/);
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
