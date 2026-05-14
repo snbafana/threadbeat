@@ -5690,6 +5690,54 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "start-control-plane-result-review-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs start-control-plane-result-review-worker requires --server");
+    }
+    const reviewAction = parseResultReviewWorkerAction(options, "runs start-control-plane-result-review-worker");
+    await printJson(await startWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs start-control-plane-result-review-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun: options["dry-run"] === "1",
+        maxSteps: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
+        maxResults: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
+        intervalMs: parsePositiveInteger(options["interval-ms"] ?? "1000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        resultReview: true,
+        reviewAction,
+        reviewedBy: options["reviewed-by"],
+        note: options.note,
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "ensure-control-plane-result-review-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-result-review-worker requires --server");
+    }
+    const reviewAction = parseResultReviewWorkerAction(options, "runs ensure-control-plane-result-review-worker");
+    await printJson(await ensureWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs ensure-control-plane-result-review-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun: options["dry-run"] === "1",
+        maxSteps: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
+        maxResults: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
+        intervalMs: parsePositiveInteger(options["interval-ms"] ?? "1000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        resultReview: true,
+        reviewAction,
+        reviewedBy: options["reviewed-by"],
+        note: options.note,
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-advance-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -5702,6 +5750,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         workerId: options["worker-id"],
         includeRetired: options["include-retired"] === "1",
         lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "session-control-plane-result-review-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-result-review-workers requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneAdvanceWorkers(
+      required(sessionName, "runs session-control-plane-result-review-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        mode: "result_review_loop",
       },
     ));
     return;
@@ -5952,6 +6017,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-result-review-workers-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-result-review-workers-next requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(
+      required(sessionName, "runs session-control-plane-result-review-workers-next <session> --server"),
+      { workerId: options["worker-id"], mode: "result_review_loop" },
+    ));
+    return;
+  }
   if (subcommandName === "restart-control-plane-advance-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -5985,6 +6062,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "restart-control-plane-result-review-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs restart-control-plane-result-review-worker requires --server");
+    }
+    await printJson(await restartWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs restart-control-plane-result-review-worker <session> --server"),
+      {
+        workerId: required(options["worker-id"], "runs restart-control-plane-result-review-worker <session> --server --worker-id <id>"),
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        mode: "result_review_loop",
+      },
+    ));
+    return;
+  }
   if (subcommandName === "stop-control-plane-advance-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -5997,6 +6091,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         workerId: options["worker-id"],
         retire: options.retire === "1",
         lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "stop-control-plane-result-review-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs stop-control-plane-result-review-worker requires --server");
+    }
+    await printJson(await stopWorkerSessionControlPlaneAdvanceWorkers(
+      required(sessionName, "runs stop-control-plane-result-review-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        retire: options.retire === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        mode: "result_review_loop",
       },
     ));
     return;
@@ -11772,6 +11883,11 @@ async function startWorkerSessionControlPlaneAdvanceWorker(
     untilEmpty?: boolean;
     topologyLoop?: boolean;
     includeMutationWorkers?: boolean;
+    resultReview?: boolean;
+    reviewAction?: "reviewed" | "skipped";
+    maxResults?: number;
+    reviewedBy?: string;
+    note?: string;
     maxIterations?: number;
     loopIntervalMs?: number;
   },
@@ -11795,6 +11911,11 @@ async function startWorkerSessionControlPlaneAdvanceWorker(
       untilEmpty: options.untilEmpty ?? false,
       topologyLoop: options.topologyLoop ?? false,
       includeMutationWorkers: options.includeMutationWorkers ?? false,
+      resultReview: options.resultReview ?? false,
+      ...(options.reviewAction ? { reviewAction: options.reviewAction } : {}),
+      maxResults: options.maxResults ?? options.maxSteps,
+      ...(options.reviewedBy ? { reviewedBy: options.reviewedBy } : {}),
+      ...(options.note ? { note: options.note } : {}),
       maxIterations: options.maxIterations ?? options.maxSteps,
       loopIntervalMs: options.loopIntervalMs ?? options.intervalMs,
     },
@@ -11815,6 +11936,11 @@ async function ensureWorkerSessionControlPlaneAdvanceWorker(
     untilEmpty?: boolean;
     topologyLoop?: boolean;
     includeMutationWorkers?: boolean;
+    resultReview?: boolean;
+    reviewAction?: "reviewed" | "skipped";
+    maxResults?: number;
+    reviewedBy?: string;
+    note?: string;
     maxIterations?: number;
     loopIntervalMs?: number;
   },
@@ -11841,6 +11967,11 @@ async function ensureWorkerSessionControlPlaneAdvanceWorker(
       untilEmpty: options.untilEmpty ?? false,
       topologyLoop: options.topologyLoop ?? false,
       includeMutationWorkers: options.includeMutationWorkers ?? false,
+      resultReview: options.resultReview ?? false,
+      ...(options.reviewAction ? { reviewAction: options.reviewAction } : {}),
+      maxResults: options.maxResults ?? options.maxSteps,
+      ...(options.reviewedBy ? { reviewedBy: options.reviewedBy } : {}),
+      ...(options.note ? { note: options.note } : {}),
       maxIterations: options.maxIterations ?? options.maxSteps,
       loopIntervalMs: options.loopIntervalMs ?? options.intervalMs,
     },
@@ -12327,8 +12458,8 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   };
 }
 
-type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "control_plane_tick" | "apply_action" | "drain";
-type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop";
+type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_tick" | "apply_action" | "drain";
+type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop";
 
 type ControlPlaneWorkerSummary = {
   total: number;
@@ -12349,6 +12480,8 @@ type ControlPlaneWorkerSummary = {
     executedSteps: number;
     attemptedConfirmations: number;
     availableConfirmations: number;
+    processed: number;
+    remainingPending: number;
   };
 };
 
@@ -12370,6 +12503,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
   summary: ControlPlaneWorkerSummary & {
     advance: ControlPlaneWorkerSummary;
     topology: ControlPlaneWorkerSummary;
+    resultReview: ControlPlaneWorkerSummary;
     tick: ControlPlaneWorkerSummary;
     applyAction: ControlPlaneWorkerSummary;
     drain: ControlPlaneWorkerSummary;
@@ -12392,6 +12526,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
   commands: {
     inspectAdvanceWorkers: string[];
     inspectTopologyWorkers: string[];
+    inspectResultReviewWorkers: string[];
     inspectTickWorkers: string[];
     inspectApplyActionWorkers: string[];
     inspectDrainWorkers: string[];
@@ -12429,6 +12564,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     : allNextSteps;
   const advanceSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_advance"));
   const topologySummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_topology"));
+  const resultReviewSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "result_review"));
   const tickSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_tick"));
   const applyActionSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "apply_action"));
   const drainSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "drain"));
@@ -12445,6 +12581,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
       ...allSummary,
       advance: advanceSummary,
       topology: topologySummary,
+      resultReview: resultReviewSummary,
       tick: tickSummary,
       applyAction: applyActionSummary,
       drain: drainSummary,
@@ -12460,6 +12597,12 @@ async function fetchWorkerSessionControlPlaneWorkers(
       ],
       inspectTopologyWorkers: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-topology-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      inspectResultReviewWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-result-review-workers", sessionName, "--server",
         ...(options.workerId ? ["--worker-id", options.workerId] : []),
         ...(options.includeRetired ? ["--include-retired"] : []),
         "--lines", String(options.lines),
@@ -12533,12 +12676,14 @@ function formatWorkerSessionControlPlaneWorkersText(
     `  all: ${formatControlPlaneWorkerSummary(response.summary)}`,
     `  advance: ${formatControlPlaneWorkerSummary(response.summary.advance)}`,
     `  topology: ${formatControlPlaneWorkerSummary(response.summary.topology)}`,
+    `  result_review: ${formatControlPlaneWorkerSummary(response.summary.resultReview)}`,
     `  tick: ${formatControlPlaneWorkerSummary(response.summary.tick)}`,
     `  apply_action: ${formatControlPlaneWorkerSummary(response.summary.applyAction)}`,
     `  drain: ${formatControlPlaneWorkerSummary(response.summary.drain)}`,
     "  commands:",
     `    inspect_advance: ${formatShellCommand(response.commands.inspectAdvanceWorkers)}`,
     `    inspect_topology: ${formatShellCommand(response.commands.inspectTopologyWorkers)}`,
+    `    inspect_result_review: ${formatShellCommand(response.commands.inspectResultReviewWorkers)}`,
     `    inspect_tick: ${formatShellCommand(response.commands.inspectTickWorkers)}`,
     `    inspect_apply_action: ${formatShellCommand(response.commands.inspectApplyActionWorkers)}`,
     `    inspect_drain: ${formatShellCommand(response.commands.inspectDrainWorkers)}`,
@@ -12590,6 +12735,8 @@ function formatControlPlaneWorkerLatestResults(summary: ControlPlaneWorkerSummar
     `steps=${summary.executedSteps}`,
     `confirmations=${summary.attemptedConfirmations}`,
     `available_confirmations=${summary.availableConfirmations}`,
+    `processed=${summary.processed}`,
+    `remaining_pending=${summary.remainingPending}`,
   ].join(",");
 }
 
@@ -12648,8 +12795,9 @@ function normalizeControlPlaneWorkerNextStep(kind: ControlPlaneWorkerKind, step:
   };
 }
 
-function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_topology"> {
+function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_topology" | "result_review"> {
   const record = plainRecord(value) ?? {};
+  if (record.mode === "result_review_loop") return "result_review";
   return record.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
 }
 
@@ -12682,6 +12830,8 @@ function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?
     executedSteps: sumNumber("executedSteps"),
     attemptedConfirmations: sumNumber("attemptedConfirmations"),
     availableConfirmations: sumNumber("availableConfirmations"),
+    processed: sumNumber("processed"),
+    remainingPending: sumNumber("remainingPending"),
   };
 }
 
@@ -12821,6 +12971,29 @@ function controlPlaneWorkerCommands(
       ],
     };
   }
+  if (kind === "result_review") {
+    return {
+      inspect: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-result-review-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      restart: [
+        "npm", "run", "cli", "--", "runs", "restart-control-plane-result-review-worker", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      stop: [
+        "npm", "run", "cli", "--", "runs", "stop-control-plane-result-review-worker", sessionName, "--server",
+        "--worker-id", workerId,
+      ],
+      retire: [
+        "npm", "run", "cli", "--", "runs", "stop-control-plane-result-review-worker", sessionName, "--server",
+        "--worker-id", workerId,
+        "--retire",
+      ],
+    };
+  }
   const nouns = controlPlaneWorkerCommandNouns(kind);
   return {
     inspect: [
@@ -12855,15 +13028,26 @@ function controlPlaneWorkerCommandNouns(kind: ControlPlaneWorkerKind): string {
 function parseControlPlaneWorkerKind(value: string): ControlPlaneWorkerKind {
   if (value === "control-plane-advance" || value === "control_plane_advance" || value === "advance") return "control_plane_advance";
   if (value === "control-plane-topology" || value === "control_plane_topology" || value === "topology") return "control_plane_topology";
+  if (value === "result-review" || value === "result_review" || value === "result") return "result_review";
   if (value === "control-plane-tick" || value === "control_plane_tick" || value === "tick") return "control_plane_tick";
   if (value === "apply-action" || value === "apply_action") return "apply_action";
   if (value === "drain") return "drain";
   throw new Error(`Unsupported control-plane worker kind: ${value}`);
 }
 
+function parseResultReviewWorkerAction(options: Record<string, string>, commandName: string): "reviewed" | "skipped" {
+  const reviewed = options["record-reviewed"] === "1";
+  const skipped = options["record-skipped"] === "1";
+  if (reviewed === skipped) {
+    throw new Error(`${commandName} requires exactly one of --record-reviewed or --record-skipped`);
+  }
+  return skipped ? "skipped" : "reviewed";
+}
+
 function controlPlaneWorkerKindFlag(kind: ControlPlaneWorkerKind): string {
   if (kind === "control_plane_advance") return "control-plane-advance";
   if (kind === "control_plane_topology") return "control-plane-topology";
+  if (kind === "result_review") return "result-review";
   if (kind === "control_plane_tick") return "control-plane-tick";
   if (kind === "apply_action") return "apply-action";
   return "drain";
@@ -14466,6 +14650,9 @@ async function stopControlPlaneWorkerForDrill(
   if (options.kind === "control_plane_topology") {
     return await stopWorkerSessionControlPlaneAdvanceWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines, mode: "topology_loop" });
   }
+  if (options.kind === "result_review") {
+    return await stopWorkerSessionControlPlaneAdvanceWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines, mode: "result_review_loop" });
+  }
   if (options.kind === "control_plane_tick") {
     return await stopWorkerSessionControlPlaneTickWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines });
   }
@@ -14492,6 +14679,14 @@ async function restartControlPlaneWorkerForDrill(
       includeRetired: options.includeRetired,
       lines: options.lines,
       mode: "topology_loop",
+    });
+  }
+  if (options.kind === "result_review") {
+    return await restartWorkerSessionControlPlaneAdvanceWorker(sessionName, {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+      mode: "result_review_loop",
     });
   }
   if (options.kind === "control_plane_tick") {
@@ -17989,11 +18184,17 @@ Commands:
   runs session-control-plane-topology-workers-next <name> --server [--worker-id id]
   runs restart-control-plane-topology-worker <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-topology-worker <name> --server [--worker-id id] [--retire] [--lines 20]
+  runs start-control-plane-result-review-worker <name> --server (--record-reviewed|--record-skipped) [--worker-id id] [--dry-run] [--max-results 10] [--interval-ms 1000] [--reviewed-by name] [--note text] [--lines 20]
+  runs ensure-control-plane-result-review-worker <name> --server (--record-reviewed|--record-skipped) [--worker-id id] [--dry-run] [--max-results 10] [--interval-ms 1000] [--reviewed-by name] [--note text] [--lines 20]
+  runs session-control-plane-result-review-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
+  runs session-control-plane-result-review-workers-next <name> --server [--worker-id id]
+  runs restart-control-plane-result-review-worker <name> --server --worker-id id [--include-retired] [--lines 20]
+  runs stop-control-plane-result-review-worker <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
-  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
-  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
-  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
+  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
+  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs ensure-control-plane-mutation-workers <name> --server (--confirm|--dry-run) [--apply-worker-id id] [--drain-worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--apply-interval-ms n] [--max-continuations n] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]

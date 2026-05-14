@@ -159,6 +159,94 @@ try {
   assert.equal(summary.results.reviews.counts.failed, 0);
   assert.equal(summary.results.reviews.failedAttempts.count, 0);
 
+  const resultReviewWorkerId = "result-review-loop-smoke";
+  const startedResultReviewWorker = await cliJson<{
+    worker: {
+      workerId: string;
+      mode: string;
+      command: string[];
+    };
+  }>(baseUrl, [
+    "runs",
+    "start-control-plane-result-review-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    resultReviewWorkerId,
+    "--record-reviewed",
+    "--dry-run",
+    "--max-results",
+    "2",
+    "--interval-ms",
+    "1",
+    "--reviewed-by",
+    "result-review-worker-smoke",
+  ]);
+  assert.equal(startedResultReviewWorker.worker.workerId, resultReviewWorkerId);
+  assert.equal(startedResultReviewWorker.worker.mode, "result_review_loop");
+  assert.deepEqual(startedResultReviewWorker.worker.command, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+    "--record-reviewed",
+    "--until-empty",
+    "--max-results",
+    "2",
+    "--interval-ms",
+    "1",
+    "--dry-run",
+    "--reviewed-by",
+    "result-review-worker-smoke",
+  ]);
+  const completedResultReviewWorker = await waitForResultReviewWorker(baseUrl, resultReviewWorkerId);
+  assert.equal(completedResultReviewWorker.latestResult?.processed, 1);
+  assert.equal(completedResultReviewWorker.latestResult?.remainingPending, 1);
+  assert.equal(completedResultReviewWorker.latestResult?.stoppedReason, "dry_run_previewed");
+
+  const resultReviewWorkers = await cliJson<{
+    count: number;
+    workers: Array<{
+      workerId: string;
+      mode: string;
+      latestResult?: { processed?: number; remainingPending?: number; stoppedReason?: string };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    resultReviewWorkerId,
+    "--include-retired",
+  ]);
+  assert.equal(resultReviewWorkers.count, 1);
+  assert.equal(resultReviewWorkers.workers[0]?.mode, "result_review_loop");
+  assert.equal(resultReviewWorkers.workers[0]?.latestResult?.processed, 1);
+
+  const aggregateWorkers = await cliJson<{
+    summary: {
+      advance: { total: number };
+      resultReview: { total: number; latestResults: { processed: number; remainingPending: number } };
+    };
+    workers: Array<{ kind: string; workerId: string | null }>;
+    commands: { inspectResultReviewWorkers: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(aggregateWorkers.summary.advance.total, 0);
+  assert.equal(aggregateWorkers.summary.resultReview.total, 1);
+  assert.equal(aggregateWorkers.summary.resultReview.latestResults.processed, 1);
+  assert.equal(aggregateWorkers.summary.resultReview.latestResults.remainingPending, 1);
+  assert.ok(aggregateWorkers.workers.some((worker) => worker.kind === "result_review" && worker.workerId === resultReviewWorkerId));
+  assert.equal(aggregateWorkers.commands.inspectResultReviewWorkers.join(" "), `npm run cli -- runs session-control-plane-result-review-workers ${sessionName} --server --include-retired --lines 5`);
+
   const commandSummary = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -897,6 +985,7 @@ try {
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "result-review-attempts", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "result-reviews", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
@@ -937,6 +1026,32 @@ async function cliText(baseUrl: string, args: string[]): Promise<string> {
     maxBuffer: 1024 * 1024,
   });
   return stdout;
+}
+
+async function waitForResultReviewWorker(baseUrl: string, workerId: string): Promise<{
+  workerId: string;
+  latestResult?: { processed?: number; remainingPending?: number; stoppedReason?: string };
+}> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = await cliJson<{
+      workers: Array<{
+        workerId: string;
+        latestResult?: { processed?: number; remainingPending?: number; stoppedReason?: string };
+      }>;
+    }>(baseUrl, [
+      "runs",
+      "session-control-plane-result-review-workers",
+      sessionName,
+      "--server",
+      "--worker-id",
+      workerId,
+      "--include-retired",
+    ]);
+    const worker = response.workers[0];
+    if (worker?.latestResult?.stoppedReason) return worker;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`timed out waiting for result review worker ${workerId}`);
 }
 
 async function cliFailure(baseUrl: string, args: string[]): Promise<{ stdout: string; stderr: string }> {

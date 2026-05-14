@@ -25,7 +25,7 @@ export type ControlPlaneAdvanceWorker = {
   recentProgress?: ControlPlaneAdvanceWorkerLatestResult[];
 };
 
-export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop";
+export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop";
 export type ControlPlaneAdvanceWorkerLatestResultSource = "recorded" | "stdout" | "none";
 
 export type ControlPlaneAdvanceWorkerLifecycle = {
@@ -50,12 +50,15 @@ export type ControlPlaneAdvanceWorkerLatestResult = {
   maxSteps?: number;
   intervalMs?: number;
   maxConfirmations?: number;
+  maxResults?: number;
   maxIterations?: number;
   loopIntervalMs?: number;
   iterations?: number;
   executedSteps?: number;
   attemptedConfirmations?: number;
   availableConfirmations?: number;
+  processed?: number;
+  remainingPending?: number;
   totalCoreExecuted?: number;
   totalMutationExecuted?: number;
   cycles?: number;
@@ -107,6 +110,11 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     untilEmpty?: boolean;
     topologyLoop?: boolean;
     includeMutationWorkers?: boolean;
+    resultReview?: boolean;
+    reviewAction?: "reviewed" | "skipped";
+    maxResults?: number;
+    reviewedBy?: string;
+    note?: string;
     maxIterations?: number;
     loopIntervalMs?: number;
   },
@@ -122,12 +130,15 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
   if (await pathExists(recordPath)) {
     throw new Error(`control-plane advance worker '${workerId}' already exists for session '${sessionName}'`);
   }
-  const mode: ControlPlaneAdvanceWorkerMode = options.topologyLoop ? "topology_loop" : options.drainConfirmations ? "confirmation_drain" : "advance_loop";
+  const mode: ControlPlaneAdvanceWorkerMode = options.resultReview ? "result_review_loop" : options.topologyLoop ? "topology_loop" : options.drainConfirmations ? "confirmation_drain" : "advance_loop";
   if (mode === "confirmation_drain" && !options.confirm) {
     throw new Error("control-plane confirmation drain workers require --confirm");
   }
   if (mode === "topology_loop" && options.dryRun === Boolean(options.confirm)) {
     throw new Error("control-plane topology workers require exactly one of dryRun or confirm");
+  }
+  if (mode === "result_review_loop" && !options.reviewAction) {
+    throw new Error("control-plane result review workers require a review action");
   }
   const command = buildControlPlaneAdvanceWorkerCommand(sessionName, mode, options);
   const stdoutStartOffset = await fileSize(stdoutPath);
@@ -313,9 +324,21 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
     .filter((worker) => worker.lifecycle.restartable)
     .map((worker): ControlPlaneAdvanceWorkerNextStep => {
       const mode = worker.mode ?? "advance_loop";
-      const restartCommandName = mode === "topology_loop" ? "restart-control-plane-topology-worker" : "restart-control-plane-advance-workers";
-      const inspectCommandName = mode === "topology_loop" ? "session-control-plane-topology-workers" : "session-control-plane-advance-workers";
-      const stopCommandName = mode === "topology_loop" ? "stop-control-plane-topology-worker" : "stop-control-plane-advance-workers";
+      const restartCommandName = mode === "topology_loop"
+        ? "restart-control-plane-topology-worker"
+        : mode === "result_review_loop"
+          ? "restart-control-plane-result-review-worker"
+          : "restart-control-plane-advance-workers";
+      const inspectCommandName = mode === "topology_loop"
+        ? "session-control-plane-topology-workers"
+        : mode === "result_review_loop"
+          ? "session-control-plane-result-review-workers"
+          : "session-control-plane-advance-workers";
+      const stopCommandName = mode === "topology_loop"
+        ? "stop-control-plane-topology-worker"
+        : mode === "result_review_loop"
+          ? "stop-control-plane-result-review-worker"
+          : "stop-control-plane-advance-workers";
       const restartControlPlaneAdvanceWorker = ["npm", "run", "cli", "--", "runs", restartCommandName, sessionName, "--server", "--worker-id", worker.workerId];
       const encodedSession = encodeURIComponent(sessionName);
       const encodedWorker = encodeURIComponent(worker.workerId);
@@ -709,12 +732,15 @@ function summarizeLatestWorkerJsonResult(value: Record<string, unknown>): Contro
     ...(typeof value.maxSteps === "number" ? { maxSteps: value.maxSteps } : {}),
     ...(typeof value.intervalMs === "number" ? { intervalMs: value.intervalMs } : {}),
     ...(typeof value.maxConfirmations === "number" ? { maxConfirmations: value.maxConfirmations } : {}),
+    ...(typeof value.maxResults === "number" ? { maxResults: value.maxResults } : {}),
     ...(typeof value.maxIterations === "number" ? { maxIterations: value.maxIterations } : {}),
     ...(typeof value.loopIntervalMs === "number" ? { loopIntervalMs: value.loopIntervalMs } : {}),
     ...(typeof summary?.iterations === "number" ? { iterations: summary.iterations } : {}),
     ...(typeof value.executedSteps === "number" ? { executedSteps: value.executedSteps } : {}),
     ...(typeof value.attemptedConfirmations === "number" ? { attemptedConfirmations: value.attemptedConfirmations } : {}),
     ...(typeof value.availableConfirmations === "number" ? { availableConfirmations: value.availableConfirmations } : {}),
+    ...(typeof value.processed === "number" ? { processed: value.processed } : {}),
+    ...(typeof value.remainingPending === "number" ? { remainingPending: value.remainingPending } : {}),
     ...(typeof summary?.totalCoreExecuted === "number" ? { totalCoreExecuted: summary.totalCoreExecuted } : {}),
     ...(typeof summary?.totalMutationExecuted === "number" ? { totalMutationExecuted: summary.totalMutationExecuted } : {}),
     ...(Array.isArray(value.cycles) ? { cycles: value.cycles.length } : {}),
@@ -768,10 +794,32 @@ function buildControlPlaneAdvanceWorkerCommand(
     untilEmpty?: boolean;
     confirm?: boolean;
     includeMutationWorkers?: boolean;
+    resultReview?: boolean;
+    reviewAction?: "reviewed" | "skipped";
+    maxResults?: number;
+    reviewedBy?: string;
+    note?: string;
     maxIterations?: number;
     loopIntervalMs?: number;
   },
 ): string[] {
+  if (mode === "result_review_loop") {
+    return [
+      "runs",
+      "session-result-review-next",
+      sessionName,
+      "--server",
+      options.reviewAction === "skipped" ? "--record-skipped" : "--record-reviewed",
+      "--until-empty",
+      "--max-results",
+      String(options.maxResults ?? options.maxSteps),
+      "--interval-ms",
+      String(options.intervalMs),
+      ...(options.dryRun ? ["--dry-run"] : []),
+      ...(options.reviewedBy ? ["--reviewed-by", options.reviewedBy] : []),
+      ...(options.note ? ["--note", options.note] : []),
+    ];
+  }
   if (mode === "topology_loop") {
     return [
       "runs",

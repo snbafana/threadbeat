@@ -996,6 +996,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           untilEmpty: parseBoolean(body.untilEmpty, false),
           topologyLoop: parseBoolean(body.topologyLoop, false),
           includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
+          resultReview: parseBoolean(body.resultReview, false),
+          ...(body.reviewAction ? { reviewAction: parseRequiredResultReviewAction(body.reviewAction) } : {}),
+          maxResults: parseOptionalInteger(body.maxResults) ?? 10,
+          ...(parseOptionalString(body.reviewedBy) ? { reviewedBy: parseOptionalString(body.reviewedBy) } : {}),
+          ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
           maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
           loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
         },
@@ -1015,7 +1020,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const lines = parseOptionalInteger(body.lines) ?? 20;
       const drainConfirmations = parseBoolean(body.drainConfirmations, false);
       const topologyLoop = parseBoolean(body.topologyLoop, false);
-      const requestedMode = topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
+      const resultReview = parseBoolean(body.resultReview, false);
+      const requestedMode = resultReview ? "result_review_loop" : topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
       const existingWorkers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
         sessionName: name,
         ...(workerId ? { workerId } : {}),
@@ -1074,6 +1080,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           untilEmpty: parseBoolean(body.untilEmpty, false),
           topologyLoop,
           includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
+          resultReview,
+          ...(body.reviewAction ? { reviewAction: parseRequiredResultReviewAction(body.reviewAction) } : {}),
+          maxResults: parseOptionalInteger(body.maxResults) ?? 10,
+          ...(parseOptionalString(body.reviewedBy) ? { reviewedBy: parseOptionalString(body.reviewedBy) } : {}),
+          ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
           maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
           loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
         },
@@ -5843,6 +5854,7 @@ const parseControlPlaneAdvanceWorkerMode = (value: unknown): ControlPlaneAdvance
   if (value === "advance_loop" || value === "advance-loop" || value === "advance") return "advance_loop";
   if (value === "confirmation_drain" || value === "confirmation-drain" || value === "confirmation") return "confirmation_drain";
   if (value === "topology_loop" || value === "topology-loop" || value === "topology") return "topology_loop";
+  if (value === "result_review_loop" || value === "result-review-loop" || value === "result_review" || value === "result-review") return "result_review_loop";
   throw new Error(`unsupported control-plane advance worker mode: ${String(value)}`);
 };
 
@@ -5994,6 +6006,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
     advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
     confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
     topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+    result_review_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   latestResults: Array<{
     workerId: string;
@@ -6010,6 +6023,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
     advance_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => (worker.mode ?? "advance_loop") === "advance_loop")),
     confirmation_drain: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "confirmation_drain")),
     topology_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "topology_loop")),
+    result_review_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "result_review_loop")),
   },
   latestResults: workers.flatMap((worker) => worker.latestResult
     ? [{
