@@ -3932,6 +3932,10 @@ const readWorkerSessionControlPlaneStatus = async (
       attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
       recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
       failedRecent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+      acknowledgements: {
+        attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
+        recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+      };
     };
     workerReconciliations: {
       counts: ReturnType<typeof summarizeWorkerSessionControlPlaneWorkerReconciliationRecords>;
@@ -3964,6 +3968,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneConfirmationAdvances,
     recoverNextAttempts,
     statusWatchExecutionAttempts,
+    statusWatchAcknowledgementAttempts,
     workerReconciliations,
   ] = await Promise.all([
     listWorkerSessionApplyRecords(settings.projectRoot, name),
@@ -4001,10 +4006,15 @@ const readWorkerSessionControlPlaneStatus = async (
       limit: Number.MAX_SAFE_INTEGER,
       detailCommands: ["status_watch_execute_action"],
     }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      detailCommands: ["acknowledge_status_watch_execution"],
+    }),
     listWorkerSessionControlPlaneWorkerReconciliationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
   const resultInspection = await summarizeWorkerSessionResultInspection(db, session, lines, resultReviews);
+  const acknowledgedStatusWatchAdvanceIds = statusWatchAcknowledgedAdvanceIds(statusWatchAcknowledgementAttempts);
   return {
     ok: true,
     session: name,
@@ -4070,8 +4080,15 @@ const readWorkerSessionControlPlaneStatus = async (
           .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
         failedRecent: statusWatchExecutionAttempts
           .filter((record) => controlPlaneAdvanceExecutionFailed(record.executed))
+          .filter((record) => !acknowledgedStatusWatchAdvanceIds.has(record.advanceId))
           .slice(0, lines)
           .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
+        acknowledgements: {
+          attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(statusWatchAcknowledgementAttempts),
+          recent: statusWatchAcknowledgementAttempts
+            .slice(0, lines)
+            .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
+        },
       },
       workerReconciliations: {
         counts: summarizeWorkerSessionControlPlaneWorkerReconciliationRecords(workerReconciliations),
@@ -4130,6 +4147,20 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
     confirmed: booleanRecordField(safety, "confirmed"),
     command,
   };
+};
+
+const statusWatchAcknowledgedAdvanceIds = (
+  records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+): Set<string> => {
+  const acknowledged = new Set<string>();
+  for (const record of records) {
+    if (!commandSucceeded(record.executed as TickCommandExecution | null)) continue;
+    const alert = objectRecord(record.alert);
+    const selected = objectRecord(record.selected);
+    const advanceId = stringRecordField(alert, "advanceId") ?? stringRecordField(selected, "advanceId");
+    if (advanceId) acknowledged.add(advanceId);
+  }
+  return acknowledged;
 };
 
 const summarizeWorkerSessionControlPlaneConfirmationQueue = (
@@ -4431,6 +4462,7 @@ type WorkerSessionControlPlaneAlertDetails =
     commands: {
       inspectStatusWatchExecution: string[];
       timelineStatusWatchExecution: string[];
+      acknowledgeStatusWatchExecution: string[];
       runSelectedCommand: string[] | null;
     };
   }
@@ -4524,6 +4556,11 @@ const readWorkerSessionControlPlaneAlertDetails = async (
           commands: {
             inspectStatusWatchExecution: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", name, "--server", "--status-watch-executions", "--advance", advance.advanceId],
             timelineStatusWatchExecution: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", name, "--server", "--source", "status_watch_execution", "--advance", advance.advanceId],
+            acknowledgeStatusWatchExecution: [
+              "npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", name, "--server",
+              "--surface", "status_watch", "--reason", "failed_status_watch_execution", "--action", "inspect_status_watch_execution",
+              "--detail-command", "acknowledge_status_watch_execution", "--confirm", "--lines", String(lines),
+            ],
             runSelectedCommand,
           },
         }
@@ -4604,7 +4641,7 @@ const readWorkerSessionControlPlaneAlerts = async (
   };
   commands: { fullStatus: string[]; timelineFailures: string[] };
 }> => {
-  const [status, timeline, statusWatchExecutionRecords] = await Promise.all([
+  const [status, timeline, statusWatchExecutionRecords, statusWatchAcknowledgementRecords] = await Promise.all([
     readWorkerSessionControlPlaneStatus(settings, db, name, options.lines),
     readWorkerSessionControlPlaneTimeline(settings, name, {
       limit: options.limit,
@@ -4623,6 +4660,10 @@ const readWorkerSessionControlPlaneAlerts = async (
       limit: Number.MAX_SAFE_INTEGER,
       detailCommands: ["status_watch_execute_action"],
     }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      detailCommands: ["acknowledge_status_watch_execution"],
+    }),
   ]);
   const continuationIdFilter = options.continuationIds.length > 0 ? new Set(options.continuationIds) : null;
   const failedDrainContinuations = status.queues.drainContinuations.failed > 0
@@ -4638,7 +4679,10 @@ const readWorkerSessionControlPlaneAlerts = async (
     ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
   ].filter(isWorkerSessionControlPlaneWorkerRecoveryStep);
-  const failedStatusWatchExecutions = statusWatchExecutionRecords.filter((record) => controlPlaneAdvanceExecutionFailed(record.executed));
+  const acknowledgedStatusWatchAdvanceIds = statusWatchAcknowledgedAdvanceIds(statusWatchAcknowledgementRecords);
+  const failedStatusWatchExecutions = statusWatchExecutionRecords
+    .filter((record) => controlPlaneAdvanceExecutionFailed(record.executed))
+    .filter((record) => !acknowledgedStatusWatchAdvanceIds.has(record.advanceId));
   const allAlerts: WorkerSessionControlPlaneAlert[] = [
     ...failedStatusWatchExecutions.map((record) => {
       const selected = objectRecord(record.selected);
@@ -4834,6 +4878,7 @@ type WorkerSessionControlPlaneAdvanceAction = {
   detailCommand?: string;
   runId?: string;
   workerId?: string;
+  advanceId?: string;
   applyId?: string;
   executionId?: string;
   continuationIds?: string[];
@@ -4845,6 +4890,7 @@ type WorkerSessionControlPlaneAlertDetailCommand =
   | "inspect_apply_action_executions"
   | "execute_apply_action"
   | "acknowledge_reset_audit"
+  | "acknowledge_status_watch_execution"
   | "inspect_failed_drain_continuations"
   | "reset_failed_drain_continuations"
   | "reset_selected_failed_drain_continuations"
@@ -4862,6 +4908,7 @@ const parseControlPlaneAlertDetailCommand = (
     "inspect_apply_action_executions",
     "execute_apply_action",
     "acknowledge_reset_audit",
+    "acknowledge_status_watch_execution",
     "inspect_failed_drain_continuations",
     "reset_failed_drain_continuations",
     "reset_selected_failed_drain_continuations",
@@ -4880,6 +4927,7 @@ const isMutatingControlPlaneAlertDetailCommand = (
 ): boolean => {
   return detailCommand === "execute_apply_action"
     || detailCommand === "acknowledge_reset_audit"
+    || detailCommand === "acknowledge_status_watch_execution"
     || detailCommand === "reset_failed_drain_continuations"
     || detailCommand === "reset_selected_failed_drain_continuations"
     || detailCommand === "restart_worker_recovery"
@@ -4981,6 +5029,11 @@ const selectControlPlaneAlertDetailCommand = (
       return { detailCommand, action: detailCommand, command: details.commands.retireWorker };
     }
   }
+  if (details?.kind === "status_watch_execution") {
+    if (detailCommand === "acknowledge_status_watch_execution") {
+      return { detailCommand, action: detailCommand, command: details.commands.acknowledgeStatusWatchExecution };
+    }
+  }
   throw new Error(`detail command ${detailCommand} is not available for the selected alert`);
 };
 
@@ -4998,6 +5051,7 @@ const controlPlaneAdvanceActionFromAlert = (
     detailCommand: selectedCommand.detailCommand === "primary" ? undefined : selectedCommand.detailCommand,
     runId: alert.runId,
     workerId: alert.workerId,
+    advanceId: alert.advanceId,
     applyId: alert.applyId,
     executionId: alert.executionId,
     continuationIds: alert.continuationIds,
@@ -5243,7 +5297,24 @@ const executeWorkerSessionControlPlaneAlert = async (
       : null,
   };
   const executed = selected && !options.dryRun && !executionSafety.blocked
-    ? await runControlPlaneTickCommand(settings.projectRoot, baseUrl, selected.command)
+    ? detailCommand === "acknowledge_status_watch_execution"
+      ? {
+          command: selected.command,
+          exitCode: 0,
+          stdout: JSON.stringify({
+            ok: true,
+            executed: true,
+            action: detailCommand,
+            acknowledgedAdvanceId: selected.advanceId ?? preview.alert?.advanceId ?? null,
+          }),
+          output: {
+            ok: true,
+            executed: true,
+            action: detailCommand,
+            acknowledgedAdvanceId: selected.advanceId ?? preview.alert?.advanceId ?? null,
+          },
+        }
+      : await runControlPlaneTickCommand(settings.projectRoot, baseUrl, selected.command)
     : null;
   const after = await readWorkerSessionControlPlaneStatus(settings, db, sessionName, options.lines);
   const written = await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {

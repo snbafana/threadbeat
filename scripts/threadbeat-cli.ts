@@ -8788,6 +8788,25 @@ type WorkerSessionControlPlaneStatusResponse = {
         confirmed: boolean | null;
         command: string[];
       }>;
+      acknowledgements: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+        recent: Array<{
+          advanceId: string;
+          observedAt: string;
+          completedAt: string;
+          detailCommand: string | null;
+          workerId: string | null;
+          action: string | null;
+          reason: string | null;
+          dryRun: boolean;
+          executed: boolean;
+          failed: boolean;
+          blocked: boolean | null;
+          mutating: boolean | null;
+          confirmed: boolean | null;
+          command: string[];
+        }>;
+      };
     };
     workerReconciliations: {
       counts: {
@@ -8918,6 +8937,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
     commands: {
       inspectStatusWatchExecution: string[];
       timelineStatusWatchExecution: string[];
+      acknowledgeStatusWatchExecution: string[];
       runSelectedCommand: string[] | null;
     };
   } | {
@@ -9693,6 +9713,7 @@ function workerSessionControlPlaneAlertPreviewCommands(
     commands.push(
       { ...base, action: "inspect_status_watch_execution", command: preview.details.commands.inspectStatusWatchExecution },
       { ...base, action: "timeline_status_watch_execution", command: preview.details.commands.timelineStatusWatchExecution },
+      { ...base, action: "acknowledge_status_watch_execution", command: preview.details.commands.acknowledgeStatusWatchExecution },
     );
     if (preview.details.commands.runSelectedCommand) {
       commands.push({ ...base, action: "run_selected_command", command: preview.details.commands.runSelectedCommand });
@@ -9761,6 +9782,7 @@ function formatStatusWatchAlertDetails(
     "  commands:",
     `    inspect_status_watch_execution: ${formatShellCommand(details.commands.inspectStatusWatchExecution)}`,
     `    timeline_status_watch_execution: ${formatShellCommand(details.commands.timelineStatusWatchExecution)}`,
+    `    acknowledge_status_watch_execution: ${formatShellCommand(details.commands.acknowledgeStatusWatchExecution)}`,
     ...(details.commands.runSelectedCommand ? [`    run_selected_command: ${formatShellCommand(details.commands.runSelectedCommand)}`] : []),
   ];
   return lines;
@@ -9957,6 +9979,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `pending_confirmations: ${summary.queues.controlPlaneConfirmations.summary.commands}`,
     `recover_next_attempts: total=${summary.recovery.recoverNext.attempts.total} dry_run=${summary.recovery.recoverNext.attempts.dryRun} executed=${summary.recovery.recoverNext.attempts.executed} failed=${summary.recovery.recoverNext.attempts.failed}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
+    `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
   ];
   if (summary.nextRecovery) {
@@ -17160,7 +17183,7 @@ Commands:
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]
+  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]

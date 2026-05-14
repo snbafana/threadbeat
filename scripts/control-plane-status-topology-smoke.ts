@@ -660,6 +660,7 @@ try {
     && command.advanceId === failedStatusWatch.record.advanceId
   )));
   assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "timeline_status_watch_execution"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "acknowledge_status_watch_execution"));
   assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "run_selected_command"));
   const statusWatchAlertText = await cliText(baseUrl, [
     "runs",
@@ -859,6 +860,69 @@ try {
   assert.match(summaryTextAfterRecoverNextStatusWatch, /selected: control_plane_action status_watch inspect_failed_status_watch_execution/);
   assert.match(summaryTextAfterRecoverNextStatusWatch, /reason: failed_status_watch_execution/);
   assert.match(summaryTextAfterRecoverNextStatusWatch, /executed_exit_code: 0/);
+  const acknowledgeStatusWatch = await cliJson<{
+    dryRun: boolean;
+    detailCommand: string;
+    selected: { surface: string; action: string; advanceId: string } | null;
+    executed: { exitCode: number | null; output: { acknowledgedAdvanceId: string | null } } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--reason",
+    "failed_status_watch_execution",
+    "--action",
+    "inspect_status_watch_execution",
+    "--detail-command",
+    "acknowledge_status_watch_execution",
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(acknowledgeStatusWatch.dryRun, false);
+  assert.equal(acknowledgeStatusWatch.detailCommand, "acknowledge_status_watch_execution");
+  assert.equal(acknowledgeStatusWatch.selected?.surface, "status_watch");
+  assert.equal(acknowledgeStatusWatch.selected?.action, "acknowledge_status_watch_execution");
+  assert.equal(acknowledgeStatusWatch.selected?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(acknowledgeStatusWatch.executed?.exitCode, 0);
+  assert.equal(acknowledgeStatusWatch.executed?.output.acknowledgedAdvanceId, failedStatusWatch.record.advanceId);
+  const statusWatchAlertsAfterAck = await cliJson<{
+    summary: { total: number; errors: number };
+    alerts: Array<{ surface: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+  ]);
+  assert.equal(statusWatchAlertsAfterAck.summary.total, 0);
+  assert.equal(statusWatchAlertsAfterAck.summary.errors, 0);
+  assert.equal(statusWatchAlertsAfterAck.alerts.length, 0);
+  const summaryAfterStatusWatchAck = await cliJson<{
+    nextRecovery: { surface: string } | null;
+    nextActions: Array<{ surface: string }>;
+    recovery: { statusWatchExecutions: { attempts: { failed: number }; failedRecent: Array<{ advanceId: string }>; acknowledgements: { attempts: { total: number; executed: number; failed: number } } } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.attempts.failed, 1);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.failedRecent.length, 0);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.acknowledgements.attempts.total, 1);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.acknowledgements.attempts.executed, 1);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.acknowledgements.attempts.failed, 0);
+  assert.notEqual(summaryAfterStatusWatchAck.nextRecovery?.surface, "status_watch");
+  assert.ok(!summaryAfterStatusWatchAck.nextActions.some((action) => action.surface === "status_watch"));
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
