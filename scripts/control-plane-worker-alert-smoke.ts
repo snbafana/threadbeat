@@ -407,6 +407,30 @@ try {
   assert.equal(statusBlockedAttempt?.workerId, workerId);
   assert.equal(statusBlockedAttempt?.confirmed, false);
 
+  const recoverNextMissingMode = await cliFailure(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.match(
+    recoverNextMissingMode.stderr || recoverNextMissingMode.message,
+    /requires exactly one of --dry-run or --confirm/,
+  );
+
+  const recoverNextConflictingMode = await cliFailure(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--confirm",
+  ]);
+  assert.match(
+    recoverNextConflictingMode.stderr || recoverNextConflictingMode.message,
+    /requires exactly one of --dry-run or --confirm/,
+  );
+
   const recoverNextDryRun = await cliJson<{
     ok: boolean;
     session: string;
@@ -426,6 +450,7 @@ try {
     "session-control-plane-recover-next",
     sessionName,
     "--server",
+    "--dry-run",
   ]);
   assert.equal(recoverNextDryRun.ok, true);
   assert.equal(recoverNextDryRun.session, sessionName);
@@ -470,6 +495,7 @@ try {
     "3",
     "--interval-ms",
     "0",
+    "--dry-run",
   ]);
   assert.equal(recoverNextLoopDryRun.ok, true);
   assert.equal(recoverNextLoopDryRun.session, sessionName);
@@ -1130,4 +1156,17 @@ async function cliText(baseUrl: string, args: string[]): Promise<string> {
     maxBuffer: 1024 * 1024,
   });
   return stdout;
+}
+
+async function cliFailure(
+  baseUrl: string,
+  args: string[],
+): Promise<{ stdout: string; stderr: string; message: string }> {
+  try {
+    await cliText(baseUrl, args);
+  } catch (error) {
+    const typed = error as Error & { stdout?: string; stderr?: string };
+    return { stdout: typed.stdout ?? "", stderr: typed.stderr ?? "", message: typed.message };
+  }
+  throw new Error(`expected CLI command to fail: ${args.join(" ")}`);
 }

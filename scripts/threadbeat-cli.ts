@@ -5279,7 +5279,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs session-control-plane-recover-next requires --server");
     }
     const requiredSessionName = required(sessionName, "runs session-control-plane-recover-next <session> --server");
-    const dryRun = options["dry-run"] === "1" || options.confirm !== "1";
+    if ((options["dry-run"] === "1") === (options.confirm === "1")) {
+      throw new Error("runs session-control-plane-recover-next requires exactly one of --dry-run or --confirm");
+    }
+    const dryRun = options["dry-run"] === "1";
     const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
     const observedAt = new Date().toISOString();
     const before = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
