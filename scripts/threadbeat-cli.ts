@@ -5430,6 +5430,32 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(aggregate);
     return;
   }
+  if (subcommandName === "session-control-plane-worker-progress") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-worker-progress requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-worker-progress --format must be json or text");
+    }
+    const progress = await fetchWorkerSessionControlPlaneWorkerProgress(
+      required(sessionName, "runs session-control-plane-worker-progress <session> --server"),
+      {
+        workerId: options["worker-id"],
+        includeRetired: options["include-retired"] === "1",
+        kind: options.kind ? parseControlPlaneWorkerKind(options.kind) : null,
+        limit: parsePositiveInteger(options.limit ?? "5", "--limit"),
+      },
+    );
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneWorkerProgressText(progress);
+      return;
+    }
+    await printJson(progress);
+    return;
+  }
   if (subcommandName === "session-control-plane-worker-drill") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -10511,6 +10537,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     inspectTickWorkers: string[];
     inspectApplyActionWorkers: string[];
     inspectDrainWorkers: string[];
+    inspectProgress: string[];
     restartNext: string[] | null;
   };
 }> {
@@ -10594,6 +10621,12 @@ async function fetchWorkerSessionControlPlaneWorkers(
         ...(options.includeRetired ? ["--include-retired"] : []),
         "--lines", String(options.lines),
       ],
+      inspectProgress: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--limit", "5",
+      ],
       restartNext: nextSteps[0]?.command ?? null,
     },
   };
@@ -10624,6 +10657,7 @@ function formatWorkerSessionControlPlaneWorkersText(
     `    inspect_tick: ${formatShellCommand(response.commands.inspectTickWorkers)}`,
     `    inspect_apply_action: ${formatShellCommand(response.commands.inspectApplyActionWorkers)}`,
     `    inspect_drain: ${formatShellCommand(response.commands.inspectDrainWorkers)}`,
+    `    inspect_progress: ${formatShellCommand(response.commands.inspectProgress)}`,
     `    restart_next: ${response.commands.restartNext ? formatShellCommand(response.commands.restartNext) : "none"}`,
   ];
   if (response.nextSteps.length === 0) {
@@ -10759,6 +10793,108 @@ function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?
     attemptedConfirmations: sumNumber("attemptedConfirmations"),
     availableConfirmations: sumNumber("availableConfirmations"),
   };
+}
+
+async function fetchWorkerSessionControlPlaneWorkerProgress(
+  sessionName: string,
+  options: {
+    workerId?: string;
+    includeRetired: boolean;
+    kind: ControlPlaneWorkerKind | null;
+    limit: number;
+  },
+): Promise<{
+  ok: true;
+  session: string;
+  filter: { workerId: string | null; includeRetired: boolean; kind: ControlPlaneWorkerKind | null; limit: number };
+  count: number;
+  progress: Array<Record<string, unknown> & {
+    kind: ControlPlaneWorkerKind;
+    workerId: string | null;
+    alive: boolean;
+    state: string | null;
+    source: string | null;
+    index: number;
+    total: number;
+  }>;
+  commands: { inspectProgress: string[]; refresh: string[] };
+}> {
+  const aggregate = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    workerId: options.workerId,
+    includeRetired: options.includeRetired,
+    lines: 1,
+  });
+  const progress = aggregate.workers
+    .filter((worker) => !options.kind || worker.kind === options.kind)
+    .flatMap((worker) => {
+      const recentProgress = Array.isArray(worker.recentProgress) ? worker.recentProgress : [];
+      return recentProgress.map((entry, index) => ({
+        ...(plainRecord(entry) ?? {}),
+        kind: worker.kind,
+        workerId: worker.workerId,
+        alive: worker.alive,
+        state: worker.state,
+        source: stringFromUnknown(worker.latestResultSource),
+        index: index + 1,
+        total: recentProgress.length,
+      }));
+    })
+    .slice(-options.limit);
+  return {
+    ok: true,
+    session: sessionName,
+    filter: {
+      workerId: options.workerId ?? null,
+      includeRetired: options.includeRetired,
+      kind: options.kind,
+      limit: options.limit,
+    },
+    count: progress.length,
+    progress,
+    commands: {
+      inspectProgress: aggregate.commands.inspectProgress,
+      refresh: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.kind ? ["--kind", options.kind.replaceAll("_", "-")] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--limit", String(options.limit),
+      ],
+    },
+  };
+}
+
+function printWorkerSessionControlPlaneWorkerProgressText(
+  response: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkerProgress>>,
+): void {
+  console.log(formatWorkerSessionControlPlaneWorkerProgressText(response).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneWorkerProgressText(
+  response: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkerProgress>>,
+): string[] {
+  const lines = [
+    "control_plane_worker_progress:",
+    `  session: ${response.session}`,
+    `  filter: worker=${response.filter.workerId ?? "all"} kind=${response.filter.kind ?? "all"} include_retired=${response.filter.includeRetired} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  refresh: ${formatShellCommand(response.commands.refresh)}`,
+  ];
+  if (response.progress.length === 0) {
+    lines.push("  progress: none");
+    return lines;
+  }
+  lines.push("  progress:");
+  for (const progress of response.progress) {
+    lines.push(
+      `    - kind=${progress.kind} worker=${progress.workerId ?? "<missing>"} state=${progress.state ?? "unknown"} source=${progress.source ?? "none"} index=${progress.index}/${progress.total} iterations=${formatOptionalNumber(progress.iterations)} reason=${stringFromUnknown(progress.stoppedReason) ?? "unknown"} core=${formatOptionalNumber(progress.totalCoreExecuted)} mutation=${formatOptionalNumber(progress.totalMutationExecuted)}`,
+    );
+  }
+  return lines;
+}
+
+function formatOptionalNumber(value: unknown): string {
+  return typeof value === "number" ? String(value) : "n/a";
 }
 
 function controlPlaneWorkerCommands(
@@ -15659,6 +15795,7 @@ Commands:
   runs stop-control-plane-topology-worker <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
   runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--lines 20]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]

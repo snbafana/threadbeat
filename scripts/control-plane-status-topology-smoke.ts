@@ -161,7 +161,7 @@ try {
       advance: { total: number; latestResults: { count: number; recorded: number; progress: number; recentProgress: number } };
     };
     workers: Array<{ kind: string; workerId: string | null; latestResultSource?: string; latestProgress?: unknown; recentProgress?: unknown[]; commands: { restart: string[] } | null }>;
-    commands: { inspectTopologyWorkers: string[] };
+    commands: { inspectTopologyWorkers: string[]; inspectProgress: string[] };
   }>(baseUrl, [
     "runs",
     "session-control-plane-workers",
@@ -197,6 +197,50 @@ try {
     aggregateBeforeStop.commands.inspectTopologyWorkers.join(" "),
     `npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`,
   );
+  assert.equal(
+    aggregateBeforeStop.commands.inspectProgress.join(" "),
+    `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`,
+  );
+  const completedProgress = await cliJson<{
+    count: number;
+    progress: Array<{ kind: string; workerId: string | null; state: string | null; source: string | null; iterations?: number; stoppedReason?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--kind",
+    "topology",
+    "--include-retired",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(completedProgress.count, 1);
+  assert.equal(completedProgress.progress[0]?.kind, "control_plane_topology");
+  assert.equal(completedProgress.progress[0]?.workerId, workerId);
+  assert.equal(completedProgress.progress[0]?.state, "completed");
+  assert.equal(completedProgress.progress[0]?.source, "recorded");
+  assert.equal(completedProgress.progress[0]?.iterations, 1);
+  assert.equal(completedProgress.progress[0]?.stoppedReason, "running");
+  const completedProgressText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--kind",
+    "topology",
+    "--include-retired",
+    "--limit",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(completedProgressText, /^control_plane_worker_progress:$/m);
+  assert.match(completedProgressText, new RegExp(`worker=${workerId} state=completed source=recorded index=1/1 iterations=1 reason=running`));
   const aggregateTextBeforeStop = await cliText(baseUrl, [
     "runs",
     "session-control-plane-workers",
@@ -212,6 +256,7 @@ try {
   assert.match(aggregateTextBeforeStop, new RegExp(`session: ${sessionName}`));
   assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 restartable=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_topology: npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`));
+  assert.match(aggregateTextBeforeStop, new RegExp(`inspect_progress: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
 
   await cliJson(baseUrl, [
     "runs",
@@ -333,6 +378,43 @@ try {
   assert.equal(liveAggregateWorker?.latestResultSource, "stdout");
   assert.equal(liveAggregateWorker?.latestProgress?.iterations, 1);
   assert.equal(liveAggregateWorker?.recentProgress?.[0]?.iterations, 1);
+  const liveProgress = await cliJson<{
+    count: number;
+    progress: Array<{ kind: string; workerId: string | null; state: string | null; source: string | null; iterations?: number; stoppedReason?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--kind",
+    "topology",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(liveProgress.count, 1);
+  assert.equal(liveProgress.progress[0]?.kind, "control_plane_topology");
+  assert.equal(liveProgress.progress[0]?.workerId, liveWorkerId);
+  assert.equal(liveProgress.progress[0]?.state, "running");
+  assert.equal(liveProgress.progress[0]?.source, "stdout");
+  assert.equal(liveProgress.progress[0]?.iterations, 1);
+  assert.equal(liveProgress.progress[0]?.stoppedReason, "running");
+  const liveProgressText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--kind",
+    "topology",
+    "--limit",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(liveProgressText, new RegExp(`worker=${liveWorkerId} state=running source=stdout index=1/1 iterations=1 reason=running`));
   const liveAggregateText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-workers",
