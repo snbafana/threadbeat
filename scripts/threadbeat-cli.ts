@@ -9546,6 +9546,11 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `  inspect_workers: ${formatShellCommand(summary.commands.inspectTopologyWorkers)}`,
     `  worker_next_steps: ${formatShellCommand(summary.commands.topologyWorkerNextSteps)}`,
   );
+  lines.push(
+    "control_plane_workers:",
+    `  inspect_all: ${formatShellCommand(summary.commands.inspectControlPlaneWorkers)}`,
+    `  inspect_progress: ${formatShellCommand(summary.commands.inspectControlPlaneWorkerProgress)}`,
+  );
   if (summary.branches.inspection.count > 0) {
     lines.push(
       "branch_inspection:",
@@ -9668,6 +9673,8 @@ function workerSessionControlPlaneStatusSummaryCommands(
   commands.push({ command: summary.commands.ensureTopologyWorkerConfirm });
   commands.push({ command: summary.commands.inspectTopologyWorkers });
   commands.push({ command: summary.commands.topologyWorkerNextSteps });
+  commands.push({ command: summary.commands.inspectControlPlaneWorkers });
+  commands.push({ command: summary.commands.inspectControlPlaneWorkerProgress });
   for (const step of summary.branches.inspection.nextSteps) {
     commands.push({ command: step.commands.inspectResult });
     commands.push({ command: step.commands.reviewRun });
@@ -9886,6 +9893,8 @@ function summarizeWorkerSessionControlPlaneStatus(
     ensureTopologyWorkerConfirm: string[];
     inspectTopologyWorkers: string[];
     topologyWorkerNextSteps: string[];
+    inspectControlPlaneWorkers: string[];
+    inspectControlPlaneWorkerProgress: string[];
     advance: string[];
     advanceDryRun: string[];
     advanceLoop: string[];
@@ -10009,6 +10018,8 @@ function summarizeWorkerSessionControlPlaneStatus(
       ],
       inspectTopologyWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-topology-workers", status.session, "--server"],
       topologyWorkerNextSteps: ["npm", "run", "cli", "--", "runs", "session-control-plane-topology-workers-next", status.session, "--server"],
+      inspectControlPlaneWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-workers", status.session, "--server", "--include-retired", "--lines", "5"],
+      inspectControlPlaneWorkerProgress: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", status.session, "--server", "--include-retired", "--limit", "5"],
       advance: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
       advanceDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
       advanceLoop: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance-loop", status.session, "--server"],
