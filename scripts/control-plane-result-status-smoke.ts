@@ -156,6 +156,49 @@ try {
   assert.match(resultInspectionText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
   assert.match(resultInspectionText, /result_commit_url: https:\/\/github.com\/threadbeat-result-status-smoke\/agent\/commit\//);
 
+  const nextResultInspection = await cliJson<{
+    count: number;
+    filter: { reviewStates: string[]; limit: number };
+    resultCommits: Array<{ runId: string; reviewState: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--next",
+  ]);
+  assert.equal(nextResultInspection.count, 1);
+  assert.deepEqual(nextResultInspection.filter.reviewStates, ["pending"]);
+  assert.equal(nextResultInspection.filter.limit, 1);
+  assert.equal(nextResultInspection.resultCommits[0]?.runId, run.id);
+  assert.equal(nextResultInspection.resultCommits[0]?.reviewState, "pending");
+
+  const nextResultInspectionText = await cliText(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--next",
+    "--format",
+    "text",
+  ]);
+  assert.match(nextResultInspectionText, /filter: run=all review_state=pending limit=1/);
+  assert.match(nextResultInspectionText, new RegExp(`run: ${run.id}`));
+  assert.match(nextResultInspectionText, new RegExp(`next: ${reviewCommand}`));
+
+  const nextResultInspectionShell = await cliText(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--next",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(nextResultInspectionShell, new RegExp(reviewCommand));
+  assert.match(nextResultInspectionShell, new RegExp(recordReviewedCommand));
+
   const reviewed = await cliJson<{ review: { reviewId: string; action: string; runId: string; resultCommit: string; reviewedBy: string } }>(baseUrl, [
     "runs",
     "session-result-reviews",
