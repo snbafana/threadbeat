@@ -10335,12 +10335,17 @@ function printWorkerSessionControlPlaneStatusSummaryText(
 function workerSessionControlPlaneWatchAction(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
 ): {
+  surface: WorkerSessionControlPlaneAdvanceAction["surface"];
+  action: string;
   reason: string;
   command: string[];
   dryRunCommand: string[] | null;
 } | null {
   if (summary.nextRecovery) {
+    const surface = summary.nextRecovery.surface === "result_inspection" ? "result_inspection" : "status_watch";
     return {
+      surface,
+      action: surface === "result_inspection" ? summary.nextRecovery.action : "execute_action",
       reason: `${summary.nextRecovery.kind}:${summary.nextRecovery.action}`,
       command: summary.nextRecovery.command,
       dryRunCommand: summary.nextRecovery.dryRunCommand,
@@ -10349,6 +10354,8 @@ function workerSessionControlPlaneWatchAction(
   const resultInspection = summary.results.inspection.nextSteps[0];
   if (resultInspection) {
     return {
+      surface: "result_inspection",
+      action: resultInspection.action,
       reason: "result_inspection:pending_result_commit",
       command: resultInspection.commands.inspectResult,
       dryRunCommand: null,
@@ -10391,8 +10398,8 @@ async function executeWorkerSessionControlPlaneWatchAction(
     completedAt: new Date().toISOString(),
     dryRun: options.dryRun,
     selected: {
-      surface: "status_watch",
-      action: "execute_action",
+      surface: action.surface,
+      action: action.action,
       reason: action.reason,
       count: 1,
       command,

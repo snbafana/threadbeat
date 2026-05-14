@@ -208,6 +208,61 @@ try {
   assert.deepEqual(watchedUntilResultInspection.untilAction.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
   assert.deepEqual(watchedUntilResultInspection.untilAction.dryRunCommand, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
 
+  const watchedResultInspectionDryRun = await cliJson<{
+    executedAction: {
+      dryRun: boolean;
+      reason: string;
+      command: string[];
+      advanceId: string;
+      executed: { command: string[]; exitCode: number | null };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--execute-action",
+    "--dry-run",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(watchedResultInspectionDryRun.executedAction.dryRun, true);
+  assert.equal(watchedResultInspectionDryRun.executedAction.reason, "control_plane_action:review_result");
+  assert.deepEqual(watchedResultInspectionDryRun.executedAction.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.deepEqual(watchedResultInspectionDryRun.executedAction.executed.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.equal(watchedResultInspectionDryRun.executedAction.executed.exitCode, 0);
+
+  const resultInspectionWatchExecutions = await cliJson<{
+    advances: Array<{
+      advanceId: string;
+      dryRun: boolean;
+      detailCommand: string;
+      selected: { surface: string; action: string; reason: string; command: string[] };
+      executed: { command: string[]; exitCode: number | null };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--status-watch-executions",
+    "--limit",
+    "1",
+  ]);
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.advanceId, watchedResultInspectionDryRun.executedAction.advanceId);
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.dryRun, true);
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.detailCommand, "status_watch_execute_action");
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.surface, "result_inspection");
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.action, "review_result");
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.reason, "control_plane_action:review_result");
+  assert.deepEqual(resultInspectionWatchExecutions.advances[0]?.selected.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.executed.exitCode, 0);
+
   const reviewNext = await cliJson<{
     count: number;
     filter: { reviewStates: string[]; limit: number };
