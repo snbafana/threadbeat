@@ -8386,6 +8386,29 @@ type WorkerSessionControlPlaneTickWithDecision = WorkerSessionControlPlaneTickRe
   decision: ReturnType<typeof summarizeWorkerSessionControlPlaneTickDecision>;
 };
 
+type WorkerSessionControlPlaneWorkerLatestResult = {
+  ok?: boolean;
+  session?: string;
+  dryRun?: boolean;
+  untilEmpty?: boolean;
+  stoppedReason?: string;
+  maxSteps?: number;
+  intervalMs?: number;
+  maxConfirmations?: number;
+  maxIterations?: number;
+  loopIntervalMs?: number;
+  iterations?: number;
+  executedSteps?: number;
+  attemptedConfirmations?: number;
+  availableConfirmations?: number;
+  totalCoreExecuted?: number;
+  totalMutationExecuted?: number;
+  cycles?: number;
+  results?: number;
+  sourceAdvanceId?: string;
+  detailCommand?: string;
+};
+
 type WorkerSessionControlPlaneStatusResponse = {
   ok: true;
   session: string;
@@ -8406,25 +8429,12 @@ type WorkerSessionControlPlaneStatusResponse = {
       };
       latestResults: Array<{
         workerId: string;
-        mode: "advance_loop" | "confirmation_drain";
+        mode: "advance_loop" | "confirmation_drain" | "topology_loop";
         lifecycle: { state: string; restartable: boolean; reason: string };
-        latestResult: {
-          ok?: boolean;
-          session?: string;
-          dryRun?: boolean;
-          untilEmpty?: boolean;
-          stoppedReason?: string;
-          maxSteps?: number;
-          intervalMs?: number;
-          maxConfirmations?: number;
-          executedSteps?: number;
-          attemptedConfirmations?: number;
-          availableConfirmations?: number;
-          cycles?: number;
-          results?: number;
-          sourceAdvanceId?: string;
-          detailCommand?: string;
-        };
+        latestResultSource: "recorded" | "stdout" | "none";
+        latestProgress: WorkerSessionControlPlaneWorkerLatestResult | null;
+        recentProgress: WorkerSessionControlPlaneWorkerLatestResult[];
+        latestResult: WorkerSessionControlPlaneWorkerLatestResult;
       }>;
     };
     controlPlaneTick: { total: number; alive: number; stopped: number; retired: number; completed: number };
@@ -9700,6 +9710,29 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `  topology_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.topology_loop)}`,
     `  control_plane_tick: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneTick)}`,
   );
+  const latestWorkerResults = summary.workers.controlPlaneAdvance.latestResults;
+  lines.push(
+    "control_plane_worker_progress:",
+    `  latest_results: count=${latestWorkerResults.length} recorded=${latestWorkerResults.filter((result) => result.latestResultSource === "recorded").length} progress=${latestWorkerResults.filter((result) => result.latestResultSource === "stdout").length} recent_progress=${latestWorkerResults.reduce((total, result) => total + result.recentProgress.length, 0)}`,
+    `  inspect_all: ${formatShellCommand(summary.commands.inspectControlPlaneWorkerProgress)}`,
+  );
+  for (const result of latestWorkerResults) {
+    lines.push(
+      `  - worker: ${result.workerId}`,
+      `    mode: ${result.mode}`,
+      `    state: ${result.lifecycle.state}`,
+      `    source: ${result.latestResultSource}`,
+      `    iterations: ${result.latestResult.iterations ?? ""}`,
+      `    stopped_reason: ${result.latestResult.stoppedReason ?? ""}`,
+      `    core: ${result.latestResult.totalCoreExecuted ?? ""}`,
+      `    mutation: ${result.latestResult.totalMutationExecuted ?? ""}`,
+      `    steps: ${result.latestResult.executedSteps ?? ""}`,
+      `    confirmations: ${result.latestResult.attemptedConfirmations ?? ""}`,
+      `    available_confirmations: ${result.latestResult.availableConfirmations ?? ""}`,
+      `    recent_progress: ${result.recentProgress.length}`,
+      `    inspect: ${formatShellCommand(workerSessionControlPlaneLatestResultProgressCommand(summary.session, result))}`,
+    );
+  }
   if (summary.branches.inspection.count > 0) {
     lines.push(
       "branch_inspection:",
@@ -9873,6 +9906,19 @@ function formatCompletedControlPlaneWorkerHealth(counts: { total: number; alive:
   ].join(" ");
 }
 
+function workerSessionControlPlaneLatestResultProgressCommand(
+  sessionName: string,
+  result: WorkerSessionControlPlaneStatusResponse["workers"]["controlPlaneAdvance"]["latestResults"][number],
+): string[] {
+  const kind = result.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", sessionName, "--server",
+    "--worker-id", result.workerId,
+    "--kind", controlPlaneWorkerKindFlag(kind),
+    "--limit", "5",
+  ];
+}
+
 function workerSessionControlPlaneStatusSummaryCommands(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
 ): CommandQueueOutput["commands"] {
@@ -9899,6 +9945,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
   commands.push({ command: summary.commands.topologyWorkerNextSteps });
   commands.push({ command: summary.commands.inspectControlPlaneWorkers });
   commands.push({ command: summary.commands.inspectControlPlaneWorkerProgress });
+  for (const result of summary.workers.controlPlaneAdvance.latestResults) {
+    commands.push({ command: workerSessionControlPlaneLatestResultProgressCommand(summary.session, result) });
+  }
   for (const step of summary.branches.inspection.nextSteps) {
     commands.push({ command: step.commands.inspectResult });
     commands.push({ command: step.commands.reviewRun });

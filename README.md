@@ -827,6 +827,9 @@ keeps the aggregate `workers.controlPlaneAdvance` totals and also breaks them
 out by `advance_loop` and `confirmation_drain` mode. It also includes
 `workers.controlPlaneAdvance.latestResults` so the aggregate status shows the
 latest structured worker outcome without a separate worker-log read. The
+control-plane status summary also prints those latest loop outcomes and stdout
+progress rows with per-worker progress inspection commands, so operators can see
+whether long-running advance/topology workers are moving without opening logs. The
 aggregate status includes `workers.controlPlaneAdvance` and advance-worker
 restart next steps alongside the other worker recovery surfaces. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
