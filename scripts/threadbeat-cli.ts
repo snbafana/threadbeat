@@ -10,8 +10,6 @@ import {
 } from "../src/workerSessionControlPlaneAdvances.js";
 import { summarizeWorkerSessionControlPlaneTickDecision } from "../src/workerSessionControlPlaneTicks.js";
 import {
-  listWorkerSessionControlPlaneWorkerReconciliationRecords,
-  summarizeWorkerSessionControlPlaneWorkerReconciliationRecords,
   type WorkerSessionControlPlaneWorkerReconciliationRecord,
   writeWorkerSessionControlPlaneWorkerReconciliationRecord,
 } from "../src/workerSessionControlPlaneWorkerReconciliations.js";
@@ -6227,7 +6225,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "text" && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-worker-reconciliations --commands-only supports --format json or shell");
     }
-    const response = await inspectWorkerSessionControlPlaneWorkerReconciliations(
+    const response = await fetchWorkerSessionControlPlaneWorkerReconciliations(
       required(sessionName, "runs session-control-plane-worker-reconciliations <session> --server"),
       {
         limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
@@ -9513,6 +9511,43 @@ type WorkerSessionControlPlaneStatusResponse = {
   };
 };
 
+type WorkerSessionControlPlaneWorkerReconciliationInspectionRecord =
+  WorkerSessionControlPlaneWorkerReconciliationRecord & {
+    commands: WorkerSessionControlPlaneWorkerReconciliationRecord["commands"] & {
+      inspectRecord: string[];
+      timeline: string[];
+    };
+  };
+
+type WorkerSessionControlPlaneWorkerReconciliationsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    limit: number;
+    latest: boolean;
+    reconciliationId: string | null;
+    totalRecords: number;
+    visibleRecords: number;
+  };
+  counts: {
+    total: number;
+    dryRun: number;
+    executed: number;
+    noop: number;
+    failed: number;
+    maxSteps: number;
+    untilEmpty: number;
+  };
+  latest: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord | null;
+  records: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord[];
+  commands: {
+    list: string[];
+    latest: string[];
+    inspectLatest: string[] | null;
+    timelineLatest: string[] | null;
+  };
+};
+
 type WorkerSessionControlPlaneAlertsResponse = {
   ok: true;
   session: string;
@@ -10330,6 +10365,22 @@ async function fetchWorkerSessionControlPlaneStatus(
       new URLSearchParams({ lines: String(options.lines) }),
     ),
   ) as WorkerSessionControlPlaneStatusResponse;
+}
+
+async function fetchWorkerSessionControlPlaneWorkerReconciliations(
+  sessionName: string,
+  options: { limit: number; reconciliationId?: string; latest: boolean },
+): Promise<WorkerSessionControlPlaneWorkerReconciliationsResponse> {
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.reconciliationId) params.set("reconciliation", options.reconciliationId);
+  if (options.latest) params.set("latest", "true");
+  return await requestJson(
+    "GET",
+    withQuery(
+      `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-worker-reconciliations`,
+      params,
+    ),
+  ) as WorkerSessionControlPlaneWorkerReconciliationsResponse;
 }
 
 async function fetchWorkerSessionControlPlaneAlerts(
@@ -14002,90 +14053,8 @@ function controlPlaneWorkerReconciliationStatus(
   return totalPlanned === 0 ? "noop" : "executed";
 }
 
-type WorkerSessionControlPlaneWorkerReconciliationInspectionRecord =
-  WorkerSessionControlPlaneWorkerReconciliationRecord & {
-    commands: WorkerSessionControlPlaneWorkerReconciliationRecord["commands"] & {
-      inspectRecord: string[];
-      timeline: string[];
-    };
-  };
-
-async function inspectWorkerSessionControlPlaneWorkerReconciliations(
-  sessionName: string,
-  options: { limit: number; reconciliationId?: string; latest: boolean },
-): Promise<{
-  ok: true;
-  session: string;
-  filter: {
-    limit: number;
-    latest: boolean;
-    reconciliationId: string | null;
-    totalRecords: number;
-    visibleRecords: number;
-  };
-  counts: ReturnType<typeof summarizeWorkerSessionControlPlaneWorkerReconciliationRecords>;
-  latest: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord | null;
-  records: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord[];
-  commands: {
-    list: string[];
-    latest: string[];
-    inspectLatest: string[] | null;
-    timelineLatest: string[] | null;
-  };
-}> {
-  const allRecords = await listWorkerSessionControlPlaneWorkerReconciliationRecords(process.cwd(), sessionName, Number.MAX_SAFE_INTEGER);
-  const selectedRecords = options.reconciliationId
-    ? allRecords.filter((record) => record.reconciliationId === options.reconciliationId)
-    : options.latest
-      ? allRecords.slice(0, 1)
-      : allRecords.slice(0, options.limit);
-  const records = selectedRecords.map((record) => decorateWorkerSessionControlPlaneWorkerReconciliationRecord(sessionName, record));
-  const latest = allRecords[0] ? decorateWorkerSessionControlPlaneWorkerReconciliationRecord(sessionName, allRecords[0]) : null;
-  return {
-    ok: true,
-    session: sessionName,
-    filter: {
-      limit: options.limit,
-      latest: options.latest,
-      reconciliationId: options.reconciliationId ?? null,
-      totalRecords: allRecords.length,
-      visibleRecords: records.length,
-    },
-    counts: summarizeWorkerSessionControlPlaneWorkerReconciliationRecords(allRecords),
-    latest,
-    records,
-    commands: {
-      list: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", sessionName, "--server", "--limit", String(options.limit)],
-      latest: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", sessionName, "--server", "--latest"],
-      inspectLatest: latest?.commands.inspectRecord ?? null,
-      timelineLatest: latest?.commands.timeline ?? null,
-    },
-  };
-}
-
-function decorateWorkerSessionControlPlaneWorkerReconciliationRecord(
-  sessionName: string,
-  record: WorkerSessionControlPlaneWorkerReconciliationRecord,
-): WorkerSessionControlPlaneWorkerReconciliationInspectionRecord {
-  return {
-    ...record,
-    commands: {
-      ...record.commands,
-      inspectRecord: [
-        "npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", sessionName, "--server",
-        "--reconciliation", record.reconciliationId,
-      ],
-      timeline: [
-        "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server",
-        "--source", "worker_reconcile_execution",
-        "--execution", record.reconciliationId,
-      ],
-    },
-  };
-}
-
 function workerSessionControlPlaneWorkerReconciliationCommandQueue(
-  response: Awaited<ReturnType<typeof inspectWorkerSessionControlPlaneWorkerReconciliations>>,
+  response: WorkerSessionControlPlaneWorkerReconciliationsResponse,
 ): CommandQueueOutput["commands"] {
   const commands: string[][] = [
     response.commands.list,
@@ -14118,13 +14087,13 @@ function uniqueCommandQueue(commands: string[][]): string[][] {
 }
 
 function printWorkerSessionControlPlaneWorkerReconciliationsText(
-  response: Awaited<ReturnType<typeof inspectWorkerSessionControlPlaneWorkerReconciliations>>,
+  response: WorkerSessionControlPlaneWorkerReconciliationsResponse,
 ): void {
   console.log(formatWorkerSessionControlPlaneWorkerReconciliationsText(response).join("\n"));
 }
 
 function formatWorkerSessionControlPlaneWorkerReconciliationsText(
-  response: Awaited<ReturnType<typeof inspectWorkerSessionControlPlaneWorkerReconciliations>>,
+  response: WorkerSessionControlPlaneWorkerReconciliationsResponse,
 ): string[] {
   const lines = [
     "control_plane_worker_reconciliations:",

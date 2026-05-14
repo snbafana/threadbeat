@@ -56,6 +56,7 @@ import {
 import {
   listWorkerSessionControlPlaneWorkerReconciliationRecords,
   summarizeWorkerSessionControlPlaneWorkerReconciliationRecords,
+  type WorkerSessionControlPlaneWorkerReconciliationRecord,
 } from "./workerSessionControlPlaneWorkerReconciliations.js";
 import {
   listWorkerSessionControlPlaneTickWorkerNextSteps,
@@ -749,6 +750,20 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         name,
         parseOptionalInteger(query.lines) ?? 5,
       );
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/control-plane-worker-reconciliations", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      return await readWorkerSessionControlPlaneWorkerReconciliations(settings, name, {
+        limit: parseOptionalInteger(query.limit) ?? 20,
+        reconciliationId: parseOptionalString(query.reconciliation),
+        latest: parseBoolean(query.latest, false),
+      });
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
@@ -4174,6 +4189,87 @@ const readWorkerSessionControlPlaneStatus = async (
 };
 
 type WorkerSessionControlPlaneStatus = Awaited<ReturnType<typeof readWorkerSessionControlPlaneStatus>>;
+
+type WorkerSessionControlPlaneWorkerReconciliationInspectionRecord =
+  WorkerSessionControlPlaneWorkerReconciliationRecord & {
+    commands: WorkerSessionControlPlaneWorkerReconciliationRecord["commands"] & {
+      inspectRecord: string[];
+      timeline: string[];
+    };
+  };
+
+const readWorkerSessionControlPlaneWorkerReconciliations = async (
+  settings: Settings,
+  name: string,
+  options: { limit: number; reconciliationId?: string | null; latest: boolean },
+): Promise<{
+  ok: true;
+  session: string;
+  filter: {
+    limit: number;
+    latest: boolean;
+    reconciliationId: string | null;
+    totalRecords: number;
+    visibleRecords: number;
+  };
+  counts: ReturnType<typeof summarizeWorkerSessionControlPlaneWorkerReconciliationRecords>;
+  latest: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord | null;
+  records: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord[];
+  commands: {
+    list: string[];
+    latest: string[];
+    inspectLatest: string[] | null;
+    timelineLatest: string[] | null;
+  };
+}> => {
+  const allRecords = await listWorkerSessionControlPlaneWorkerReconciliationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
+  const selectedRecords = options.reconciliationId
+    ? allRecords.filter((record) => record.reconciliationId === options.reconciliationId)
+    : options.latest
+      ? allRecords.slice(0, 1)
+      : allRecords.slice(0, options.limit);
+  const records = selectedRecords.map((record) => decorateWorkerSessionControlPlaneWorkerReconciliationRecord(name, record));
+  const latest = allRecords[0] ? decorateWorkerSessionControlPlaneWorkerReconciliationRecord(name, allRecords[0]) : null;
+  return {
+    ok: true,
+    session: name,
+    filter: {
+      limit: options.limit,
+      latest: options.latest,
+      reconciliationId: options.reconciliationId ?? null,
+      totalRecords: allRecords.length,
+      visibleRecords: records.length,
+    },
+    counts: summarizeWorkerSessionControlPlaneWorkerReconciliationRecords(allRecords),
+    latest,
+    records,
+    commands: {
+      list: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", name, "--server", "--limit", String(options.limit)],
+      latest: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", name, "--server", "--latest"],
+      inspectLatest: latest?.commands.inspectRecord ?? null,
+      timelineLatest: latest?.commands.timeline ?? null,
+    },
+  };
+};
+
+const decorateWorkerSessionControlPlaneWorkerReconciliationRecord = (
+  sessionName: string,
+  record: WorkerSessionControlPlaneWorkerReconciliationRecord,
+): WorkerSessionControlPlaneWorkerReconciliationInspectionRecord => ({
+  ...record,
+  commands: {
+    ...record.commands,
+    inspectRecord: [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", sessionName, "--server",
+      "--reconciliation", record.reconciliationId,
+    ],
+    timeline: [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server",
+      "--source", "worker_reconcile_execution",
+      "--execution", record.reconciliationId,
+    ],
+  },
+});
 
 const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
   sessionName: string,
