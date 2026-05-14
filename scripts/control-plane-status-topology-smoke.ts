@@ -742,7 +742,13 @@ try {
     details: {
       kind: string;
       advance: { advanceId: string; detailCommand: string; executed: { exitCode: number | null } | null };
-      commands: { inspectStatusWatchExecution: string[]; timelineStatusWatchExecution: string[]; runSelectedCommand: string[] | null };
+      commands: {
+        inspectStatusWatchExecution: string[];
+        timelineStatusWatchExecution: string[];
+        runSelectedCommand: string[] | null;
+        previewSelectedCommand: string[] | null;
+        retrySelectedCommand: string[] | null;
+      };
     } | null;
   }>(baseUrl, [
     "runs",
@@ -761,6 +767,8 @@ try {
   assert.deepEqual(statusWatchAlertPreview.details?.commands.inspectStatusWatchExecution, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions", "--advance", failedStatusWatch.record.advanceId]);
   assert.deepEqual(statusWatchAlertPreview.details?.commands.timelineStatusWatchExecution, ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server", "--source", "status_watch_execution", "--advance", failedStatusWatch.record.advanceId]);
   assert.deepEqual(statusWatchAlertPreview.details?.commands.runSelectedCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.previewSelectedCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", sessionName, "--server", "--surface", "status_watch", "--reason", "failed_status_watch_execution", "--action", "inspect_status_watch_execution", "--detail-command", "run_selected_command", "--dry-run", "--lines", "5"]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.retrySelectedCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", sessionName, "--server", "--surface", "status_watch", "--reason", "failed_status_watch_execution", "--action", "inspect_status_watch_execution", "--detail-command", "run_selected_command", "--confirm", "--lines", "5"]);
   const statusWatchAlertCommands = await cliJson<{ commands: Array<{ action: string; advanceId?: string; command: string[] }> }>(baseUrl, [
     "runs",
     "session-control-plane-alert",
@@ -777,6 +785,8 @@ try {
   assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "timeline_status_watch_execution"));
   assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "acknowledge_status_watch_execution"));
   assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "run_selected_command"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "preview_selected_command"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "retry_selected_command"));
   const statusWatchAlertText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-alert",
@@ -791,6 +801,40 @@ try {
   assert.match(statusWatchAlertText, new RegExp(`advance: ${failedStatusWatch.record.advanceId}`));
   assert.match(statusWatchAlertText, /status_watch_execution:/);
   assert.match(statusWatchAlertText, /inspect_status_watch_execution: npm run cli -- runs session-control-plane-advances/);
+  assert.match(statusWatchAlertText, /preview_selected_command: npm run cli -- runs session-control-plane-alert-execute/);
+  assert.match(statusWatchAlertText, /retry_selected_command: npm run cli -- runs session-control-plane-alert-execute/);
+  const statusWatchRetryDryRun = await cliJson<{
+    dryRun: boolean;
+    detailCommand: string;
+    selected: { surface: string; action: string; reason: string; command: string[] } | null;
+    executed: unknown | null;
+    executionSafety: { mutating: boolean; blocked: boolean; confirmationRequired: boolean };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--reason",
+    "failed_status_watch_execution",
+    "--action",
+    "inspect_status_watch_execution",
+    "--detail-command",
+    "run_selected_command",
+    "--dry-run",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(statusWatchRetryDryRun.dryRun, true);
+  assert.equal(statusWatchRetryDryRun.detailCommand, "run_selected_command");
+  assert.equal(statusWatchRetryDryRun.executionSafety.mutating, true);
+  assert.equal(statusWatchRetryDryRun.executionSafety.blocked, false);
+  assert.equal(statusWatchRetryDryRun.executionSafety.confirmationRequired, true);
+  assert.equal(statusWatchRetryDryRun.selected?.surface, "status_watch");
+  assert.equal(statusWatchRetryDryRun.selected?.action, "run_selected_command");
+  assert.deepEqual(statusWatchRetryDryRun.selected?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"]);
+  assert.equal(statusWatchRetryDryRun.executed, null);
   const summaryAfterFailedStatusWatch = await cliJson<{
     needsAction: boolean;
     nextRecovery: { surface: string; action: string; reason: string; count: number; command: string[]; dryRunCommand: string[] } | null;

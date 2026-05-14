@@ -9662,6 +9662,8 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
       timelineStatusWatchExecution: string[];
       acknowledgeStatusWatchExecution: string[];
       runSelectedCommand: string[] | null;
+      previewSelectedCommand: string[] | null;
+      retrySelectedCommand: string[] | null;
     };
   } | {
     kind: "worker_recovery";
@@ -10593,6 +10595,12 @@ function workerSessionControlPlaneAlertPreviewCommands(
     if (preview.details.commands.runSelectedCommand) {
       commands.push({ ...base, action: "run_selected_command", command: preview.details.commands.runSelectedCommand });
     }
+    if (preview.details.commands.previewSelectedCommand) {
+      commands.push({ ...base, action: "preview_selected_command", command: preview.details.commands.previewSelectedCommand });
+    }
+    if (preview.details.commands.retrySelectedCommand) {
+      commands.push({ ...base, action: "retry_selected_command", command: preview.details.commands.retrySelectedCommand });
+    }
   }
   if (preview.details?.kind === "recover_next_loop") {
     commands.push(
@@ -10671,6 +10679,8 @@ function formatStatusWatchAlertDetails(
     `    timeline_status_watch_execution: ${formatShellCommand(details.commands.timelineStatusWatchExecution)}`,
     `    acknowledge_status_watch_execution: ${formatShellCommand(details.commands.acknowledgeStatusWatchExecution)}`,
     ...(details.commands.runSelectedCommand ? [`    run_selected_command: ${formatShellCommand(details.commands.runSelectedCommand)}`] : []),
+    ...(details.commands.previewSelectedCommand ? [`    preview_selected_command: ${formatShellCommand(details.commands.previewSelectedCommand)}`] : []),
+    ...(details.commands.retrySelectedCommand ? [`    retry_selected_command: ${formatShellCommand(details.commands.retrySelectedCommand)}`] : []),
   ];
   return lines;
 }
@@ -19759,7 +19769,7 @@ Commands:
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
+  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|run_selected_command|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history [--execute-resume --confirm]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]

@@ -4739,6 +4739,8 @@ type WorkerSessionControlPlaneAlertDetails =
       timelineStatusWatchExecution: string[];
       acknowledgeStatusWatchExecution: string[];
       runSelectedCommand: string[] | null;
+      previewSelectedCommand: string[] | null;
+      retrySelectedCommand: string[] | null;
     };
   }
   | {
@@ -4834,6 +4836,20 @@ const readWorkerSessionControlPlaneAlertDetails = async (
     const advance = records.find((record) => controlPlaneAdvanceExecutionFailed(record.executed));
     const selected = objectRecord(advance?.selected);
     const runSelectedCommand = stringArrayRecordField(selected, "command");
+    const previewSelectedCommand = runSelectedCommand
+      ? [
+          "npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", name, "--server",
+          "--surface", "status_watch", "--reason", "failed_status_watch_execution", "--action", "inspect_status_watch_execution",
+          "--detail-command", "run_selected_command", "--dry-run", "--lines", String(lines),
+        ]
+      : null;
+    const retrySelectedCommand = runSelectedCommand
+      ? [
+          "npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", name, "--server",
+          "--surface", "status_watch", "--reason", "failed_status_watch_execution", "--action", "inspect_status_watch_execution",
+          "--detail-command", "run_selected_command", "--confirm", "--lines", String(lines),
+        ]
+      : null;
     return advance
       ? {
           kind: "status_watch_execution",
@@ -4847,6 +4863,8 @@ const readWorkerSessionControlPlaneAlertDetails = async (
               "--detail-command", "acknowledge_status_watch_execution", "--confirm", "--lines", String(lines),
             ],
             runSelectedCommand,
+            previewSelectedCommand,
+            retrySelectedCommand,
           },
         }
       : null;
@@ -5204,6 +5222,7 @@ type WorkerSessionControlPlaneAlertDetailCommand =
   | "execute_apply_action"
   | "acknowledge_reset_audit"
   | "acknowledge_status_watch_execution"
+  | "run_selected_command"
   | "inspect_failed_drain_continuations"
   | "reset_failed_drain_continuations"
   | "reset_selected_failed_drain_continuations"
@@ -5223,6 +5242,7 @@ const parseControlPlaneAlertDetailCommand = (
     "execute_apply_action",
     "acknowledge_reset_audit",
     "acknowledge_status_watch_execution",
+    "run_selected_command",
     "inspect_failed_drain_continuations",
     "reset_failed_drain_continuations",
     "reset_selected_failed_drain_continuations",
@@ -5243,6 +5263,7 @@ const isMutatingControlPlaneAlertDetailCommand = (
   return detailCommand === "execute_apply_action"
     || detailCommand === "acknowledge_reset_audit"
     || detailCommand === "acknowledge_status_watch_execution"
+    || detailCommand === "run_selected_command"
     || detailCommand === "reset_failed_drain_continuations"
     || detailCommand === "reset_selected_failed_drain_continuations"
     || detailCommand === "restart_worker_recovery"
@@ -5348,6 +5369,9 @@ const selectControlPlaneAlertDetailCommand = (
   if (details?.kind === "status_watch_execution") {
     if (detailCommand === "acknowledge_status_watch_execution") {
       return { detailCommand, action: detailCommand, command: details.commands.acknowledgeStatusWatchExecution };
+    }
+    if (detailCommand === "run_selected_command" && details.commands.runSelectedCommand) {
+      return { detailCommand, action: detailCommand, command: details.commands.runSelectedCommand };
     }
   }
   if (details?.kind === "recover_next_loop") {
