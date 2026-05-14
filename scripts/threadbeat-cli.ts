@@ -7530,7 +7530,7 @@ type ControlPlaneTimelineCommand = {
   scope: "control_plane_timeline";
   source: string;
   event: string;
-  action: "inspect_tick" | "inspect_advance" | "inspect_worker" | "inspect_apply_action_execution" | "inspect_branch_recovery_execution" | "inspect_result_review" | "run_selected_command";
+  action: "inspect_tick" | "inspect_advance" | "inspect_status_watch_execution" | "inspect_worker" | "inspect_apply_action_execution" | "inspect_branch_recovery_execution" | "inspect_result_review" | "run_selected_command";
   reason: string;
   tickId: string | null;
   advanceId: string | null;
@@ -7742,6 +7742,34 @@ function workerSessionControlPlaneTimelineCommands(
           "session-control-plane-advances",
           timeline.session,
           "--server",
+          ...(event.advanceId ? ["--advance", event.advanceId] : []),
+          "--limit",
+          String(timeline.filter.limit),
+        ],
+      }];
+      if (event.command) {
+        commands.push({
+          ...common,
+          action: "run_selected_command" as const,
+          command: event.command,
+        });
+      }
+      return commands;
+    }
+    if (event.source === "status_watch_execution") {
+      const commands: ControlPlaneTimelineCommand[] = [{
+        ...common,
+        action: "inspect_status_watch_execution" as const,
+        command: [
+          "npm",
+          "run",
+          "cli",
+          "--",
+          "runs",
+          "session-control-plane-advances",
+          timeline.session,
+          "--server",
+          "--status-watch-executions",
           ...(event.advanceId ? ["--advance", event.advanceId] : []),
           "--limit",
           String(timeline.filter.limit),
@@ -9018,6 +9046,7 @@ type WorkerSessionControlPlaneTimelineResponse = {
     state?: string;
     restartable?: boolean;
     dryRun?: boolean;
+    detailCommand?: string | null;
     selectedSurface?: string;
     selectedAction?: string;
     selectedCount?: number;
@@ -11206,6 +11235,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
     reason?: string;
     restartable?: boolean;
     dryRun?: boolean;
+    detailCommand?: string | null;
     selectedSurface?: string;
     selectedAction?: string;
     selectedCount?: number;
@@ -11255,6 +11285,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
       reason: event.reason,
       restartable: event.restartable,
       dryRun: event.dryRun,
+      detailCommand: event.detailCommand,
       selectedSurface: event.selectedSurface,
       selectedAction: event.selectedAction,
       selectedCount: event.selectedCount,
@@ -17045,7 +17076,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--tick tick_id[,tick_id]] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--source tick,control_plane_advance_worker,control_plane_tick_worker,worker_reconcile_execution,branch_recovery_execution,result_review] [--event tick_recorded,worker_progress_recorded,worker_exited_unrecorded,worker_reconcile_executed,branch_recovery_executed,result_review_recorded,result_review_record_failed] [--status executed,noop,running,reviewed,skipped,failed] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,advance,status_watch_execution,control_plane_advance_worker,control_plane_tick_worker,worker_reconcile_execution,branch_recovery_execution,result_review] [--event tick_recorded,advance_recorded,status_watch_executed,worker_progress_recorded,worker_exited_unrecorded,worker_reconcile_executed,branch_recovery_executed,result_review_recorded,result_review_record_failed] [--status dry_run,executed,noop,running,reviewed,skipped,failed] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

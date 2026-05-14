@@ -893,18 +893,22 @@ next steps. The tick-worker list also includes `lifecycle.state`,
 running, stopped, completed, retired, failed-stop, and unrecorded-exit workers
 without inferring state from raw timestamps.
 `runs session-control-plane-timeline <name> --server` joins recent advance
-records, tick records, advance-worker lifecycle events, tick-worker lifecycle
-events, apply-action executions, and branch-recovery executions for a durable
-session-level audit trail. Add `--source`, `--event`, or `--status` to narrow
-that audit stream to one durable surface, such as
+records, status-watch executions, tick records, advance-worker lifecycle
+events, tick-worker lifecycle events, apply-action executions, and
+branch-recovery executions for a durable session-level audit trail. Add
+`--source`, `--event`, or `--status` to narrow that audit stream to one durable
+surface, such as
 `--source branch_recovery_execution --event branch_recovery_executed --status
-noop` when inspecting blocked branch resumes. Add `--tick`, `--advance`,
-`--worker`, `--execution`, `--apply`, or `--run` to jump to exact durable ids
-from status, alert, or timeline output. Add `--summary` for a
+noop` when inspecting blocked branch resumes, or
+`--source status_watch_execution --event status_watch_executed` when auditing
+actions launched by a status watch. Add `--tick`, `--advance`, `--worker`,
+`--execution`, `--apply`, or `--run` to jump to exact durable ids from status,
+alert, or timeline output. Add `--summary` for a
 compact operator view with event counts, the decision rollup, latest bounded
 events, and the command to fetch the full timeline. Add `--commands-only
 --format shell` to turn matching timeline events into the next inspection
-commands for tick, advance, worker, apply-action, and branch-recovery records.
+commands for tick, advance, status-watch, worker, apply-action, and
+branch-recovery records.
 Its top-level `decisions`
 rollup summarizes recent tick statuses, status reasons, planned/executed/skipped
 surfaces, and the latest bounded tick decisions for long-run progress review.

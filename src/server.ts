@@ -3328,8 +3328,8 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "worker_reconcile_execution" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
-  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "worker_reconcile_executed" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded" | "result_review_record_failed";
+  source: "tick" | "advance" | "status_watch_execution" | "control_plane_advance_worker" | "control_plane_tick_worker" | "worker_reconcile_execution" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
+  event: "tick_recorded" | "advance_recorded" | "status_watch_executed" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "worker_reconcile_executed" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded" | "result_review_record_failed";
   tickId?: string;
   advanceId?: string;
   workerId?: string;
@@ -3350,6 +3350,7 @@ type WorkerSessionControlPlaneTimelineEvent = {
   state?: string;
   restartable?: boolean;
   dryRun?: boolean;
+  detailCommand?: string | null;
   selectedSurface?: string;
   selectedAction?: string;
   selectedCount?: number;
@@ -3499,13 +3500,15 @@ const readWorkerSessionControlPlaneTimeline = async (
     const selected = timelineRecord(advance.selected);
     const executed = timelineRecord(advance.executed);
     const exitCode = timelineNumberOrNull(executed?.exitCode);
+    const status = advance.dryRun ? "dry_run" : selected ? (exitCode === 0 ? "executed" : "failed") : "noop";
     events.push({
       observedAt: advance.observedAt,
       source: "advance",
       event: "advance_recorded",
       advanceId: advance.advanceId,
       dryRun: advance.dryRun,
-      status: advance.dryRun ? "dry_run" : selected ? (exitCode === 0 ? "executed" : "failed") : "noop",
+      detailCommand: advance.detailCommand ?? null,
+      status,
       selectedSurface: timelineString(selected?.surface),
       selectedAction: timelineString(selected?.action),
       selectedCount: timelineNumber(selected?.count),
@@ -3513,6 +3516,23 @@ const readWorkerSessionControlPlaneTimeline = async (
       reason: timelineString(selected?.reason),
       exitCode,
     });
+    if (advance.detailCommand === "status_watch_execute_action") {
+      events.push({
+        observedAt: advance.observedAt,
+        source: "status_watch_execution",
+        event: "status_watch_executed",
+        advanceId: advance.advanceId,
+        dryRun: advance.dryRun,
+        detailCommand: advance.detailCommand,
+        status,
+        selectedSurface: timelineString(selected?.surface),
+        selectedAction: timelineString(selected?.action),
+        selectedCount: timelineNumber(selected?.count),
+        command: timelineStringArray(selected?.command),
+        reason: timelineString(selected?.reason),
+        exitCode,
+      });
+    }
   }
   for (const worker of advanceWorkers) {
     events.push({

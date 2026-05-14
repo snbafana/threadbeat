@@ -530,6 +530,54 @@ try {
   assert.match(summaryTextAfterWatchExecution, /status_watch_executions: total=1 dry_run=1 executed=1 failed=0/);
   assert.match(summaryTextAfterWatchExecution, new RegExp(`inspect: npm run cli -- runs session-control-plane-advances ${sessionName} --server --status-watch-executions`));
   assert.match(summaryTextAfterWatchExecution, /recent_status_watch_executions:/);
+  const statusWatchTimeline = await cliJson<{
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{
+      source: string;
+      event: string;
+      status: string;
+      advanceId: string;
+      detailCommand: string;
+      command: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "status_watch_execution",
+    "--event",
+    "status_watch_executed",
+    "--status",
+    "dry_run",
+  ]);
+  assert.equal(statusWatchTimeline.count, 1);
+  assert.equal(statusWatchTimeline.counts.status_watch_executed, 1);
+  assert.equal(statusWatchTimeline.events[0]?.source, "status_watch_execution");
+  assert.equal(statusWatchTimeline.events[0]?.event, "status_watch_executed");
+  assert.equal(statusWatchTimeline.events[0]?.status, "dry_run");
+  assert.equal(statusWatchTimeline.events[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  assert.equal(statusWatchTimeline.events[0]?.detailCommand, "status_watch_execute_action");
+  assert.deepEqual(statusWatchTimeline.events[0]?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  const statusWatchTimelineCommands = await cliJson<{ commands: Array<{ action: string; command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "status_watch_execution",
+    "--commands-only",
+  ]);
+  assert.ok(statusWatchTimelineCommands.commands.some((command) => (
+    command.action === "inspect_status_watch_execution"
+    && command.command.join(" ") === `npm run cli -- runs session-control-plane-advances ${sessionName} --server --status-watch-executions --advance ${watchedUntilActionDryRunLines[0]?.executedAction?.advanceId} --limit 20`
+  )));
+  assert.ok(statusWatchTimelineCommands.commands.some((command) => (
+    command.action === "run_selected_command"
+    && command.command.join(" ") === `npm run cli -- runs session-control-plane-advance ${sessionName} --server --dry-run`
+  )));
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
