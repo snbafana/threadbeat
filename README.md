@@ -1026,7 +1026,9 @@ present. Use
 review log to the current durable decision per run/result commit; add
 `--format text` for a readable CLI audit. Use
 `runs session-result-review-next <name> --server --format text` to inspect the
-next pending result commit and its exact branch-native review/record commands.
+next pending result commit and its exact branch-native review/record commands;
+add `--record-reviewed` or `--record-skipped` to record that selected next result
+without copying its run id.
 Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving

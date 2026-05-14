@@ -2949,6 +2949,8 @@ try {
       timelineSummary: string[];
       resultInspections: string[];
       nextResultReview: string[];
+      recordNextReviewed: string[];
+      recordNextSkipped: string[];
       pendingResultInspections: string[];
       reviewedResultInspections: string[];
       skippedResultInspections: string[];

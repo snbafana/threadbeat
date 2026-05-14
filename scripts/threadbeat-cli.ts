@@ -4743,8 +4743,16 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const outputFormat = options.format ?? "json";
+    const recordAction = options["record-reviewed"] === "1"
+      ? "reviewed"
+      : options["record-skipped"] === "1"
+        ? "skipped"
+        : null;
     if (options.server !== "1") {
       throw new Error("runs session-result-review-next requires --server");
+    }
+    if (options["record-reviewed"] === "1" && options["record-skipped"] === "1") {
+      throw new Error("runs session-result-review-next accepts only one of --record-reviewed or --record-skipped");
     }
     if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
       throw new Error("runs session-result-review-next --format must be json, text, or shell");
@@ -4755,6 +4763,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "text" && options["commands-only"] === "1") {
       throw new Error("runs session-result-review-next --commands-only supports --format json or shell");
     }
+    if (recordAction && options["commands-only"] === "1") {
+      throw new Error("runs session-result-review-next --record-reviewed|--record-skipped cannot be combined with --commands-only");
+    }
     const resultInspections = await fetchWorkerSessionResultInspections(
       required(sessionName, "runs session-result-review-next <session> --server"),
       {
@@ -4763,6 +4774,29 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         limit: 1,
       },
     );
+    if (recordAction) {
+      const selected = resultInspections.resultCommits[0];
+      if (!selected) {
+        throw new Error(`no pending result commits for worker session ${resultInspections.session}`);
+      }
+      const recorded = await recordWorkerSessionResultReview(
+        resultInspections.session,
+        {
+          runId: selected.runId,
+          action: recordAction,
+          dryRun: options["dry-run"] === "1",
+          reviewedBy: options["reviewed-by"],
+          note: options.note,
+        },
+      );
+      const response: RecordWorkerSessionResultReviewNextResponse = { ...recorded, selected };
+      if (outputFormat === "text") {
+        printWorkerSessionResultReviewNextRecordText(response);
+      } else {
+        await printJson(response);
+      }
+      return;
+    }
     const commands = workerSessionResultInspectionCommands(resultInspections);
     if (options["commands-only"] === "1") {
       if (outputFormat === "shell") {
@@ -8241,6 +8275,10 @@ type RecordWorkerSessionResultReviewResponse = {
   review: WorkerSessionResultReviewRecord;
 };
 
+type RecordWorkerSessionResultReviewNextResponse = RecordWorkerSessionResultReviewResponse & {
+  selected: WorkerSessionResultInspectionRecord;
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -9656,6 +9694,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     if (summary.results.counts.pending > 0) {
       lines.push(`  inspect_next: ${formatShellCommand(summary.commands.nextResultInspection)}`);
       lines.push(`  review_next: ${formatShellCommand(summary.commands.nextResultReview)}`);
+      lines.push(`  record_next_reviewed: ${formatShellCommand(summary.commands.recordNextReviewed)}`);
+      lines.push(`  record_next_skipped: ${formatShellCommand(summary.commands.recordNextSkipped)}`);
     }
     if (summary.results.counts.reviewed > 0) {
       lines.push(`  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`);
@@ -9786,6 +9826,8 @@ function workerSessionControlPlaneStatusSummaryCommands(
   if (summary.results.counts.pending > 0) {
     commands.push({ command: summary.commands.nextResultInspection });
     commands.push({ command: summary.commands.nextResultReview });
+    commands.push({ command: summary.commands.recordNextReviewed });
+    commands.push({ command: summary.commands.recordNextSkipped });
     commands.push({ command: summary.commands.pendingResultInspections });
   }
   if (summary.results.counts.reviewed > 0) {
@@ -9861,6 +9903,32 @@ function printWorkerSessionResultReviewNextText(response: WorkerSessionResultIns
 
 function formatWorkerSessionResultReviewNextText(response: WorkerSessionResultInspectionsResponse): string[] {
   const runIds = stringListFromUnknown(response.filter.runIds);
+  const recordReviewedCommand = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-result-review-next",
+    response.session,
+    "--server",
+    "--record-reviewed",
+  ];
+  const recordSkippedCommand = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-result-review-next",
+    response.session,
+    "--server",
+    "--record-skipped",
+  ];
+  if (runIds.length === 1) {
+    recordReviewedCommand.push("--run", runIds[0]);
+    recordSkippedCommand.push("--run", runIds[0]);
+  }
   const lines = [
     "result_review_next:",
     `  session: ${response.session}`,
@@ -9883,8 +9951,30 @@ function formatWorkerSessionResultReviewNextText(response: WorkerSessionResultIn
     `  review: ${formatShellCommand(result.commands.reviewRun)}`,
     `  record_reviewed: ${formatShellCommand(result.commands.recordReviewed)}`,
     `  record_skipped: ${formatShellCommand(result.commands.recordSkipped)}`,
+    `  record_next_reviewed: ${formatShellCommand(recordReviewedCommand)}`,
+    `  record_next_skipped: ${formatShellCommand(recordSkippedCommand)}`,
   );
   return lines;
+}
+
+function printWorkerSessionResultReviewNextRecordText(response: RecordWorkerSessionResultReviewNextResponse): void {
+  console.log(formatWorkerSessionResultReviewNextRecordText(response).join("\n"));
+}
+
+function formatWorkerSessionResultReviewNextRecordText(response: RecordWorkerSessionResultReviewNextResponse): string[] {
+  return [
+    "result_review_next_record:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  recorded: ${response.recorded}`,
+    `  action: ${response.review.action}`,
+    `  run: ${response.review.runId}`,
+    `  branch: ${response.selected.branchName}`,
+    `  result_commit: ${response.review.resultCommit}`,
+    `  reviewed_by: ${response.review.reviewedBy}`,
+    `  review: ${response.review.reviewId}`,
+    `  review_command: ${formatShellCommand(response.review.command)}`,
+  ];
 }
 
 function printWorkerSessionResultInspectionsText(response: WorkerSessionResultInspectionsResponse): void {
@@ -10156,6 +10246,8 @@ function summarizeWorkerSessionControlPlaneStatus(
     resultInspections: string[];
     nextResultInspection: string[];
     nextResultReview: string[];
+    recordNextReviewed: string[];
+    recordNextSkipped: string[];
     pendingResultInspections: string[];
     reviewedResultInspections: string[];
     skippedResultInspections: string[];
@@ -10284,6 +10376,8 @@ function summarizeWorkerSessionControlPlaneStatus(
       resultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server"],
       nextResultInspection: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--next"],
       nextResultReview: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server"],
+      recordNextReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-reviewed"],
+      recordNextSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped"],
       pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
       reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
       skippedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped"],
@@ -16525,7 +16619,7 @@ Commands:
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
-  runs session-result-review-next <name> --server [--run run_id] [--commands-only] [--format json|text|shell]
+  runs session-result-review-next <name> --server [--run run_id] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--commands-only] [--format json|text|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
