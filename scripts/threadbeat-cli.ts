@@ -4,7 +4,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveGitHubLinks } from "../src/gitLinks.js";
 import { listWorkerSessionBranchRecoveryExecutionRecords } from "../src/workerSessionBranchRecovery.js";
-import { writeWorkerSessionControlPlaneAdvanceRecord } from "../src/workerSessionControlPlaneAdvances.js";
+import {
+  listWorkerSessionControlPlaneAdvanceRecords,
+  writeWorkerSessionControlPlaneAdvanceRecord,
+} from "../src/workerSessionControlPlaneAdvances.js";
 import { summarizeWorkerSessionControlPlaneTickDecision } from "../src/workerSessionControlPlaneTicks.js";
 import { writeWorkerSessionControlPlaneWorkerReconciliationRecord } from "../src/workerSessionControlPlaneWorkerReconciliations.js";
 
@@ -5000,10 +5003,34 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["until-empty"] === "1") {
       const maxSteps = parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps");
       const intervalMs = parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms");
-      const loopAdvanceId = createRecoverNextLoopAdvanceId(observedAt);
+      const resumedLoopAdvanceId = options["resume-loop"] ?? null;
+      if (resumedLoopAdvanceId && !/^[A-Za-z0-9._-]+$/.test(resumedLoopAdvanceId)) {
+        throw new Error(`unsafe --resume-loop value: ${resumedLoopAdvanceId}`);
+      }
+      const existingLoopRecords = resumedLoopAdvanceId
+        ? await listWorkerSessionControlPlaneAdvanceRecords(process.cwd(), requiredSessionName, {
+            limit: Number.MAX_SAFE_INTEGER,
+            advanceIds: [resumedLoopAdvanceId],
+            detailCommands: ["recover_next_loop"],
+          })
+        : [];
+      if (existingLoopRecords.length > 0) {
+        throw new Error(`runs session-control-plane-recover-next --resume-loop ${resumedLoopAdvanceId} already has a final loop record`);
+      }
+      const existingLoopSteps = resumedLoopAdvanceId
+        ? (await listWorkerSessionControlPlaneAdvanceRecords(process.cwd(), requiredSessionName, {
+            limit: Number.MAX_SAFE_INTEGER,
+            detailCommands: ["recover_next_loop_step"],
+          })).filter((record) => recoverNextLoopStepLoopId(record) === resumedLoopAdvanceId)
+        : [];
+      const highestExistingStep = existingLoopSteps.reduce((highest, record) => {
+        const stepIndex = recoverNextLoopStepIndex(record);
+        return stepIndex && stepIndex > highest ? stepIndex : highest;
+      }, 0);
+      const loopAdvanceId = resumedLoopAdvanceId ?? createRecoverNextLoopAdvanceId(observedAt);
       const cycles: Array<Awaited<ReturnType<typeof executeNextRecovery>>> = [];
       let stoppedReason: "empty" | "dry_run" | "failed" | "max_steps" = "max_steps";
-      for (let stepIndex = 0; stepIndex < maxSteps; stepIndex += 1) {
+      for (let stepIndex = highestExistingStep; stepIndex < maxSteps; stepIndex += 1) {
         const stepObservedAt = new Date().toISOString();
         const cycle = await executeNextRecovery();
         cycles.push(cycle);
@@ -5061,7 +5088,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         loopAdvanceId,
         maxSteps,
         intervalMs,
-        executedSteps: cycles.filter((cycle) => cycle.selected).length,
+        resumed: Boolean(resumedLoopAdvanceId),
+        previousSteps: existingLoopSteps.length,
+        executedSteps: existingLoopSteps.filter((record) => record.selected).length + cycles.filter((cycle) => cycle.selected).length,
         stoppedReason,
         cycles,
       };
@@ -5071,7 +5100,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         observedAt,
         completedAt: new Date().toISOString(),
         dryRun,
-        selected: cycles.find((cycle) => cycle.selected)?.selected ?? null,
+        selected: cycles.find((cycle) => cycle.selected)?.selected ?? existingLoopSteps.find((record) => record.selected)?.selected ?? null,
         detailCommand: "recover_next_loop",
         recovery: response,
         executed: null,
@@ -14443,6 +14472,20 @@ function createRecoverNextLoopAdvanceId(observedAt: string): string {
   return `recover-next-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+function recoverNextLoopStepLoopId(record: { recovery?: unknown }): string | null {
+  const recovery = record.recovery;
+  if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return null;
+  const loopAdvanceId = (recovery as Record<string, unknown>).loopAdvanceId;
+  return typeof loopAdvanceId === "string" ? loopAdvanceId : null;
+}
+
+function recoverNextLoopStepIndex(record: { recovery?: unknown }): number | null {
+  const recovery = record.recovery;
+  if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return null;
+  const stepIndex = (recovery as Record<string, unknown>).stepIndex;
+  return typeof stepIndex === "number" && Number.isFinite(stepIndex) ? stepIndex : null;
+}
+
 async function git(args: string[], cwd = process.cwd()): Promise<string> {
   return await new Promise((resolve, reject) => {
     const child = spawn("git", args, {
@@ -17259,7 +17302,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
+  runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]

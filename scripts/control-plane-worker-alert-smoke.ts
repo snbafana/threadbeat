@@ -603,6 +603,62 @@ try {
   assert.ok(statusSummaryShellLines.some((line) => line === `npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recoverNextLoopDryRun.advanceId}`)));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recentRecoverLoopStep?.advanceId}`)));
+
+  await fs.rm(recoverNextLoopDryRun.advancePath, { force: true });
+  const resumedRecoverNextLoopDryRun = await cliJson<{
+    ok: boolean;
+    session: string;
+    dryRun: boolean;
+    untilEmpty: boolean;
+    resumed: boolean;
+    previousSteps: number;
+    executedSteps: number;
+    advanceId: string;
+    loopAdvanceId: string;
+    cycles: Array<{ selected: { kind: string; action: string } | null }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--until-empty",
+    "--resume-loop",
+    recoverNextLoopDryRun.advanceId,
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+  ]);
+  assert.equal(resumedRecoverNextLoopDryRun.ok, true);
+  assert.equal(resumedRecoverNextLoopDryRun.session, sessionName);
+  assert.equal(resumedRecoverNextLoopDryRun.dryRun, true);
+  assert.equal(resumedRecoverNextLoopDryRun.untilEmpty, true);
+  assert.equal(resumedRecoverNextLoopDryRun.resumed, true);
+  assert.equal(resumedRecoverNextLoopDryRun.previousSteps, 1);
+  assert.equal(resumedRecoverNextLoopDryRun.executedSteps, 2);
+  assert.equal(resumedRecoverNextLoopDryRun.advanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(resumedRecoverNextLoopDryRun.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(resumedRecoverNextLoopDryRun.cycles.length, 1);
+  assert.equal(resumedRecoverNextLoopDryRun.cycles[0]?.selected?.kind, "confirmation_queue");
+  assert.equal(resumedRecoverNextLoopDryRun.cycles[0]?.selected?.action, "drain_control_plane_confirmations");
+  const statusAfterRecoverNextResume = await cliJson<{
+    recovery: { recoverNext: { loopSteps: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; loopAdvanceId: string | null; stepIndex: number | null }> } } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.attempts.total, 2);
+  assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.attempts.dryRun, 2);
+  assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.attempts.executed, 2);
+  assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.attempts.failed, 0);
+  assert.ok(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.recent.some((step) => (
+    step.loopAdvanceId === recoverNextLoopDryRun.advanceId
+      && step.stepIndex === 2
+      && step.advanceId === `${recoverNextLoopDryRun.advanceId}-step-002`
+  )));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
