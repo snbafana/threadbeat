@@ -254,6 +254,7 @@ try {
     "text",
   ]);
   assert.match(statusSummaryText, /worker_reconciliations: total=1 dry_run=1 executed=0 noop=0 failed=0 max_steps=0 until_empty=1/);
+  assert.match(statusSummaryText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server`));
   assert.match(statusSummaryText, new RegExp(`reconciliation: ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
   const statusSummaryShell = await cliText(baseUrl, [
     "runs",
@@ -271,6 +272,50 @@ try {
     statusSummaryShell,
     new RegExp(`npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 3 --interval-ms 1 --confirm`),
   );
+  assert.match(
+    statusSummaryShell,
+    new RegExp(`npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server`),
+  );
+  const workerReconciliations = await cliJson<WorkerReconciliationsResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-reconciliations",
+    sessionName,
+    "--server",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(workerReconciliations.counts.total, 1);
+  assert.equal(workerReconciliations.counts.dryRun, 1);
+  assert.equal(workerReconciliations.records.length, 1);
+  assert.equal(workerReconciliations.latest?.reconciliationId, reconcileLoopPreview.reconciliationRecord.reconciliationId);
+  assert.equal(workerReconciliations.records[0]?.reconciliationId, reconcileLoopPreview.reconciliationRecord.reconciliationId);
+  assert.equal(workerReconciliations.records[0]?.commands.inspectRecord.join(" "), `npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server --reconciliation ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`);
+  assert.equal(workerReconciliations.records[0]?.commands.timeline.join(" "), `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --source worker_reconcile_execution --execution ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`);
+  assert.equal(workerReconciliations.records[0]?.commands.confirm.join(" "), `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 3 --interval-ms 1 --confirm`);
+  const workerReconciliationsText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-reconciliations",
+    sessionName,
+    "--server",
+    "--latest",
+    "--format",
+    "text",
+  ]);
+  assert.match(workerReconciliationsText, /control_plane_worker_reconciliations:/);
+  assert.match(workerReconciliationsText, new RegExp(`reconciliation: ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
+  assert.match(workerReconciliationsText, new RegExp(`timeline: npm run cli -- runs session-control-plane-timeline ${sessionName} --server --source worker_reconcile_execution --execution ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
+  const workerReconciliationsShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-reconciliations",
+    sessionName,
+    "--server",
+    "--latest",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(workerReconciliationsShell, new RegExp(`npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server --reconciliation ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
+  assert.match(workerReconciliationsShell, new RegExp(`npm run cli -- runs session-control-plane-timeline ${sessionName} --server --source worker_reconcile_execution --execution ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
   const reconcileLoopText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-reconcile-workers",
@@ -365,6 +410,22 @@ type WorkerStatusSummaryResponse = {
       recent: Array<{ reconciliationId: string }>;
     };
   };
+};
+
+type WorkerReconciliationsResponse = {
+  counts: {
+    total: number;
+    dryRun: number;
+  };
+  latest: { reconciliationId: string } | null;
+  records: Array<{
+    reconciliationId: string;
+    commands: {
+      inspectRecord: string[];
+      timeline: string[];
+      confirm: string[];
+    };
+  }>;
 };
 
 type WorkerReconcileLoopResponse = {

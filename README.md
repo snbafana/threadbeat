@@ -870,6 +870,9 @@ which keeps short bundle-recovery probes inspectable without forcing them to sta
 alive. Worker rows also include kind-scoped `session-control-plane-reconcile-workers`
 dry-run, confirm, and until-empty confirm commands so a stopped worker can be
 recovered through the generic reconcile path without guessing its worker kind.
+Use `runs session-control-plane-worker-reconciliations <name> --server` to
+inspect the durable reconciliation history, replay commands, and matching
+timeline lookup commands after a reconcile pass or loop runs.
 The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
 sandbox, and includes exact bulk resume, dry-run, and branch-inspection
