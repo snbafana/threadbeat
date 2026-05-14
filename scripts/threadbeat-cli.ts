@@ -8291,6 +8291,7 @@ type WorkerSessionControlPlaneStatusResponse = {
       modes: {
         advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
       };
       latestResults: Array<{
         workerId: string;
@@ -9551,6 +9552,17 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `  inspect_all: ${formatShellCommand(summary.commands.inspectControlPlaneWorkers)}`,
     `  inspect_progress: ${formatShellCommand(summary.commands.inspectControlPlaneWorkerProgress)}`,
   );
+  lines.push(
+    "worker_health:",
+    `  watch: ${formatBasicControlPlaneWorkerHealth(summary.workers.watch)}`,
+    `  drain: ${formatBasicControlPlaneWorkerHealth(summary.workers.drain)}`,
+    `  apply_action: ${formatBasicControlPlaneWorkerHealth(summary.workers.applyAction)}`,
+    `  control_plane_advance: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance)}`,
+    `  advance_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.advance_loop)}`,
+    `  confirmation_drain: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.confirmation_drain)}`,
+    `  topology_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.topology_loop)}`,
+    `  control_plane_tick: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneTick)}`,
+  );
   if (summary.branches.inspection.count > 0) {
     lines.push(
       "branch_inspection:",
@@ -9656,6 +9668,22 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     }
   }
   return lines;
+}
+
+function formatBasicControlPlaneWorkerHealth(counts: { total: number; alive: number; stopped: number; retired: number }): string {
+  return [
+    `total=${counts.total}`,
+    `alive=${counts.alive}`,
+    `stopped=${counts.stopped}`,
+    `retired=${counts.retired}`,
+  ].join(" ");
+}
+
+function formatCompletedControlPlaneWorkerHealth(counts: { total: number; alive: number; stopped: number; retired: number; completed: number }): string {
+  return [
+    formatBasicControlPlaneWorkerHealth(counts),
+    `completed=${counts.completed}`,
+  ].join(" ");
 }
 
 function workerSessionControlPlaneStatusSummaryCommands(

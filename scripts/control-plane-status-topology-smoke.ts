@@ -99,6 +99,9 @@ try {
   assert.match(text, /^control_plane_workers:$/m);
   assert.match(text, new RegExp(`inspect_all: .*session-control-plane-workers ${sessionName} --server --include-retired --lines 5`));
   assert.match(text, new RegExp(`inspect_progress: .*session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
+  assert.match(text, /^worker_health:$/m);
+  assert.match(text, /watch: total=0 alive=0 stopped=0 retired=0/);
+  assert.match(text, /topology_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
 
   const workerId = "status-topology-worker";
   const started = await cliJson<{ worker: { workerId: string; mode: string; command: string[] } }>(baseUrl, [
@@ -152,6 +155,17 @@ try {
   const completedWorkerRecord = await readTopologyWorkerRecord(workerId);
   assert.equal(completedWorkerRecord.recentProgress?.length, 1);
   assert.equal(completedWorkerRecord.recentProgress?.[0]?.iterations, 1);
+  const completedStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(completedStatusText, /control_plane_advance: total=1 alive=0 stopped=0 retired=0 completed=1/);
+  assert.match(completedStatusText, /topology_loop: total=1 alive=0 stopped=0 retired=0 completed=1/);
 
   const aggregateBeforeStop = await cliJson<{
     summary: {
