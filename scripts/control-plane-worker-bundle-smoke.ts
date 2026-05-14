@@ -161,6 +161,61 @@ try {
   assert.equal(fromProfile.plan.actionable, 0);
   assert.ok(fromProfile.plan.blocked + fromProfile.plan.existing === 2);
 
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
+
+  const recoveryDryRun = await cliJson<{
+    dryRun: boolean;
+    profileCount: number;
+    summary: { planned: number; actionable: number; blocked: number; executed: number; passed: boolean | null };
+    results: Array<{ session: string; result: { plan: { expected: number; actionable: number } } }>;
+  }>(baseUrl, [
+    "runs",
+    "recover-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--dry-run",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(recoveryDryRun.dryRun, true);
+  assert.equal(recoveryDryRun.profileCount, 1);
+  assert.equal(recoveryDryRun.summary.planned, 2);
+  assert.equal(recoveryDryRun.summary.actionable, 2);
+  assert.equal(recoveryDryRun.summary.blocked, 0);
+  assert.equal(recoveryDryRun.summary.executed, 0);
+  assert.equal(recoveryDryRun.summary.passed, null);
+  assert.equal(recoveryDryRun.results[0]?.session, sessionName);
+  assert.equal(recoveryDryRun.results[0]?.result.plan.actionable, 2);
+
+  const recoveryConfirmed = await cliJson<{
+    confirmed: boolean;
+    profileCount: number;
+    summary: { planned: number; actionable: number; blocked: number; executed: number; passed: boolean | null };
+    results: Array<{ session: string; result: { passed: boolean | null; executed: Array<{ workerId: string }> } }>;
+  }>(baseUrl, [
+    "runs",
+    "recover-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(recoveryConfirmed.confirmed, true);
+  assert.equal(recoveryConfirmed.profileCount, 1);
+  assert.equal(recoveryConfirmed.summary.planned, 2);
+  assert.equal(recoveryConfirmed.summary.actionable, 2);
+  assert.equal(recoveryConfirmed.summary.blocked, 0);
+  assert.equal(recoveryConfirmed.summary.executed, 2);
+  assert.equal(recoveryConfirmed.summary.passed, true);
+  assert.equal(recoveryConfirmed.results[0]?.result.passed, true);
+  assert.deepEqual(
+    recoveryConfirmed.results[0]?.result.executed.map((step) => step.workerId),
+    [topologyWorkerId, resultReviewWorkerId],
+  );
+
   const text = await cliText(baseUrl, [...bundleArgs, "--dry-run", "--format", "text"]);
   assert.match(text, /control_plane_worker_bundle:/);
   assert.match(text, new RegExp(`topology=${topologyWorkerId}`));
@@ -180,6 +235,21 @@ try {
   assert.match(profileText, /control_plane_worker_bundle_profile:/);
   assert.match(profileText, /exists: true/);
   assert.match(profileText, /plan: expected=2 actionable=0 blocked=\d+ existing=\d+/);
+
+  const recoveryText = await cliText(baseUrl, [
+    "runs",
+    "recover-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--dry-run",
+    "--format",
+    "text",
+    "--lines",
+    "1",
+  ]);
+  assert.match(recoveryText, /control_plane_worker_bundle_recovery:/);
+  assert.match(recoveryText, /profile_count: 1/);
 
   const aggregate = await cliJson<{
     summary: { topology: { total: number }; resultReview: { total: number } };
