@@ -752,6 +752,50 @@ try {
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--reconciliation ${workerRestartQueueDryRun.reconciliation.record.reconciliationId}`)));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--source worker_reconcile_execution --execution ${workerRestartQueueDryRun.reconciliation.record.reconciliationId}`)));
 
+  const watchedActionWithReconciliation = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--execute-action",
+    "--reconcile-workers",
+    "--include-retired",
+    "--limit",
+    "1",
+    "--dry-run",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedActionWithReconciliationLines = watchedActionWithReconciliation.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    untilAction: { done: boolean; reason: string | null };
+    executedAction?: { dryRun: boolean; reason: string; executed: { exitCode: number | null } };
+    executedReconciliation?: {
+      skipped: boolean;
+      result: { dryRun: boolean; confirmed: boolean; plan: { count: number }; executed: unknown[] };
+      record: { reconciliationId: string; status: string };
+      afterSummary: { recovery: { workerReconciliations: { counts: { total: number; dryRun: number } } } };
+    };
+  });
+  assert.equal(watchedActionWithReconciliationLines.length, 1);
+  assert.equal(watchedActionWithReconciliationLines[0]?.untilAction.done, true);
+  assert.equal(watchedActionWithReconciliationLines[0]?.untilAction.reason, "confirmation_queue:drain_control_plane_confirmations");
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedAction?.dryRun, true);
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedAction?.executed.exitCode, 0);
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedReconciliation?.skipped, false);
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedReconciliation?.result.dryRun, true);
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedReconciliation?.result.confirmed, false);
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedReconciliation?.result.plan.count, 1);
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedReconciliation?.result.executed.length, 0);
+  assert.equal(watchedActionWithReconciliationLines[0]?.executedReconciliation?.record.status, "dry_run");
+  assert.ok(watchedActionWithReconciliationLines[0]?.executedReconciliation?.record.reconciliationId);
+  assert.ok((watchedActionWithReconciliationLines[0]?.executedReconciliation?.afterSummary.recovery.workerReconciliations.counts.total ?? 0) >= 3);
+  assert.ok((watchedActionWithReconciliationLines[0]?.executedReconciliation?.afterSummary.recovery.workerReconciliations.counts.dryRun ?? 0) >= 3);
+
   const statusReconcileDryRun = await cliJson<{
     reconciliation: {
       result: { dryRun: boolean; confirmed: boolean; plan: { count: number }; executed: unknown[] };

@@ -4562,9 +4562,6 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (reconcileWorkers && options.summary !== "1") {
       throw new Error("runs session-control-plane-status --reconcile-workers requires --summary");
     }
-    if (reconcileWorkers && watch) {
-      throw new Error("runs session-control-plane-status --reconcile-workers cannot be combined with --watch");
-    }
     if (executeAction && outputFormat !== "json") {
       throw new Error("runs session-control-plane-status --execute-action requires json output");
     }
@@ -4583,8 +4580,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (reconcileWorkers && dryRun === confirm) {
       throw new Error("runs session-control-plane-status --reconcile-workers requires exactly one of --dry-run or --confirm");
     }
-    if (executeAction && reconcileWorkers) {
-      throw new Error("runs session-control-plane-status accepts only one execution mode");
+    if (reconcileWorkers && watch && options["until-action"] !== "1") {
+      throw new Error("runs session-control-plane-status --watch --reconcile-workers requires --until-action");
+    }
+    if (reconcileWorkers && watch && !executeAction) {
+      throw new Error("runs session-control-plane-status --watch --reconcile-workers requires --execute-action");
     }
     if ((options["until-empty"] === "1" || options["max-steps"] || options.limit || (options["interval-ms"] && !watch)) && !reconcileWorkers) {
       throw new Error("runs session-control-plane-status reconciliation options require --reconcile-workers");
@@ -4618,6 +4618,22 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               lines,
             })
           : null;
+        const executedReconciliation = executedAction && reconcileWorkers
+          ? action?.reason === "control_plane_action:reconcile_control_plane_workers"
+            ? {
+              skipped: true,
+              reason: "watch_action_already_reconciles_workers",
+              actionReason: action.reason,
+            }
+            : {
+              skipped: false,
+              ...(await executeWorkerSessionControlPlaneStatusReconciliation(requiredSessionName, options, {
+                lines,
+                dryRun,
+                confirm,
+              })),
+            }
+          : null;
         if (executedAction?.executed.exitCode !== undefined && executedAction.executed.exitCode !== null && executedAction.executed.exitCode !== 0) {
           process.exitCode = 1;
         }
@@ -4637,6 +4653,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             observedAt,
             ...(untilAction ? { untilAction } : {}),
             ...(executedAction ? { executedAction } : {}),
+            ...(executedReconciliation ? { executedReconciliation } : {}),
             commands: workerSessionControlPlaneStatusSummaryCommands(summary),
           }));
         } else {
@@ -4647,6 +4664,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             observedAt,
             ...(untilAction ? { untilAction } : {}),
             ...(executedAction ? { executedAction } : {}),
+            ...(executedReconciliation ? { executedReconciliation } : {}),
             summary,
           }));
         }
@@ -4660,35 +4678,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.summary === "1") {
       const summary = summarizeWorkerSessionControlPlaneStatus(status);
       if (reconcileWorkers) {
-        const reconcileOptions = {
-          workerId: options["worker-id"],
-          kind: options.kind ? parseControlPlaneWorkerKind(options.kind) : null,
-          includeRetired: options["include-retired"] === "1",
+        const reconciliation = await executeWorkerSessionControlPlaneStatusReconciliation(requiredSessionName, options, {
           lines,
-          limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
           dryRun,
           confirm,
-        };
-        const result = options["until-empty"] === "1"
-          ? await reconcileWorkerSessionControlPlaneWorkersLoop(requiredSessionName, {
-            ...reconcileOptions,
-            maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
-            intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
-          })
-          : await reconcileWorkerSessionControlPlaneWorkers(requiredSessionName, reconcileOptions);
-        const written = await recordWorkerSessionControlPlaneWorkerReconciliation(requiredSessionName, result);
-        const afterStatus = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
+        });
         const output = {
           ...summary,
           reconciliation: {
-            result,
-            record: {
-              path: written.path,
-              reconciliationId: written.record.reconciliationId,
-              status: written.record.status,
-            },
+            result: reconciliation.result,
+            record: reconciliation.record,
           },
-          afterSummary: summarizeWorkerSessionControlPlaneStatus(afterStatus),
+          afterSummary: reconciliation.afterSummary,
         };
         if (outputFormat === "text") {
           printWorkerSessionControlPlaneStatusSummaryReconcileText(output);
@@ -11444,6 +11445,52 @@ function printWorkerSessionControlPlaneStatusSummaryText(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
 ): void {
   console.log(formatWorkerSessionControlPlaneStatusSummaryText(summary).join("\n"));
+}
+
+async function executeWorkerSessionControlPlaneStatusReconciliation(
+  sessionName: string,
+  options: Record<string, string>,
+  execution: {
+    lines: number;
+    dryRun: boolean;
+    confirm: boolean;
+  },
+): Promise<{
+  result: ControlPlaneWorkerReconcileResult | ControlPlaneWorkerReconcileLoopResult;
+  record: {
+    path: string;
+    reconciliationId: string;
+    status: string;
+  };
+  afterSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
+}> {
+  const reconcileOptions = {
+    workerId: options["worker-id"],
+    kind: options.kind ? parseControlPlaneWorkerKind(options.kind) : null,
+    includeRetired: options["include-retired"] === "1",
+    lines: execution.lines,
+    limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+    dryRun: execution.dryRun,
+    confirm: execution.confirm,
+  };
+  const result = options["until-empty"] === "1"
+    ? await reconcileWorkerSessionControlPlaneWorkersLoop(sessionName, {
+      ...reconcileOptions,
+      maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+      intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+    })
+    : await reconcileWorkerSessionControlPlaneWorkers(sessionName, reconcileOptions);
+  const written = await recordWorkerSessionControlPlaneWorkerReconciliation(sessionName, result);
+  const afterStatus = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines });
+  return {
+    result,
+    record: {
+      path: written.path,
+      reconciliationId: written.record.reconciliationId,
+      status: written.record.status,
+    },
+    afterSummary: summarizeWorkerSessionControlPlaneStatus(afterStatus),
+  };
 }
 
 function printWorkerSessionControlPlaneStatusSummaryReconcileText(
