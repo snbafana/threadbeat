@@ -10574,7 +10574,9 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       `  reviewed: ${summary.results.counts.reviewed}`,
       `  skipped: ${summary.results.counts.skipped}`,
       `  inspect_all: ${formatShellCommand(summary.commands.resultInspections)}`,
+      `  result_commits: ${formatShellCommand(summary.commands.resultCommitView)}`,
       `  inspect_pending: ${formatShellCommand(summary.commands.pendingResultInspections)}`,
+      `  pending_result_commits: ${formatShellCommand(summary.commands.pendingResultCommitView)}`,
     );
     if (summary.results.counts.pending > 0) {
       lines.push(`  inspect_next: ${formatShellCommand(summary.commands.nextResultInspection)}`);
@@ -10584,9 +10586,11 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     }
     if (summary.results.counts.reviewed > 0) {
       lines.push(`  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`);
+      lines.push(`  reviewed_result_commits: ${formatShellCommand(summary.commands.reviewedResultCommitView)}`);
     }
     if (summary.results.counts.skipped > 0) {
       lines.push(`  inspect_skipped: ${formatShellCommand(summary.commands.skippedResultInspections)}`);
+      lines.push(`  skipped_result_commits: ${formatShellCommand(summary.commands.skippedResultCommitView)}`);
     }
     for (const step of summary.results.inspection.nextSteps) {
       lines.push(
@@ -10607,8 +10611,11 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     lines.push(
       `result_inspection: none (reviewed=${summary.results.counts.reviewed} skipped=${summary.results.counts.skipped})`,
       `  inspect_all: ${formatShellCommand(summary.commands.resultInspections)}`,
+      `  result_commits: ${formatShellCommand(summary.commands.resultCommitView)}`,
       `  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`,
+      `  reviewed_result_commits: ${formatShellCommand(summary.commands.reviewedResultCommitView)}`,
       `  inspect_skipped: ${formatShellCommand(summary.commands.skippedResultInspections)}`,
+      `  skipped_result_commits: ${formatShellCommand(summary.commands.skippedResultCommitView)}`,
     );
   }
   lines.push(
@@ -10817,18 +10824,22 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: step.commands.recordSkipped });
   }
   commands.push({ command: summary.commands.resultInspections });
+  commands.push({ command: summary.commands.resultCommitView });
   if (summary.results.counts.pending > 0) {
     commands.push({ command: summary.commands.nextResultInspection });
     commands.push({ command: summary.commands.nextResultReview });
     commands.push({ command: summary.commands.recordNextReviewed });
     commands.push({ command: summary.commands.recordNextSkipped });
     commands.push({ command: summary.commands.pendingResultInspections });
+    commands.push({ command: summary.commands.pendingResultCommitView });
   }
   if (summary.results.counts.reviewed > 0) {
     commands.push({ command: summary.commands.reviewedResultInspections });
+    commands.push({ command: summary.commands.reviewedResultCommitView });
   }
   if (summary.results.counts.skipped > 0) {
     commands.push({ command: summary.commands.skippedResultInspections });
+    commands.push({ command: summary.commands.skippedResultCommitView });
   }
   if (summary.results.reviews.count > 0) {
     commands.push({ command: summary.commands.latestResultReviews });
@@ -11373,13 +11384,17 @@ function summarizeWorkerSessionControlPlaneStatus(
     tickDryRun: string[];
     timelineSummary: string[];
     resultInspections: string[];
+    resultCommitView: string[];
     nextResultInspection: string[];
     nextResultReview: string[];
     recordNextReviewed: string[];
     recordNextSkipped: string[];
     pendingResultInspections: string[];
+    pendingResultCommitView: string[];
     reviewedResultInspections: string[];
+    reviewedResultCommitView: string[];
     skippedResultInspections: string[];
+    skippedResultCommitView: string[];
     latestResultReviews: string[];
     failedResultReviewAttempts: string[];
     branchRecoveryExecutions: string[];
@@ -11509,13 +11524,17 @@ function summarizeWorkerSessionControlPlaneStatus(
       tickDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-tick", status.session, "--server", "--dry-run"],
       timelineSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server", "--summary"],
       resultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server"],
+      resultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--result-commits"],
       nextResultInspection: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--next"],
       nextResultReview: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server"],
       recordNextReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-reviewed"],
       recordNextSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped"],
       pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
+      pendingResultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending", "--result-commits"],
       reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
+      reviewedResultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed", "--result-commits"],
       skippedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped"],
+      skippedResultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped", "--result-commits"],
       latestResultReviews: ["npm", "run", "cli", "--", "runs", "session-result-reviews", status.session, "--server", "--latest"],
       failedResultReviewAttempts: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server",

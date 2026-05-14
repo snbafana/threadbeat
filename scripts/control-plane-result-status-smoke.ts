@@ -56,6 +56,8 @@ try {
   const reviewCommand = `npm run cli -- runs review ${run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
   const nextResultInspectionCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --next`;
   const nextResultReviewCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server`;
+  const resultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --result-commits`;
+  const pendingResultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`;
   const recordNextReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed`;
   const recordNextSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped`;
   const latestResultReviewsCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --latest`;
@@ -71,6 +73,8 @@ try {
     commands: {
       nextResultInspection: string[];
       nextResultReview: string[];
+      resultCommitView: string[];
+      pendingResultCommitView: string[];
       recordNextReviewed: string[];
       recordNextSkipped: string[];
       latestResultReviews: string[];
@@ -108,6 +112,8 @@ try {
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.recordSkipped.join(" "), recordScopedSkippedCommand);
   assert.equal(summary.commands.nextResultInspection.join(" "), nextResultInspectionCommand);
   assert.equal(summary.commands.nextResultReview.join(" "), nextResultReviewCommand);
+  assert.equal(summary.commands.resultCommitView.join(" "), resultCommitViewCommand);
+  assert.equal(summary.commands.pendingResultCommitView.join(" "), pendingResultCommitViewCommand);
   assert.equal(summary.commands.recordNextReviewed.join(" "), recordNextReviewedCommand);
   assert.equal(summary.commands.recordNextSkipped.join(" "), recordNextSkippedCommand);
   assert.equal(summary.commands.latestResultReviews.join(" "), latestResultReviewsCommand);
@@ -129,6 +135,8 @@ try {
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordScopedSkippedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === nextResultInspectionCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === nextResultReviewCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === resultCommitViewCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === pendingResultCommitViewCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordNextReviewedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordNextSkippedCommand));
 
@@ -142,6 +150,8 @@ try {
     "text",
   ]);
   assert.match(pendingStatusText, new RegExp(`inspect_next: ${nextResultInspectionCommand}`));
+  assert.match(pendingStatusText, new RegExp(`result_commits: ${resultCommitViewCommand}`));
+  assert.match(pendingStatusText, new RegExp(`pending_result_commits: ${pendingResultCommitViewCommand}`));
   assert.match(pendingStatusText, new RegExp(`review_next: ${nextResultReviewCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_reviewed: ${recordNextReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_skipped: ${recordNextSkippedCommand}`));
