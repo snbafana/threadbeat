@@ -4556,20 +4556,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
         const summary = summarizeWorkerSessionControlPlaneStatus(status);
         const observedAt = new Date().toISOString();
-        const actionReason = workerSessionControlPlaneWatchActionReason(summary);
+        const action = workerSessionControlPlaneWatchAction(summary);
         const untilAction = options["until-action"] === "1"
           ? {
-              done: actionReason !== null,
-              reason: actionReason,
+              done: action !== null,
+              reason: action?.reason ?? null,
               poll: polls + 1,
               maxPolls,
+              command: action?.command ?? null,
+              dryRunCommand: action?.dryRunCommand ?? null,
             }
           : null;
         if (outputFormat === "text") {
-          console.log([
-            `control-plane status watch poll=${polls + 1} observed_at=${observedAt}${untilAction ? ` until_action=${actionReason ?? "waiting"}` : ""}`,
+          const lines = [
+            `control-plane status watch poll=${polls + 1} observed_at=${observedAt}${untilAction ? ` until_action=${action?.reason ?? "waiting"}` : ""}`,
+            ...(untilAction?.command ? [`control-plane status watch command: ${formatShellCommand(untilAction.command)}`] : []),
+            ...(untilAction?.dryRunCommand ? [`control-plane status watch dry_run: ${formatShellCommand(untilAction.dryRunCommand)}`] : []),
             ...formatWorkerSessionControlPlaneStatusSummaryText(summary),
-          ].join("\n"));
+          ];
+          console.log(lines.join("\n"));
         } else if (options["commands-only"] === "1") {
           console.log(JSON.stringify({
             ok: true,
@@ -9702,14 +9707,27 @@ function printWorkerSessionControlPlaneStatusSummaryText(
   console.log(formatWorkerSessionControlPlaneStatusSummaryText(summary).join("\n"));
 }
 
-function workerSessionControlPlaneWatchActionReason(
+function workerSessionControlPlaneWatchAction(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
-): string | null {
+): {
+  reason: string;
+  command: string[];
+  dryRunCommand: string[] | null;
+} | null {
   if (summary.nextRecovery) {
-    return `${summary.nextRecovery.kind}:${summary.nextRecovery.action}`;
+    return {
+      reason: `${summary.nextRecovery.kind}:${summary.nextRecovery.action}`,
+      command: summary.nextRecovery.command,
+      dryRunCommand: summary.nextRecovery.dryRunCommand,
+    };
   }
-  if (summary.results.inspection.count > 0) {
-    return "result_inspection:pending_result_commit";
+  const resultInspection = summary.results.inspection.nextSteps[0];
+  if (resultInspection) {
+    return {
+      reason: "result_inspection:pending_result_commit",
+      command: resultInspection.commands.inspectResult,
+      dryRunCommand: null,
+    };
   }
   return null;
 }

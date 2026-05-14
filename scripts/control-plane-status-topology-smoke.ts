@@ -144,11 +144,12 @@ try {
   ]);
   const watchedUntilActionEmptyLines = watchedUntilActionEmpty.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
     poll: number;
-    untilAction: { done: boolean; reason: string | null };
+    untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
   });
   assert.equal(watchedUntilActionEmptyLines.length, 2);
   assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.done, false);
   assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.reason, null);
+  assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.command, null);
   const watchedText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -433,12 +434,14 @@ try {
   ]);
   const watchedUntilActionStoppedLines = watchedUntilActionStopped.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
     poll: number;
-    untilAction: { done: boolean; reason: string | null };
+    untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
   });
   assert.equal(watchedUntilActionStoppedLines.length, 1);
   assert.equal(watchedUntilActionStoppedLines[0]?.poll, 1);
   assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.done, true);
   assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.reason, "control_plane_action:restart_control_plane_advance_worker");
+  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server"]);
+  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.dryRunCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
