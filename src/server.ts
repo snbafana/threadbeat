@@ -4087,6 +4087,22 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
   const selected = objectRecord(record.selected);
   const safety = objectRecord(record.executionSafety);
   const detailCommand = record.detailCommand ?? null;
+  const alertSurface = stringRecordField(alert, "surface");
+  const command = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--advance",
+    record.advanceId,
+    ...(detailCommand === "status_watch_execute_action" ? ["--status-watch-executions"] : []),
+    ...(alertSurface ? ["--alert-surface", alertSurface] : []),
+    ...(detailCommand && detailCommand !== "status_watch_execute_action" ? ["--detail-command", detailCommand] : []),
+  ];
   return {
     advanceId: record.advanceId,
     observedAt: record.observedAt,
@@ -4101,21 +4117,7 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
     blocked: booleanRecordField(safety, "blocked"),
     mutating: booleanRecordField(safety, "mutating"),
     confirmed: booleanRecordField(safety, "confirmed"),
-    command: [
-      "npm",
-      "run",
-      "cli",
-      "--",
-      "runs",
-      "session-control-plane-advances",
-      sessionName,
-      "--server",
-      "--advance",
-      record.advanceId,
-      "--alert-surface",
-      "worker_recovery",
-      ...(detailCommand ? ["--detail-command", detailCommand] : []),
-    ],
+    command,
   };
 };
 

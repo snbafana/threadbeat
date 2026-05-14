@@ -9957,6 +9957,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    action: ${action.action}`,
         `    reason: ${action.reason}`,
         `    count: ${action.count}`,
+        `    advance: ${action.advanceId ?? ""}`,
         `    run: ${action.runId ?? ""}`,
         `    worker: ${action.workerId ?? ""}`,
         `    command: ${formatShellCommand(action.command)}`,
@@ -10504,6 +10505,17 @@ function selectWorkerSessionControlPlaneNextActions(
   status: WorkerSessionControlPlaneStatusResponse,
 ): Array<WorkerSessionControlPlaneAdvanceAction> {
   const nextActions: Array<WorkerSessionControlPlaneAdvanceAction> = [];
+  const failedStatusWatchExecution = status.recovery.statusWatchExecutions.recent.find((attempt) => attempt.failed);
+  if (failedStatusWatchExecution) {
+    nextActions.push({
+      surface: "status_watch",
+      action: "inspect_failed_status_watch_execution",
+      reason: "failed_status_watch_execution",
+      count: status.recovery.statusWatchExecutions.attempts.failed,
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-alert", status.session, "--server", "--surface", "status_watch"],
+      advanceId: failedStatusWatchExecution.advanceId,
+    });
+  }
   const staleRun = status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run");
   if (staleRun) {
     nextActions.push({
@@ -10592,6 +10604,17 @@ function selectWorkerSessionControlPlaneNextRecovery(
   }
   const nextAction = nextActions[0];
   if (!nextAction) return null;
+  if (nextAction.surface === "status_watch") {
+    return {
+      kind: "control_plane_action",
+      surface: nextAction.surface,
+      action: nextAction.action,
+      reason: nextAction.reason,
+      count: nextAction.count,
+      command: nextAction.command,
+      dryRunCommand: nextAction.command,
+    };
+  }
   return {
     kind: "control_plane_action",
     surface: nextAction.surface,
