@@ -196,6 +196,22 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
       command: string[];
     }>;
   };
+  incompleteLoops: {
+    count: number;
+    recent: Array<{
+      loopAdvanceId: string;
+      steps: number;
+      dryRun: boolean;
+      lastStepIndex: number | null;
+      lastObservedAt: string;
+      lastCompletedAt: string;
+      maxSteps: number | null;
+      intervalMs: number | null;
+      stoppedReason: string | null;
+      resumeCommand: string[];
+      inspectLastStepCommand: string[];
+    }>;
+  };
 };
 
 export const buildServer = async (settings: Settings): Promise<AppParts> => {
@@ -4275,6 +4291,10 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
   loopStepRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
   lines: number,
 ): WorkerSessionControlPlaneRecoverNextHistoryStatus => {
+  const completedLoopAdvanceIds = new Set(records
+    .filter((record) => record.detailCommand === "recover_next_loop")
+    .map((record) => record.advanceId));
+  const incompleteLoops = summarizeIncompleteRecoverNextLoops(sessionName, loopStepRecords, completedLoopAdvanceIds, lines);
   return {
     attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(records),
     recent: records.slice(0, lines).map((record) => {
@@ -4329,6 +4349,59 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
         };
       }),
     },
+    incompleteLoops,
+  };
+};
+
+const summarizeIncompleteRecoverNextLoops = (
+  sessionName: string,
+  loopStepRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  completedLoopAdvanceIds: Set<string>,
+  lines: number,
+): WorkerSessionControlPlaneRecoverNextHistoryStatus["incompleteLoops"] => {
+  const grouped = new Map<string, Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>>();
+  for (const record of loopStepRecords) {
+    const recovery = objectRecord(record.recovery);
+    const loopAdvanceId = stringRecordField(recovery, "loopAdvanceId");
+    if (!loopAdvanceId || completedLoopAdvanceIds.has(loopAdvanceId)) continue;
+    const records = grouped.get(loopAdvanceId) ?? [];
+    records.push(record);
+    grouped.set(loopAdvanceId, records);
+  }
+  const summaries = [...grouped.entries()].map(([loopAdvanceId, records]) => {
+    const sorted = [...records].sort((left, right) => {
+      const leftIndex = numberRecordField(objectRecord(left.recovery), "stepIndex") ?? 0;
+      const rightIndex = numberRecordField(objectRecord(right.recovery), "stepIndex") ?? 0;
+      return rightIndex - leftIndex || right.observedAt.localeCompare(left.observedAt);
+    });
+    const last = sorted[0]!;
+    const recovery = objectRecord(last.recovery);
+    const dryRun = sorted.every((record) => record.dryRun);
+    const maxSteps = numberRecordField(recovery, "maxSteps");
+    const intervalMs = numberRecordField(recovery, "intervalMs");
+    return {
+      loopAdvanceId,
+      steps: records.length,
+      dryRun,
+      lastStepIndex: numberRecordField(recovery, "stepIndex"),
+      lastObservedAt: last.observedAt,
+      lastCompletedAt: last.completedAt,
+      maxSteps,
+      intervalMs,
+      stoppedReason: stringRecordField(recovery, "stoppedReason"),
+      resumeCommand: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", sessionName, "--server",
+        "--until-empty", "--resume-loop", loopAdvanceId,
+        "--max-steps", String(maxSteps ?? 10),
+        "--interval-ms", String(intervalMs ?? 2000),
+        dryRun ? "--dry-run" : "--confirm",
+      ],
+      inspectLastStepCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", last.advanceId],
+    };
+  }).sort((left, right) => right.lastObservedAt.localeCompare(left.lastObservedAt));
+  return {
+    count: summaries.length,
+    recent: summaries.slice(0, lines),
   };
 };
 

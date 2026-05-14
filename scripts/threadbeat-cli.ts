@@ -8835,6 +8835,22 @@ type WorkerSessionControlPlaneStatusResponse = {
           command: string[];
         }>;
       };
+      incompleteLoops: {
+        count: number;
+        recent: Array<{
+          loopAdvanceId: string;
+          steps: number;
+          dryRun: boolean;
+          lastStepIndex: number | null;
+          lastObservedAt: string;
+          lastCompletedAt: string;
+          maxSteps: number | null;
+          intervalMs: number | null;
+          stoppedReason: string | null;
+          resumeCommand: string[];
+          inspectLastStepCommand: string[];
+        }>;
+      };
     };
     statusWatchExecutions: {
       attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
@@ -10061,6 +10077,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `pending_confirmations: ${summary.queues.controlPlaneConfirmations.summary.commands}`,
     `recover_next_attempts: total=${summary.recovery.recoverNext.attempts.total} dry_run=${summary.recovery.recoverNext.attempts.dryRun} executed=${summary.recovery.recoverNext.attempts.executed} failed=${summary.recovery.recoverNext.attempts.failed}`,
     `recover_next_loop_steps: total=${summary.recovery.recoverNext.loopSteps.attempts.total} dry_run=${summary.recovery.recoverNext.loopSteps.attempts.dryRun} executed=${summary.recovery.recoverNext.loopSteps.attempts.executed} failed=${summary.recovery.recoverNext.loopSteps.attempts.failed}`,
+    `recover_next_incomplete_loops: ${summary.recovery.recoverNext.incompleteLoops.count}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
@@ -10300,6 +10317,22 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   }
+  if (summary.recovery.recoverNext.incompleteLoops.recent.length > 0) {
+    lines.push("incomplete_recover_next_loops:");
+    for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
+      lines.push(
+        `  - loop: ${loop.loopAdvanceId}`,
+        `    steps: ${loop.steps}`,
+        `    last_step: ${loop.lastStepIndex ?? ""}`,
+        `    dry_run: ${loop.dryRun}`,
+        `    max_steps: ${loop.maxSteps ?? ""}`,
+        `    interval_ms: ${loop.intervalMs ?? ""}`,
+        `    stopped_reason: ${loop.stoppedReason ?? ""}`,
+        `    resume: ${formatShellCommand(loop.resumeCommand)}`,
+        `    inspect_last_step: ${formatShellCommand(loop.inspectLastStepCommand)}`,
+      );
+    }
+  }
   if (summary.recovery.statusWatchExecutions.recent.length > 0) {
     lines.push("recent_status_watch_executions:");
     for (const attempt of summary.recovery.statusWatchExecutions.recent) {
@@ -10453,6 +10486,10 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   for (const step of summary.recovery.recoverNext.loopSteps.recent) {
     commands.push({ command: step.command });
+  }
+  for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
+    commands.push({ command: loop.resumeCommand });
+    commands.push({ command: loop.inspectLastStepCommand });
   }
   if (summary.recovery.statusWatchExecutions.attempts.total > 0) {
     commands.push({ command: summary.commands.statusWatchExecutions });

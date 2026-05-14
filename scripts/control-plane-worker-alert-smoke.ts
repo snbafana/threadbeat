@@ -605,6 +605,83 @@ try {
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recentRecoverLoopStep?.advanceId}`)));
 
   await fs.rm(recoverNextLoopDryRun.advancePath, { force: true });
+  const statusAfterRecoverNextInterruption = await cliJson<{
+    recovery: {
+      recoverNext: {
+        incompleteLoops: {
+          count: number;
+          recent: Array<{
+            loopAdvanceId: string;
+            steps: number;
+            dryRun: boolean;
+            lastStepIndex: number | null;
+            maxSteps: number | null;
+            intervalMs: number | null;
+            resumeCommand: string[];
+            inspectLastStepCommand: string[];
+          }>;
+        };
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusAfterRecoverNextInterruption.recovery.recoverNext.incompleteLoops.count, 1);
+  const interruptedLoop = statusAfterRecoverNextInterruption.recovery.recoverNext.incompleteLoops.recent[0];
+  assert.equal(interruptedLoop?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(interruptedLoop?.steps, 1);
+  assert.equal(interruptedLoop?.dryRun, true);
+  assert.equal(interruptedLoop?.lastStepIndex, 1);
+  assert.equal(interruptedLoop?.maxSteps, 3);
+  assert.equal(interruptedLoop?.intervalMs, 0);
+  assert.deepEqual(interruptedLoop?.resumeCommand, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--until-empty",
+    "--resume-loop",
+    recoverNextLoopDryRun.advanceId,
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+    "--dry-run",
+  ]);
+  assert.deepEqual(interruptedLoop?.inspectLastStepCommand, recentRecoverLoopStep?.command);
+  const interruptedSummaryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(interruptedSummaryText, /recover_next_incomplete_loops: 1/);
+  assert.match(interruptedSummaryText, /incomplete_recover_next_loops:/);
+  assert.match(interruptedSummaryText, new RegExp(`resume: npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --until-empty --resume-loop ${recoverNextLoopDryRun.advanceId}`));
+  const interruptedSummaryShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  const interruptedSummaryShellLines = interruptedSummaryShell.trim().split("\n").filter(Boolean);
+  assert.ok(interruptedSummaryShellLines.some((line) => line.includes(`--resume-loop ${recoverNextLoopDryRun.advanceId}`)));
+
   const resumedRecoverNextLoopDryRun = await cliJson<{
     ok: boolean;
     session: string;
@@ -642,7 +719,12 @@ try {
   assert.equal(resumedRecoverNextLoopDryRun.cycles[0]?.selected?.kind, "confirmation_queue");
   assert.equal(resumedRecoverNextLoopDryRun.cycles[0]?.selected?.action, "drain_control_plane_confirmations");
   const statusAfterRecoverNextResume = await cliJson<{
-    recovery: { recoverNext: { loopSteps: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; loopAdvanceId: string | null; stepIndex: number | null }> } } };
+    recovery: {
+      recoverNext: {
+        loopSteps: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; loopAdvanceId: string | null; stepIndex: number | null }> };
+        incompleteLoops: { count: number };
+      };
+    };
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -654,6 +736,7 @@ try {
   assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.attempts.dryRun, 2);
   assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.attempts.executed, 2);
   assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.attempts.failed, 0);
+  assert.equal(statusAfterRecoverNextResume.recovery.recoverNext.incompleteLoops.count, 0);
   assert.ok(statusAfterRecoverNextResume.recovery.recoverNext.loopSteps.recent.some((step) => (
     step.loopAdvanceId === recoverNextLoopDryRun.advanceId
       && step.stepIndex === 2
