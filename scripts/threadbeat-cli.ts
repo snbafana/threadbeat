@@ -9156,6 +9156,29 @@ type WorkerSessionControlPlaneWorkerLatestResult = {
   detailCommand?: string;
 };
 
+type WorkerSessionControlPlaneRecoveryAttemptResponse = {
+  advanceId: string;
+  observedAt: string;
+  completedAt: string;
+  detailCommand: string | null;
+  workerId: string | null;
+  action: string | null;
+  reason: string | null;
+  selectedSurface: string | null;
+  selectedAction: string | null;
+  selectedReason: string | null;
+  selectedCommand: string[] | null;
+  executedCommand: string[] | null;
+  executedExitCode: number | null;
+  dryRun: boolean;
+  executed: boolean;
+  failed: boolean;
+  blocked: boolean | null;
+  mutating: boolean | null;
+  confirmed: boolean | null;
+  command: string[];
+};
+
 type WorkerSessionControlPlaneStatusResponse = {
   ok: true;
   session: string;
@@ -9405,6 +9428,11 @@ type WorkerSessionControlPlaneStatusResponse = {
           executedExitCode: number | null;
           command: string[];
         }>;
+      };
+      resumeAttempts: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+        recent: WorkerSessionControlPlaneRecoveryAttemptResponse[];
+        failedRecent: WorkerSessionControlPlaneRecoveryAttemptResponse[];
       };
       incompleteLoops: {
         count: number;
@@ -11089,6 +11117,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `pending_confirmations: ${summary.queues.controlPlaneConfirmations.summary.commands}`,
     `recover_next_attempts: total=${summary.recovery.recoverNext.attempts.total} dry_run=${summary.recovery.recoverNext.attempts.dryRun} executed=${summary.recovery.recoverNext.attempts.executed} failed=${summary.recovery.recoverNext.attempts.failed}`,
     `recover_next_loop_steps: total=${summary.recovery.recoverNext.loopSteps.attempts.total} dry_run=${summary.recovery.recoverNext.loopSteps.attempts.dryRun} executed=${summary.recovery.recoverNext.loopSteps.attempts.executed} failed=${summary.recovery.recoverNext.loopSteps.attempts.failed}`,
+    `recover_next_resume_attempts: total=${summary.recovery.recoverNext.resumeAttempts.attempts.total} dry_run=${summary.recovery.recoverNext.resumeAttempts.attempts.dryRun} executed=${summary.recovery.recoverNext.resumeAttempts.attempts.executed} failed=${summary.recovery.recoverNext.resumeAttempts.attempts.failed}`,
     `recover_next_incomplete_loops: ${summary.recovery.recoverNext.incompleteLoops.count}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
@@ -11349,6 +11378,24 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   }
+  if (summary.recovery.recoverNext.resumeAttempts.recent.length > 0) {
+    lines.push("recent_recover_next_resume_attempts:");
+    for (const attempt of summary.recovery.recoverNext.resumeAttempts.recent) {
+      lines.push(
+        `  - advance: ${attempt.advanceId}`,
+        `    detail_command: ${attempt.detailCommand ?? ""}`,
+        `    dry_run: ${attempt.dryRun}`,
+        `    executed: ${attempt.executed}`,
+        `    failed: ${attempt.failed}`,
+        `    selected: ${attempt.selectedSurface ?? ""} ${attempt.selectedAction ?? ""}`.trimEnd(),
+        `    reason: ${attempt.selectedReason ?? ""}`,
+        `    selected_command: ${formatShellCommand(attempt.selectedCommand ?? [])}`,
+        `    executed_exit_code: ${attempt.executedExitCode ?? ""}`,
+        `    executed_command: ${formatShellCommand(attempt.executedCommand ?? [])}`,
+        `    inspect: ${formatShellCommand(attempt.command)}`,
+      );
+    }
+  }
   if (summary.recovery.recoverNext.incompleteLoops.recent.length > 0) {
     lines.push("incomplete_recover_next_loops:");
     for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
@@ -11547,6 +11594,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   for (const step of summary.recovery.recoverNext.loopSteps.recent) {
     commands.push({ command: step.command });
+  }
+  for (const attempt of summary.recovery.recoverNext.resumeAttempts.recent) {
+    commands.push({ command: attempt.command });
   }
   for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
     commands.push({ command: loop.resumeCommand });

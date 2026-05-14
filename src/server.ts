@@ -203,6 +203,11 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
       command: string[];
     }>;
   };
+  resumeAttempts: {
+    attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
+    recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+    failedRecent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+  };
   incompleteLoops: {
     count: number;
     recent: Array<{
@@ -4065,6 +4070,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneConfirmationAdvances,
     recoverNextAttempts,
     recoverNextLoopStepAttempts,
+    recoverNextResumeAttempts,
     statusWatchExecutionAttempts,
     statusWatchAcknowledgementAttempts,
     workerReconciliations,
@@ -4103,6 +4109,10 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
       limit: Number.MAX_SAFE_INTEGER,
       detailCommands: ["recover_next_loop_step"],
+    }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      detailCommands: ["resume_recover_next_loop"],
     }),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
       limit: Number.MAX_SAFE_INTEGER,
@@ -4174,7 +4184,7 @@ const readWorkerSessionControlPlaneStatus = async (
       recentAttempts: controlPlaneRecoveryAttempts
         .slice(0, lines)
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
-      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(name, recoverNextAttempts, recoverNextLoopStepAttempts, lines),
+      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(name, recoverNextAttempts, recoverNextLoopStepAttempts, recoverNextResumeAttempts, lines),
       statusWatchExecutions: {
         attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(statusWatchExecutionAttempts),
         recent: statusWatchExecutionAttempts
@@ -4437,6 +4447,7 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
   sessionName: string,
   records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
   loopStepRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  resumeRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
   lines: number,
 ): WorkerSessionControlPlaneRecoverNextHistoryStatus => {
   const completedLoopAdvanceIds = new Set(records
@@ -4496,6 +4507,16 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
           command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", record.advanceId],
         };
       }),
+    },
+    resumeAttempts: {
+      attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(resumeRecords),
+      recent: resumeRecords
+        .slice(0, lines)
+        .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, record)),
+      failedRecent: resumeRecords
+        .filter((record) => controlPlaneAdvanceExecutionFailed(record.executed))
+        .slice(0, lines)
+        .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, record)),
     },
     incompleteLoops,
   };
