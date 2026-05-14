@@ -115,6 +115,50 @@ try {
   assert.match(pendingStatusText, new RegExp(`inspect_next: ${nextResultInspectionCommand}`));
   assert.match(pendingStatusText, new RegExp(`latest: ${latestResultReviewsCommand}`));
 
+  const reviewNext = await cliJson<{
+    count: number;
+    filter: { reviewStates: string[]; limit: number };
+    resultCommits: Array<{ runId: string; reviewState: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(reviewNext.count, 1);
+  assert.deepEqual(reviewNext.filter.reviewStates, ["pending"]);
+  assert.equal(reviewNext.filter.limit, 1);
+  assert.equal(reviewNext.resultCommits[0]?.runId, run.id);
+  assert.equal(reviewNext.resultCommits[0]?.reviewState, "pending");
+
+  const reviewNextText = await cliText(baseUrl, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(reviewNextText, /result_review_next:/);
+  assert.match(reviewNextText, /review_state=pending limit=1/);
+  assert.match(reviewNextText, new RegExp(`run: ${run.id}`));
+  assert.match(reviewNextText, new RegExp(`review: ${reviewCommand}`));
+  assert.match(reviewNextText, new RegExp(`record_reviewed: ${recordReviewedCommand}`));
+  assert.match(reviewNextText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
+
+  const reviewNextShell = await cliText(baseUrl, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(reviewNextShell, new RegExp(reviewCommand));
+  assert.match(reviewNextShell, new RegExp(recordReviewedCommand));
+  assert.match(reviewNextShell, new RegExp(recordSkippedCommand));
+
   const shellSummary = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",

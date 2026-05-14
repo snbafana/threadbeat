@@ -1023,7 +1023,10 @@ result commits exist, plus reviewed/skipped inspection commands and the latest
 review audit command when those review states are present. Use
 `runs session-result-reviews <name> --server --latest` to collapse the append-only
 review log to the current durable decision per run/result commit; add
-`--format text` for a readable CLI audit. Add
+`--format text` for a readable CLI audit. Use
+`runs session-result-review-next <name> --server --format text` to inspect the
+next pending result commit and its exact branch-native review/record commands.
+Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving
 the exact branch name and result commit on each command row. Add
