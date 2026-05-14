@@ -140,6 +140,33 @@ try {
   assert.ok((profile.current?.plan.blocked ?? 0) + (profile.current?.plan.existing ?? 0) === 2);
   assert.equal(profile.commands.confirm.join(" "), `npm run cli -- runs ensure-control-plane-worker-bundle ${sessionName} --server --from-profile --confirm --lines 1`);
 
+  const profileList = await cliJson<{
+    profileCount: number;
+    summary: { sessions: number; expected: number; actionable: number; blocked: number; existing: number; passed: boolean | null };
+    bundles: Array<{ session: string; exists: boolean; current: { plan: { expected: number; actionable: number; blocked: number; existing: number } } | null }>;
+    commands: { recoverDryRun: string[]; recoverConfirm: string[]; recoverLoopDryRun: string[]; list: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(profileList.profileCount, 1);
+  assert.equal(profileList.summary.sessions, 1);
+  assert.equal(profileList.summary.expected, 2);
+  assert.equal(profileList.summary.actionable, 0);
+  assert.ok(profileList.summary.blocked + profileList.summary.existing === 2);
+  assert.equal(profileList.bundles[0]?.session, sessionName);
+  assert.equal(profileList.bundles[0]?.exists, true);
+  assert.equal(profileList.bundles[0]?.current?.plan.expected, 2);
+  assert.equal(profileList.commands.list.join(" "), `npm run cli -- runs session-control-plane-worker-bundles --server --session ${sessionName} --lines 1`);
+  assert.equal(profileList.commands.recoverDryRun.join(" "), `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --dry-run`);
+  assert.equal(profileList.commands.recoverConfirm.join(" "), `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --confirm`);
+  assert.equal(profileList.commands.recoverLoopDryRun.join(" "), `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --loop --dry-run`);
+
   const fromProfile = await cliJson<{
     dryRun: boolean;
     desired: { topologyWorkerId: string; includeResultReviewWorker: boolean; resultReviewWorkerId: string; reviewAction: string };
@@ -268,6 +295,21 @@ try {
   assert.match(profileText, /control_plane_worker_bundle_profile:/);
   assert.match(profileText, /exists: true/);
   assert.match(profileText, /plan: expected=2 actionable=0 blocked=\d+ existing=\d+/);
+
+  const profileListText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--format",
+    "text",
+    "--lines",
+    "1",
+  ]);
+  assert.match(profileListText, /control_plane_worker_bundle_profiles:/);
+  assert.match(profileListText, /profile_count: 1/);
+  assert.match(profileListText, new RegExp(`- ${sessionName} exists=true`));
 
   const recoveryText = await cliText(baseUrl, [
     "runs",

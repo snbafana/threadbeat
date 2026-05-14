@@ -834,6 +834,17 @@ settings. Worker inspection includes a persisted `latestResult` summary for
 completed workers, including the confirmation drain stop reason when available.
 Restarted workers keep log history but persist a fresh stdout boundary so the
 new completion result cannot inherit JSON from the previous process attempt.
+Use `runs ensure-control-plane-worker-bundle <name> --server --save-profile`
+to save the desired topology/result-review worker bundle for a session, then
+`runs session-control-plane-worker-bundle <name> --server` to inspect that one
+saved profile. Use `runs session-control-plane-worker-bundles --server` for a
+read-only fleet listing of every saved bundle profile, its current actionable,
+blocked, and existing worker counts, and copyable recovery commands. Add
+`--session <name>` to filter that list to one saved session without requiring a
+mutating recovery pass. Use `runs recover-control-plane-worker-bundles --server
+--dry-run` to preview restarting missing saved bundle workers, or add
+`--confirm` to recover them; add `--loop --max-polls <n>` for a bounded
+foreground recovery poll.
 `runs session-control-plane-status <name> --server`
 keeps the aggregate `workers.controlPlaneAdvance` totals and also breaks them
 out by `advance_loop` and `confirmation_drain` mode. It also includes

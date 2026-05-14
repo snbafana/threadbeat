@@ -4804,6 +4804,26 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-worker-bundles") {
+    const options = parseOptions(args);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-worker-bundles requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-worker-bundles --format must be json or text");
+    }
+    const result = await inspectControlPlaneWorkerBundleProfiles({
+      sessionName: options.session,
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    });
+    if (outputFormat === "text") {
+      printControlPlaneWorkerBundleProfilesText(result);
+    } else {
+      await printJson(result);
+    }
+    return;
+  }
   if (subcommandName === "recover-control-plane-worker-bundles") {
     const options = parseOptions(args);
     const outputFormat = options.format ?? "json";
@@ -14966,6 +14986,64 @@ async function inspectControlPlaneWorkerBundleProfile(
   };
 }
 
+async function inspectControlPlaneWorkerBundleProfiles(options: {
+  sessionName?: string;
+  lines: number;
+}) {
+  const profiles = await listControlPlaneWorkerBundleProfiles(options.sessionName);
+  const bundles = [];
+  for (const profile of profiles) {
+    bundles.push(await inspectControlPlaneWorkerBundleProfile(profile.session, { lines: options.lines }));
+  }
+  const actionable = bundles.reduce((total, bundle) => total + (bundle.current?.plan.actionable ?? 0), 0);
+  const blocked = bundles.reduce((total, bundle) => total + (bundle.current?.plan.blocked ?? 0), 0);
+  const existing = bundles.reduce((total, bundle) => total + (bundle.current?.plan.existing ?? 0), 0);
+  const expected = bundles.reduce((total, bundle) => total + (bundle.current?.plan.expected ?? 0), 0);
+  return {
+    ok: true,
+    filter: {
+      session: options.sessionName ?? null,
+      lines: options.lines,
+    },
+    profileCount: bundles.length,
+    summary: {
+      sessions: bundles.length,
+      expected,
+      actionable,
+      blocked,
+      existing,
+      passed: bundles.length === 0 ? null : bundles.every((bundle) => bundle.current?.plan.blocked === 0),
+    },
+    bundles,
+    commands: {
+      recoverDryRun: [
+        "npm", "run", "cli", "--", "runs", "recover-control-plane-worker-bundles", "--server",
+        ...(options.sessionName ? ["--session", options.sessionName] : []),
+        "--lines", String(options.lines),
+        "--dry-run",
+      ],
+      recoverConfirm: [
+        "npm", "run", "cli", "--", "runs", "recover-control-plane-worker-bundles", "--server",
+        ...(options.sessionName ? ["--session", options.sessionName] : []),
+        "--lines", String(options.lines),
+        "--confirm",
+      ],
+      recoverLoopDryRun: [
+        "npm", "run", "cli", "--", "runs", "recover-control-plane-worker-bundles", "--server",
+        ...(options.sessionName ? ["--session", options.sessionName] : []),
+        "--lines", String(options.lines),
+        "--loop",
+        "--dry-run",
+      ],
+      list: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-worker-bundles", "--server",
+        ...(options.sessionName ? ["--session", options.sessionName] : []),
+        "--lines", String(options.lines),
+      ],
+    },
+  };
+}
+
 function controlPlaneWorkerBundleEnsureCommand(
   sessionName: string,
   step: Pick<ControlPlaneWorkerBundlePlanStep, "kind" | "workerId">,
@@ -15302,6 +15380,37 @@ function printControlPlaneWorkerBundleProfileText(
   lines.push(`    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`);
   lines.push(`    dry_run: ${formatShellCommand(response.commands.dryRun)}`);
   lines.push(`    confirm: ${formatShellCommand(response.commands.confirm)}`);
+  console.log(lines.join("\n"));
+}
+
+function printControlPlaneWorkerBundleProfilesText(
+  response: Awaited<ReturnType<typeof inspectControlPlaneWorkerBundleProfiles>>,
+): void {
+  const lines = [
+    "control_plane_worker_bundle_profiles:",
+    `  profile_count: ${response.profileCount}`,
+    `  filter: session=${response.filter.session ?? "all"} lines=${response.filter.lines}`,
+    `  summary: expected=${response.summary.expected} actionable=${response.summary.actionable} blocked=${response.summary.blocked} existing=${response.summary.existing} passed=${response.summary.passed ?? "pending"}`,
+    "  commands:",
+    `    list: ${formatShellCommand(response.commands.list)}`,
+    `    recover_dry_run: ${formatShellCommand(response.commands.recoverDryRun)}`,
+    `    recover_confirm: ${formatShellCommand(response.commands.recoverConfirm)}`,
+    `    recover_loop_dry_run: ${formatShellCommand(response.commands.recoverLoopDryRun)}`,
+  ];
+  if (response.bundles.length === 0) {
+    lines.push("  profiles: none");
+  } else {
+    lines.push("  profiles:");
+    for (const bundle of response.bundles) {
+      lines.push(`    - ${bundle.session} exists=${bundle.exists} path=${bundle.path}`);
+      if (bundle.current) {
+        lines.push(`      plan: expected=${bundle.current.plan.expected} actionable=${bundle.current.plan.actionable} blocked=${bundle.current.plan.blocked} existing=${bundle.current.plan.existing}`);
+      }
+      if (bundle.commands.confirm) {
+        lines.push(`      confirm: ${formatShellCommand(bundle.commands.confirm)}`);
+      }
+    }
+  }
   console.log(lines.join("\n"));
 }
 
@@ -19068,6 +19177,7 @@ Commands:
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs session-control-plane-worker-bundle <name> --server [--lines 20] [--format json|text]
+  runs session-control-plane-worker-bundles --server [--session name] [--lines 20] [--format json|text]
   runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--from-profile] [--save-profile] [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
   runs recover-control-plane-worker-bundles --server (--confirm|--dry-run) [--session name] [--loop --max-polls 60 --interval-ms 2000 --progress-json] [--lines 20] [--format json|text]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
