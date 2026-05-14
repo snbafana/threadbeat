@@ -4818,14 +4818,28 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (dryRun === confirm) {
       throw new Error("runs recover-control-plane-worker-bundles requires exactly one of --confirm or --dry-run");
     }
-    const result = await recoverControlPlaneWorkerBundleProfiles({
+    const recoverOptions = {
       sessionName: options.session,
       lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
       dryRun,
       confirm,
-    });
+      maxPolls: parsePositiveInteger(options["max-polls"] ?? "1", "--max-polls"),
+      intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+      loop: options.loop === "1",
+      progressJson: options["progress-json"] === "1",
+    };
+    if (!recoverOptions.loop && options["progress-json"] === "1") {
+      throw new Error("runs recover-control-plane-worker-bundles --progress-json requires --loop");
+    }
+    const result = recoverOptions.loop
+      ? await recoverControlPlaneWorkerBundleProfilesLoop(recoverOptions)
+      : await recoverControlPlaneWorkerBundleProfiles(recoverOptions);
     if (outputFormat === "text") {
-      printControlPlaneWorkerBundleRecoveryText(result);
+      if (recoverOptions.loop) {
+        printControlPlaneWorkerBundleRecoveryLoopText(result as Awaited<ReturnType<typeof recoverControlPlaneWorkerBundleProfilesLoop>>);
+      } else {
+        printControlPlaneWorkerBundleRecoveryText(result as Awaited<ReturnType<typeof recoverControlPlaneWorkerBundleProfiles>>);
+      }
     } else {
       await printJson(result);
     }
@@ -14811,6 +14825,107 @@ async function recoverControlPlaneWorkerBundleProfiles(options: {
   };
 }
 
+async function recoverControlPlaneWorkerBundleProfilesLoop(options: {
+  sessionName?: string;
+  lines: number;
+  dryRun: boolean;
+  confirm: boolean;
+  maxPolls: number;
+  intervalMs: number;
+  progressJson: boolean;
+}) {
+  const startedAt = new Date().toISOString();
+  const iterations = [];
+  let stoppedReason: "max_polls" | "failed" = "max_polls";
+  for (let poll = 1; poll <= options.maxPolls; poll += 1) {
+    const result = await recoverControlPlaneWorkerBundleProfiles(options);
+    iterations.push({
+      poll,
+      observedAt: result.startedAt,
+      completedAt: result.completedAt,
+      summary: result.summary,
+      result,
+    });
+    if (options.progressJson) {
+      await printJson(controlPlaneWorkerBundleRecoveryLoopProgress(options, startedAt, iterations, "running"));
+    }
+    if (result.summary.passed === false) {
+      stoppedReason = "failed";
+      break;
+    }
+    if (poll < options.maxPolls) {
+      await sleep(options.intervalMs);
+    }
+  }
+  return controlPlaneWorkerBundleRecoveryLoopProgress(options, startedAt, iterations, stoppedReason);
+}
+
+function controlPlaneWorkerBundleRecoveryLoopProgress(
+  options: {
+    sessionName?: string;
+    lines: number;
+    dryRun: boolean;
+    confirm: boolean;
+    maxPolls: number;
+    intervalMs: number;
+  },
+  startedAt: string,
+  iterations: Array<{
+    poll: number;
+    observedAt: string;
+    completedAt: string;
+    summary: Awaited<ReturnType<typeof recoverControlPlaneWorkerBundleProfiles>>["summary"];
+    result: Awaited<ReturnType<typeof recoverControlPlaneWorkerBundleProfiles>>;
+  }>,
+  stoppedReason: "running" | "max_polls" | "failed",
+) {
+  return {
+    ok: stoppedReason !== "failed",
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    loop: true,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    stoppedReason,
+    maxPolls: options.maxPolls,
+    intervalMs: options.intervalMs,
+    filter: {
+      session: options.sessionName ?? null,
+      lines: options.lines,
+    },
+    iterations,
+    summary: {
+      polls: iterations.length,
+      profileCount: iterations.at(-1)?.result.profileCount ?? 0,
+      planned: iterations.reduce((total, iteration) => total + iteration.summary.planned, 0),
+      actionable: iterations.reduce((total, iteration) => total + iteration.summary.actionable, 0),
+      blocked: iterations.reduce((total, iteration) => total + iteration.summary.blocked, 0),
+      executed: iterations.reduce((total, iteration) => total + iteration.summary.executed, 0),
+      passed: options.dryRun ? null : iterations.every((iteration) => iteration.summary.passed === true),
+    },
+    commands: {
+      dryRun: [
+        "npm", "run", "cli", "--", "runs", "recover-control-plane-worker-bundles", "--server",
+        ...(options.sessionName ? ["--session", options.sessionName] : []),
+        "--lines", String(options.lines),
+        "--max-polls", String(options.maxPolls),
+        "--interval-ms", String(options.intervalMs),
+        "--loop",
+        "--dry-run",
+      ],
+      confirm: [
+        "npm", "run", "cli", "--", "runs", "recover-control-plane-worker-bundles", "--server",
+        ...(options.sessionName ? ["--session", options.sessionName] : []),
+        "--lines", String(options.lines),
+        "--max-polls", String(options.maxPolls),
+        "--interval-ms", String(options.intervalMs),
+        "--loop",
+        "--confirm",
+      ],
+    },
+  };
+}
+
 async function inspectControlPlaneWorkerBundleProfile(
   sessionName: string,
   options: { lines: number },
@@ -15211,6 +15326,33 @@ function printControlPlaneWorkerBundleRecoveryText(
     for (const item of response.results) {
       lines.push(`    - ${item.session} planned=${item.result.plan.expected} actionable=${item.result.plan.actionable} blocked=${item.result.plan.blocked} executed=${item.result.executed.length} passed=${item.result.passed ?? "pending"}`);
       lines.push(`      path: ${item.path}`);
+    }
+  }
+  console.log(lines.join("\n"));
+}
+
+function printControlPlaneWorkerBundleRecoveryLoopText(
+  response: Awaited<ReturnType<typeof recoverControlPlaneWorkerBundleProfilesLoop>>,
+): void {
+  const lines = [
+    "control_plane_worker_bundle_recovery_loop:",
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  stopped_reason: ${response.stoppedReason}`,
+    `  polls: ${response.summary.polls}/${response.maxPolls}`,
+    `  interval_ms: ${response.intervalMs}`,
+    `  filter: session=${response.filter.session ?? "all"} lines=${response.filter.lines}`,
+    `  summary: profile_count=${response.summary.profileCount} planned=${response.summary.planned} actionable=${response.summary.actionable} blocked=${response.summary.blocked} executed=${response.summary.executed} passed=${response.summary.passed ?? "pending"}`,
+    "  commands:",
+    `    dry_run: ${formatShellCommand(response.commands.dryRun)}`,
+    `    confirm: ${formatShellCommand(response.commands.confirm)}`,
+  ];
+  if (response.iterations.length === 0) {
+    lines.push("  iterations: none");
+  } else {
+    lines.push("  iterations:");
+    for (const iteration of response.iterations) {
+      lines.push(`    - poll=${iteration.poll} planned=${iteration.summary.planned} actionable=${iteration.summary.actionable} blocked=${iteration.summary.blocked} executed=${iteration.summary.executed} passed=${iteration.summary.passed ?? "pending"}`);
     }
   }
   console.log(lines.join("\n"));
@@ -18927,7 +19069,7 @@ Commands:
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs session-control-plane-worker-bundle <name> --server [--lines 20] [--format json|text]
   runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--from-profile] [--save-profile] [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
-  runs recover-control-plane-worker-bundles --server (--confirm|--dry-run) [--session name] [--lines 20] [--format json|text]
+  runs recover-control-plane-worker-bundles --server (--confirm|--dry-run) [--session name] [--loop --max-polls 60 --interval-ms 2000 --progress-json] [--lines 20] [--format json|text]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]

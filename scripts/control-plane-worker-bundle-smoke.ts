@@ -188,6 +188,39 @@ try {
   assert.equal(recoveryDryRun.results[0]?.session, sessionName);
   assert.equal(recoveryDryRun.results[0]?.result.plan.actionable, 2);
 
+  const recoveryLoop = await cliJson<{
+    dryRun: boolean;
+    loop: boolean;
+    stoppedReason: string;
+    iterations: Array<{ poll: number; summary: { planned: number; actionable: number; executed: number; passed: boolean | null } }>;
+    summary: { polls: number; profileCount: number; planned: number; actionable: number; executed: number; passed: boolean | null };
+  }>(baseUrl, [
+    "runs",
+    "recover-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--dry-run",
+    "--loop",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(recoveryLoop.dryRun, true);
+  assert.equal(recoveryLoop.loop, true);
+  assert.equal(recoveryLoop.stoppedReason, "max_polls");
+  assert.equal(recoveryLoop.iterations.length, 2);
+  assert.deepEqual(recoveryLoop.iterations.map((iteration) => iteration.poll), [1, 2]);
+  assert.equal(recoveryLoop.summary.polls, 2);
+  assert.equal(recoveryLoop.summary.profileCount, 1);
+  assert.equal(recoveryLoop.summary.planned, 4);
+  assert.equal(recoveryLoop.summary.actionable, 4);
+  assert.equal(recoveryLoop.summary.executed, 0);
+  assert.equal(recoveryLoop.summary.passed, null);
+
   const recoveryConfirmed = await cliJson<{
     confirmed: boolean;
     profileCount: number;
