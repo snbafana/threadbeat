@@ -263,6 +263,67 @@ try {
   assert.match(resultInspectionText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
   assert.match(resultInspectionText, /result_commit_url: https:\/\/github.com\/threadbeat-result-status-smoke\/agent\/commit\//);
 
+  const resultCommitView = await cliJson<{
+    count: number;
+    summary: { resultCommits: number; pending: number; reviewed: number; skipped: number };
+    commands: { inspectAll: string[]; inspectPending: string[]; reviewNext: string[] };
+    resultCommits: Array<{
+      runId: string;
+      branchName: string;
+      resultCommit: string;
+      reviewState: string;
+      commands: {
+        checkoutBranch: string[];
+        reviewRun: string[];
+        recordReviewed: string[];
+        recordSkipped: string[];
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "pending",
+    "--result-commits",
+  ]);
+  assert.equal(resultCommitView.count, 1);
+  assert.equal(resultCommitView.summary.resultCommits, 1);
+  assert.equal(resultCommitView.summary.pending, 1);
+  assert.equal(resultCommitView.commands.inspectPending.join(" "), `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`);
+  assert.equal(resultCommitView.commands.reviewNext.join(" "), nextResultReviewCommand);
+  assert.equal(resultCommitView.resultCommits[0]?.runId, run.id);
+  assert.equal(resultCommitView.resultCommits[0]?.branchName, run.run_branch);
+  assert.equal(resultCommitView.resultCommits[0]?.resultCommit, resultCommit);
+  assert.equal(resultCommitView.resultCommits[0]?.reviewState, "pending");
+  assert.equal(resultCommitView.resultCommits[0]?.commands.checkoutBranch.join(" "), checkoutCommand);
+  assert.equal(resultCommitView.resultCommits[0]?.commands.reviewRun.join(" "), reviewCommand);
+  assert.equal(resultCommitView.resultCommits[0]?.commands.recordReviewed.join(" "), recordReviewedCommand);
+  assert.equal(resultCommitView.resultCommits[0]?.commands.recordSkipped.join(" "), recordSkippedCommand);
+
+  const resultCommitViewText = await cliText(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "pending",
+    "--result-commits",
+    "--format",
+    "text",
+  ]);
+  assert.match(resultCommitViewText, /result_commit_view:/);
+  assert.match(resultCommitViewText, new RegExp(`inspect_pending: npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`));
+  assert.match(resultCommitViewText, new RegExp(`review_next: ${nextResultReviewCommand}`));
+  assert.match(resultCommitViewText, new RegExp(`run: ${run.id}`));
+  assert.match(resultCommitViewText, new RegExp(`branch: ${run.run_branch}`));
+  assert.match(resultCommitViewText, new RegExp(`result_commit: ${resultCommit}`));
+  assert.match(resultCommitViewText, new RegExp(`checkout: ${checkoutCommand}`));
+  assert.match(resultCommitViewText, new RegExp(`review: ${reviewCommand}`));
+  assert.match(resultCommitViewText, new RegExp(`record_reviewed: ${recordReviewedCommand}`));
+  assert.match(resultCommitViewText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
+
   const nextResultInspection = await cliJson<{
     count: number;
     filter: { reviewStates: string[]; limit: number };
