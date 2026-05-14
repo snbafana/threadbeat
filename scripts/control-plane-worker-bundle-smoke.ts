@@ -453,6 +453,98 @@ try {
     bundleProgress.commands.refresh.join(" "),
     `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --kind control-plane-bundle-recovery --include-retired --limit 5`,
   );
+
+  const bundleRecoveryDrillDryRun = await cliJson<{
+    dryRun: boolean;
+    passed: boolean | null;
+    kind: string;
+    workerId: string;
+    before: { worker: { kind: string; workerId: string | null; state: string | null } | null; commands: { stop: string[]; restart: string[]; aggregate: string[] } };
+    checks: { workerSeenBefore: boolean; restartStepSeen: boolean };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-drill",
+    sessionName,
+    "--server",
+    "--kind",
+    "bundle-recovery",
+    "--worker-id",
+    recoveryWorkerId,
+    "--include-retired",
+    "--dry-run",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(bundleRecoveryDrillDryRun.dryRun, true);
+  assert.equal(bundleRecoveryDrillDryRun.passed, null);
+  assert.equal(bundleRecoveryDrillDryRun.kind, "control_plane_bundle_recovery");
+  assert.equal(bundleRecoveryDrillDryRun.workerId, recoveryWorkerId);
+  assert.equal(bundleRecoveryDrillDryRun.checks.workerSeenBefore, true);
+  assert.equal(bundleRecoveryDrillDryRun.before.worker?.kind, "control_plane_bundle_recovery");
+  assert.equal(bundleRecoveryDrillDryRun.before.worker?.workerId, recoveryWorkerId);
+  assert.equal(bundleRecoveryDrillDryRun.before.worker?.state, "completed");
+  assert.equal(
+    bundleRecoveryDrillDryRun.before.commands.stop.join(" "),
+    `npm run cli -- runs stop-control-plane-worker-bundle-recovery-worker ${sessionName} --server --worker-id ${recoveryWorkerId}`,
+  );
+  assert.equal(
+    bundleRecoveryDrillDryRun.before.commands.restart.join(" "),
+    `npm run cli -- runs restart-control-plane-worker-bundle-recovery-worker ${sessionName} --server --worker-id ${recoveryWorkerId} --include-retired`,
+  );
+  assert.equal(
+    bundleRecoveryDrillDryRun.before.commands.aggregate.join(" "),
+    `npm run cli -- runs session-control-plane-workers ${sessionName} --server --worker-id ${recoveryWorkerId} --include-retired --lines 1`,
+  );
+
+  const bundleRecoveryDrill = await cliJson<{
+    confirmed: boolean;
+    passed: boolean | null;
+    kind: string;
+    workerId: string;
+    stopped: { count: number } | null;
+    restarted: { count: number } | null;
+    afterStop: { nextSteps: Array<{ kind: string; workerId: string | null; command: string[] }> } | null;
+    afterRestart: { worker: { kind: string; workerId: string | null; alive: boolean; state: string | null } | null } | null;
+    checks: {
+      stopCount: number | null;
+      restartStepSeen: boolean;
+      restartCount: number | null;
+      workerSeenAfterRestart: boolean | null;
+      workerAliveAfterRestart: boolean | null;
+      workerCompletedAfterRestart: boolean | null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-drill",
+    sessionName,
+    "--server",
+    "--kind",
+    "bundle-recovery",
+    "--worker-id",
+    recoveryWorkerId,
+    "--include-retired",
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(bundleRecoveryDrill.confirmed, true);
+  assert.equal(bundleRecoveryDrill.passed, true);
+  assert.equal(bundleRecoveryDrill.kind, "control_plane_bundle_recovery");
+  assert.equal(bundleRecoveryDrill.workerId, recoveryWorkerId);
+  assert.equal(bundleRecoveryDrill.stopped?.count, 1);
+  assert.equal(bundleRecoveryDrill.restarted?.count, 1);
+  assert.equal(bundleRecoveryDrill.checks.stopCount, 1);
+  assert.equal(bundleRecoveryDrill.checks.restartStepSeen, true);
+  assert.equal(bundleRecoveryDrill.checks.restartCount, 1);
+  assert.equal(bundleRecoveryDrill.checks.workerSeenAfterRestart, true);
+  assert.ok(bundleRecoveryDrill.checks.workerAliveAfterRestart === true || bundleRecoveryDrill.checks.workerCompletedAfterRestart === true);
+  assert.ok(bundleRecoveryDrill.afterStop?.nextSteps.some((step) => (
+    step.kind === "control_plane_bundle_recovery"
+    && step.workerId === recoveryWorkerId
+    && step.command.join(" ") === `npm run cli -- runs restart-control-plane-worker-bundle-recovery-worker ${sessionName} --server --worker-id ${recoveryWorkerId}`
+  )));
+  assert.equal(bundleRecoveryDrill.afterRestart?.worker?.kind, "control_plane_bundle_recovery");
+  assert.equal(bundleRecoveryDrill.afterRestart?.worker?.workerId, recoveryWorkerId);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

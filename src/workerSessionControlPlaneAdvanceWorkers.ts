@@ -174,8 +174,9 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
       stdoutStartOffset,
       latestResult: null,
     };
-    await fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
-    recordControlPlaneAdvanceWorkerCompletion(projectRoot, child, worker);
+    const recordReady = fs.writeFile(recordPath, `${JSON.stringify(worker, null, 2)}\n`, { flag: "wx" });
+    recordControlPlaneAdvanceWorkerCompletion(projectRoot, child, worker, recordReady);
+    await recordReady;
     const alive = processIsAlive(worker.pid);
     return { ...worker, alive, lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive) };
   } finally {
@@ -468,13 +469,13 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
       stdio: ["ignore", stdout.fd, stderr.fd],
     });
     child.unref();
-    const recordedWorker = await readControlPlaneAdvanceWorker(projectRoot, sessionName, options.workerId);
     const updated: ControlPlaneAdvanceWorker = {
-      ...recordedWorker,
+      ...pendingRestart,
       pid: child.pid ?? null,
     };
-    await writeControlPlaneAdvanceWorker(projectRoot, updated);
-    recordControlPlaneAdvanceWorkerCompletion(projectRoot, child, updated);
+    const recordReady = writeControlPlaneAdvanceWorker(projectRoot, updated);
+    recordControlPlaneAdvanceWorkerCompletion(projectRoot, child, updated, recordReady);
+    await recordReady;
     return {
       session: sessionName,
       count: 1,
@@ -498,9 +499,15 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
   }
 }
 
-function recordControlPlaneAdvanceWorkerCompletion(projectRoot: string, child: ReturnType<typeof spawn>, worker: ControlPlaneAdvanceWorker): void {
+function recordControlPlaneAdvanceWorkerCompletion(
+  projectRoot: string,
+  child: ReturnType<typeof spawn>,
+  worker: ControlPlaneAdvanceWorker,
+  recordReady: Promise<void>,
+): void {
   child.once("exit", (exitCode, signal) => {
     void (async () => {
+      await recordReady;
       const current = await readControlPlaneAdvanceWorker(projectRoot, worker.session, worker.workerId).catch((error) => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
         throw error;

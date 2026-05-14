@@ -15749,6 +15749,7 @@ async function executeWorkerSessionControlPlaneWorkerDrill(
     restartCount: number | null;
     workerSeenAfterRestart: boolean | null;
     workerAliveAfterRestart: boolean | null;
+    workerCompletedAfterRestart: boolean | null;
   };
 }> {
   const observedAt = new Date().toISOString();
@@ -15777,6 +15778,7 @@ async function executeWorkerSessionControlPlaneWorkerDrill(
         restartCount: null,
         workerSeenAfterRestart: null,
         workerAliveAfterRestart: null,
+        workerCompletedAfterRestart: null,
       },
     };
   }
@@ -15793,6 +15795,7 @@ async function executeWorkerSessionControlPlaneWorkerDrill(
   const stopCount = numberFromUnknown(plainRecord(stopped)?.count);
   const restartCount = numberFromUnknown(plainRecord(restarted)?.count);
   const workerAliveAfterRestart = afterRestart.worker?.alive ?? null;
+  const workerCompletedAfterRestart = afterRestart.worker?.state === "completed";
   const checks = {
     workerSeenBefore: before.worker !== null,
     stopCount,
@@ -15800,6 +15803,7 @@ async function executeWorkerSessionControlPlaneWorkerDrill(
     restartCount,
     workerSeenAfterRestart: afterRestart.worker !== null,
     workerAliveAfterRestart,
+    workerCompletedAfterRestart,
   };
   return {
     ok: true,
@@ -15813,7 +15817,7 @@ async function executeWorkerSessionControlPlaneWorkerDrill(
       && checks.restartStepSeen
       && (checks.restartCount ?? 0) > 0
       && checks.workerSeenAfterRestart
-      && checks.workerAliveAfterRestart === true,
+      && (checks.workerAliveAfterRestart === true || checks.workerCompletedAfterRestart === true),
     observedAt,
     completedAt: new Date().toISOString(),
     before,
@@ -19425,9 +19429,9 @@ Commands:
   runs stop-control-plane-result-review-worker <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
-  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
-  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
-  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
+  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
+  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs ensure-control-plane-mutation-workers <name> --server (--confirm|--dry-run) [--apply-worker-id id] [--drain-worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--apply-interval-ms n] [--max-continuations n] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]

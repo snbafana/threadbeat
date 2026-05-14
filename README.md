@@ -864,7 +864,10 @@ aggregate status includes `workers.controlPlaneAdvance` and advance-worker
 restart next steps alongside the other worker recovery surfaces; `runs
 session-control-plane-workers <name> --server` exposes bundle-recovery loops as
 `control_plane_bundle_recovery` workers with matching progress, inspect,
-restart, stop, and retire commands. The `branches` block
+restart, stop, retire, and worker-drill commands. Worker drills treat a bounded
+loop that restarts and completes before the follow-up read as a passing restart,
+which keeps short bundle-recovery probes inspectable without forcing them to stay
+alive. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
 sandbox, and includes exact bulk resume, dry-run, and branch-inspection
 commands. Each branch next-step row includes objective, branch name, worker
