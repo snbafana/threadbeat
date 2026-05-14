@@ -224,6 +224,49 @@ try {
   assert.equal(completedProgress.progress[0]?.source, "recorded");
   assert.equal(completedProgress.progress[0]?.iterations, 1);
   assert.equal(completedProgress.progress[0]?.stoppedReason, "running");
+  const completedProgressTimeline = await cliJson<{
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{
+      source: string;
+      event: string;
+      workerId?: string;
+      status?: string;
+      reason?: string;
+      mode?: string;
+      progressIndex?: number;
+      progressTotal?: number;
+      iterations?: number;
+      totalCoreExecuted?: number;
+      totalMutationExecuted?: number;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--event",
+    "worker_progress_recorded",
+    "--worker",
+    workerId,
+    "--status",
+    "running",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(completedProgressTimeline.count, 1);
+  assert.equal(completedProgressTimeline.counts.worker_progress_recorded, 1);
+  assert.equal(completedProgressTimeline.events[0]?.source, "control_plane_advance_worker");
+  assert.equal(completedProgressTimeline.events[0]?.event, "worker_progress_recorded");
+  assert.equal(completedProgressTimeline.events[0]?.workerId, workerId);
+  assert.equal(completedProgressTimeline.events[0]?.status, "running");
+  assert.equal(completedProgressTimeline.events[0]?.reason, "running");
+  assert.equal(completedProgressTimeline.events[0]?.mode, "topology_loop");
+  assert.equal(completedProgressTimeline.events[0]?.progressIndex, 1);
+  assert.equal(completedProgressTimeline.events[0]?.progressTotal, 1);
+  assert.equal(completedProgressTimeline.events[0]?.iterations, 1);
+  assert.equal(completedProgressTimeline.events[0]?.totalCoreExecuted, 0);
+  assert.equal(completedProgressTimeline.events[0]?.totalMutationExecuted, 0);
   const completedProgressText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-worker-progress",

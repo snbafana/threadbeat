@@ -43,6 +43,7 @@ export type ControlPlaneAdvanceWorkerLifecycle = {
 export type ControlPlaneAdvanceWorkerLatestResult = {
   ok?: boolean;
   session?: string;
+  observedAt?: string;
   dryRun?: boolean;
   untilEmpty?: boolean;
   stoppedReason?: string;
@@ -699,6 +700,7 @@ function summarizeLatestWorkerJsonResult(value: Record<string, unknown>): Contro
   return {
     ...(typeof value.ok === "boolean" ? { ok: value.ok } : {}),
     ...(typeof value.session === "string" ? { session: value.session } : {}),
+    ...(typeof value.observedAt === "string" ? { observedAt: value.observedAt } : {}),
     ...(typeof value.dryRun === "boolean" ? { dryRun: value.dryRun } : {}),
     ...(typeof value.untilEmpty === "boolean" ? { untilEmpty: value.untilEmpty } : {}),
     ...(typeof value.stoppedReason === "string" ? { stoppedReason: value.stoppedReason } : {}),

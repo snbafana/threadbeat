@@ -3302,7 +3302,7 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
   source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
-  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
+  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
   tickId?: string;
   advanceId?: string;
   workerId?: string;
@@ -3330,6 +3330,12 @@ type WorkerSessionControlPlaneTimelineEvent = {
   previousPid?: number | null;
   plannedCount?: number;
   executedCount?: number;
+  mode?: string;
+  progressIndex?: number;
+  progressTotal?: number;
+  iterations?: number;
+  totalCoreExecuted?: number;
+  totalMutationExecuted?: number;
   selected?: number;
   resumedCount?: number;
   skippedCount?: number;
@@ -3482,6 +3488,27 @@ const readWorkerSessionControlPlaneTimeline = async (
       reason: worker.lifecycle.reason,
       pid: worker.pid,
       previousPid: worker.previousPid ?? null,
+    });
+    const recentProgress = worker.recentProgress ?? [];
+    recentProgress.forEach((progress, index) => {
+      events.push({
+        observedAt: progress.observedAt ?? worker.completedAt ?? worker.stoppedAt ?? worker.startedAt,
+        source: "control_plane_advance_worker",
+        event: "worker_progress_recorded",
+        workerId: worker.workerId,
+        state: worker.lifecycle.state,
+        restartable: worker.lifecycle.restartable,
+        status: progress.stoppedReason ?? "progress",
+        reason: progress.stoppedReason,
+        mode: worker.mode,
+        dryRun: progress.dryRun,
+        progressIndex: index + 1,
+        progressTotal: recentProgress.length,
+        iterations: progress.iterations,
+        totalCoreExecuted: progress.totalCoreExecuted,
+        totalMutationExecuted: progress.totalMutationExecuted,
+        pid: worker.pid,
+      });
     });
     if (worker.stoppedAt) {
       events.push({
