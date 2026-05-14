@@ -9146,7 +9146,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
 };
 
 type WorkerSessionControlPlaneAdvanceAction = {
-  surface: "stale_run" | "branch" | "apply_action" | "drain_continuation" | "status_watch" | "worker_recovery" | "recover_next";
+  surface: "stale_run" | "branch" | "result_inspection" | "apply_action" | "drain_continuation" | "status_watch" | "worker_recovery" | "recover_next";
   action: string;
   reason: string;
   count: number;
@@ -9154,6 +9154,7 @@ type WorkerSessionControlPlaneAdvanceAction = {
   detailCommand?: string;
   loopAdvanceId?: string;
   runId?: string;
+  resultCommit?: string;
   workerId?: string;
   advanceId?: string;
   applyId?: string;
@@ -10467,6 +10468,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    count: ${action.count}`,
         `    advance: ${action.advanceId ?? ""}`,
         `    run: ${action.runId ?? ""}`,
+        `    result_commit: ${action.resultCommit ?? ""}`,
         `    worker: ${action.workerId ?? ""}`,
         `    command: ${formatShellCommand(action.command)}`,
       );
@@ -11207,6 +11209,19 @@ function selectWorkerSessionControlPlaneNextActions(
       ...(branch.workerId ? { workerId: branch.workerId } : {}),
     });
   }
+  const resultInspection = status.results.nextSteps[0];
+  if (resultInspection) {
+    nextActions.push({
+      surface: "result_inspection",
+      action: resultInspection.action,
+      reason: resultInspection.reason,
+      count: status.results.counts.pending,
+      command: resultInspection.commands.inspectResult,
+      runId: resultInspection.runId,
+      resultCommit: resultInspection.resultCommit,
+      ...(resultInspection.workerId ? { workerId: resultInspection.workerId } : {}),
+    });
+  }
   const applyAction = status.queues.applyActionNextSteps.nextSteps[0];
   if (applyAction) {
     nextActions.push({
@@ -11271,7 +11286,7 @@ function selectWorkerSessionControlPlaneNextRecovery(
   }
   const nextAction = nextActions[0];
   if (!nextAction) return null;
-  if (nextAction.surface === "status_watch") {
+  if (nextAction.surface === "status_watch" || nextAction.surface === "result_inspection") {
     return {
       kind: "control_plane_action",
       surface: nextAction.surface,

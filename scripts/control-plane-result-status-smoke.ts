@@ -70,6 +70,17 @@ try {
   const failedResultReviewAttemptsCommand = `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --source result_review --event result_review_record_failed --status failed`;
 
   const summary = await cliJson<{
+    needsAction: boolean;
+    nextRecovery: {
+      kind: string;
+      surface?: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      dryRunCommand: string[];
+    } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; runId?: string; resultCommit?: string; command: string[] }>;
     commands: {
       nextResultInspection: string[];
       nextResultReview: string[];
@@ -88,7 +99,7 @@ try {
         nextSteps: Array<{
           runId: string;
           resultCommit: string;
-          commands: { checkoutBranch: string[]; reviewRun: string[]; recordReviewed: string[]; recordSkipped: string[] };
+          commands: { inspectResult: string[]; checkoutBranch: string[]; reviewRun: string[]; recordReviewed: string[]; recordSkipped: string[] };
         }>;
       };
     };
@@ -99,6 +110,7 @@ try {
     "--server",
     "--summary",
   ]);
+  assert.equal(summary.needsAction, true);
   assert.equal(summary.results.counts.resultCommits, 1);
   assert.equal(summary.results.counts.pending, 1);
   assert.equal(summary.results.counts.reviewed, 0);
@@ -106,6 +118,20 @@ try {
   assert.equal(summary.results.inspection.count, 1);
   assert.equal(summary.results.inspection.nextSteps[0]?.runId, run.id);
   assert.equal(summary.results.inspection.nextSteps[0]?.resultCommit, resultCommit);
+  assert.equal(summary.nextRecovery?.kind, "control_plane_action");
+  assert.equal(summary.nextRecovery?.surface, "result_inspection");
+  assert.equal(summary.nextRecovery?.action, "review_result");
+  assert.equal(summary.nextRecovery?.reason, "result_commit_available");
+  assert.equal(summary.nextRecovery?.count, 1);
+  assert.deepEqual(summary.nextRecovery?.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.deepEqual(summary.nextRecovery?.dryRunCommand, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.ok(summary.nextActions.some((action) => (
+    action.surface === "result_inspection"
+    && action.action === "review_result"
+    && action.runId === run.id
+    && action.resultCommit === resultCommit
+    && action.command.join(" ") === summary.results.inspection.nextSteps[0]?.commands.inspectResult.join(" ")
+  )));
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.checkoutBranch.join(" "), checkoutCommand);
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.reviewRun.join(" "), reviewCommand);
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.recordReviewed.join(" "), recordScopedReviewedCommand);
@@ -155,10 +181,32 @@ try {
   assert.match(pendingStatusText, new RegExp(`review_next: ${nextResultReviewCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_reviewed: ${recordNextReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_skipped: ${recordNextSkippedCommand}`));
+  assert.match(pendingStatusText, /next_recovery:\n  kind: control_plane_action\n  action: review_result\n  reason: result_commit_available/);
+  assert.match(pendingStatusText, /next_actions:\n  - surface: result_inspection/);
   assert.match(pendingStatusText, new RegExp(`record_reviewed: ${recordScopedReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_skipped: ${recordScopedSkippedCommand}`));
   assert.match(pendingStatusText, new RegExp(`latest: ${latestResultReviewsCommand}`));
   assert.match(pendingStatusText, /result_reviews: count=0 reviewed=0 skipped=0 failed_attempts=0/);
+
+  const watchedUntilResultInspection = await cliJson<{
+    untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(watchedUntilResultInspection.untilAction.done, true);
+  assert.equal(watchedUntilResultInspection.untilAction.reason, "control_plane_action:review_result");
+  assert.deepEqual(watchedUntilResultInspection.untilAction.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.deepEqual(watchedUntilResultInspection.untilAction.dryRunCommand, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
 
   const reviewNext = await cliJson<{
     count: number;
