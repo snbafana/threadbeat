@@ -255,6 +255,22 @@ try {
   ]);
   assert.match(statusSummaryText, /worker_reconciliations: total=1 dry_run=1 executed=0 noop=0 failed=0 max_steps=0 until_empty=1/);
   assert.match(statusSummaryText, new RegExp(`reconciliation: ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
+  const statusSummaryShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "5",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(
+    statusSummaryShell,
+    new RegExp(`npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 3 --interval-ms 1 --confirm`),
+  );
   const reconcileLoopText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-reconcile-workers",
