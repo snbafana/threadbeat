@@ -163,7 +163,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
 
 export async function listWorkerSessionControlPlaneAdvanceWorkers(
   projectRoot: string,
-  options: { sessionName?: string; workerId?: string; includeRetired?: boolean },
+  options: { sessionName?: string; workerId?: string; includeRetired?: boolean; mode?: ControlPlaneAdvanceWorkerMode },
   lines: number,
 ): Promise<Array<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle; latestResult: ControlPlaneAdvanceWorkerLatestResult | null; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
   const sessionNames = options.sessionName ? [options.sessionName] : await listControlPlaneAdvanceWorkerSessionNames(projectRoot);
@@ -180,6 +180,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
         .map(async (entry) => {
           const worker = await readControlPlaneAdvanceWorker(projectRoot, sessionName, entry.name.replace(/\.json$/, ""));
           if (worker.retiredAt && !options.includeRetired) return null;
+          if (options.mode && (worker.mode ?? "advance_loop") !== options.mode) return null;
           const alive = processIsAlive(worker.pid);
           return {
             ...worker,
@@ -201,7 +202,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
 export async function stopWorkerSessionControlPlaneAdvanceWorkers(
   projectRoot: string,
   sessionName: string,
-  options: { workerId?: string; retire: boolean; lines: number },
+  options: { workerId?: string; retire: boolean; lines: number; mode?: ControlPlaneAdvanceWorkerMode },
 ): Promise<{
   session: string;
   count: number;
@@ -224,6 +225,7 @@ export async function stopWorkerSessionControlPlaneAdvanceWorkers(
     sessionName,
     ...(options.workerId ? { workerId: options.workerId } : {}),
     includeRetired: true,
+    ...(options.mode ? { mode: options.mode } : {}),
   }, 0);
   if (options.workerId && workers.length === 0) {
     throw new Error(`control-plane advance worker '${options.workerId}' not found for session '${sessionName}'`);
@@ -260,6 +262,7 @@ export async function stopWorkerSessionControlPlaneAdvanceWorkers(
       sessionName,
       ...(options.workerId ? { workerId: options.workerId } : {}),
       includeRetired: true,
+      ...(options.mode ? { mode: options.mode } : {}),
     }, options.lines),
   };
 }
@@ -267,7 +270,7 @@ export async function stopWorkerSessionControlPlaneAdvanceWorkers(
 export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
   projectRoot: string,
   sessionName: string,
-  options: { workerId?: string } = {},
+  options: { workerId?: string; mode?: ControlPlaneAdvanceWorkerMode } = {},
 ): Promise<{
   session: string;
   count: number;
@@ -279,25 +282,30 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
   const workers = await listWorkerSessionControlPlaneAdvanceWorkers(projectRoot, {
     sessionName,
     ...(options.workerId ? { workerId: options.workerId } : {}),
+    ...(options.mode ? { mode: options.mode } : {}),
   }, 1);
   const nextSteps = workers
     .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
     .map((worker): ControlPlaneAdvanceWorkerNextStep => {
-      const restartControlPlaneAdvanceWorker = ["npm", "run", "cli", "--", "runs", "restart-control-plane-advance-workers", sessionName, "--server", "--worker-id", worker.workerId];
+      const mode = worker.mode ?? "advance_loop";
+      const restartCommandName = mode === "topology_loop" ? "restart-control-plane-topology-worker" : "restart-control-plane-advance-workers";
+      const inspectCommandName = mode === "topology_loop" ? "session-control-plane-topology-workers" : "session-control-plane-advance-workers";
+      const stopCommandName = mode === "topology_loop" ? "stop-control-plane-topology-worker" : "stop-control-plane-advance-workers";
+      const restartControlPlaneAdvanceWorker = ["npm", "run", "cli", "--", "runs", restartCommandName, sessionName, "--server", "--worker-id", worker.workerId];
       const encodedSession = encodeURIComponent(sessionName);
       const encodedWorker = encodeURIComponent(worker.workerId);
       return {
         action: "restart_control_plane_advance_worker",
         reason: "stopped_control_plane_advance_worker",
         workerId: worker.workerId,
-        mode: worker.mode ?? "advance_loop",
+        mode,
         pid: worker.pid,
         stoppedAt: worker.stoppedAt as string,
         command: restartControlPlaneAdvanceWorker,
         commands: {
           restartControlPlaneAdvanceWorker,
-          inspectControlPlaneAdvanceWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance-workers", sessionName, "--server", "--worker-id", worker.workerId],
-          retireControlPlaneAdvanceWorker: ["npm", "run", "cli", "--", "runs", "stop-control-plane-advance-workers", sessionName, "--server", "--worker-id", worker.workerId, "--retire"],
+          inspectControlPlaneAdvanceWorkers: ["npm", "run", "cli", "--", "runs", inspectCommandName, sessionName, "--server", "--worker-id", worker.workerId],
+          retireControlPlaneAdvanceWorker: ["npm", "run", "cli", "--", "runs", stopCommandName, sessionName, "--server", "--worker-id", worker.workerId, "--retire"],
         },
         api: {
           restart: {
@@ -329,7 +337,7 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
   projectRoot: string,
   baseUrl: string,
   sessionName: string,
-  options: { workerId: string; includeRetired: boolean; lines: number },
+  options: { workerId: string; includeRetired: boolean; lines: number; mode?: ControlPlaneAdvanceWorkerMode },
 ): Promise<{
   session: string;
   count: number;
@@ -356,6 +364,9 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
   }
   if (worker.retiredAt && !options.includeRetired) {
     throw new Error(`control-plane advance worker '${options.workerId}' is retired; pass includeRetired to restart it`);
+  }
+  if (options.mode && (worker.mode ?? "advance_loop") !== options.mode) {
+    throw new Error(`control-plane advance worker '${options.workerId}' is mode '${worker.mode ?? "advance_loop"}', not '${options.mode}'`);
   }
   if (processIsAlive(worker.pid)) {
     throw new Error(`control-plane advance worker '${options.workerId}' is already alive with pid ${worker.pid}`);

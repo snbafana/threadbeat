@@ -868,6 +868,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         sessionName: name,
         ...(query.workerId ? { workerId: query.workerId } : {}),
         includeRetired: parseBoolean(query.includeRetired, false),
+        ...(query.mode ? { mode: parseControlPlaneAdvanceWorkerMode(query.mode) } : {}),
       }, parseOptionalInteger(query.lines) ?? 20);
       return {
         ok: true,
@@ -888,6 +889,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         ok: true,
         ...await listWorkerSessionControlPlaneAdvanceWorkerNextSteps(settings.projectRoot, name, {
           ...(query.workerId ? { workerId: query.workerId } : {}),
+          ...(query.mode ? { mode: parseControlPlaneAdvanceWorkerMode(query.mode) } : {}),
         }),
       };
     } catch (error) {
@@ -1024,6 +1026,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
             workerId: parseString(body.workerId, "workerId"),
             includeRetired: parseBoolean(body.includeRetired, false),
             lines: parseOptionalInteger(body.lines) ?? 20,
+            ...(body.mode ? { mode: parseControlPlaneAdvanceWorkerMode(body.mode) } : {}),
           },
         ),
       };
@@ -1042,6 +1045,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
           retire: parseBoolean(body.retire, false),
           lines: parseOptionalInteger(body.lines) ?? 20,
+          ...(body.mode ? { mode: parseControlPlaneAdvanceWorkerMode(body.mode) } : {}),
         }),
       };
     } catch (error) {
@@ -5318,6 +5322,13 @@ const parseOptionalNonNegativeInteger = (value: unknown): number | undefined => 
   const parsed = typeof value === "number" ? value : Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed) || parsed < 0) throw new Error("expected non-negative integer");
   return Math.floor(parsed);
+};
+
+const parseControlPlaneAdvanceWorkerMode = (value: unknown): ControlPlaneAdvanceWorkerMode => {
+  if (value === "advance_loop" || value === "advance-loop" || value === "advance") return "advance_loop";
+  if (value === "confirmation_drain" || value === "confirmation-drain" || value === "confirmation") return "confirmation_drain";
+  if (value === "topology_loop" || value === "topology-loop" || value === "topology") return "topology_loop";
+  throw new Error(`unsupported control-plane advance worker mode: ${String(value)}`);
 };
 
 const parseOptionalStatusList = (value: unknown): string[] | undefined => {

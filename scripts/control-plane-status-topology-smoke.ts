@@ -41,6 +41,8 @@ try {
       ensureTopologyLoopConfirm: string[];
       startTopologyWorkerDryRun: string[];
       ensureTopologyWorkerConfirm: string[];
+      inspectTopologyWorkers: string[];
+      topologyWorkerNextSteps: string[];
     };
   }>(baseUrl, [
     "runs",
@@ -56,6 +58,8 @@ try {
   assert.equal(summary.commands.ensureTopologyLoopConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology-loop ${sessionName} --server --confirm --max-iterations 3 --loop-interval-ms 2000`);
   assert.equal(summary.commands.startTopologyWorkerDryRun.join(" "), `npm run cli -- runs start-control-plane-topology-worker ${sessionName} --server --dry-run --max-iterations 60 --loop-interval-ms 2000`);
   assert.equal(summary.commands.ensureTopologyWorkerConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology-worker ${sessionName} --server --confirm --max-iterations 60 --loop-interval-ms 2000`);
+  assert.equal(summary.commands.inspectTopologyWorkers.join(" "), `npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server`);
+  assert.equal(summary.commands.topologyWorkerNextSteps.join(" "), `npm run cli -- runs session-control-plane-topology-workers-next ${sessionName} --server`);
 
   const commandQueue = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
     "runs",
@@ -70,6 +74,8 @@ try {
   assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyLoopConfirm.join(" ")));
   assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.startTopologyWorkerDryRun.join(" ")));
   assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyWorkerConfirm.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.inspectTopologyWorkers.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.topologyWorkerNextSteps.join(" ")));
 
   const text = await cliText(baseUrl, [
     "runs",
@@ -83,6 +89,7 @@ try {
   assert.match(text, /^control_plane_topology:$/m);
   assert.match(text, new RegExp(`ensure_loop_dry_run: .*ensure-control-plane-topology-loop ${sessionName}`));
   assert.match(text, new RegExp(`start_worker_dry_run: .*start-control-plane-topology-worker ${sessionName}`));
+  assert.match(text, new RegExp(`inspect_workers: .*session-control-plane-topology-workers ${sessionName}`));
 
   const workerId = "status-topology-worker";
   const started = await cliJson<{ worker: { workerId: string; mode: string; command: string[] } }>(baseUrl, [
@@ -115,9 +122,45 @@ try {
     "--lines",
     "5",
   ]);
+  const inspected = await cliJson<{ count: number; workers: Array<{ workerId: string; mode: string }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-topology-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(inspected.count, 1);
+  assert.equal(inspected.workers[0]?.workerId, workerId);
+  assert.equal(inspected.workers[0]?.mode, "topology_loop");
+
   await cliJson(baseUrl, [
     "runs",
-    "stop-control-plane-advance-workers",
+    "stop-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--lines",
+    "1",
+  ]);
+  const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-topology-workers-next",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+  ]);
+  assert.equal(nextSteps.count, 1);
+  assert.equal(nextSteps.nextSteps[0]?.command.join(" "), `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`);
+  assert.equal(nextSteps.nextSteps[0]?.commands.retireControlPlaneAdvanceWorker.join(" "), `npm run cli -- runs stop-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId} --retire`);
+
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-topology-worker",
     sessionName,
     "--server",
     "--worker-id",
