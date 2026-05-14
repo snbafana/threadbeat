@@ -5324,6 +5324,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const drainConfirmations = options["drain-confirmations"] === "1";
     const statusWatchExecutions = options["status-watch-executions"] === "1";
     const recoverNextLoopHistory = options["recover-next-loop-history"] === "1";
+    const executeResume = options["execute-resume"] === "1";
     const confirmationExecutionModes = [executeConfirmation, executeNextConfirmation, drainConfirmations].filter(Boolean).length;
     if (statusWatchExecutions && options["detail-command"]) {
       throw new Error("runs session-control-plane-advances --status-watch-executions cannot be combined with --detail-command");
@@ -5360,6 +5361,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (recoverNextLoopHistory && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-advances --recover-next-loop-history cannot be combined with --commands-only");
+    }
+    if (executeResume && !recoverNextLoopHistory) {
+      throw new Error("runs session-control-plane-advances --execute-resume requires --recover-next-loop-history");
+    }
+    if (executeResume && outputFormat !== "json") {
+      throw new Error("runs session-control-plane-advances --execute-resume requires json output");
+    }
+    if (executeResume && options.confirm !== "1") {
+      throw new Error("runs session-control-plane-advances --execute-resume requires --confirm");
     }
     const limit = parsePositiveInteger(
       options.limit ?? (confirmationExecutionModes > 0 ? "100" : "20"),
@@ -5505,6 +5515,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (recoverNextLoopHistory) {
       const history = summarizeRecoverNextLoopHistory(requiredSessionName, advances, options["loop-advance-id"]);
+      if (executeResume) {
+        const response = await executeRecoverNextLoopHistoryResume(requiredSessionName, history, { limit });
+        if (response.executed.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+          process.exitCode = 1;
+        }
+        await printJson(response);
+        return;
+      }
       if (outputFormat === "text") {
         printRecoverNextLoopHistoryText(history);
       } else {
@@ -7588,7 +7606,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -9202,6 +9220,22 @@ type RecoverNextLoopHistoryResponse = {
   records: RecoverNextLoopHistoryRecord[];
 };
 
+type RecoverNextLoopHistoryResumeResponse = {
+  ok: boolean;
+  session: string;
+  loopAdvanceId: string;
+  command: string[];
+  before: RecoverNextLoopHistoryResponse;
+  executed: {
+    command: string[];
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    output: unknown;
+  };
+  after: RecoverNextLoopHistoryResponse;
+};
+
 type WorkerSessionControlPlaneAdvanceLoopResponse = {
   ok: true;
   session: string;
@@ -10101,6 +10135,38 @@ function summarizeRecoverNextLoopHistory(
       resumeLoop,
     },
     records,
+  };
+}
+
+async function executeRecoverNextLoopHistoryResume(
+  sessionName: string,
+  history: RecoverNextLoopHistoryResponse,
+  options: { limit: number },
+): Promise<RecoverNextLoopHistoryResumeResponse> {
+  if (!history.commands.resumeLoop) {
+    throw new Error(`recover-next loop ${history.loopAdvanceId} has no resume command`);
+  }
+  const command = history.commands.resumeLoop;
+  const executed = await runCliWorker(cliCommandArgs(command));
+  const afterAdvances = await fetchWorkerSessionControlPlaneAdvances(sessionName, {
+    limit: options.limit,
+    loopAdvanceId: history.loopAdvanceId,
+  });
+  const after = summarizeRecoverNextLoopHistory(sessionName, afterAdvances, history.loopAdvanceId);
+  return {
+    ok: executed.exitCode === 0,
+    session: sessionName,
+    loopAdvanceId: history.loopAdvanceId,
+    command,
+    before: history,
+    executed: {
+      command,
+      exitCode: executed.exitCode,
+      stdout: executed.stdout,
+      stderr: executed.stderr,
+      output: parseJsonMaybe(executed.stdout),
+    },
+    after,
   };
 }
 
@@ -17604,7 +17670,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history [--execute-resume --confirm]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]

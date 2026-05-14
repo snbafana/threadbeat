@@ -976,30 +976,53 @@ try {
   const interruptedSummaryShellLines = interruptedSummaryShell.trim().split("\n").filter(Boolean);
   assert.ok(interruptedSummaryShellLines.some((line) => line.includes(`--resume-loop ${recoverNextLoopDryRun.advanceId}`)));
 
-  const resumedRecoverNextLoopDryRun = await cliJson<{
+  const resumedRecoverNextLoopExecution = await cliJson<{
     ok: boolean;
     session: string;
-    dryRun: boolean;
-    untilEmpty: boolean;
-    resumed: boolean;
-    previousSteps: number;
-    executedSteps: number;
-    advanceId: string;
     loopAdvanceId: string;
-    cycles: Array<{ selected: { kind: string; action: string } | null }>;
+    command: string[];
+    before: { summary: { completed: boolean; steps: number; resumeAttempts: number }; commands: { resumeLoop: string[] | null } };
+    executed: {
+      exitCode: number | null;
+      output: {
+        ok: boolean;
+        session: string;
+        dryRun: boolean;
+        untilEmpty: boolean;
+        resumed: boolean;
+        previousSteps: number;
+        executedSteps: number;
+        advanceId: string;
+        loopAdvanceId: string;
+        cycles: Array<{ selected: { kind: string; action: string } | null }>;
+      };
+    };
+    after: {
+      summary: { completed: boolean; steps: number; resumeAttempts: number; failedExecutions: number };
+      commands: { resumeLoop: string[] | null };
+      records: Array<{ kind: string; advanceId: string; stepIndex: number | null }>;
+    };
   }>(baseUrl, [
     "runs",
-    "session-control-plane-recover-next",
+    "session-control-plane-advances",
     sessionName,
     "--server",
-    "--until-empty",
-    "--resume-loop",
+    "--loop-advance-id",
     recoverNextLoopDryRun.advanceId,
-    "--max-steps",
-    "3",
-    "--interval-ms",
-    "0",
+    "--recover-next-loop-history",
+    "--execute-resume",
+    "--confirm",
   ]);
+  assert.equal(resumedRecoverNextLoopExecution.ok, true);
+  assert.equal(resumedRecoverNextLoopExecution.session, sessionName);
+  assert.equal(resumedRecoverNextLoopExecution.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.deepEqual(resumedRecoverNextLoopExecution.command, interruptedLoop?.resumeCommand);
+  assert.equal(resumedRecoverNextLoopExecution.before.summary.completed, false);
+  assert.equal(resumedRecoverNextLoopExecution.before.summary.steps, 1);
+  assert.equal(resumedRecoverNextLoopExecution.before.summary.resumeAttempts, 1);
+  assert.deepEqual(resumedRecoverNextLoopExecution.before.commands.resumeLoop, interruptedLoop?.resumeCommand);
+  assert.equal(resumedRecoverNextLoopExecution.executed.exitCode, 0);
+  const resumedRecoverNextLoopDryRun = resumedRecoverNextLoopExecution.executed.output;
   assert.equal(resumedRecoverNextLoopDryRun.ok, true);
   assert.equal(resumedRecoverNextLoopDryRun.session, sessionName);
   assert.equal(resumedRecoverNextLoopDryRun.dryRun, true);
@@ -1012,6 +1035,20 @@ try {
   assert.equal(resumedRecoverNextLoopDryRun.cycles.length, 1);
   assert.equal(resumedRecoverNextLoopDryRun.cycles[0]?.selected?.kind, "confirmation_queue");
   assert.equal(resumedRecoverNextLoopDryRun.cycles[0]?.selected?.action, "drain_control_plane_confirmations");
+  assert.equal(resumedRecoverNextLoopExecution.after.summary.completed, true);
+  assert.equal(resumedRecoverNextLoopExecution.after.summary.steps, 2);
+  assert.equal(resumedRecoverNextLoopExecution.after.summary.resumeAttempts, 1);
+  assert.equal(resumedRecoverNextLoopExecution.after.summary.failedExecutions, 0);
+  assert.equal(resumedRecoverNextLoopExecution.after.commands.resumeLoop, null);
+  assert.ok(resumedRecoverNextLoopExecution.after.records.some((record) => (
+    record.kind === "loop"
+    && record.advanceId === recoverNextLoopDryRun.advanceId
+  )));
+  assert.ok(resumedRecoverNextLoopExecution.after.records.some((record) => (
+    record.kind === "step"
+    && record.stepIndex === 2
+    && record.advanceId === `${recoverNextLoopDryRun.advanceId}-step-002`
+  )));
   const statusAfterRecoverNextResume = await cliJson<{
     recovery: {
       recoverNext: {
