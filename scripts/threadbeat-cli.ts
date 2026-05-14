@@ -4717,6 +4717,40 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(status);
     return;
   }
+  if (subcommandName === "session-control-plane-operate") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-operate requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-operate --format must be json or text");
+    }
+    if (dryRun === confirm) {
+      throw new Error("runs session-control-plane-operate requires exactly one of --dry-run or --confirm");
+    }
+    if ((options["until-empty"] === "1" || options["max-steps"] || options.limit || options["interval-ms"]) && options["reconcile-workers"] !== "1") {
+      throw new Error("runs session-control-plane-operate reconciliation options require --reconcile-workers");
+    }
+    const requiredSessionName = required(sessionName, "runs session-control-plane-operate <session> --server");
+    const response = await operateWorkerSessionControlPlane(requiredSessionName, options, {
+      dryRun,
+      confirm,
+      lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      maxCycles: parsePositiveInteger(options["max-cycles"] ?? "1", "--max-cycles"),
+      cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "2000", "--cycle-interval-ms"),
+      reconcileWorkers: options["reconcile-workers"] === "1",
+    });
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneOperateText(response);
+    } else {
+      await printJson(response);
+    }
+    return;
+  }
   if (subcommandName === "session-control-plane-topology") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -11445,6 +11479,189 @@ function printWorkerSessionControlPlaneStatusSummaryText(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
 ): void {
   console.log(formatWorkerSessionControlPlaneStatusSummaryText(summary).join("\n"));
+}
+
+async function operateWorkerSessionControlPlane(
+  sessionName: string,
+  options: Record<string, string>,
+  execution: {
+    dryRun: boolean;
+    confirm: boolean;
+    lines: number;
+    maxCycles: number;
+    cycleIntervalMs: number;
+    reconcileWorkers: boolean;
+  },
+): Promise<{
+  ok: boolean;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  startedAt: string;
+  completedAt: string;
+  maxCycles: number;
+  cycleIntervalMs: number;
+  stoppedReason: "idle" | "max_cycles" | "action_failed";
+  cycles: Array<{
+    cycle: number;
+    observedAt: string;
+    status: "idle" | "executed" | "failed";
+    action: ReturnType<typeof workerSessionControlPlaneWatchAction>;
+    executedAction: Awaited<ReturnType<typeof executeWorkerSessionControlPlaneWatchAction>> | null;
+    executedReconciliation: ({
+      skipped: true;
+      reason: "not_requested" | "watch_action_already_reconciles_workers";
+      actionReason?: string;
+    } | ({
+      skipped: false;
+    } & Awaited<ReturnType<typeof executeWorkerSessionControlPlaneStatusReconciliation>>)) | null;
+    afterSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
+  }>;
+  commands: {
+    rerunDryRun: string[];
+    rerunConfirm: string[];
+    inspectStatusWatchExecutions: string[];
+    inspectWorkerReconciliations: string[];
+  };
+}> {
+  const startedAt = new Date().toISOString();
+  const cycles: Array<{
+    cycle: number;
+    observedAt: string;
+    status: "idle" | "executed" | "failed";
+    action: ReturnType<typeof workerSessionControlPlaneWatchAction>;
+    executedAction: Awaited<ReturnType<typeof executeWorkerSessionControlPlaneWatchAction>> | null;
+    executedReconciliation: ({
+      skipped: true;
+      reason: "not_requested" | "watch_action_already_reconciles_workers";
+      actionReason?: string;
+    } | ({
+      skipped: false;
+    } & Awaited<ReturnType<typeof executeWorkerSessionControlPlaneStatusReconciliation>>)) | null;
+    afterSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
+  }> = [];
+  let stoppedReason: "idle" | "max_cycles" | "action_failed" = "max_cycles";
+
+  for (let cycle = 1; cycle <= execution.maxCycles; cycle += 1) {
+    const before = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines });
+    const beforeSummary = summarizeWorkerSessionControlPlaneStatus(before);
+    const action = workerSessionControlPlaneWatchAction(beforeSummary);
+    const observedAt = new Date().toISOString();
+    if (!action) {
+      cycles.push({
+        cycle,
+        observedAt,
+        status: "idle",
+        action,
+        executedAction: null,
+        executedReconciliation: null,
+        afterSummary: beforeSummary,
+      });
+      stoppedReason = "idle";
+      break;
+    }
+
+    const executedAction = await executeWorkerSessionControlPlaneWatchAction(sessionName, action, {
+      dryRun: execution.dryRun,
+      observedAt,
+      before,
+      lines: execution.lines,
+    });
+    const failed = executedAction.executed.exitCode !== null && executedAction.executed.exitCode !== 0;
+    const executedReconciliation = execution.reconcileWorkers
+      ? action.reason === "control_plane_action:reconcile_control_plane_workers"
+        ? {
+          skipped: true as const,
+          reason: "watch_action_already_reconciles_workers" as const,
+          actionReason: action.reason,
+        }
+        : {
+          skipped: false as const,
+          ...(await executeWorkerSessionControlPlaneStatusReconciliation(sessionName, options, {
+            lines: execution.lines,
+            dryRun: execution.dryRun,
+            confirm: execution.confirm,
+          })),
+        }
+      : {
+        skipped: true as const,
+        reason: "not_requested" as const,
+      };
+    const afterSummary = executedReconciliation?.skipped === false
+      ? executedReconciliation.afterSummary
+      : summarizeWorkerSessionControlPlaneStatus(await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines }));
+
+    cycles.push({
+      cycle,
+      observedAt,
+      status: failed ? "failed" : "executed",
+      action,
+      executedAction,
+      executedReconciliation,
+      afterSummary,
+    });
+    if (failed) {
+      stoppedReason = "action_failed";
+      break;
+    }
+    if (cycle < execution.maxCycles) {
+      await sleep(execution.cycleIntervalMs);
+    }
+  }
+
+  const commandBase = [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
+    "--max-cycles", String(execution.maxCycles),
+    "--cycle-interval-ms", String(execution.cycleIntervalMs),
+    "--lines", String(execution.lines),
+    ...(execution.reconcileWorkers ? ["--reconcile-workers"] : []),
+    ...(options["include-retired"] === "1" ? ["--include-retired"] : []),
+    ...(options.limit ? ["--limit", options.limit] : []),
+    ...(options["until-empty"] === "1" ? ["--until-empty"] : []),
+    ...(options["max-steps"] ? ["--max-steps", options["max-steps"]] : []),
+    ...(options["interval-ms"] ? ["--interval-ms", options["interval-ms"]] : []),
+  ];
+  return {
+    ok: stoppedReason !== "action_failed",
+    session: sessionName,
+    dryRun: execution.dryRun,
+    confirmed: execution.confirm,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    maxCycles: execution.maxCycles,
+    cycleIntervalMs: execution.cycleIntervalMs,
+    stoppedReason,
+    cycles,
+    commands: {
+      rerunDryRun: [...commandBase, "--dry-run"],
+      rerunConfirm: [...commandBase, "--confirm"],
+      inspectStatusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions"],
+      inspectWorkerReconciliations: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", sessionName, "--server"],
+    },
+  };
+}
+
+function printWorkerSessionControlPlaneOperateText(
+  response: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>,
+): void {
+  console.log([
+    "control_plane_operate:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  stopped_reason: ${response.stoppedReason}`,
+    `  cycles: ${response.cycles.length}`,
+    `  inspect_status_watch_executions: ${formatShellCommand(response.commands.inspectStatusWatchExecutions)}`,
+    `  inspect_worker_reconciliations: ${formatShellCommand(response.commands.inspectWorkerReconciliations)}`,
+    ...response.cycles.flatMap((cycle) => [
+      `  - cycle: ${cycle.cycle}`,
+      `    status: ${cycle.status}`,
+      `    action: ${cycle.action?.reason ?? "none"}`,
+      `    advance: ${cycle.executedAction?.advanceId ?? ""}`,
+      `    reconciliation: ${cycle.executedReconciliation?.skipped === false ? cycle.executedReconciliation.record.reconciliationId : ""}`,
+      `    needs_action_after: ${cycle.afterSummary.needsAction}`,
+    ]),
+  ].join("\n"));
 }
 
 async function executeWorkerSessionControlPlaneStatusReconciliation(
@@ -20651,6 +20868,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]

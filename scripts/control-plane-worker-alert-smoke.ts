@@ -796,6 +796,97 @@ try {
   assert.ok((watchedActionWithReconciliationLines[0]?.executedReconciliation?.afterSummary.recovery.workerReconciliations.counts.total ?? 0) >= 3);
   assert.ok((watchedActionWithReconciliationLines[0]?.executedReconciliation?.afterSummary.recovery.workerReconciliations.counts.dryRun ?? 0) >= 3);
 
+  const operatedDryRun = await cliJson<{
+    ok: boolean;
+    stoppedReason: string;
+    cycles: Array<{
+      status: string;
+      action: { reason: string } | null;
+      executedAction: { dryRun: boolean; executed: { exitCode: number | null }; advanceId: string } | null;
+      executedReconciliation: {
+        skipped: boolean;
+        result?: { dryRun: boolean; confirmed: boolean; plan: { count: number }; executed: unknown[] };
+        record?: { reconciliationId: string; status: string };
+      } | null;
+      afterSummary: { recovery: { workerReconciliations: { counts: { total: number; dryRun: number } } } };
+    }>;
+    commands: { inspectStatusWatchExecutions: string[]; inspectWorkerReconciliations: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-operate",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "1",
+    "--reconcile-workers",
+    "--include-retired",
+    "--limit",
+    "1",
+  ]);
+  assert.equal(operatedDryRun.ok, true);
+  assert.equal(operatedDryRun.stoppedReason, "max_cycles");
+  assert.equal(operatedDryRun.cycles.length, 1);
+  assert.equal(operatedDryRun.cycles[0]?.status, "executed");
+  assert.equal(operatedDryRun.cycles[0]?.action?.reason, "confirmation_queue:drain_control_plane_confirmations");
+  assert.equal(operatedDryRun.cycles[0]?.executedAction?.dryRun, true);
+  assert.equal(operatedDryRun.cycles[0]?.executedAction?.executed.exitCode, 0);
+  assert.equal(operatedDryRun.cycles[0]?.executedReconciliation?.skipped, false);
+  assert.equal(operatedDryRun.cycles[0]?.executedReconciliation?.result?.dryRun, true);
+  assert.equal(operatedDryRun.cycles[0]?.executedReconciliation?.result?.confirmed, false);
+  assert.equal(operatedDryRun.cycles[0]?.executedReconciliation?.result?.plan.count, 1);
+  assert.equal(operatedDryRun.cycles[0]?.executedReconciliation?.result?.executed.length, 0);
+  assert.equal(operatedDryRun.cycles[0]?.executedReconciliation?.record?.status, "dry_run");
+  assert.ok(operatedDryRun.cycles[0]?.executedReconciliation?.record?.reconciliationId);
+  assert.ok((operatedDryRun.cycles[0]?.afterSummary.recovery.workerReconciliations.counts.total ?? 0) >= 4);
+  assert.ok((operatedDryRun.cycles[0]?.afterSummary.recovery.workerReconciliations.counts.dryRun ?? 0) >= 4);
+  assert.deepEqual(operatedDryRun.commands.inspectStatusWatchExecutions, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--status-watch-executions",
+  ]);
+  assert.deepEqual(operatedDryRun.commands.inspectWorkerReconciliations, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-worker-reconciliations",
+    sessionName,
+    "--server",
+  ]);
+
+  const operatedDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-operate",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "1",
+    "--reconcile-workers",
+    "--include-retired",
+    "--limit",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(operatedDryRunText, /control_plane_operate:/);
+  assert.match(operatedDryRunText, /stopped_reason: max_cycles/);
+  assert.match(operatedDryRunText, /action: confirmation_queue:drain_control_plane_confirmations/);
+  assert.match(operatedDryRunText, /reconciliation: \d{8}T\d{9}Z-[a-f0-9]+/);
+  assert.match(operatedDryRunText, /inspect_status_watch_executions: npm run cli -- runs session-control-plane-advances/);
+
   const statusReconcileDryRun = await cliJson<{
     reconciliation: {
       result: { dryRun: boolean; confirmed: boolean; plan: { count: number }; executed: unknown[] };
