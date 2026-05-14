@@ -271,6 +271,48 @@ async function assertControlPlaneTopologyEnsure(baseUrl: string, sessionName: st
   assert.equal(coreOnlyTopologyEnsure.checks.coreExecutedCount, 2);
   assert.equal(coreOnlyTopologyEnsure.checks.mutationExecutedCount, null);
   assert.ok(coreOnlyTopologyEnsure.checks.afterRunningCount >= 1);
+  const dryRunTopologyLoop = await cliJson<{
+    ok?: true;
+    dryRun: boolean;
+    confirmed: boolean;
+    includeMutationWorkers: boolean;
+    maxIterations: number;
+    loopIntervalMs: number;
+    stoppedReason: string;
+    iterations: Array<{
+      passed: null;
+      plan: { actionable: number; skippedMutationActions: number };
+      core: { executed: unknown[] };
+      mutation: { executed: unknown[] };
+    }>;
+    summary: {
+      iterations: number;
+      passed: null;
+      lastPassed: null;
+      lastActionable: number;
+      lastSkippedMutationActions: number;
+      totalCoreExecuted: number;
+      totalMutationExecuted: number;
+    };
+  }>(baseUrl, [...coreOnlyArgs, "--dry-run", "--max-iterations", "2", "--loop-interval-ms", "0"].map((value) => (
+    value === "ensure-control-plane-topology" ? "ensure-control-plane-topology-loop" : value
+  )));
+  assert.equal(dryRunTopologyLoop.ok, true);
+  assert.equal(dryRunTopologyLoop.dryRun, true);
+  assert.equal(dryRunTopologyLoop.confirmed, false);
+  assert.equal(dryRunTopologyLoop.includeMutationWorkers, false);
+  assert.equal(dryRunTopologyLoop.maxIterations, 2);
+  assert.equal(dryRunTopologyLoop.loopIntervalMs, 0);
+  assert.equal(dryRunTopologyLoop.stoppedReason, "max_iterations");
+  assert.equal(dryRunTopologyLoop.iterations.length, 2);
+  assert.equal(dryRunTopologyLoop.iterations.every((iteration) => iteration.passed === null), true);
+  assert.equal(dryRunTopologyLoop.summary.iterations, 2);
+  assert.equal(dryRunTopologyLoop.summary.passed, null);
+  assert.equal(dryRunTopologyLoop.summary.lastPassed, null);
+  assert.equal(dryRunTopologyLoop.summary.lastActionable, 2);
+  assert.equal(dryRunTopologyLoop.summary.lastSkippedMutationActions, 0);
+  assert.equal(dryRunTopologyLoop.summary.totalCoreExecuted, 0);
+  assert.equal(dryRunTopologyLoop.summary.totalMutationExecuted, 0);
   await cliJson(baseUrl, [
     "runs",
     "stop-control-plane-advance-workers",
