@@ -1019,7 +1019,8 @@ checkout/review commands, record-reviewed/skipped commands, and reviewed/skipped
 state. Add `--next` to default to the first pending result commit with
 `--limit 1`, so operators can review one branch-native result at a time. The
 control-plane status summary surfaces the same next-result command when pending
-result commits exist. Add
+result commits exist, plus reviewed/skipped inspection commands when those
+review states are present. Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving
 the exact branch name and result commit on each command row. Add

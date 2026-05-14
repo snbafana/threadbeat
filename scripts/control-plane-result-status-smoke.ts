@@ -61,7 +61,7 @@ try {
   const summary = await cliJson<{
     commands: { nextResultInspection: string[] };
     results: {
-      counts: { resultCommits: number; pending: number };
+      counts: { resultCommits: number; pending: number; reviewed: number; skipped: number };
       inspection: {
         count: number;
         nextSteps: Array<{
@@ -80,6 +80,8 @@ try {
   ]);
   assert.equal(summary.results.counts.resultCommits, 1);
   assert.equal(summary.results.counts.pending, 1);
+  assert.equal(summary.results.counts.reviewed, 0);
+  assert.equal(summary.results.counts.skipped, 0);
   assert.equal(summary.results.inspection.count, 1);
   assert.equal(summary.results.inspection.nextSteps[0]?.runId, run.id);
   assert.equal(summary.results.inspection.nextSteps[0]?.resultCommit, resultCommit);
@@ -241,6 +243,8 @@ try {
     "text",
   ]);
   assert.match(reviewedStatusText, /result_reviews: count=1 reviewed=1 skipped=0/);
+  assert.match(reviewedStatusText, /result_inspection: none \(reviewed=1 skipped=0\)/);
+  assert.match(reviewedStatusText, new RegExp(`inspect_reviewed: npm run cli -- runs session-result-inspections ${sessionName} --server --review-state reviewed`));
   assert.match(reviewedStatusText, /recent_result_reviews:/);
   assert.match(reviewedStatusText, new RegExp(`review: ${reviewed.review.reviewId}`));
   assert.match(reviewedStatusText, /action: reviewed/);
@@ -286,6 +290,74 @@ try {
   assert.match(reviewedInspectionText, new RegExp(`latest_review: ${reviewed.review.reviewId}`));
   assert.match(reviewedInspectionText, /reviewed_by: result-status-smoke/);
   assert.match(reviewedInspectionText, new RegExp(`next: ${reviewedResultInspectionCommand}`));
+
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const skipped = await cliJson<{ review: { reviewId: string; action: string; runId: string; resultCommit: string; reviewedBy: string } }>(baseUrl, [
+    "runs",
+    "session-result-reviews",
+    sessionName,
+    "--server",
+    "--record-skipped",
+    "--run",
+    run.id,
+    "--reviewed-by",
+    "result-status-smoke",
+  ]);
+  assert.equal(skipped.review.action, "skipped");
+  assert.equal(skipped.review.runId, run.id);
+  assert.equal(skipped.review.resultCommit, resultCommit);
+  assert.equal(skipped.review.reviewedBy, "result-status-smoke");
+
+  const skippedStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(skippedStatusText, /result_reviews: count=2 reviewed=1 skipped=1/);
+  assert.match(skippedStatusText, /result_inspection: none \(reviewed=0 skipped=1\)/);
+  assert.match(skippedStatusText, new RegExp(`inspect_skipped: npm run cli -- runs session-result-inspections ${sessionName} --server --review-state skipped`));
+
+  const skippedStatusCommands = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+  ]);
+  assert.ok(skippedStatusCommands.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state skipped`
+  )));
+
+  const skippedResultInspections = await cliJson<{
+    summary: { resultCommits: number; pending: number; reviewed: number; skipped: number };
+    resultCommits: Array<{
+      runId: string;
+      reviewState: string;
+      latestReview: null | { reviewId: string; action: string; reviewedBy: string };
+      nextStep: { action: string; reason: string; command: string[] };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "skipped",
+  ]);
+  assert.equal(skippedResultInspections.summary.resultCommits, 1);
+  assert.equal(skippedResultInspections.summary.skipped, 1);
+  assert.equal(skippedResultInspections.resultCommits[0]?.runId, run.id);
+  assert.equal(skippedResultInspections.resultCommits[0]?.reviewState, "skipped");
+  assert.equal(skippedResultInspections.resultCommits[0]?.latestReview?.reviewId, skipped.review.reviewId);
+  assert.equal(skippedResultInspections.resultCommits[0]?.latestReview?.action, "skipped");
+  assert.equal(skippedResultInspections.resultCommits[0]?.latestReview?.reviewedBy, "result-status-smoke");
+  assert.equal(skippedResultInspections.resultCommits[0]?.nextStep.action, "inspect_review");
+  assert.equal(skippedResultInspections.resultCommits[0]?.nextStep.reason, "result_commit_skipped");
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

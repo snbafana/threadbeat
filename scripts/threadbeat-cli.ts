@@ -8420,7 +8420,7 @@ type WorkerSessionControlPlaneStatusResponse = {
     };
   };
   results: {
-    counts: { total: number; resultCommits: number; reviewed: number; pending: number };
+    counts: { total: number; resultCommits: number; reviewed: number; skipped: number; pending: number };
     actions: { review_result: number };
     nextSteps: Array<{
       action: "review_result";
@@ -9609,11 +9609,18 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       "result_inspection:",
       `  pending: ${summary.results.counts.pending}`,
       `  reviewed: ${summary.results.counts.reviewed}`,
+      `  skipped: ${summary.results.counts.skipped}`,
       `  inspect_all: ${formatShellCommand(summary.commands.resultInspections)}`,
       `  inspect_pending: ${formatShellCommand(summary.commands.pendingResultInspections)}`,
     );
     if (summary.results.counts.pending > 0) {
       lines.push(`  inspect_next: ${formatShellCommand(summary.commands.nextResultInspection)}`);
+    }
+    if (summary.results.counts.reviewed > 0) {
+      lines.push(`  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`);
+    }
+    if (summary.results.counts.skipped > 0) {
+      lines.push(`  inspect_skipped: ${formatShellCommand(summary.commands.skippedResultInspections)}`);
     }
     for (const step of summary.results.inspection.nextSteps) {
       lines.push(
@@ -9630,9 +9637,10 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     }
   } else {
     lines.push(
-      `result_inspection: none (reviewed=${summary.results.counts.reviewed})`,
+      `result_inspection: none (reviewed=${summary.results.counts.reviewed} skipped=${summary.results.counts.skipped})`,
       `  inspect_all: ${formatShellCommand(summary.commands.resultInspections)}`,
       `  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`,
+      `  inspect_skipped: ${formatShellCommand(summary.commands.skippedResultInspections)}`,
     );
   }
   lines.push(
@@ -9739,6 +9747,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   if (summary.results.counts.reviewed > 0) {
     commands.push({ command: summary.commands.reviewedResultInspections });
+  }
+  if (summary.results.counts.skipped > 0) {
+    commands.push({ command: summary.commands.skippedResultInspections });
   }
   for (const review of summary.results.reviews.recent) {
     commands.push({

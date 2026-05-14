@@ -5790,7 +5790,7 @@ const summarizeWorkerSessionResultInspection = async (
   nextStepLimit: number,
   resultReviews: Awaited<ReturnType<typeof listWorkerSessionResultReviewRecords>>,
 ): Promise<{
-  counts: { total: number; resultCommits: number; reviewed: number; pending: number };
+  counts: { total: number; resultCommits: number; reviewed: number; skipped: number; pending: number };
   actions: { review_result: number };
   nextSteps: Array<{
     action: "review_result";
@@ -5819,6 +5819,8 @@ const summarizeWorkerSessionResultInspection = async (
       .filter((run) => run.worker_id === null || sessionWorkerIds.has(run.worker_id))
       .map((run) => ({ agentId, run: { ...run, result_commit: run.result_commit as string } }));
   }))).flat();
+  const reviewedRuns = runs.filter(({ run }) => latestReviews.get(resultReviewRunCommitKey(run.id, run.result_commit))?.action === "reviewed");
+  const skippedRuns = runs.filter(({ run }) => latestReviews.get(resultReviewRunCommitKey(run.id, run.result_commit))?.action === "skipped");
   const pendingRuns = runs.filter(({ run }) => !latestReviews.has(resultReviewRunCommitKey(run.id, run.result_commit)));
   const nextSteps = pendingRuns.map(({ agentId, run }) => {
     const checkoutDir = `./checkouts/${session.session}-control-plane-results/${run.id}`;
@@ -5846,7 +5848,8 @@ const summarizeWorkerSessionResultInspection = async (
     counts: {
       total: runs.length,
       resultCommits: runs.length,
-      reviewed: runs.length - pendingRuns.length,
+      reviewed: reviewedRuns.length,
+      skipped: skippedRuns.length,
       pending: pendingRuns.length,
     },
     actions: {

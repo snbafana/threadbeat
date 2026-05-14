@@ -2739,7 +2739,7 @@ try {
       };
     };
     results: {
-      counts: { total: number; resultCommits: number; reviewed: number; pending: number };
+      counts: { total: number; resultCommits: number; reviewed: number; skipped: number; pending: number };
       actions: { review_result: number };
       nextSteps: Array<{
         action: string;
