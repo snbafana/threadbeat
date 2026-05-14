@@ -29,6 +29,141 @@ const { app, db } = await buildServer(settings);
 let baseUrl: string | null = null;
 let sessionStarted = false;
 
+async function assertControlPlaneTopology(baseUrl: string, sessionName: string): Promise<void> {
+  const advanceWorkerId = "detached-smoke-topology-advance-worker";
+  const tickWorkerId = "detached-smoke-topology-tick-worker";
+  const applyWorkerId = "detached-smoke-topology-apply-worker";
+  const drainWorkerId = "detached-smoke-topology-drain-worker";
+  const commonArgs = [
+    "runs",
+    "session-control-plane-topology",
+    sessionName,
+    "--server",
+    "--advance-worker-id",
+    advanceWorkerId,
+    "--tick-worker-id",
+    tickWorkerId,
+    "--worker-dry-run",
+    "1",
+    "--max-steps",
+    "50",
+    "--max-ticks",
+    "50",
+    "--interval-ms",
+    "1000",
+    "--apply-worker-id",
+    applyWorkerId,
+    "--drain-worker-id",
+    drainWorkerId,
+    "--apply-id",
+    "detached-smoke-topology-empty-apply",
+    "--apply-action",
+    "inspect_drain_continuation_resets",
+    "--max-actions",
+    "1",
+    "--max-polls",
+    "1",
+    "--apply-interval-ms",
+    "1",
+    "--max-continuations",
+    "1",
+    "--lines",
+    "5",
+  ];
+  const topology = await cliJson<{
+    ok?: true;
+    session: string;
+    desired: {
+      core: { advanceWorkerId: string; tickWorkerId: string; workerDryRun: boolean; maxSteps: number; maxTicks: number; intervalMs: number };
+      mutation: { applyWorkerId: string; drainWorkerId: string; applyId?: string; action?: string; maxActions: number | null; maxPolls: number | null; applyIntervalMs: number | null; maxContinuations: number | null };
+    };
+    plan: {
+      expected: number;
+      running: number;
+      actionable: number;
+      blocked: number;
+      existing: number;
+      missing: number;
+      restartable: number;
+      ready: boolean;
+      steps: Array<{ group: string; kind: string; workerId: string; action: string; reason: string; command: string[] }>;
+      commands: string[][];
+    };
+    checks: { expectedCount: number; runningCount: number; actionableCount: number; blockedCount: number; missingCount: number; restartableCount: number; ready: boolean };
+    commands: { ensureCoreDryRun: string[]; ensureCoreConfirm: string[]; ensureMutationDryRun: string[]; ensureMutationConfirm: string[] };
+  }>(baseUrl, commonArgs);
+  assert.equal(topology.ok, true);
+  assert.equal(topology.session, sessionName);
+  assert.equal(topology.desired.core.advanceWorkerId, advanceWorkerId);
+  assert.equal(topology.desired.core.tickWorkerId, tickWorkerId);
+  assert.equal(topology.desired.core.workerDryRun, true);
+  assert.equal(topology.desired.core.maxSteps, 50);
+  assert.equal(topology.desired.core.maxTicks, 50);
+  assert.equal(topology.desired.core.intervalMs, 1000);
+  assert.equal(topology.desired.mutation.applyWorkerId, applyWorkerId);
+  assert.equal(topology.desired.mutation.drainWorkerId, drainWorkerId);
+  assert.equal(topology.desired.mutation.applyId, "detached-smoke-topology-empty-apply");
+  assert.equal(topology.desired.mutation.action, "inspect_drain_continuation_resets");
+  assert.equal(topology.desired.mutation.maxActions, 1);
+  assert.equal(topology.desired.mutation.maxPolls, 1);
+  assert.equal(topology.desired.mutation.applyIntervalMs, 1);
+  assert.equal(topology.desired.mutation.maxContinuations, 1);
+  assert.equal(topology.plan.expected, 4);
+  assert.equal(topology.plan.running, 0);
+  assert.equal(topology.plan.actionable, 4);
+  assert.equal(topology.plan.blocked, 0);
+  assert.equal(topology.plan.existing, 0);
+  assert.equal(topology.plan.missing, 4);
+  assert.equal(topology.plan.restartable, 0);
+  assert.equal(topology.plan.ready, false);
+  assert.deepEqual(
+    topology.plan.steps.map((step) => [step.group, step.kind, step.workerId, step.action, step.reason]),
+    [
+      ["core", "control_plane_advance", advanceWorkerId, "ensure_control_plane_advance_worker", "no_worker_record"],
+      ["core", "control_plane_tick", tickWorkerId, "ensure_control_plane_tick_worker", "no_worker_record"],
+      ["mutation", "apply_action", applyWorkerId, "ensure_apply_action_worker", "no_worker_record"],
+      ["mutation", "drain", drainWorkerId, "ensure_drain_worker", "no_worker_record"],
+    ],
+  );
+  assert.equal(topology.checks.expectedCount, 4);
+  assert.equal(topology.checks.runningCount, 0);
+  assert.equal(topology.checks.actionableCount, 4);
+  assert.equal(topology.checks.blockedCount, 0);
+  assert.equal(topology.checks.missingCount, 4);
+  assert.equal(topology.checks.restartableCount, 0);
+  assert.equal(topology.checks.ready, false);
+  assert.equal(
+    topology.commands.ensureCoreDryRun.join(" "),
+    `npm run cli -- runs ensure-control-plane-core-workers ${sessionName} --server --advance-worker-id ${advanceWorkerId} --tick-worker-id ${tickWorkerId} --worker-dry-run 1 --max-steps 50 --max-ticks 50 --interval-ms 1000 --lines 5 --dry-run`,
+  );
+  assert.equal(
+    topology.commands.ensureMutationConfirm.join(" "),
+    `npm run cli -- runs ensure-control-plane-mutation-workers ${sessionName} --server --apply-worker-id ${applyWorkerId} --drain-worker-id ${drainWorkerId} --apply-id detached-smoke-topology-empty-apply --apply-action inspect_drain_continuation_resets --max-actions 1 --max-polls 1 --apply-interval-ms 1 --max-continuations 1 --lines 5 --confirm`,
+  );
+  assert.equal(
+    topology.plan.commands[0]?.join(" "),
+    `npm run cli -- runs ensure-control-plane-advance-worker ${sessionName} --server --worker-id ${advanceWorkerId} --max-steps 50 --interval-ms 1000 --lines 5 --dry-run`,
+  );
+  assert.equal(
+    topology.plan.commands[3]?.join(" "),
+    `npm run cli -- runs ensure-drain-worker ${sessionName} --server --worker-id ${drainWorkerId} --max-continuations 1 --lines 5`,
+  );
+
+  const topologyCommands = await cliJson<{ ok?: true; session: string; commands: Array<{ command: string[] }> }>(
+    baseUrl,
+    [...commonArgs, "--commands-only"],
+  );
+  assert.equal(topologyCommands.ok, true);
+  assert.equal(topologyCommands.session, sessionName);
+  assert.equal(topologyCommands.commands.length, 4);
+  assert.equal(topologyCommands.commands[2]?.command.join(" "), topology.plan.commands[2]?.join(" "));
+  const topologyShell = await cliText(baseUrl, [...commonArgs, "--commands-only", "--format", "shell"]);
+  assert.deepEqual(
+    topologyShell.trim().split("\n"),
+    topology.plan.commands.map((command) => command.join(" ")),
+  );
+}
+
 async function assertControlPlaneWorkerDrill(baseUrl: string, sessionName: string): Promise<void> {
   const drillTickWorkerId = "detached-smoke-control-plane-drill-worker";
   await cliJson(baseUrl, [
@@ -5706,6 +5841,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   assert.equal(deadWorkerStoppedRun?.run.status, "running");
+  await assertControlPlaneTopology(baseUrl, sessionName);
   await assertControlPlaneCoreWorkerEnsure(baseUrl, sessionName);
   await assertControlPlaneMutationWorkerEnsure(baseUrl, sessionName);
 } finally {

@@ -4557,6 +4557,55 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(status);
     return;
   }
+  if (subcommandName === "session-control-plane-topology") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-topology requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-topology --format must be json or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-topology --format shell requires --commands-only");
+    }
+    const topology = await inspectWorkerSessionControlPlaneTopology(
+      required(sessionName, "runs session-control-plane-topology <session> --server"),
+      {
+        advanceWorkerId: options["advance-worker-id"] ?? "threadbeat-control-plane-advance",
+        tickWorkerId: options["tick-worker-id"] ?? "threadbeat-control-plane-tick",
+        workerDryRun: options["worker-dry-run"] === "1",
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        maxTicks: parsePositiveInteger(options["max-ticks"] ?? "10", "--max-ticks"),
+        intervalMs: parsePositiveInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        applyWorkerId: options["apply-worker-id"] ?? "threadbeat-apply-action",
+        drainWorkerId: options["drain-worker-id"] ?? "threadbeat-drain",
+        applyId: options["apply-id"],
+        source: options.source,
+        action: options["apply-action"],
+        limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
+        maxActions: options["max-actions"] ? parsePositiveInteger(options["max-actions"], "--max-actions") : null,
+        continueOnFailure: options["continue-on-failure"] === "1",
+        untilEmpty: options["until-empty"] === "1",
+        maxPolls: options["max-polls"] ? parsePositiveInteger(options["max-polls"], "--max-polls") : null,
+        applyIntervalMs: options["apply-interval-ms"] ? parsePositiveInteger(options["apply-interval-ms"], "--apply-interval-ms") : null,
+        maxContinuations: options["max-continuations"] ? parsePositiveInteger(options["max-continuations"], "--max-continuations") : null,
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+      },
+    );
+    if (options["commands-only"] === "1") {
+      const commands = topology.plan.commands.map((command) => ({ command }));
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        await printJson({ ok: true, session: topology.session, commands });
+      }
+      return;
+    }
+    await printJson(topology);
+    return;
+  }
   if (subcommandName === "session-result-reviews") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -11106,6 +11155,148 @@ async function ensureWorkerSessionControlPlaneMutationWorkers(
   };
 }
 
+type ControlPlaneTopologyOptions = ControlPlaneMutationWorkerOptions & {
+  advanceWorkerId: string;
+  tickWorkerId: string;
+  workerDryRun: boolean;
+  maxSteps: number;
+  maxTicks: number;
+  intervalMs: number;
+};
+
+async function inspectWorkerSessionControlPlaneTopology(
+  sessionName: string,
+  options: ControlPlaneTopologyOptions,
+) {
+  const observedAt = new Date().toISOString();
+  const aggregate = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    includeRetired: true,
+    lines: options.lines,
+  });
+  const coreDesired = {
+    advanceWorkerId: options.advanceWorkerId,
+    tickWorkerId: options.tickWorkerId,
+    workerDryRun: options.workerDryRun,
+    maxSteps: options.maxSteps,
+    maxTicks: options.maxTicks,
+    intervalMs: options.intervalMs,
+    lines: options.lines,
+  };
+  const mutationDesired: ControlPlaneMutationWorkerOptions = {
+    applyWorkerId: options.applyWorkerId,
+    drainWorkerId: options.drainWorkerId,
+    applyId: options.applyId,
+    source: options.source,
+    action: options.action,
+    limit: options.limit,
+    maxActions: options.maxActions,
+    continueOnFailure: options.continueOnFailure,
+    untilEmpty: options.untilEmpty,
+    maxPolls: options.maxPolls,
+    applyIntervalMs: options.applyIntervalMs,
+    maxContinuations: options.maxContinuations,
+    lines: options.lines,
+  };
+  const coreSteps = controlPlaneCoreWorkerPlan(sessionName, aggregate, coreDesired).map((step) => ({ ...step, group: "core" as const }));
+  const mutationSteps = controlPlaneMutationWorkerPlan(sessionName, aggregate, mutationDesired).map((step) => ({ ...step, group: "mutation" as const }));
+  const steps = [...coreSteps, ...mutationSteps];
+  const runningSteps = steps.filter((step) => step.worker?.alive === true);
+  const actionableSteps = steps.filter((step) => step.command.length > 0);
+  const blockedSteps = steps.filter((step) => step.action === "blocked");
+  const existingSteps = steps.filter((step) => step.action === "existing");
+  const missingSteps = steps.filter((step) => step.reason === "no_worker_record");
+  const restartableSteps = steps.filter((step) => step.reason === "restartable_worker_exists");
+  return {
+    ok: true,
+    session: sessionName,
+    observedAt,
+    desired: {
+      core: coreDesired,
+      mutation: mutationDesired,
+    },
+    aggregate,
+    plan: {
+      expected: steps.length,
+      running: runningSteps.length,
+      actionable: actionableSteps.length,
+      blocked: blockedSteps.length,
+      existing: existingSteps.length,
+      missing: missingSteps.length,
+      restartable: restartableSteps.length,
+      ready: runningSteps.length === steps.length,
+      steps,
+      commands: actionableSteps.map((step) => step.command),
+    },
+    checks: {
+      expectedCount: steps.length,
+      runningCount: runningSteps.length,
+      actionableCount: actionableSteps.length,
+      blockedCount: blockedSteps.length,
+      missingCount: missingSteps.length,
+      restartableCount: restartableSteps.length,
+      ready: runningSteps.length === steps.length,
+    },
+    commands: {
+      fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server"],
+      inspectWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-workers", sessionName, "--server", "--include-retired", "--lines", String(options.lines)],
+      ensureCoreDryRun: controlPlaneCoreTopologyCommand(sessionName, coreDesired, true),
+      ensureCoreConfirm: controlPlaneCoreTopologyCommand(sessionName, coreDesired, false),
+      ensureMutationDryRun: controlPlaneMutationTopologyCommand(sessionName, mutationDesired, true),
+      ensureMutationConfirm: controlPlaneMutationTopologyCommand(sessionName, mutationDesired, false),
+    },
+  };
+}
+
+function controlPlaneCoreTopologyCommand(
+  sessionName: string,
+  options: {
+    advanceWorkerId: string;
+    tickWorkerId: string;
+    workerDryRun: boolean;
+    maxSteps: number;
+    maxTicks: number;
+    intervalMs: number;
+    lines: number;
+  },
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "ensure-control-plane-core-workers", sessionName, "--server",
+    "--advance-worker-id", options.advanceWorkerId,
+    "--tick-worker-id", options.tickWorkerId,
+    ...(options.workerDryRun ? ["--worker-dry-run", "1"] : []),
+    "--max-steps", String(options.maxSteps),
+    "--max-ticks", String(options.maxTicks),
+    "--interval-ms", String(options.intervalMs),
+    "--lines", String(options.lines),
+    dryRun ? "--dry-run" : "--confirm",
+  ];
+}
+
+function controlPlaneMutationTopologyCommand(
+  sessionName: string,
+  options: ControlPlaneMutationWorkerOptions,
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "ensure-control-plane-mutation-workers", sessionName, "--server",
+    "--apply-worker-id", options.applyWorkerId,
+    "--drain-worker-id", options.drainWorkerId,
+    ...(options.applyId ? ["--apply-id", options.applyId] : []),
+    ...(options.source ? ["--source", options.source] : []),
+    ...(options.action ? ["--apply-action", options.action] : []),
+    ...(options.limit !== null ? ["--limit", String(options.limit)] : []),
+    ...(options.maxActions !== null ? ["--max-actions", String(options.maxActions)] : []),
+    ...(options.continueOnFailure ? ["--continue-on-failure"] : []),
+    ...(options.untilEmpty ? ["--until-empty"] : []),
+    ...(options.maxPolls !== null ? ["--max-polls", String(options.maxPolls)] : []),
+    ...(options.applyIntervalMs !== null ? ["--apply-interval-ms", String(options.applyIntervalMs)] : []),
+    ...(options.maxContinuations !== null ? ["--max-continuations", String(options.maxContinuations)] : []),
+    "--lines", String(options.lines),
+    dryRun ? "--dry-run" : "--confirm",
+  ];
+}
+
 async function executeWorkerSessionControlPlaneWorkerDrill(
   sessionName: string,
   options: {
@@ -14724,6 +14915,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--commands-only] [--format json|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
