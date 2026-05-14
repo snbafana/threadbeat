@@ -6,6 +6,7 @@ import { deriveGitHubLinks } from "../src/gitLinks.js";
 import { listWorkerSessionBranchRecoveryExecutionRecords } from "../src/workerSessionBranchRecovery.js";
 import { writeWorkerSessionControlPlaneAdvanceRecord } from "../src/workerSessionControlPlaneAdvances.js";
 import { summarizeWorkerSessionControlPlaneTickDecision } from "../src/workerSessionControlPlaneTicks.js";
+import { writeWorkerSessionControlPlaneWorkerReconciliationRecord } from "../src/workerSessionControlPlaneWorkerReconciliations.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
@@ -5512,10 +5513,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
       })
       : await reconcileWorkerSessionControlPlaneWorkers(requiredSessionName, reconcileOptions);
+    const written = await recordWorkerSessionControlPlaneWorkerReconciliation(requiredSessionName, result);
+    const output = {
+      ...result,
+      reconciliationRecord: {
+        path: written.path,
+        reconciliationId: written.record.reconciliationId,
+      },
+    };
     if (outputFormat === "text") {
-      printWorkerSessionControlPlaneReconcileText(result);
+      printWorkerSessionControlPlaneReconcileText(output);
     } else {
-      await printJson(result);
+      await printJson(output);
     }
     return;
   }
@@ -8704,6 +8713,7 @@ type WorkerSessionControlPlaneTimelineResponse = {
     advanceId?: string;
     workerId?: string;
     executionId?: string;
+    reconciliationId?: string;
     reviewId?: string;
     applyId?: string;
     applySource?: string;
@@ -8731,6 +8741,11 @@ type WorkerSessionControlPlaneTimelineResponse = {
     iterations?: number;
     totalCoreExecuted?: number;
     totalMutationExecuted?: number;
+    totalPlanned?: number;
+    totalExecuted?: number;
+    lastPlannedCount?: number | null;
+    lastNextPlannedCount?: number | null;
+    lastRemainingCount?: number | null;
     selected?: number;
     resumedCount?: number;
     skippedCount?: number;
@@ -10327,6 +10342,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
     advanceId?: string;
     workerId?: string;
     executionId?: string;
+    reconciliationId?: string;
     reviewId?: string;
     status?: string;
     exitCode?: number | null;
@@ -10346,6 +10362,11 @@ function summarizeWorkerSessionControlPlaneTimeline(
     iterations?: number;
     totalCoreExecuted?: number;
     totalMutationExecuted?: number;
+    totalPlanned?: number;
+    totalExecuted?: number;
+    lastPlannedCount?: number | null;
+    lastNextPlannedCount?: number | null;
+    lastRemainingCount?: number | null;
     resultCommit?: string;
     reviewedBy?: string;
   }>;
@@ -10368,6 +10389,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
       advanceId: event.advanceId,
       workerId: event.workerId,
       executionId: event.executionId,
+      reconciliationId: event.reconciliationId,
       reviewId: event.reviewId,
       status: event.status,
       exitCode: event.exitCode,
@@ -10387,6 +10409,11 @@ function summarizeWorkerSessionControlPlaneTimeline(
       iterations: event.iterations,
       totalCoreExecuted: event.totalCoreExecuted,
       totalMutationExecuted: event.totalMutationExecuted,
+      totalPlanned: event.totalPlanned,
+      totalExecuted: event.totalExecuted,
+      lastPlannedCount: event.lastPlannedCount,
+      lastNextPlannedCount: event.lastNextPlannedCount,
+      lastRemainingCount: event.lastRemainingCount,
       resultCommit: event.resultCommit,
       reviewedBy: event.reviewedBy,
     })),
@@ -11266,6 +11293,7 @@ async function reconcileWorkerSessionControlPlaneWorkers(
 }
 
 type ControlPlaneWorkerReconcileResult = Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkers>>;
+type ControlPlaneWorkerReconcileLoopResult = Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkersLoop>>;
 
 async function reconcileWorkerSessionControlPlaneWorkersLoop(
   sessionName: string,
@@ -11389,14 +11417,86 @@ async function reconcileWorkerSessionControlPlaneWorkersLoop(
   };
 }
 
+async function recordWorkerSessionControlPlaneWorkerReconciliation(
+  sessionName: string,
+  result: ControlPlaneWorkerReconcileResult | ControlPlaneWorkerReconcileLoopResult,
+): Promise<Awaited<ReturnType<typeof writeWorkerSessionControlPlaneWorkerReconciliationRecord>>> {
+  const untilEmpty = "untilEmpty" in result;
+  const summary = untilEmpty
+    ? result.summary
+    : {
+      iterations: 1,
+      totalPlanned: result.plan.count,
+      totalExecuted: result.executed.length,
+      lastPlannedCount: result.plan.count,
+      lastNextPlannedCount: result.after
+        ? controlPlaneWorkerReconcilePlan(result.after.nextSteps, {
+          workerId: result.filter.workerId ?? undefined,
+          kind: result.filter.kind,
+          limit: result.filter.limit,
+        }).planned.length
+        : null,
+      lastRemainingCount: result.checks.remainingCount,
+    };
+  return await writeWorkerSessionControlPlaneWorkerReconciliationRecord(process.cwd(), {
+    session: sessionName,
+    observedAt: untilEmpty ? result.startedAt : result.observedAt,
+    completedAt: result.completedAt,
+    dryRun: result.dryRun,
+    confirmed: result.confirmed,
+    untilEmpty,
+    status: controlPlaneWorkerReconciliationStatus(result),
+    ...(untilEmpty ? { stoppedReason: result.stoppedReason } : {}),
+    filter: result.filter,
+    summary,
+    commands: untilEmpty
+      ? result.commands
+      : controlPlaneWorkerReconciliationCommands(sessionName, result.filter),
+  });
+}
+
+function controlPlaneWorkerReconciliationCommands(
+  sessionName: string,
+  filter: ControlPlaneWorkerReconcileResult["filter"],
+): { inspectWorkers: string[]; dryRun: string[]; confirm: string[] } {
+  const base = [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+    ...(filter.workerId ? ["--worker-id", filter.workerId] : []),
+    ...(filter.kind ? ["--kind", controlPlaneWorkerKindFlag(filter.kind)] : []),
+    ...(filter.includeRetired ? ["--include-retired"] : []),
+    ...(filter.limit !== null ? ["--limit", String(filter.limit)] : []),
+    "--lines", String(filter.lines),
+  ];
+  return {
+    inspectWorkers: [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-workers", sessionName, "--server",
+      ...(filter.workerId ? ["--worker-id", filter.workerId] : []),
+      ...(filter.includeRetired ? ["--include-retired"] : []),
+      "--lines", String(filter.lines),
+    ],
+    dryRun: [...base, "--dry-run"],
+    confirm: [...base, "--confirm"],
+  };
+}
+
+function controlPlaneWorkerReconciliationStatus(
+  result: ControlPlaneWorkerReconcileResult | ControlPlaneWorkerReconcileLoopResult,
+): "dry_run" | "executed" | "noop" | "failed" | "max_steps" {
+  if (result.dryRun || !result.confirmed) return "dry_run";
+  if ("untilEmpty" in result && result.stoppedReason === "max_steps") return "max_steps";
+  if (result.passed === false) return "failed";
+  const totalPlanned = "untilEmpty" in result ? result.summary.totalPlanned : result.plan.count;
+  return totalPlanned === 0 ? "noop" : "executed";
+}
+
 function printWorkerSessionControlPlaneReconcileText(
-  response: ControlPlaneWorkerReconcileResult | Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkersLoop>>,
+  response: ControlPlaneWorkerReconcileResult | ControlPlaneWorkerReconcileLoopResult,
 ): void {
   console.log(formatWorkerSessionControlPlaneReconcileText(response).join("\n"));
 }
 
 function formatWorkerSessionControlPlaneReconcileText(
-  response: ControlPlaneWorkerReconcileResult | Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkersLoop>>,
+  response: ControlPlaneWorkerReconcileResult | ControlPlaneWorkerReconcileLoopResult,
 ): string[] {
   return "untilEmpty" in response
     ? formatWorkerSessionControlPlaneReconcileLoopText(response)
@@ -11427,7 +11527,7 @@ function formatWorkerSessionControlPlaneReconcilePassText(response: ControlPlane
 }
 
 function formatWorkerSessionControlPlaneReconcileLoopText(
-  response: Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkersLoop>>,
+  response: ControlPlaneWorkerReconcileLoopResult,
 ): string[] {
   const lines = [
     "control_plane_worker_reconcile_loop:",
@@ -16085,7 +16185,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--tick tick_id[,tick_id]] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--source tick,control_plane_advance_worker,branch_recovery_execution,result_review] [--event tick_recorded,worker_progress_recorded,worker_exited_unrecorded,branch_recovery_executed,result_review_recorded] [--status executed,noop,running,reviewed,skipped] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,control_plane_advance_worker,control_plane_tick_worker,worker_reconcile_execution,branch_recovery_execution,result_review] [--event tick_recorded,worker_progress_recorded,worker_exited_unrecorded,worker_reconcile_executed,branch_recovery_executed,result_review_recorded] [--status executed,noop,running,reviewed,skipped] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

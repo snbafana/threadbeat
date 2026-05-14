@@ -202,6 +202,29 @@ try {
     reconcileLoopPreview.commands.confirm.join(" "),
     `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 3 --interval-ms 1 --confirm`,
   );
+  assert.match(reconcileLoopPreview.reconciliationRecord.reconciliationId, /^[0-9A-Za-z-]+$/);
+  const reconcileTimeline = await cliJson<WorkerTimelineResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "worker_reconcile_execution",
+    "--event",
+    "worker_reconcile_executed",
+    "--execution",
+    reconcileLoopPreview.reconciliationRecord.reconciliationId,
+  ]);
+  assert.equal(reconcileTimeline.count, 1);
+  assert.equal(reconcileTimeline.counts.worker_reconcile_executed, 1);
+  assert.equal(reconcileTimeline.events[0]?.source, "worker_reconcile_execution");
+  assert.equal(reconcileTimeline.events[0]?.event, "worker_reconcile_executed");
+  assert.equal(reconcileTimeline.events[0]?.executionId, reconcileLoopPreview.reconciliationRecord.reconciliationId);
+  assert.equal(reconcileTimeline.events[0]?.status, "dry_run");
+  assert.equal(reconcileTimeline.events[0]?.reason, "dry_run");
+  assert.equal(reconcileTimeline.events[0]?.iterations, 1);
+  assert.equal(reconcileTimeline.events[0]?.totalPlanned, 6);
+  assert.equal(reconcileTimeline.events[0]?.totalExecuted, 0);
   const reconcileLoopText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-reconcile-workers",
@@ -238,6 +261,7 @@ try {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-tick-workers", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-worker-reconciliations", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
@@ -255,9 +279,14 @@ type WorkerTimelineResponse = {
   events: Array<{
     source: string;
     event: string;
+    executionId?: string;
+    status?: string;
     state?: string;
     restartable?: boolean;
     reason?: string;
+    iterations?: number;
+    totalPlanned?: number;
+    totalExecuted?: number;
   }>;
 };
 
@@ -288,6 +317,9 @@ type WorkerReconcileLoopResponse = {
   };
   commands: {
     confirm: string[];
+  };
+  reconciliationRecord: {
+    reconciliationId: string;
   };
 };
 

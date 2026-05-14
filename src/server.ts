@@ -52,6 +52,9 @@ import {
   writeWorkerSessionControlPlaneTickRecord,
 } from "./workerSessionControlPlaneTicks.js";
 import {
+  listWorkerSessionControlPlaneWorkerReconciliationRecords,
+} from "./workerSessionControlPlaneWorkerReconciliations.js";
+import {
   listWorkerSessionControlPlaneTickWorkerNextSteps,
   listWorkerSessionControlPlaneTickWorkers,
   restartWorkerSessionControlPlaneTickWorker,
@@ -3301,12 +3304,13 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
-  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
+  source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "worker_reconcile_execution" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
+  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "worker_reconcile_executed" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
   tickId?: string;
   advanceId?: string;
   workerId?: string;
   executionId?: string;
+  reconciliationId?: string;
   reviewId?: string;
   applyId?: string;
   applySource?: string;
@@ -3336,6 +3340,11 @@ type WorkerSessionControlPlaneTimelineEvent = {
   iterations?: number;
   totalCoreExecuted?: number;
   totalMutationExecuted?: number;
+  totalPlanned?: number;
+  totalExecuted?: number;
+  lastPlannedCount?: number | null;
+  lastNextPlannedCount?: number | null;
+  lastRemainingCount?: number | null;
   selected?: number;
   resumedCount?: number;
   skippedCount?: number;
@@ -3437,11 +3446,12 @@ const readWorkerSessionControlPlaneTimeline = async (
     options.runIds,
   ].some((values) => values.length > 0);
   const recordReadLimit = hasIdentityFilter ? Number.MAX_SAFE_INTEGER : options.limit;
-  const [ticks, advances, advanceWorkers, tickWorkers, applyActionExecutions, branchRecoveryExecutions, resultReviews] = await Promise.all([
+  const [ticks, advances, advanceWorkers, tickWorkers, workerReconciliations, applyActionExecutions, branchRecoveryExecutions, resultReviews] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, { limit: recordReadLimit }),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
+    listWorkerSessionControlPlaneWorkerReconciliationRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionResultReviewRecords(settings.projectRoot, name, recordReadLimit),
@@ -3622,6 +3632,25 @@ const readWorkerSessionControlPlaneTimeline = async (
         pid: worker.pid,
       });
     }
+  }
+  for (const reconciliation of workerReconciliations) {
+    events.push({
+      observedAt: reconciliation.observedAt,
+      source: "worker_reconcile_execution",
+      event: "worker_reconcile_executed",
+      reconciliationId: reconciliation.reconciliationId,
+      executionId: reconciliation.reconciliationId,
+      status: reconciliation.status,
+      dryRun: reconciliation.dryRun,
+      reason: reconciliation.stoppedReason,
+      iterations: reconciliation.summary.iterations,
+      totalPlanned: reconciliation.summary.totalPlanned,
+      totalExecuted: reconciliation.summary.totalExecuted,
+      lastPlannedCount: reconciliation.summary.lastPlannedCount,
+      lastNextPlannedCount: reconciliation.summary.lastNextPlannedCount,
+      lastRemainingCount: reconciliation.summary.lastRemainingCount,
+      command: reconciliation.commands.confirm,
+    });
   }
   for (const execution of applyActionExecutions) {
     events.push({
