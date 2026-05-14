@@ -4693,8 +4693,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-result-reviews") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
     if (options.server !== "1") {
       throw new Error("runs session-result-reviews requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-result-reviews --format must be json or text");
     }
     const requiredSessionName = required(sessionName, "runs session-result-reviews <session> --server");
     const recordAction = options["record-reviewed"] === "1"
@@ -4718,7 +4722,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       ));
       return;
     }
-    await printJson(await fetchWorkerSessionResultReviews(
+    const reviews = await fetchWorkerSessionResultReviews(
       requiredSessionName,
       {
         reviewId: options.review,
@@ -4727,7 +4731,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         latest: options.latest === "1",
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
       },
-    ));
+    );
+    if (outputFormat === "text") {
+      printWorkerSessionResultReviewsText(reviews);
+    } else {
+      await printJson(reviews);
+    }
     return;
   }
   if (subcommandName === "session-result-inspections") {
@@ -9774,6 +9783,45 @@ function workerSessionControlPlaneStatusSummaryCommands(
     }
   }
   return commands;
+}
+
+function printWorkerSessionResultReviewsText(response: WorkerSessionResultReviewsResponse): void {
+  console.log(formatWorkerSessionResultReviewsText(response).join("\n"));
+}
+
+function formatWorkerSessionResultReviewsText(response: WorkerSessionResultReviewsResponse): string[] {
+  const reviewIds = stringListFromUnknown(response.filter.reviewIds);
+  const runIds = stringListFromUnknown(response.filter.runIds);
+  const actions = stringListFromUnknown(response.filter.action);
+  const lines = [
+    "result_reviews:",
+    `  session: ${response.session}`,
+    `  filter: review=${reviewIds.length > 0 ? reviewIds.join(",") : "all"} run=${runIds.length > 0 ? runIds.join(",") : "all"} action=${actions.length > 0 ? actions.join(",") : "all"} latest=${response.filter.latest === true} limit=${formatOptionalNumber(response.filter.limit)}`,
+    `  count: ${response.count}`,
+  ];
+  if (response.reviews.length === 0) {
+    lines.push("  reviews: none");
+    return lines;
+  }
+  lines.push("  reviews:");
+  for (const review of response.reviews) {
+    lines.push(
+      `    - review: ${review.reviewId}`,
+      `      observed_at: ${review.observedAt}`,
+      `      action: ${review.action}`,
+      `      run: ${review.runId}`,
+      `      objective: ${review.objective}`,
+      `      branch: ${review.branchName}`,
+      `      result_commit: ${review.resultCommit}`,
+      `      worker: ${review.workerId ?? ""}`,
+      `      reviewed_by: ${review.reviewedBy}`,
+      `      command: ${formatShellCommand(review.command)}`,
+    );
+    if (review.note) {
+      lines.push(`      note: ${review.note}`);
+    }
+  }
+  return lines;
 }
 
 function printWorkerSessionResultInspectionsText(response: WorkerSessionResultInspectionsResponse): void {
@@ -16394,7 +16442,7 @@ Commands:
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
-  runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20]
+  runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--commands-only] [--format json|text|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]

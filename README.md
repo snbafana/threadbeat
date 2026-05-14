@@ -1022,7 +1022,8 @@ control-plane status summary surfaces the same next-result command when pending
 result commits exist, plus reviewed/skipped inspection commands and the latest
 review audit command when those review states are present. Use
 `runs session-result-reviews <name> --server --latest` to collapse the append-only
-review log to the current durable decision per run/result commit. Add
+review log to the current durable decision per run/result commit; add
+`--format text` for a readable CLI audit. Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving
 the exact branch name and result commit on each command row. Add

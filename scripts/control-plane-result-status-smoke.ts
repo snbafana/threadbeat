@@ -335,6 +335,24 @@ try {
   assert.equal(latestReviews.reviews[0]?.runId, run.id);
   assert.equal(latestReviews.reviews[0]?.resultCommit, resultCommit);
 
+  const latestReviewsText = await cliText(baseUrl, [
+    "runs",
+    "session-result-reviews",
+    sessionName,
+    "--server",
+    "--latest",
+    "--run",
+    run.id,
+    "--format",
+    "text",
+  ]);
+  assert.match(latestReviewsText, /result_reviews:/);
+  assert.match(latestReviewsText, /latest=true/);
+  assert.match(latestReviewsText, new RegExp(`review: ${skipped.review.reviewId}`));
+  assert.match(latestReviewsText, /action: skipped/);
+  assert.match(latestReviewsText, new RegExp(`run: ${run.id}`));
+  assert.match(latestReviewsText, new RegExp(`result_commit: ${resultCommit}`));
+
   const latestReviewedReviews = await cliJson<{ count: number; filter: { latest: boolean; action: string[] }; reviews: unknown[] }>(baseUrl, [
     "runs",
     "session-result-reviews",
