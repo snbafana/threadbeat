@@ -9647,6 +9647,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   }
   lines.push(
     `result_reviews: count=${summary.results.reviews.count} reviewed=${summary.results.reviews.counts.reviewed} skipped=${summary.results.reviews.counts.skipped}`,
+    `  latest: ${formatShellCommand(summary.commands.latestResultReviews)}`,
   );
   if (summary.results.reviews.recent.length > 0) {
     lines.push("recent_result_reviews:");
@@ -9752,6 +9753,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   if (summary.results.counts.skipped > 0) {
     commands.push({ command: summary.commands.skippedResultInspections });
+  }
+  if (summary.results.reviews.count > 0) {
+    commands.push({ command: summary.commands.latestResultReviews });
   }
   for (const review of summary.results.reviews.recent) {
     commands.push({
@@ -10026,6 +10030,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     pendingResultInspections: string[];
     reviewedResultInspections: string[];
     skippedResultInspections: string[];
+    latestResultReviews: string[];
   };
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
@@ -10152,6 +10157,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
       reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
       skippedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped"],
+      latestResultReviews: ["npm", "run", "cli", "--", "runs", "session-result-reviews", status.session, "--server", "--latest"],
     },
   };
 }

@@ -55,11 +55,12 @@ try {
   const checkoutCommand = `npm run cli -- runs checkout ${run.id} --dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
   const reviewCommand = `npm run cli -- runs review ${run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
   const nextResultInspectionCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --next`;
+  const latestResultReviewsCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --latest`;
   const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id}`;
   const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id}`;
 
   const summary = await cliJson<{
-    commands: { nextResultInspection: string[] };
+    commands: { nextResultInspection: string[]; latestResultReviews: string[] };
     results: {
       counts: { resultCommits: number; pending: number; reviewed: number; skipped: number };
       inspection: {
@@ -88,6 +89,7 @@ try {
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.checkoutBranch.join(" "), checkoutCommand);
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.reviewRun.join(" "), reviewCommand);
   assert.equal(summary.commands.nextResultInspection.join(" "), nextResultInspectionCommand);
+  assert.equal(summary.commands.latestResultReviews.join(" "), latestResultReviewsCommand);
 
   const commandSummary = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
     "runs",
@@ -111,6 +113,7 @@ try {
     "text",
   ]);
   assert.match(pendingStatusText, new RegExp(`inspect_next: ${nextResultInspectionCommand}`));
+  assert.match(pendingStatusText, new RegExp(`latest: ${latestResultReviewsCommand}`));
 
   const shellSummary = await cliText(baseUrl, [
     "runs",
@@ -243,6 +246,7 @@ try {
     "text",
   ]);
   assert.match(reviewedStatusText, /result_reviews: count=1 reviewed=1 skipped=0/);
+  assert.match(reviewedStatusText, new RegExp(`latest: ${latestResultReviewsCommand}`));
   assert.match(reviewedStatusText, /result_inspection: none \(reviewed=1 skipped=0\)/);
   assert.match(reviewedStatusText, new RegExp(`inspect_reviewed: npm run cli -- runs session-result-inspections ${sessionName} --server --review-state reviewed`));
   assert.match(reviewedStatusText, /recent_result_reviews:/);
@@ -261,6 +265,7 @@ try {
     "--commands-only",
   ]);
   assert.ok(reviewedStatusCommands.commands.some((command) => command.command.join(" ") === inspectReviewCommand));
+  assert.ok(reviewedStatusCommands.commands.some((command) => command.command.join(" ") === latestResultReviewsCommand));
 
   const reviewedStatusShell = await cliText(baseUrl, [
     "runs",
@@ -273,6 +278,7 @@ try {
     "shell",
   ]);
   assert.match(reviewedStatusShell, new RegExp(inspectReviewCommand));
+  assert.match(reviewedStatusShell, new RegExp(latestResultReviewsCommand));
 
   const reviewedResultInspectionCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --review ${reviewed.review.reviewId} --limit 20`;
   const reviewedInspectionText = await cliText(baseUrl, [
@@ -355,6 +361,7 @@ try {
     "text",
   ]);
   assert.match(skippedStatusText, /result_reviews: count=2 reviewed=1 skipped=1/);
+  assert.match(skippedStatusText, new RegExp(`latest: ${latestResultReviewsCommand}`));
   assert.match(skippedStatusText, /result_inspection: none \(reviewed=0 skipped=1\)/);
   assert.match(skippedStatusText, new RegExp(`inspect_skipped: npm run cli -- runs session-result-inspections ${sessionName} --server --review-state skipped`));
 
@@ -369,6 +376,7 @@ try {
   assert.ok(skippedStatusCommands.commands.some((command) => (
     command.command.join(" ") === `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state skipped`
   )));
+  assert.ok(skippedStatusCommands.commands.some((command) => command.command.join(" ") === latestResultReviewsCommand));
 
   const skippedResultInspections = await cliJson<{
     summary: { resultCommits: number; pending: number; reviewed: number; skipped: number };

@@ -1019,8 +1019,8 @@ checkout/review commands, record-reviewed/skipped commands, and reviewed/skipped
 state. Add `--next` to default to the first pending result commit with
 `--limit 1`, so operators can review one branch-native result at a time. The
 control-plane status summary surfaces the same next-result command when pending
-result commits exist, plus reviewed/skipped inspection commands when those
-review states are present. Use
+result commits exist, plus reviewed/skipped inspection commands and the latest
+review audit command when those review states are present. Use
 `runs session-result-reviews <name> --server --latest` to collapse the append-only
 review log to the current durable decision per run/result commit. Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,

@@ -2951,6 +2951,7 @@ try {
       pendingResultInspections: string[];
       reviewedResultInspections: string[];
       skippedResultInspections: string[];
+      latestResultReviews: string[];
     };
   }>(baseUrl, [
     "runs",
