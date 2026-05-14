@@ -1630,6 +1630,58 @@ try {
   assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, /status: retry_succeeded/);
   assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, /retry_attempts: 1/);
   assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, new RegExp(`latest_retry: ${retriedResumeAdvanceId}`));
+  assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, /inspect_acknowledged_resume_history:/);
+
+  const acknowledgedRecoverNextResumeHistory = await cliJson<{
+    selected: {
+      acknowledgedAdvanceId: string | null;
+      status: string;
+      retryAttempts: number;
+      latestRetryAdvanceId: string | null;
+    } | null;
+    history: {
+      loopAdvanceId: string;
+      summary: { resumeAttempts: number; failedExecutions: number };
+      records: Array<{ advanceId: string; kind: string }>;
+    } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--acknowledged-recover-next-resume-history",
+    "--advance",
+    failedResumeAdvanceId,
+    "--limit",
+    "20",
+  ]);
+  assert.equal(acknowledgedRecoverNextResumeHistory.selected?.acknowledgedAdvanceId, failedResumeAdvanceId);
+  assert.equal(acknowledgedRecoverNextResumeHistory.selected?.status, "retry_succeeded");
+  assert.equal(acknowledgedRecoverNextResumeHistory.selected?.retryAttempts, 1);
+  assert.equal(acknowledgedRecoverNextResumeHistory.selected?.latestRetryAdvanceId, retriedResumeAdvanceId);
+  assert.equal(acknowledgedRecoverNextResumeHistory.history?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal((acknowledgedRecoverNextResumeHistory.history?.summary.resumeAttempts ?? 0) >= 2, true);
+  assert.equal(acknowledgedRecoverNextResumeHistory.history?.summary.failedExecutions, 1);
+  assert.equal(acknowledgedRecoverNextResumeHistory.history?.records.some((record) => record.advanceId === failedResumeAdvanceId && record.kind === "resume_attempt"), true);
+  assert.equal(acknowledgedRecoverNextResumeHistory.history?.records.some((record) => record.advanceId === retriedResumeAdvanceId && record.kind === "resume_attempt"), true);
+
+  const acknowledgedRecoverNextResumeHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--acknowledged-recover-next-resume-history",
+    "--advance",
+    failedResumeAdvanceId,
+    "--limit",
+    "20",
+    "--format",
+    "text",
+  ]);
+  assert.match(acknowledgedRecoverNextResumeHistoryText, /acknowledged_recover_next_resume_history:/);
+  assert.match(acknowledgedRecoverNextResumeHistoryText, /status: retry_succeeded/);
+  assert.match(acknowledgedRecoverNextResumeHistoryText, /recover-next loop history/);
+  assert.match(acknowledgedRecoverNextResumeHistoryText, new RegExp(`latest_retry: ${retriedResumeAdvanceId}`));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
