@@ -4783,6 +4783,27 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "session-control-plane-worker-bundle") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-worker-bundle requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-worker-bundle --format must be json or text");
+    }
+    const profile = await inspectControlPlaneWorkerBundleProfile(
+      required(sessionName, "runs session-control-plane-worker-bundle <session> --server"),
+      { lines: parsePositiveInteger(options.lines ?? "20", "--lines") },
+    );
+    if (outputFormat === "text") {
+      printControlPlaneWorkerBundleProfileText(profile);
+    } else {
+      await printJson(profile);
+    }
+    return;
+  }
   if (subcommandName === "ensure-control-plane-worker-bundle") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -4798,33 +4819,60 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (dryRun === confirm) {
       throw new Error("runs ensure-control-plane-worker-bundle requires exactly one of --confirm or --dry-run");
     }
-    const includeResultReviewWorker = options["include-result-review-worker"] === "1";
+    if (options["save-profile"] === "1" && !confirm) {
+      throw new Error("runs ensure-control-plane-worker-bundle --save-profile requires --confirm");
+    }
+    const requiredSessionName = required(sessionName, "runs ensure-control-plane-worker-bundle <session> --server");
+    const savedProfile = options["from-profile"] === "1"
+      ? await readControlPlaneWorkerBundleProfile(requiredSessionName)
+      : null;
+    if (options["from-profile"] === "1" && !savedProfile) {
+      throw new Error(`no saved control-plane worker bundle profile for worker session ${requiredSessionName}`);
+    }
+    const savedDesired = savedProfile?.desired ?? null;
+    const includeResultReviewWorker = hasOption(options, "include-result-review-worker")
+      ? options["include-result-review-worker"] === "1"
+      : savedDesired?.includeResultReviewWorker ?? false;
     const reviewAction = includeResultReviewWorker
-      ? parseResultReviewWorkerAction(options, "runs ensure-control-plane-worker-bundle --include-result-review-worker")
+      ? parseResultReviewWorkerActionOrDefault(options, savedDesired?.reviewAction, "runs ensure-control-plane-worker-bundle --include-result-review-worker")
       : undefined;
     if (!includeResultReviewWorker && (options["record-reviewed"] === "1" || options["record-skipped"] === "1")) {
       throw new Error("runs ensure-control-plane-worker-bundle --record-reviewed|--record-skipped requires --include-result-review-worker");
     }
     const result = await ensureWorkerSessionControlPlaneWorkerBundle(
-      required(sessionName, "runs ensure-control-plane-worker-bundle <session> --server"),
+      requiredSessionName,
       {
-        topologyWorkerId: options["topology-worker-id"] ?? "threadbeat-control-plane-topology",
-        includeMutationWorkers: options["include-mutation-workers"] === "1",
-        workerDryRun: options["worker-dry-run"] === "1",
-        maxIterations: parsePositiveInteger(options["max-iterations"] ?? "60", "--max-iterations"),
-        loopIntervalMs: parseNonNegativeInteger(options["loop-interval-ms"] ?? "2000", "--loop-interval-ms"),
+        topologyWorkerId: options["topology-worker-id"] ?? savedDesired?.topologyWorkerId ?? "threadbeat-control-plane-topology",
+        includeMutationWorkers: hasOption(options, "include-mutation-workers")
+          ? options["include-mutation-workers"] === "1"
+          : savedDesired?.includeMutationWorkers ?? false,
+        workerDryRun: hasOption(options, "worker-dry-run")
+          ? options["worker-dry-run"] === "1"
+          : savedDesired?.workerDryRun ?? false,
+        maxIterations: parsePositiveInteger(options["max-iterations"] ?? String(savedDesired?.maxIterations ?? 60), "--max-iterations"),
+        loopIntervalMs: parseNonNegativeInteger(options["loop-interval-ms"] ?? String(savedDesired?.loopIntervalMs ?? 2000), "--loop-interval-ms"),
         includeResultReviewWorker,
-        resultReviewWorkerId: options["result-review-worker-id"] ?? "threadbeat-result-review",
+        resultReviewWorkerId: options["result-review-worker-id"] ?? savedDesired?.resultReviewWorkerId ?? "threadbeat-result-review",
         reviewAction,
-        maxResults: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
-        resultReviewIntervalMs: parseNonNegativeInteger(options["result-review-interval-ms"] ?? options["interval-ms"] ?? "1000", "--result-review-interval-ms"),
-        reviewedBy: options["reviewed-by"],
-        note: options.note,
-        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        maxResults: parsePositiveInteger(options["max-results"] ?? String(savedDesired?.maxResults ?? 10), "--max-results"),
+        resultReviewIntervalMs: parseNonNegativeInteger(options["result-review-interval-ms"] ?? options["interval-ms"] ?? String(savedDesired?.resultReviewIntervalMs ?? 1000), "--result-review-interval-ms"),
+        reviewedBy: options["reviewed-by"] ?? savedDesired?.reviewedBy,
+        note: options.note ?? savedDesired?.note,
+        lines: parsePositiveInteger(options.lines ?? String(savedDesired?.lines ?? 20), "--lines"),
         dryRun,
         confirm,
       },
     );
+    if (options["save-profile"] === "1") {
+      result.profile = result.plan.blocked === 0
+        ? await saveControlPlaneWorkerBundleProfile(result.session, result.desired)
+        : {
+            saved: false,
+            reason: "blocked_plan",
+            path: controlPlaneWorkerBundleProfilePath(result.session),
+            savedAt: null,
+          };
+    }
     if (outputFormat === "text") {
       printControlPlaneWorkerBundleText(result);
     } else {
@@ -7807,7 +7855,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "finalize" || key === "include-mutation-workers" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -7817,6 +7865,10 @@ function parseOptions(args: string[]): Record<string, string> {
     index += 1;
   }
   return options;
+}
+
+function hasOption(options: Record<string, string>, key: string): boolean {
+  return Object.hasOwn(options, key);
 }
 
 function parseList(value: string): string[] {
@@ -13093,6 +13145,22 @@ function parseResultReviewWorkerAction(options: Record<string, string>, commandN
   return skipped ? "skipped" : "reviewed";
 }
 
+function parseResultReviewWorkerActionOrDefault(
+  options: Record<string, string>,
+  defaultAction: "reviewed" | "skipped" | undefined,
+  commandName: string,
+): "reviewed" | "skipped" {
+  const reviewed = options["record-reviewed"] === "1";
+  const skipped = options["record-skipped"] === "1";
+  if (reviewed && skipped) {
+    throw new Error(`${commandName} accepts only one of --record-reviewed or --record-skipped`);
+  }
+  if (reviewed) return "reviewed";
+  if (skipped) return "skipped";
+  if (defaultAction) return defaultAction;
+  throw new Error(`${commandName} requires exactly one of --record-reviewed or --record-skipped`);
+}
+
 function controlPlaneWorkerKindFlag(kind: ControlPlaneWorkerKind): string {
   if (kind === "control_plane_advance") return "control-plane-advance";
   if (kind === "control_plane_topology") return "control-plane-topology";
@@ -14531,6 +14599,142 @@ type ControlPlaneWorkerBundlePlanStep = {
   worker: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>["workers"][number] | null;
 };
 
+type ControlPlaneWorkerBundleProfileSave = {
+  saved: boolean;
+  reason: "saved" | "blocked_plan";
+  path: string;
+  savedAt: string | null;
+  desired?: ControlPlaneWorkerBundleOptions;
+};
+
+type ControlPlaneWorkerBundleStoredProfile = {
+  session: string;
+  savedAt: string;
+  desired: ControlPlaneWorkerBundleOptions;
+};
+
+function controlPlaneWorkerBundleProfilePath(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, "control-plane-worker-bundles", `${sessionName}.json`);
+}
+
+async function readControlPlaneWorkerBundleProfile(sessionName: string): Promise<ControlPlaneWorkerBundleStoredProfile | null> {
+  const profilePath = controlPlaneWorkerBundleProfilePath(sessionName);
+  try {
+    const parsed = JSON.parse(await fs.readFile(profilePath, "utf8")) as unknown;
+    const record = plainRecord(parsed);
+    const desired = plainRecord(record?.desired);
+    if (!record || !desired) throw new Error(`invalid control-plane worker bundle profile: ${profilePath}`);
+    return {
+      session: stringFromUnknown(record.session) ?? sessionName,
+      savedAt: stringFromUnknown(record.savedAt) ?? "",
+      desired: parseControlPlaneWorkerBundleDesired(desired, profilePath),
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function parseControlPlaneWorkerBundleDesired(record: Record<string, unknown>, source: string): ControlPlaneWorkerBundleOptions {
+  const topologyWorkerId = stringFromUnknown(record.topologyWorkerId);
+  const resultReviewWorkerId = stringFromUnknown(record.resultReviewWorkerId);
+  const reviewAction = stringFromUnknown(record.reviewAction);
+  if (!topologyWorkerId || !resultReviewWorkerId) throw new Error(`invalid control-plane worker bundle profile: ${source}`);
+  if (reviewAction !== null && reviewAction !== "reviewed" && reviewAction !== "skipped") {
+    throw new Error(`invalid control-plane worker bundle review action in ${source}`);
+  }
+  return {
+    topologyWorkerId,
+    includeMutationWorkers: record.includeMutationWorkers === true,
+    workerDryRun: record.workerDryRun === true,
+    maxIterations: positiveNumberFromProfile(record.maxIterations, "maxIterations", source),
+    loopIntervalMs: nonNegativeNumberFromProfile(record.loopIntervalMs, "loopIntervalMs", source),
+    includeResultReviewWorker: record.includeResultReviewWorker === true,
+    resultReviewWorkerId,
+    ...(reviewAction ? { reviewAction } : {}),
+    maxResults: positiveNumberFromProfile(record.maxResults, "maxResults", source),
+    resultReviewIntervalMs: nonNegativeNumberFromProfile(record.resultReviewIntervalMs, "resultReviewIntervalMs", source),
+    ...(stringFromUnknown(record.reviewedBy) ? { reviewedBy: stringFromUnknown(record.reviewedBy) ?? undefined } : {}),
+    ...(stringFromUnknown(record.note) ? { note: stringFromUnknown(record.note) ?? undefined } : {}),
+    lines: positiveNumberFromProfile(record.lines, "lines", source),
+  };
+}
+
+function positiveNumberFromProfile(value: unknown, key: string, source: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`invalid control-plane worker bundle ${key} in ${source}`);
+  }
+  return value;
+}
+
+function nonNegativeNumberFromProfile(value: unknown, key: string, source: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new Error(`invalid control-plane worker bundle ${key} in ${source}`);
+  }
+  return value;
+}
+
+async function saveControlPlaneWorkerBundleProfile(
+  sessionName: string,
+  desired: ControlPlaneWorkerBundleOptions,
+): Promise<ControlPlaneWorkerBundleProfileSave> {
+  const profilePath = controlPlaneWorkerBundleProfilePath(sessionName);
+  const savedAt = new Date().toISOString();
+  await fs.mkdir(path.dirname(profilePath), { recursive: true });
+  await fs.writeFile(profilePath, `${JSON.stringify({
+    session: sessionName,
+    savedAt,
+    desired,
+    commands: {
+      dryRun: ["npm", "run", "cli", "--", "runs", "ensure-control-plane-worker-bundle", sessionName, "--server", "--from-profile", "--dry-run"],
+      confirm: ["npm", "run", "cli", "--", "runs", "ensure-control-plane-worker-bundle", sessionName, "--server", "--from-profile", "--confirm"],
+      inspect: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-bundle", sessionName, "--server"],
+    },
+  }, null, 2)}\n`);
+  return { saved: true, reason: "saved", path: profilePath, savedAt, desired };
+}
+
+async function inspectControlPlaneWorkerBundleProfile(
+  sessionName: string,
+  options: { lines: number },
+) {
+  const profilePath = controlPlaneWorkerBundleProfilePath(sessionName);
+  const profile = await readControlPlaneWorkerBundleProfile(sessionName);
+  if (!profile) {
+    return {
+      ok: true,
+      session: sessionName,
+      exists: false,
+      path: profilePath,
+      profile: null,
+      current: null,
+      commands: {
+        inspectWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-workers", sessionName, "--server", "--include-retired", "--lines", String(options.lines)],
+      },
+    };
+  }
+  const desired = { ...profile.desired, lines: options.lines };
+  const current = await ensureWorkerSessionControlPlaneWorkerBundle(sessionName, {
+    ...desired,
+    dryRun: true,
+    confirm: false,
+  });
+  return {
+    ok: true,
+    session: sessionName,
+    exists: true,
+    path: profilePath,
+    profile: { ...profile, desired },
+    current,
+    commands: {
+      inspectWorkers: current.commands.inspectWorkers,
+      dryRun: ["npm", "run", "cli", "--", "runs", "ensure-control-plane-worker-bundle", sessionName, "--server", "--from-profile", "--dry-run", "--lines", String(options.lines)],
+      confirm: ["npm", "run", "cli", "--", "runs", "ensure-control-plane-worker-bundle", sessionName, "--server", "--from-profile", "--confirm", "--lines", String(options.lines)],
+    },
+  };
+}
+
 function controlPlaneWorkerBundleEnsureCommand(
   sessionName: string,
   step: Pick<ControlPlaneWorkerBundlePlanStep, "kind" | "workerId">,
@@ -14683,6 +14887,7 @@ async function ensureWorkerSessionControlPlaneWorkerBundle(
     dryRun: string[];
     confirm: string[];
   };
+  profile: ControlPlaneWorkerBundleProfileSave | null;
 }> {
   if (options.includeResultReviewWorker && !options.reviewAction) {
     throw new Error("control-plane worker bundle result review worker requires --record-reviewed or --record-skipped");
@@ -14764,6 +14969,7 @@ async function ensureWorkerSessionControlPlaneWorkerBundle(
         seenAfterCount: null,
       },
       commands,
+      profile: null,
     };
   }
   const executed: Array<ControlPlaneWorkerBundlePlanStep & { result: unknown; actionResult: string | null }> = [];
@@ -14806,6 +15012,7 @@ async function ensureWorkerSessionControlPlaneWorkerBundle(
       seenAfterCount: seenAfter.length,
     },
     commands,
+    profile: null,
   };
 }
 
@@ -14825,6 +15032,9 @@ function printControlPlaneWorkerBundleText(
     `    dry_run: ${formatShellCommand(response.commands.dryRun)}`,
     `    confirm: ${formatShellCommand(response.commands.confirm)}`,
   ];
+  if (response.profile) {
+    lines.push(`  profile: saved=${response.profile.saved} reason=${response.profile.reason} path=${response.profile.path}`);
+  }
   if (response.plan.steps.length === 0) {
     lines.push("  planned_steps: none");
   } else {
@@ -14836,6 +15046,31 @@ function printControlPlaneWorkerBundleText(
       }
     }
   }
+  console.log(lines.join("\n"));
+}
+
+function printControlPlaneWorkerBundleProfileText(
+  response: Awaited<ReturnType<typeof inspectControlPlaneWorkerBundleProfile>>,
+): void {
+  const lines = [
+    "control_plane_worker_bundle_profile:",
+    `  session: ${response.session}`,
+    `  exists: ${response.exists}`,
+    `  path: ${response.path}`,
+  ];
+  if (!response.profile || !response.current) {
+    lines.push("  desired: none");
+    lines.push(`  inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`);
+    console.log(lines.join("\n"));
+    return;
+  }
+  lines.push(`  saved_at: ${response.profile.savedAt}`);
+  lines.push(`  desired: topology=${response.profile.desired.topologyWorkerId} include_mutation=${response.profile.desired.includeMutationWorkers} include_result_review=${response.profile.desired.includeResultReviewWorker} result_review=${response.profile.desired.includeResultReviewWorker ? response.profile.desired.resultReviewWorkerId : "none"} worker_dry_run=${response.profile.desired.workerDryRun}`);
+  lines.push(`  plan: expected=${response.current.plan.expected} actionable=${response.current.plan.actionable} blocked=${response.current.plan.blocked} existing=${response.current.plan.existing}`);
+  lines.push("  commands:");
+  lines.push(`    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`);
+  lines.push(`    dry_run: ${formatShellCommand(response.commands.dryRun)}`);
+  lines.push(`    confirm: ${formatShellCommand(response.commands.confirm)}`);
   console.log(lines.join("\n"));
 }
 
@@ -18548,7 +18783,8 @@ Commands:
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
-  runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
+  runs session-control-plane-worker-bundle <name> --server [--lines 20] [--format json|text]
+  runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--from-profile] [--save-profile] [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]

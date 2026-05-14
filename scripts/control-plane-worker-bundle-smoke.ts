@@ -100,22 +100,86 @@ try {
   const confirmed = await cliJson<{
     confirmed: boolean;
     passed: boolean | null;
+    profile: { saved: boolean; reason: string; path: string; savedAt: string | null } | null;
     executed: Array<{ kind: string; workerId: string; actionResult: string | null }>;
     checks: { expectedCount: number; executedCount: number | null; seenAfterCount: number | null };
-  }>(baseUrl, [...bundleArgs, "--confirm"]);
+  }>(baseUrl, [...bundleArgs, "--confirm", "--save-profile"]);
   assert.equal(confirmed.confirmed, true);
   assert.equal(confirmed.passed, true);
+  assert.equal(confirmed.profile?.saved, true);
+  assert.equal(confirmed.profile?.reason, "saved");
+  assert.match(confirmed.profile?.path ?? "", /control-plane-worker-bundles/);
   assert.equal(confirmed.executed.length, 2);
   assert.equal(confirmed.checks.expectedCount, 2);
   assert.equal(confirmed.checks.executedCount, 2);
   assert.equal(confirmed.checks.seenAfterCount, 2);
   assert.ok(confirmed.executed.every((step) => step.actionResult === "started" || step.actionResult === "existing"));
 
+  const profile = await cliJson<{
+    exists: boolean;
+    path: string;
+    profile: { desired: { topologyWorkerId: string; includeResultReviewWorker: boolean; resultReviewWorkerId: string; reviewAction: string } } | null;
+    current: { plan: { expected: number; actionable: number; blocked: number; existing: number }; commands: { confirm: string[] } } | null;
+    commands: { dryRun: string[]; confirm: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundle",
+    sessionName,
+    "--server",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(profile.exists, true);
+  assert.match(profile.path, /control-plane-worker-bundles/);
+  assert.equal(profile.profile?.desired.topologyWorkerId, topologyWorkerId);
+  assert.equal(profile.profile?.desired.includeResultReviewWorker, true);
+  assert.equal(profile.profile?.desired.resultReviewWorkerId, resultReviewWorkerId);
+  assert.equal(profile.profile?.desired.reviewAction, "reviewed");
+  assert.equal(profile.current?.plan.expected, 2);
+  assert.equal(profile.current?.plan.actionable, 0);
+  assert.ok((profile.current?.plan.blocked ?? 0) + (profile.current?.plan.existing ?? 0) === 2);
+  assert.equal(profile.commands.confirm.join(" "), `npm run cli -- runs ensure-control-plane-worker-bundle ${sessionName} --server --from-profile --confirm --lines 1`);
+
+  const fromProfile = await cliJson<{
+    dryRun: boolean;
+    desired: { topologyWorkerId: string; includeResultReviewWorker: boolean; resultReviewWorkerId: string; reviewAction: string };
+    plan: { expected: number; actionable: number; blocked: number; existing: number };
+  }>(baseUrl, [
+    "runs",
+    "ensure-control-plane-worker-bundle",
+    sessionName,
+    "--server",
+    "--from-profile",
+    "--dry-run",
+  ]);
+  assert.equal(fromProfile.dryRun, true);
+  assert.equal(fromProfile.desired.topologyWorkerId, topologyWorkerId);
+  assert.equal(fromProfile.desired.includeResultReviewWorker, true);
+  assert.equal(fromProfile.desired.resultReviewWorkerId, resultReviewWorkerId);
+  assert.equal(fromProfile.desired.reviewAction, "reviewed");
+  assert.equal(fromProfile.plan.expected, 2);
+  assert.equal(fromProfile.plan.actionable, 0);
+  assert.ok(fromProfile.plan.blocked + fromProfile.plan.existing === 2);
+
   const text = await cliText(baseUrl, [...bundleArgs, "--dry-run", "--format", "text"]);
   assert.match(text, /control_plane_worker_bundle:/);
   assert.match(text, new RegExp(`topology=${topologyWorkerId}`));
   assert.match(text, new RegExp(`result_review=${resultReviewWorkerId}`));
-  assert.match(text, /plan: expected=2 actionable=0 blocked=0 existing=2/);
+  assert.match(text, /plan: expected=2 actionable=0 blocked=\d+ existing=\d+/);
+
+  const profileText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundle",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+    "--lines",
+    "1",
+  ]);
+  assert.match(profileText, /control_plane_worker_bundle_profile:/);
+  assert.match(profileText, /exists: true/);
+  assert.match(profileText, /plan: expected=2 actionable=0 blocked=\d+ existing=\d+/);
 
   const aggregate = await cliJson<{
     summary: { topology: { total: number }; resultReview: { total: number } };
@@ -138,6 +202,7 @@ try {
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.out.log`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.err.log`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-worker-bundles", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
