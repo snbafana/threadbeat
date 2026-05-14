@@ -2871,8 +2871,8 @@ try {
     && step.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${controlPlaneResultPlan.run.id} --server`
     && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${controlPlaneResultPlan.run.id} --dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
     && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
-    && step.commands.recordReviewed.join(" ") === `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${controlPlaneResultPlan.run.id} --record-reviewed`
-    && step.commands.recordSkipped.join(" ") === `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${controlPlaneResultPlan.run.id} --record-skipped`
+    && step.commands.recordReviewed.join(" ") === `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${controlPlaneResultPlan.run.id} --result-commit ${controlPlaneResultCommit} --record-reviewed`
+    && step.commands.recordSkipped.join(" ") === `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${controlPlaneResultPlan.run.id} --result-commit ${controlPlaneResultCommit} --record-skipped`
   )));
   assert.equal(controlPlaneStatus.staleRuns.counts.ready, controlPlaneStatus.staleRuns.actions.recover_session_run);
   assert.equal(controlPlaneStatus.staleRuns.counts.blocked, controlPlaneStatus.staleRuns.actions.inspect_run);
@@ -3080,7 +3080,7 @@ try {
   assert.equal(pendingResultInspections.resultCommits[0]?.nextStep.reason, "result_commit_unreviewed");
   assert.equal(pendingResultInspections.resultCommits[0]?.commands.inspectResult.join(" "), `npm run cli -- runs inspect-result ${controlPlaneResultPlan.run.id} --server`);
   assert.equal(pendingResultInspections.resultCommits[0]?.commands.reviewRun.join(" "), `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`);
-  assert.equal(pendingResultInspections.resultCommits[0]?.commands.recordReviewed.join(" "), `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${controlPlaneResultPlan.run.id}`);
+  assert.equal(pendingResultInspections.resultCommits[0]?.commands.recordReviewed.join(" "), `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${controlPlaneResultPlan.run.id} --result-commit ${controlPlaneResultCommit}`);
   const pendingResultInspectionCommands = await cliJson<{
     ok?: true;
     commands: Array<{ command: string[] }>;

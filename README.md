@@ -1028,7 +1028,9 @@ review log to the current durable decision per run/result commit; add
 `runs session-result-review-next <name> --server --format text` to inspect the
 next pending result commit and its exact branch-native review/record commands;
 add `--record-reviewed` or `--record-skipped` to record that selected next result
-without copying its run id.
+without copying its run id. Generated record commands include `--result-commit`
+when Threadbeat knows the selected result, so stale commands fail instead of
+recording a decision against a changed run result.
 Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving

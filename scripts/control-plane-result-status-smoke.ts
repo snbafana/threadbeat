@@ -59,10 +59,12 @@ try {
   const recordNextReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed`;
   const recordNextSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped`;
   const latestResultReviewsCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --latest`;
-  const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id}`;
-  const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id}`;
-  const recordScopedReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${run.id} --record-reviewed`;
-  const recordScopedSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${run.id} --record-skipped`;
+  const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id} --result-commit ${resultCommit}`;
+  const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id} --result-commit ${resultCommit}`;
+  const recordScopedReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${run.id} --result-commit ${resultCommit} --record-reviewed`;
+  const recordScopedSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${run.id} --result-commit ${resultCommit} --record-skipped`;
+  const recordNextSelectedReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed --run ${run.id} --result-commit ${resultCommit}`;
+  const recordNextSelectedSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped --run ${run.id} --result-commit ${resultCommit}`;
 
   const summary = await cliJson<{
     commands: {
@@ -171,8 +173,8 @@ try {
   assert.match(reviewNextText, new RegExp(`review: ${reviewCommand}`));
   assert.match(reviewNextText, new RegExp(`record_reviewed: ${recordReviewedCommand}`));
   assert.match(reviewNextText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
-  assert.match(reviewNextText, new RegExp(`record_next_reviewed: ${recordNextReviewedCommand}`));
-  assert.match(reviewNextText, new RegExp(`record_next_skipped: ${recordNextSkippedCommand}`));
+  assert.match(reviewNextText, new RegExp(`record_next_reviewed: ${recordNextSelectedReviewedCommand}`));
+  assert.match(reviewNextText, new RegExp(`record_next_skipped: ${recordNextSelectedSkippedCommand}`));
 
   const reviewNextShell = await cliText(baseUrl, [
     "runs",
@@ -296,6 +298,17 @@ try {
   ]);
   assert.match(nextResultInspectionShell, new RegExp(reviewCommand));
   assert.match(nextResultInspectionShell, new RegExp(recordReviewedCommand));
+
+  const staleGuard = await cliFailure(baseUrl, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+    "--record-reviewed",
+    "--result-commit",
+    "ffffffffffffffffffffffffffffffffffffffff",
+  ]);
+  assert.match(staleGuard.stderr, /result commit changed: expected ffffffffffffffffffffffffffffffffffffffff/);
 
   const nextRecordDryRun = await cliJson<{
     dryRun: boolean;
@@ -584,4 +597,18 @@ async function cliText(baseUrl: string, args: string[]): Promise<string> {
     maxBuffer: 1024 * 1024,
   });
   return stdout;
+}
+
+async function cliFailure(baseUrl: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+      cwd: path.resolve("."),
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      maxBuffer: 1024 * 1024,
+    });
+    assert.fail(`expected CLI failure, got stdout=${stdout} stderr=${stderr}`);
+  } catch (error) {
+    const failed = error as { stdout?: string; stderr?: string };
+    return { stdout: failed.stdout ?? "", stderr: failed.stderr ?? "" };
+  }
 }

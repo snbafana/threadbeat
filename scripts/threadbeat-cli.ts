@@ -4714,6 +4714,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         requiredSessionName,
         {
           runId: required(options.run, "runs session-result-reviews <session> --server --record-reviewed|--record-skipped --run <run>"),
+          resultCommit: options["result-commit"],
           action: recordAction,
           dryRun: options["dry-run"] === "1",
           reviewedBy: options["reviewed-by"],
@@ -4783,6 +4784,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         resultInspections.session,
         {
           runId: selected.runId,
+          resultCommit: options["result-commit"] ?? selected.resultCommit,
           action: recordAction,
           dryRun: options["dry-run"] === "1",
           reviewedBy: options["reviewed-by"],
@@ -9045,13 +9047,14 @@ async function fetchWorkerSessionResultInspections(
 
 async function recordWorkerSessionResultReview(
   sessionName: string,
-  options: { runId: string; action: "reviewed" | "skipped"; dryRun: boolean; reviewedBy?: string; note?: string },
+  options: { runId: string; resultCommit?: string; action: "reviewed" | "skipped"; dryRun: boolean; reviewedBy?: string; note?: string },
 ): Promise<RecordWorkerSessionResultReviewResponse> {
   return await requestJson(
     "POST",
     `/api/worker-sessions/${encodeURIComponent(sessionName)}/result-reviews`,
     {
       runId: options.runId,
+      resultCommit: options.resultCommit,
       action: options.action,
       dryRun: options.dryRun,
       reviewedBy: options.reviewedBy,
@@ -9946,6 +9949,12 @@ function formatWorkerSessionResultReviewNextText(response: WorkerSessionResultIn
     lines.push("  next: none");
     return lines;
   }
+  if (runIds.length !== 1) {
+    recordReviewedCommand.push("--run", result.runId);
+    recordSkippedCommand.push("--run", result.runId);
+  }
+  recordReviewedCommand.push("--result-commit", result.resultCommit);
+  recordSkippedCommand.push("--result-commit", result.resultCommit);
   lines.push(
     `  run: ${result.runId}`,
     `  objective: ${result.objective}`,
@@ -16626,8 +16635,8 @@ Commands:
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
-  runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
-  runs session-result-review-next <name> --server [--run run_id] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
+  runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
+  runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--commands-only] [--format json|text|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]

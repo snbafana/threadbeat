@@ -560,6 +560,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return await recordWorkerSessionResultReview(settings, db, name, {
         runId,
         action,
+        expectedResultCommit: parseOptionalString(body.resultCommit),
         dryRun: parseBoolean(body.dryRun, false),
         reviewedBy: parseOptionalString(body.reviewedBy) ?? "server",
         note: parseOptionalString(body.note),
@@ -5849,8 +5850,8 @@ const summarizeWorkerSessionResultInspection = async (
         inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"],
         checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", checkoutDir],
         reviewRun,
-        recordReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", session.session, "--server", "--run", run.id, "--record-reviewed"],
-        recordSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", session.session, "--server", "--run", run.id, "--record-skipped"],
+        recordReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", session.session, "--server", "--run", run.id, "--result-commit", run.result_commit, "--record-reviewed"],
+        recordSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", session.session, "--server", "--run", run.id, "--result-commit", run.result_commit, "--record-skipped"],
       },
     };
   });
@@ -5978,8 +5979,8 @@ const readWorkerSessionResultInspections = async (
           inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"],
           checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", checkoutDir],
           reviewRun,
-          recordReviewed: ["npm", "run", "cli", "--", "runs", "session-result-reviews", session.session, "--server", "--record-reviewed", "--run", run.id],
-          recordSkipped: ["npm", "run", "cli", "--", "runs", "session-result-reviews", session.session, "--server", "--record-skipped", "--run", run.id],
+          recordReviewed: ["npm", "run", "cli", "--", "runs", "session-result-reviews", session.session, "--server", "--record-reviewed", "--run", run.id, "--result-commit", run.result_commit],
+          recordSkipped: ["npm", "run", "cli", "--", "runs", "session-result-reviews", session.session, "--server", "--record-skipped", "--run", run.id, "--result-commit", run.result_commit],
           inspectReviews,
         },
         nextStep: review
@@ -6020,6 +6021,7 @@ const recordWorkerSessionResultReview = async (
   sessionName: string,
   options: {
     runId: string;
+    expectedResultCommit?: string;
     action: "reviewed" | "skipped";
     dryRun: boolean;
     reviewedBy: string;
@@ -6046,6 +6048,9 @@ const recordWorkerSessionResultReview = async (
   }
   if (!run.result_commit) {
     throw new Error(`run ${run.id} has no result commit to review`);
+  }
+  if (options.expectedResultCommit && options.expectedResultCommit !== run.result_commit) {
+    throw new Error(`run ${run.id} result commit changed: expected ${options.expectedResultCommit}, found ${run.result_commit}`);
   }
   const checkoutDir = `./checkouts/${session.session}-control-plane-results/${run.id}`;
   const reviewInput = {
