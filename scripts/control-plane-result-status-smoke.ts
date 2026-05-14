@@ -60,6 +60,10 @@ try {
   const pendingResultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`;
   const recordNextReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed`;
   const recordNextSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped`;
+  const previewPendingReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed --until-empty --dry-run`;
+  const previewPendingSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped --until-empty --dry-run`;
+  const recordPendingReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed --until-empty`;
+  const recordPendingSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped --until-empty`;
   const latestResultReviewsCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --latest`;
   const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id} --result-commit ${resultCommit}`;
   const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id} --result-commit ${resultCommit}`;
@@ -88,6 +92,10 @@ try {
       pendingResultCommitView: string[];
       recordNextReviewed: string[];
       recordNextSkipped: string[];
+      previewPendingReviewed: string[];
+      previewPendingSkipped: string[];
+      recordPendingReviewed: string[];
+      recordPendingSkipped: string[];
       latestResultReviews: string[];
       failedResultReviewAttempts: string[];
     };
@@ -142,6 +150,10 @@ try {
   assert.equal(summary.commands.pendingResultCommitView.join(" "), pendingResultCommitViewCommand);
   assert.equal(summary.commands.recordNextReviewed.join(" "), recordNextReviewedCommand);
   assert.equal(summary.commands.recordNextSkipped.join(" "), recordNextSkippedCommand);
+  assert.equal(summary.commands.previewPendingReviewed.join(" "), previewPendingReviewedCommand);
+  assert.equal(summary.commands.previewPendingSkipped.join(" "), previewPendingSkippedCommand);
+  assert.equal(summary.commands.recordPendingReviewed.join(" "), recordPendingReviewedCommand);
+  assert.equal(summary.commands.recordPendingSkipped.join(" "), recordPendingSkippedCommand);
   assert.equal(summary.commands.latestResultReviews.join(" "), latestResultReviewsCommand);
   assert.equal(summary.commands.failedResultReviewAttempts.join(" "), failedResultReviewAttemptsCommand);
   assert.equal(summary.results.reviews.counts.failed, 0);
@@ -165,6 +177,10 @@ try {
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === pendingResultCommitViewCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordNextReviewedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordNextSkippedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === previewPendingReviewedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === previewPendingSkippedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordPendingReviewedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordPendingSkippedCommand));
 
   const pendingStatusText = await cliText(baseUrl, [
     "runs",
@@ -181,6 +197,10 @@ try {
   assert.match(pendingStatusText, new RegExp(`review_next: ${nextResultReviewCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_reviewed: ${recordNextReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_skipped: ${recordNextSkippedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`preview_pending_reviewed: ${previewPendingReviewedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`preview_pending_skipped: ${previewPendingSkippedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`record_pending_reviewed: ${recordPendingReviewedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`record_pending_skipped: ${recordPendingSkippedCommand}`));
   assert.match(pendingStatusText, /next_recovery:\n  kind: control_plane_action\n  action: review_result\n  reason: result_commit_available/);
   assert.match(pendingStatusText, /next_actions:\n  - surface: result_inspection/);
   assert.match(pendingStatusText, new RegExp(`record_reviewed: ${recordScopedReviewedCommand}`));

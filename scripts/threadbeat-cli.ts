@@ -10689,6 +10689,10 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       lines.push(`  review_next: ${formatShellCommand(summary.commands.nextResultReview)}`);
       lines.push(`  record_next_reviewed: ${formatShellCommand(summary.commands.recordNextReviewed)}`);
       lines.push(`  record_next_skipped: ${formatShellCommand(summary.commands.recordNextSkipped)}`);
+      lines.push(`  preview_pending_reviewed: ${formatShellCommand(summary.commands.previewPendingReviewed)}`);
+      lines.push(`  preview_pending_skipped: ${formatShellCommand(summary.commands.previewPendingSkipped)}`);
+      lines.push(`  record_pending_reviewed: ${formatShellCommand(summary.commands.recordPendingReviewed)}`);
+      lines.push(`  record_pending_skipped: ${formatShellCommand(summary.commands.recordPendingSkipped)}`);
     }
     if (summary.results.counts.reviewed > 0) {
       lines.push(`  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`);
@@ -10936,6 +10940,10 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: summary.commands.nextResultReview });
     commands.push({ command: summary.commands.recordNextReviewed });
     commands.push({ command: summary.commands.recordNextSkipped });
+    commands.push({ command: summary.commands.previewPendingReviewed });
+    commands.push({ command: summary.commands.previewPendingSkipped });
+    commands.push({ command: summary.commands.recordPendingReviewed });
+    commands.push({ command: summary.commands.recordPendingSkipped });
     commands.push({ command: summary.commands.pendingResultInspections });
     commands.push({ command: summary.commands.pendingResultCommitView });
   }
@@ -11541,6 +11549,10 @@ function summarizeWorkerSessionControlPlaneStatus(
     nextResultReview: string[];
     recordNextReviewed: string[];
     recordNextSkipped: string[];
+    previewPendingReviewed: string[];
+    previewPendingSkipped: string[];
+    recordPendingReviewed: string[];
+    recordPendingSkipped: string[];
     pendingResultInspections: string[];
     pendingResultCommitView: string[];
     reviewedResultInspections: string[];
@@ -11681,6 +11693,10 @@ function summarizeWorkerSessionControlPlaneStatus(
       nextResultReview: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server"],
       recordNextReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-reviewed"],
       recordNextSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped"],
+      previewPendingReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-reviewed", "--until-empty", "--dry-run"],
+      previewPendingSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped", "--until-empty", "--dry-run"],
+      recordPendingReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-reviewed", "--until-empty"],
+      recordPendingSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped", "--until-empty"],
       pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
       pendingResultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending", "--result-commits"],
       reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
