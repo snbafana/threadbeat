@@ -4860,8 +4860,34 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recordAction && options["commands-only"] === "1") {
       throw new Error("runs session-result-review-next --record-reviewed|--record-skipped cannot be combined with --commands-only");
     }
+    if (options["until-empty"] === "1" && !recordAction) {
+      throw new Error("runs session-result-review-next --until-empty requires --record-reviewed or --record-skipped");
+    }
+    if (options["until-empty"] === "1" && outputFormat === "shell") {
+      throw new Error("runs session-result-review-next --until-empty supports --format json or text");
+    }
+    if (options["until-empty"] === "1" && options["result-commit"]) {
+      throw new Error("runs session-result-review-next --until-empty cannot be combined with --result-commit");
+    }
+    const requiredSessionName = required(sessionName, "runs session-result-review-next <session> --server");
+    if (recordAction && options["until-empty"] === "1") {
+      const response = await recordWorkerSessionResultReviewNextLoop(requiredSessionName, {
+        action: recordAction,
+        dryRun: options["dry-run"] === "1",
+        reviewedBy: options["reviewed-by"],
+        note: options.note,
+        maxResults: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
+        intervalMs: parsePositiveInteger(options["interval-ms"] ?? "1", "--interval-ms"),
+      });
+      if (outputFormat === "text") {
+        printWorkerSessionResultReviewNextLoopText(response);
+      } else {
+        await printJson(response);
+      }
+      return;
+    }
     const resultInspections = await fetchWorkerSessionResultInspections(
-      required(sessionName, "runs session-result-review-next <session> --server"),
+      requiredSessionName,
       {
         runId: options.run,
         reviewState: "pending",
@@ -8559,6 +8585,19 @@ type RecordWorkerSessionResultReviewNextResponse = RecordWorkerSessionResultRevi
   selected: WorkerSessionResultInspectionRecord;
 };
 
+type RecordWorkerSessionResultReviewNextLoopResponse = {
+  ok: true;
+  session: string;
+  action: "reviewed" | "skipped";
+  dryRun: boolean;
+  untilEmpty: true;
+  maxResults: number;
+  processed: number;
+  remainingPending: number;
+  stoppedReason: "no_pending_result_commits" | "dry_run_previewed" | "max_results_reached";
+  records: RecordWorkerSessionResultReviewNextResponse[];
+};
+
 type WorkerSessionDrainContinuationRecord = {
   continuationId: string;
   session: string;
@@ -9540,6 +9579,64 @@ async function recordWorkerSessionResultReview(
       note: options.note,
     },
   ) as RecordWorkerSessionResultReviewResponse;
+}
+
+async function recordWorkerSessionResultReviewNextLoop(
+  sessionName: string,
+  options: {
+    action: "reviewed" | "skipped";
+    dryRun: boolean;
+    reviewedBy?: string;
+    note?: string;
+    maxResults: number;
+    intervalMs: number;
+  },
+): Promise<RecordWorkerSessionResultReviewNextLoopResponse> {
+  const records: RecordWorkerSessionResultReviewNextResponse[] = [];
+  let stoppedReason: RecordWorkerSessionResultReviewNextLoopResponse["stoppedReason"] | null = null;
+  for (let index = 0; index < options.maxResults; index += 1) {
+    const resultInspections = await fetchWorkerSessionResultInspections(sessionName, {
+      reviewState: "pending",
+      limit: 1,
+    });
+    const selected = resultInspections.resultCommits[0];
+    if (!selected) {
+      stoppedReason = "no_pending_result_commits";
+      break;
+    }
+    const recorded = await recordWorkerSessionResultReview(sessionName, {
+      runId: selected.runId,
+      resultCommit: selected.resultCommit,
+      action: options.action,
+      dryRun: options.dryRun,
+      reviewedBy: options.reviewedBy,
+      note: options.note,
+    });
+    records.push({ ...recorded, selected });
+    if (options.dryRun) {
+      stoppedReason = "dry_run_previewed";
+      break;
+    }
+    if (options.intervalMs > 0 && index + 1 < options.maxResults) {
+      await sleep(options.intervalMs);
+    }
+  }
+  const pending = await fetchWorkerSessionResultInspections(sessionName, {
+    reviewState: "pending",
+    limit: 1,
+  });
+  return {
+    ok: true,
+    session: pending.session,
+    action: options.action,
+    dryRun: options.dryRun,
+    untilEmpty: true,
+    maxResults: options.maxResults,
+    processed: records.length,
+    remainingPending: pending.summary.pending,
+    stoppedReason: stoppedReason ?? "max_results_reached",
+    records,
+  };
 }
 
 async function fetchWorkerSessionDrainWorkers(
@@ -11017,6 +11114,39 @@ function formatWorkerSessionResultReviewNextRecordText(response: RecordWorkerSes
     `  review: ${response.review.reviewId}`,
     `  review_command: ${formatShellCommand(response.review.command)}`,
   ];
+}
+
+function printWorkerSessionResultReviewNextLoopText(response: RecordWorkerSessionResultReviewNextLoopResponse): void {
+  console.log(formatWorkerSessionResultReviewNextLoopText(response).join("\n"));
+}
+
+function formatWorkerSessionResultReviewNextLoopText(response: RecordWorkerSessionResultReviewNextLoopResponse): string[] {
+  const lines = [
+    "result_review_next_loop:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  action: ${response.action}`,
+    `  processed: ${response.processed}`,
+    `  remaining_pending: ${response.remainingPending}`,
+    `  stopped_reason: ${response.stoppedReason}`,
+    `  max_results: ${response.maxResults}`,
+  ];
+  if (response.records.length === 0) {
+    lines.push("  records: none");
+    return lines;
+  }
+  lines.push("  records:");
+  for (const record of response.records) {
+    lines.push(
+      `    - run: ${record.selected.runId}`,
+      `      branch: ${record.selected.branchName}`,
+      `      result_commit: ${record.selected.resultCommit}`,
+      `      recorded: ${record.recorded}`,
+      `      review: ${record.review.reviewId}`,
+      `      command: ${formatShellCommand(record.review.command)}`,
+    );
+  }
+  return lines;
 }
 
 function printWorkerSessionResultInspectionsText(response: WorkerSessionResultInspectionsResponse): void {
@@ -17826,7 +17956,7 @@ Commands:
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
-  runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
+  runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]

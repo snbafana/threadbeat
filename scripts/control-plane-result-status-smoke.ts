@@ -309,6 +309,55 @@ try {
   assert.match(reviewNextShell, new RegExp(recordReviewedCommand));
   assert.match(reviewNextShell, new RegExp(recordSkippedCommand));
 
+  const reviewLoopDryRun = await cliJson<{
+    dryRun: boolean;
+    action: string;
+    processed: number;
+    remainingPending: number;
+    stoppedReason: string;
+    records: Array<{ recorded: boolean; selected: { runId: string; resultCommit: string }; review: { action: string; resultCommit: string } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+    "--record-reviewed",
+    "--until-empty",
+    "--dry-run",
+    "--max-results",
+    "5",
+  ]);
+  assert.equal(reviewLoopDryRun.dryRun, true);
+  assert.equal(reviewLoopDryRun.action, "reviewed");
+  assert.equal(reviewLoopDryRun.processed, 1);
+  assert.equal(reviewLoopDryRun.remainingPending, 1);
+  assert.equal(reviewLoopDryRun.stoppedReason, "dry_run_previewed");
+  assert.equal(reviewLoopDryRun.records[0]?.recorded, false);
+  assert.equal(reviewLoopDryRun.records[0]?.selected.runId, run.id);
+  assert.equal(reviewLoopDryRun.records[0]?.selected.resultCommit, resultCommit);
+  assert.equal(reviewLoopDryRun.records[0]?.review.action, "reviewed");
+  assert.equal(reviewLoopDryRun.records[0]?.review.resultCommit, resultCommit);
+
+  const reviewLoopDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+    "--record-reviewed",
+    "--until-empty",
+    "--dry-run",
+    "--max-results",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(reviewLoopDryRunText, /result_review_next_loop:/);
+  assert.match(reviewLoopDryRunText, /dry_run: true/);
+  assert.match(reviewLoopDryRunText, /processed: 1/);
+  assert.match(reviewLoopDryRunText, /remaining_pending: 1/);
+  assert.match(reviewLoopDryRunText, /stopped_reason: dry_run_previewed/);
+  assert.match(reviewLoopDryRunText, new RegExp(`run: ${run.id}`));
+
   const shellSummary = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -805,6 +854,26 @@ try {
   assert.equal(skippedResultInspections.resultCommits[0]?.latestReview?.reviewedBy, "result-status-smoke");
   assert.equal(skippedResultInspections.resultCommits[0]?.nextStep.action, "inspect_review");
   assert.equal(skippedResultInspections.resultCommits[0]?.nextStep.reason, "result_commit_skipped");
+
+  const emptyReviewLoop = await cliJson<{
+    processed: number;
+    remainingPending: number;
+    stoppedReason: string;
+    records: unknown[];
+  }>(baseUrl, [
+    "runs",
+    "session-result-review-next",
+    sessionName,
+    "--server",
+    "--record-reviewed",
+    "--until-empty",
+    "--max-results",
+    "3",
+  ]);
+  assert.equal(emptyReviewLoop.processed, 0);
+  assert.equal(emptyReviewLoop.remainingPending, 0);
+  assert.equal(emptyReviewLoop.stoppedReason, "no_pending_result_commits");
+  assert.deepEqual(emptyReviewLoop.records, []);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
