@@ -10456,6 +10456,8 @@ type ControlPlaneWorkerSummary = {
   restartable: number;
   latestResults: {
     count: number;
+    recorded: number;
+    progress: number;
     iterations: number;
     totalCoreExecuted: number;
     totalMutationExecuted: number;
@@ -10655,6 +10657,8 @@ function formatControlPlaneWorkerSummary(summary: ControlPlaneWorkerSummary): st
 function formatControlPlaneWorkerLatestResults(summary: ControlPlaneWorkerSummary["latestResults"]): string {
   return [
     `count=${summary.count}`,
+    `recorded=${summary.recorded}`,
+    `progress=${summary.progress}`,
     `iterations=${summary.iterations}`,
     `core=${summary.totalCoreExecuted}`,
     `mutation=${summary.totalMutationExecuted}`,
@@ -10724,7 +10728,7 @@ function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWork
   return record.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
 }
 
-function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean; latestResult?: unknown }>): ControlPlaneWorkerSummary {
+function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean; latestResult?: unknown; latestResultSource?: unknown }>): ControlPlaneWorkerSummary {
   return {
     total: workers.length,
     alive: workers.filter((worker) => worker.alive).length,
@@ -10736,13 +10740,15 @@ function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: st
   };
 }
 
-function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?: unknown }>): ControlPlaneWorkerSummary["latestResults"] {
+function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?: unknown; latestResultSource?: unknown }>): ControlPlaneWorkerSummary["latestResults"] {
   const latestResults = workers
     .map((worker) => plainRecord(worker.latestResult))
     .filter((latestResult): latestResult is Record<string, unknown> => latestResult !== null);
   const sumNumber = (field: string): number => latestResults.reduce((total, latestResult) => total + (numberFromUnknown(latestResult[field]) ?? 0), 0);
   return {
     count: latestResults.length,
+    recorded: workers.filter((worker) => worker.latestResultSource === "recorded" && plainRecord(worker.latestResult) !== null).length,
+    progress: workers.filter((worker) => worker.latestResultSource === "stdout" && plainRecord(worker.latestResult) !== null).length,
     iterations: sumNumber("iterations"),
     totalCoreExecuted: sumNumber("totalCoreExecuted"),
     totalMutationExecuted: sumNumber("totalMutationExecuted"),

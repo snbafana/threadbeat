@@ -60,6 +60,7 @@ import {
 } from "./workerSessionControlPlaneTickWorkers.js";
 import {
   type ControlPlaneAdvanceWorkerLatestResult,
+  type ControlPlaneAdvanceWorkerLatestResultSource,
   type ControlPlaneAdvanceWorkerLifecycle,
   type ControlPlaneAdvanceWorkerMode,
   listWorkerSessionControlPlaneAdvanceWorkerNextSteps,
@@ -3734,6 +3735,8 @@ const readWorkerSessionControlPlaneStatus = async (
         workerId: string;
         mode: ControlPlaneAdvanceWorkerMode;
         lifecycle: ControlPlaneAdvanceWorkerLifecycle;
+        latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
+        latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
         latestResult: ControlPlaneAdvanceWorkerLatestResult;
       }>;
     };
@@ -5457,7 +5460,18 @@ const summarizeControlPlaneCompletedWorkers = <T extends { alive: boolean; retir
   completed: workers.filter((worker) => !worker.alive && Boolean(worker.completedAt) && !worker.stoppedAt && !worker.retiredAt).length,
 });
 
-const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string; mode?: ControlPlaneAdvanceWorkerMode; lifecycle: ControlPlaneAdvanceWorkerLifecycle; latestResult: ControlPlaneAdvanceWorkerLatestResult | null }>(workers: T[]): {
+const summarizeControlPlaneAdvanceWorkers = <T extends {
+  workerId: string;
+  alive: boolean;
+  retiredAt?: string;
+  stoppedAt?: string;
+  completedAt?: string;
+  mode?: ControlPlaneAdvanceWorkerMode;
+  lifecycle: ControlPlaneAdvanceWorkerLifecycle;
+  latestResult: ControlPlaneAdvanceWorkerLatestResult | null;
+  latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
+  latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
+}>(workers: T[]): {
   total: number;
   alive: number;
   stopped: number;
@@ -5472,6 +5486,8 @@ const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive
     workerId: string;
     mode: ControlPlaneAdvanceWorkerMode;
     lifecycle: ControlPlaneAdvanceWorkerLifecycle;
+    latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
+    latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
     latestResult: ControlPlaneAdvanceWorkerLatestResult;
   }>;
 } => ({
@@ -5486,6 +5502,8 @@ const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive
         workerId: worker.workerId,
         mode: worker.mode ?? "advance_loop",
         lifecycle: worker.lifecycle,
+        latestResultSource: worker.latestResultSource,
+        latestProgress: worker.latestProgress,
         latestResult: worker.latestResult,
       }]
     : []),

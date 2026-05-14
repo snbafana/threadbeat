@@ -147,14 +147,16 @@ try {
         total: number;
         latestResults: {
           count: number;
+          recorded: number;
+          progress: number;
           iterations: number;
           totalCoreExecuted: number;
           totalMutationExecuted: number;
         };
       };
-      advance: { total: number; latestResults: { count: number } };
+      advance: { total: number; latestResults: { count: number; recorded: number; progress: number } };
     };
-    workers: Array<{ kind: string; workerId: string | null; commands: { restart: string[] } | null }>;
+    workers: Array<{ kind: string; workerId: string | null; latestResultSource?: string; latestProgress?: unknown; commands: { restart: string[] } | null }>;
     commands: { inspectTopologyWorkers: string[] };
   }>(baseUrl, [
     "runs",
@@ -167,13 +169,19 @@ try {
   ]);
   assert.equal(aggregateBeforeStop.summary.topology.total, 1);
   assert.equal(aggregateBeforeStop.summary.topology.latestResults.count, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.recorded, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.progress, 0);
   assert.equal(aggregateBeforeStop.summary.topology.latestResults.iterations, 1);
   assert.equal(aggregateBeforeStop.summary.topology.latestResults.totalCoreExecuted, 0);
   assert.equal(aggregateBeforeStop.summary.topology.latestResults.totalMutationExecuted, 0);
   assert.equal(aggregateBeforeStop.summary.advance.total, 0);
   assert.equal(aggregateBeforeStop.summary.advance.latestResults.count, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.latestResults.recorded, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.latestResults.progress, 0);
   const aggregateTopologyWorker = aggregateBeforeStop.workers.find((worker) => worker.workerId === workerId);
   assert.equal(aggregateTopologyWorker?.kind, "control_plane_topology");
+  assert.equal(aggregateTopologyWorker?.latestResultSource, "recorded");
+  assert.equal(aggregateTopologyWorker?.latestProgress, null);
   assert.equal(
     aggregateTopologyWorker?.commands?.restart.join(" "),
     `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId} --include-retired`,
@@ -195,7 +203,7 @@ try {
   ]);
   assert.match(aggregateTextBeforeStop, /^control_plane_workers:$/m);
   assert.match(aggregateTextBeforeStop, new RegExp(`session: ${sessionName}`));
-  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 restartable=0 latest_results=count=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 restartable=0 latest_results=count=1,recorded=1,progress=0,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_topology: npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`));
 
   await cliJson(baseUrl, [
@@ -255,7 +263,7 @@ try {
     "--format",
     "text",
   ]);
-  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 restartable=1 latest_results=count=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 restartable=1 latest_results=count=1,recorded=1,progress=0,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextAfterStop, new RegExp(`restart_next: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
   assert.match(aggregateTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
 
@@ -291,6 +299,26 @@ try {
   assert.equal(liveTopologyWorker.alive, true);
   assert.equal(liveTopologyWorker.latestResult?.iterations, 1);
   assert.equal(liveTopologyWorker.latestResult?.stoppedReason, "running");
+  assert.equal(liveTopologyWorker.latestResultSource, "stdout");
+  assert.equal(liveTopologyWorker.latestProgress?.iterations, 1);
+  const liveAggregate = await cliJson<{
+    summary: { topology: { latestResults: { count: number; recorded: number; progress: number; iterations: number } } };
+    workers: Array<{ kind: string; workerId: string | null; latestResultSource?: string; latestProgress?: { iterations?: number } | null }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(liveAggregate.summary.topology.latestResults.count, 1);
+  assert.equal(liveAggregate.summary.topology.latestResults.recorded, 0);
+  assert.equal(liveAggregate.summary.topology.latestResults.progress, 1);
+  assert.equal(liveAggregate.summary.topology.latestResults.iterations, 1);
+  const liveAggregateWorker = liveAggregate.workers.find((worker) => worker.workerId === liveWorkerId);
+  assert.equal(liveAggregateWorker?.latestResultSource, "stdout");
+  assert.equal(liveAggregateWorker?.latestProgress?.iterations, 1);
   const liveAggregateText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-workers",
@@ -301,7 +329,7 @@ try {
     "--format",
     "text",
   ]);
-  assert.match(liveAggregateText, /topology: total=1 alive=1 stopped=0 completed=0 retired=0 restartable=0 latest_results=count=1,iterations=1,core=0,mutation=0/);
+  assert.match(liveAggregateText, /topology: total=1 alive=1 stopped=0 completed=0 retired=0 restartable=0 latest_results=count=1,recorded=0,progress=1,iterations=1,core=0,mutation=0/);
   await cliJson(baseUrl, [
     "runs",
     "stop-control-plane-topology-worker",
@@ -343,6 +371,13 @@ async function waitForTopologyWorkerResult(
 ): Promise<{
   alive: boolean;
   lifecycle: { state: string };
+  latestResultSource: string;
+  latestProgress: {
+    iterations?: number;
+    stoppedReason?: string;
+    totalCoreExecuted?: number;
+    totalMutationExecuted?: number;
+  } | null;
   latestResult: {
     iterations?: number;
     stoppedReason?: string;
@@ -351,7 +386,7 @@ async function waitForTopologyWorkerResult(
   } | null;
 }> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const inspected = await cliJson<{ workers: Array<{ alive: boolean; lifecycle: { state: string }; latestResult: { iterations?: number; stoppedReason?: string; totalCoreExecuted?: number; totalMutationExecuted?: number } | null }> }>(baseUrl, [
+    const inspected = await cliJson<{ workers: Array<{ alive: boolean; lifecycle: { state: string }; latestResultSource: string; latestProgress: { iterations?: number; stoppedReason?: string; totalCoreExecuted?: number; totalMutationExecuted?: number } | null; latestResult: { iterations?: number; stoppedReason?: string; totalCoreExecuted?: number; totalMutationExecuted?: number } | null }> }>(baseUrl, [
       "runs",
       "session-control-plane-topology-workers",
       sessionName,

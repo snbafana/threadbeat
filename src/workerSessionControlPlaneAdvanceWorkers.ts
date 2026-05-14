@@ -25,6 +25,7 @@ export type ControlPlaneAdvanceWorker = {
 };
 
 export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop";
+export type ControlPlaneAdvanceWorkerLatestResultSource = "recorded" | "stdout" | "none";
 
 export type ControlPlaneAdvanceWorkerLifecycle = {
   state: "running" | "stopped" | "completed" | "retired" | "stopping_failed" | "exited_unrecorded";
@@ -165,7 +166,15 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
   projectRoot: string,
   options: { sessionName?: string; workerId?: string; includeRetired?: boolean; mode?: ControlPlaneAdvanceWorkerMode },
   lines: number,
-): Promise<Array<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle; latestResult: ControlPlaneAdvanceWorkerLatestResult | null; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>> {
+): Promise<Array<ControlPlaneAdvanceWorker & {
+  alive: boolean;
+  lifecycle: ControlPlaneAdvanceWorkerLifecycle;
+  latestResult: ControlPlaneAdvanceWorkerLatestResult | null;
+  latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
+  latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
+  stdout: { path: string; lines: string[] };
+  stderr: { path: string; lines: string[] };
+}>> {
   const sessionNames = options.sessionName ? [options.sessionName] : await listControlPlaneAdvanceWorkerSessionNames(projectRoot);
   const workers = await Promise.all(sessionNames.map(async (sessionName) => {
     assertSafeWorkerSessionName(sessionName);
@@ -182,11 +191,16 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
           if (worker.retiredAt && !options.includeRetired) return null;
           if (options.mode && (worker.mode ?? "advance_loop") !== options.mode) return null;
           const alive = processIsAlive(worker.pid);
+          const latestProgress = worker.latestResult ? null : await readLatestWorkerJsonResult(worker.stdoutPath, worker.stdoutStartOffset ?? 0);
+          const latestResult = worker.latestResult ?? latestProgress;
+          const latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource = worker.latestResult ? "recorded" : latestProgress ? "stdout" : "none";
           return {
             ...worker,
             alive,
             lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive),
-            latestResult: worker.latestResult ?? await readLatestWorkerJsonResult(worker.stdoutPath, worker.stdoutStartOffset ?? 0),
+            latestResult,
+            latestProgress,
+            latestResultSource,
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
           };
