@@ -9724,6 +9724,24 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   } else {
     lines.push("branch_inspection: none");
   }
+  lines.push(
+    `branch_recovery_executions: recent=${summary.branches.executions.counts.recent} executed=${summary.branches.executions.counts.executed} partial=${summary.branches.executions.counts.partial} noop=${summary.branches.executions.counts.noop}`,
+    `  inspect: ${formatShellCommand(summary.commands.branchRecoveryExecutions)}`,
+  );
+  if (summary.branches.executions.recent.length > 0) {
+    lines.push("recent_branch_recovery_executions:");
+    for (const execution of summary.branches.executions.recent) {
+      lines.push(
+        `  - execution: ${execution.executionId}`,
+        `    status: ${execution.status}`,
+        `    selected: ${execution.selected}`,
+        `    resumed: ${execution.resumed.length}`,
+        `    skipped: ${execution.skipped.length}`,
+        `    runs: ${[...execution.resumed, ...execution.skipped].map((run) => run.runId).join(",")}`,
+        `    inspect: ${formatShellCommand([...summary.commands.branchRecoveryExecutions, "--execution", execution.executionId])}`,
+      );
+    }
+  }
   if (summary.results.inspection.count > 0) {
     lines.push(
       "result_inspection:",
@@ -9866,6 +9884,12 @@ function workerSessionControlPlaneStatusSummaryCommands(
   for (const action of summary.nextActions) {
     commands.push({ command: action.command });
   }
+  commands.push({ command: summary.commands.branchRecoveryExecutions });
+  commands.push(...workerSessionBranchRecoveryExecutionCommands(
+    summary.session,
+    summary.branches.executions.recent,
+    { checkoutRoot: `./checkouts/${summary.session}-branch-recovery` },
+  ).map((command) => ({ command: command.command })));
   commands.push({ command: summary.commands.inspectTopology });
   commands.push({ command: summary.commands.ensureTopologyLoopDryRun });
   commands.push({ command: summary.commands.ensureTopologyLoopConfirm });
@@ -10243,7 +10267,7 @@ function summarizeWorkerSessionControlPlaneStatus(
   branches: {
     counts: WorkerSessionControlPlaneStatusResponse["branches"]["counts"];
     actions: WorkerSessionControlPlaneStatusResponse["branches"]["actions"];
-    executions: WorkerSessionControlPlaneStatusResponse["branches"]["executions"]["counts"];
+    executions: WorkerSessionControlPlaneStatusResponse["branches"]["executions"];
     inspection: {
       count: number;
       nextSteps: Array<{
@@ -10326,6 +10350,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     skippedResultInspections: string[];
     latestResultReviews: string[];
     failedResultReviewAttempts: string[];
+    branchRecoveryExecutions: string[];
   };
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
@@ -10357,7 +10382,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     branches: {
       counts: status.branches.counts,
       actions: status.branches.actions,
-      executions: status.branches.executions.counts,
+      executions: status.branches.executions,
       inspection: {
         count: status.branches.nextSteps.length,
         nextSteps: status.branches.nextSteps.map((step) => ({
@@ -10462,6 +10487,7 @@ function summarizeWorkerSessionControlPlaneStatus(
         "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server",
         "--source", "result_review", "--event", "result_review_record_failed", "--status", "failed",
       ],
+      branchRecoveryExecutions: ["npm", "run", "cli", "--", "runs", "session-branch-recovery-executions", status.session, "--server"],
     },
   };
 }

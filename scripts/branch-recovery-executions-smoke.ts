@@ -31,6 +31,7 @@ try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
   const baseUrl = `http://${settings.host}:${address.port}`;
+  await writeWorkerSessionRecord();
   const older = await writeBranchRecoveryExecution({
     executionId: `branch-recovery-execution-older-${Date.now().toString(36)}`,
     observedAt: "2026-05-13T10:00:00.000Z",
@@ -197,9 +198,74 @@ try {
     "10",
   ]);
   assert.match(timelineShellCommands, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId} --commands-only`));
+
+  const statusSummary = await cliJson<{
+    branches: {
+      executions: {
+        counts: { recent: number; executed: number; partial: number; noop: number };
+        recent: Array<{ executionId: string; status: string; selected: number; resumed: Array<{ runId: string }>; skipped: Array<{ runId: string }> }>;
+      };
+    };
+    commands: { branchRecoveryExecutions: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(statusSummary.branches.executions.counts.recent, 2);
+  assert.equal(statusSummary.branches.executions.counts.executed, 1);
+  assert.equal(statusSummary.branches.executions.counts.partial, 0);
+  assert.equal(statusSummary.branches.executions.counts.noop, 1);
+  assert.deepEqual(statusSummary.commands.branchRecoveryExecutions, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-branch-recovery-executions",
+    sessionName,
+    "--server",
+  ]);
+  assert.deepEqual(statusSummary.branches.executions.recent.map((execution) => execution.executionId), [newer.executionId, older.executionId]);
+
+  const statusSummaryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(statusSummaryText, /branch_recovery_executions: recent=2 executed=1 partial=0 noop=1/);
+  assert.match(statusSummaryText, /recent_branch_recovery_executions:/);
+  assert.match(statusSummaryText, new RegExp(`execution: ${newer.executionId}`));
+  assert.match(statusSummaryText, /runs: run-a/);
+  assert.match(statusSummaryText, new RegExp(`inspect: npm run cli -- runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId}`));
+
+  const statusSummaryShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(statusSummaryShell, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server$`, "m"));
+  assert.match(statusSummaryShell, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId}`));
+  assert.match(statusSummaryShell, /runs inspect run-a/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "branch-recovery-executions", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
@@ -253,9 +319,27 @@ async function writeBranchRecoveryExecution(options: {
   return { executionId: options.executionId };
 }
 
+async function writeWorkerSessionRecord(): Promise<void> {
+  const sessionDir = path.join(".threadbeat", "worker-sessions");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(path.join(sessionDir, `${sessionName}.json`), `${JSON.stringify({
+    session: sessionName,
+    baseUrl: "http://127.0.0.1:0",
+    startedAt: "2026-05-14T00:00:00.000Z",
+    command: ["runs", "work", "--agent", "agent-branch-recovery-smoke"],
+    workers: [],
+    stoppedAt: "2026-05-14T00:00:01.000Z",
+  }, null, 2)}\n`);
+}
+
 async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
   const { stdout } = await cli(baseUrl, args);
   return JSON.parse(stdout) as T;
+}
+
+async function cliText(baseUrl: string, args: string[]): Promise<string> {
+  const { stdout } = await cli(baseUrl, args);
+  return stdout;
 }
 
 async function cli(baseUrl: string, args: string[]): Promise<{ stdout: string }> {
