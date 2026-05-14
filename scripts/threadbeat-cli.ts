@@ -5483,8 +5483,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-control-plane-reconcile-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-reconcile-workers requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-reconcile-workers --format must be json or text");
     }
     const dryRun = options["dry-run"] === "1";
     const confirm = options.confirm === "1";
@@ -5501,13 +5505,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       confirm,
     };
     const requiredSessionName = required(sessionName, "runs session-control-plane-reconcile-workers <session> --server");
-    await printJson(options["until-empty"] === "1"
+    const result = options["until-empty"] === "1"
       ? await reconcileWorkerSessionControlPlaneWorkersLoop(requiredSessionName, {
         ...reconcileOptions,
         maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
         intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
       })
-      : await reconcileWorkerSessionControlPlaneWorkers(requiredSessionName, reconcileOptions));
+      : await reconcileWorkerSessionControlPlaneWorkers(requiredSessionName, reconcileOptions);
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneReconcileText(result);
+    } else {
+      await printJson(result);
+    }
     return;
   }
   if (subcommandName === "ensure-control-plane-core-workers") {
@@ -11380,6 +11389,88 @@ async function reconcileWorkerSessionControlPlaneWorkersLoop(
   };
 }
 
+function printWorkerSessionControlPlaneReconcileText(
+  response: ControlPlaneWorkerReconcileResult | Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkersLoop>>,
+): void {
+  console.log(formatWorkerSessionControlPlaneReconcileText(response).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneReconcileText(
+  response: ControlPlaneWorkerReconcileResult | Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkersLoop>>,
+): string[] {
+  return "untilEmpty" in response
+    ? formatWorkerSessionControlPlaneReconcileLoopText(response)
+    : formatWorkerSessionControlPlaneReconcilePassText(response);
+}
+
+function formatWorkerSessionControlPlaneReconcilePassText(response: ControlPlaneWorkerReconcileResult): string[] {
+  const lines = [
+    "control_plane_worker_reconcile:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  passed: ${response.passed ?? "pending"}`,
+    `  filter: ${formatControlPlaneWorkerReconcileFilter(response.filter)}`,
+    `  plan: count=${response.plan.count} skipped=${response.plan.skipped}`,
+    `  executed: ${response.executed.length}`,
+    `  remaining: ${response.remaining ? response.remaining.length : "unknown"}`,
+  ];
+  if (response.plan.steps.length === 0) {
+    lines.push("  planned_steps: none");
+  } else {
+    lines.push("  planned_steps:");
+    for (const step of response.plan.steps) {
+      lines.push(`    - ${step.kind} ${step.workerId} action=${step.action ?? ""} reason=${step.reason ?? ""}`);
+    }
+  }
+  return lines;
+}
+
+function formatWorkerSessionControlPlaneReconcileLoopText(
+  response: Awaited<ReturnType<typeof reconcileWorkerSessionControlPlaneWorkersLoop>>,
+): string[] {
+  const lines = [
+    "control_plane_worker_reconcile_loop:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  passed: ${response.passed ?? "pending"}`,
+    `  stopped_reason: ${response.stoppedReason}`,
+    `  bounds: max_steps=${response.maxSteps} interval_ms=${response.intervalMs}`,
+    `  filter: ${formatControlPlaneWorkerReconcileFilter(response.filter)}`,
+    `  summary: iterations=${response.summary.iterations} total_planned=${response.summary.totalPlanned} total_executed=${response.summary.totalExecuted} last_planned=${response.summary.lastPlannedCount ?? "unknown"} last_next_planned=${response.summary.lastNextPlannedCount ?? "unknown"} last_remaining=${response.summary.lastRemainingCount ?? "unknown"}`,
+    "  commands:",
+    `    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`,
+    `    dry_run: ${formatShellCommand(response.commands.dryRun)}`,
+    `    confirm: ${formatShellCommand(response.commands.confirm)}`,
+  ];
+  if (response.iterations.length === 0) {
+    lines.push("  iterations: none");
+  } else {
+    lines.push("  iterations:");
+    for (const iteration of response.iterations) {
+      lines.push(
+        `    - step: ${iteration.step}`,
+        `      planned: ${iteration.result.plan.count}`,
+        `      executed: ${iteration.result.executed.length}`,
+        `      next_planned: ${iteration.nextPlannedCount ?? "unknown"}`,
+        `      passed: ${iteration.result.passed ?? "pending"}`,
+      );
+    }
+  }
+  return lines;
+}
+
+function formatControlPlaneWorkerReconcileFilter(filter: ControlPlaneWorkerReconcileResult["filter"]): string {
+  return [
+    `worker=${filter.workerId ?? "all"}`,
+    `kind=${filter.kind ?? "all"}`,
+    `include_retired=${filter.includeRetired}`,
+    `limit=${filter.limit ?? "none"}`,
+    `lines=${filter.lines}`,
+  ].join(" ");
+}
+
 type ControlPlaneCoreWorkerPlanStep = {
   kind: Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_tick">;
   workerId: string;
@@ -15985,7 +16076,7 @@ Commands:
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
-  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs ensure-control-plane-mutation-workers <name> --server (--confirm|--dry-run) [--apply-worker-id id] [--drain-worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--apply-interval-ms n] [--max-continuations n] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]

@@ -202,6 +202,24 @@ try {
     reconcileLoopPreview.commands.confirm.join(" "),
     `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 3 --interval-ms 1 --confirm`,
   );
+  const reconcileLoopText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--until-empty",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(reconcileLoopText, /control_plane_worker_reconcile_loop:/);
+  assert.match(reconcileLoopText, /stopped_reason: dry_run/);
+  assert.match(reconcileLoopText, /summary: iterations=1 total_planned=6 total_executed=0 last_planned=6/);
+  assert.match(reconcileLoopText, new RegExp(`confirm: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 3 --interval-ms 1 --confirm`));
   const aggregateText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-workers",
