@@ -3737,6 +3737,7 @@ const readWorkerSessionControlPlaneStatus = async (
         lifecycle: ControlPlaneAdvanceWorkerLifecycle;
         latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
         latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
+        recentProgress: ControlPlaneAdvanceWorkerLatestResult[];
         latestResult: ControlPlaneAdvanceWorkerLatestResult;
       }>;
     };
@@ -5470,6 +5471,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
   lifecycle: ControlPlaneAdvanceWorkerLifecycle;
   latestResult: ControlPlaneAdvanceWorkerLatestResult | null;
   latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
+  recentProgress: ControlPlaneAdvanceWorkerLatestResult[];
   latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
 }>(workers: T[]): {
   total: number;
@@ -5488,6 +5490,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
     lifecycle: ControlPlaneAdvanceWorkerLifecycle;
     latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
     latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
+    recentProgress: ControlPlaneAdvanceWorkerLatestResult[];
     latestResult: ControlPlaneAdvanceWorkerLatestResult;
   }>;
 } => ({
@@ -5504,6 +5507,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
         lifecycle: worker.lifecycle,
         latestResultSource: worker.latestResultSource,
         latestProgress: worker.latestProgress,
+        recentProgress: worker.recentProgress,
         latestResult: worker.latestResult,
       }]
     : []),

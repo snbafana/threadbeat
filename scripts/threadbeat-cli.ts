@@ -10458,6 +10458,7 @@ type ControlPlaneWorkerSummary = {
     count: number;
     recorded: number;
     progress: number;
+    recentProgress: number;
     iterations: number;
     totalCoreExecuted: number;
     totalMutationExecuted: number;
@@ -10659,6 +10660,7 @@ function formatControlPlaneWorkerLatestResults(summary: ControlPlaneWorkerSummar
     `count=${summary.count}`,
     `recorded=${summary.recorded}`,
     `progress=${summary.progress}`,
+    `recent_progress=${summary.recentProgress}`,
     `iterations=${summary.iterations}`,
     `core=${summary.totalCoreExecuted}`,
     `mutation=${summary.totalMutationExecuted}`,
@@ -10728,7 +10730,7 @@ function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWork
   return record.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
 }
 
-function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean; latestResult?: unknown; latestResultSource?: unknown }>): ControlPlaneWorkerSummary {
+function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean; latestResult?: unknown; latestResultSource?: unknown; recentProgress?: unknown }>): ControlPlaneWorkerSummary {
   return {
     total: workers.length,
     alive: workers.filter((worker) => worker.alive).length,
@@ -10740,7 +10742,7 @@ function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: st
   };
 }
 
-function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?: unknown; latestResultSource?: unknown }>): ControlPlaneWorkerSummary["latestResults"] {
+function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?: unknown; latestResultSource?: unknown; recentProgress?: unknown }>): ControlPlaneWorkerSummary["latestResults"] {
   const latestResults = workers
     .map((worker) => plainRecord(worker.latestResult))
     .filter((latestResult): latestResult is Record<string, unknown> => latestResult !== null);
@@ -10749,6 +10751,7 @@ function summarizeControlPlaneWorkerLatestResults(workers: Array<{ latestResult?
     count: latestResults.length,
     recorded: workers.filter((worker) => worker.latestResultSource === "recorded" && plainRecord(worker.latestResult) !== null).length,
     progress: workers.filter((worker) => worker.latestResultSource === "stdout" && plainRecord(worker.latestResult) !== null).length,
+    recentProgress: workers.reduce((total, worker) => total + (Array.isArray(worker.recentProgress) ? worker.recentProgress.length : 0), 0),
     iterations: sumNumber("iterations"),
     totalCoreExecuted: sumNumber("totalCoreExecuted"),
     totalMutationExecuted: sumNumber("totalMutationExecuted"),

@@ -171,6 +171,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
   lifecycle: ControlPlaneAdvanceWorkerLifecycle;
   latestResult: ControlPlaneAdvanceWorkerLatestResult | null;
   latestProgress: ControlPlaneAdvanceWorkerLatestResult | null;
+  recentProgress: ControlPlaneAdvanceWorkerLatestResult[];
   latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource;
   stdout: { path: string; lines: string[] };
   stderr: { path: string; lines: string[] };
@@ -191,7 +192,10 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
           if (worker.retiredAt && !options.includeRetired) return null;
           if (options.mode && (worker.mode ?? "advance_loop") !== options.mode) return null;
           const alive = processIsAlive(worker.pid);
-          const latestProgress = worker.latestResult ? null : await readLatestWorkerJsonResult(worker.stdoutPath, worker.stdoutStartOffset ?? 0);
+          const recentStdoutResults = await readRecentWorkerJsonResults(worker.stdoutPath, worker.stdoutStartOffset ?? 0, 10);
+          const latestStdoutResult = recentStdoutResults.at(-1) ?? null;
+          const recentProgress = recentStdoutResults.filter((result) => result.stoppedReason === "running").slice(-5);
+          const latestProgress = worker.latestResult ? null : latestStdoutResult;
           const latestResult = worker.latestResult ?? latestProgress;
           const latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource = worker.latestResult ? "recorded" : latestProgress ? "stdout" : "none";
           return {
@@ -200,6 +204,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
             lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive),
             latestResult,
             latestProgress,
+            recentProgress,
             latestResultSource,
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
@@ -585,30 +590,66 @@ async function fileSize(filePath: string): Promise<number> {
 }
 
 async function readLatestWorkerJsonResult(filePath: string, startOffset: number): Promise<ControlPlaneAdvanceWorkerLatestResult | null> {
+  return (await readRecentWorkerJsonResults(filePath, startOffset, 1)).at(-1) ?? null;
+}
+
+async function readRecentWorkerJsonResults(filePath: string, startOffset: number, limit: number): Promise<ControlPlaneAdvanceWorkerLatestResult[]> {
+  if (limit <= 0) return [];
   let text: string;
   try {
     const buffer = await fs.readFile(filePath);
-    if (startOffset >= buffer.length) return null;
+    if (startOffset >= buffer.length) return [];
     text = buffer.subarray(startOffset).toString("utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
-  const parsed = parseLastJsonObject(text);
-  if (!isRecord(parsed)) return null;
-  return summarizeLatestWorkerJsonResult(parsed);
+  return parseJsonObjects(text)
+    .filter(isRecord)
+    .map(summarizeLatestWorkerJsonResult)
+    .slice(-limit);
 }
 
-function parseLastJsonObject(text: string): unknown {
-  const trimmed = text.trim();
-  for (let index = trimmed.lastIndexOf("{"); index >= 0; index = trimmed.lastIndexOf("{", index - 1)) {
-    try {
-      return JSON.parse(trimmed.slice(index));
-    } catch {
-      // Keep scanning for the outer brace of the final pretty-printed JSON object.
+function parseJsonObjects(text: string): unknown[] {
+  const values: unknown[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        try {
+          values.push(JSON.parse(text.slice(start, index + 1)));
+        } catch {
+          // Ignore incomplete or non-JSON fragments in worker stdout.
+        }
+        start = -1;
+      }
     }
   }
-  return null;
+  return values;
 }
 
 function summarizeLatestWorkerJsonResult(value: Record<string, unknown>): ControlPlaneAdvanceWorkerLatestResult {
