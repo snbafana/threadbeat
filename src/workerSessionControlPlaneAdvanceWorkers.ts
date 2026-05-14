@@ -73,11 +73,11 @@ type StopProcessGroupResult = {
 
 export type ControlPlaneAdvanceWorkerNextStep = {
   action: "restart_control_plane_advance_worker";
-  reason: "stopped_control_plane_advance_worker";
+  reason: "stopped_control_plane_advance_worker" | "worker_exited_without_stop_or_completion_record";
   workerId: string;
   mode: ControlPlaneAdvanceWorkerMode;
   pid: number | null;
-  stoppedAt: string;
+  stoppedAt?: string;
   command: string[];
   commands: {
     restartControlPlaneAdvanceWorker: string[];
@@ -310,7 +310,7 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
     ...(options.mode ? { mode: options.mode } : {}),
   }, 1);
   const nextSteps = workers
-    .filter((worker) => !worker.alive && Boolean(worker.stoppedAt))
+    .filter((worker) => worker.lifecycle.restartable)
     .map((worker): ControlPlaneAdvanceWorkerNextStep => {
       const mode = worker.mode ?? "advance_loop";
       const restartCommandName = mode === "topology_loop" ? "restart-control-plane-topology-worker" : "restart-control-plane-advance-workers";
@@ -321,11 +321,13 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
       const encodedWorker = encodeURIComponent(worker.workerId);
       return {
         action: "restart_control_plane_advance_worker",
-        reason: "stopped_control_plane_advance_worker",
+        reason: worker.lifecycle.reason === "worker_exited_without_stop_or_completion_record"
+          ? "worker_exited_without_stop_or_completion_record"
+          : "stopped_control_plane_advance_worker",
         workerId: worker.workerId,
         mode,
         pid: worker.pid,
-        stoppedAt: worker.stoppedAt as string,
+        ...(worker.stoppedAt ? { stoppedAt: worker.stoppedAt } : {}),
         command: restartControlPlaneAdvanceWorker,
         commands: {
           restartControlPlaneAdvanceWorker,
@@ -498,7 +500,7 @@ function describeControlPlaneAdvanceWorkerLifecycle(worker: ControlPlaneAdvanceW
   if (worker.completedAt) {
     return { state: "completed", restartable: false, reason: "worker_completed" };
   }
-  return { state: "exited_unrecorded", restartable: false, reason: "worker_exited_without_stop_or_completion_record" };
+  return { state: "exited_unrecorded", restartable: true, reason: "worker_exited_without_stop_or_completion_record" };
 }
 
 async function listControlPlaneAdvanceWorkerSessionNames(projectRoot: string): Promise<string[]> {
