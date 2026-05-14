@@ -3887,8 +3887,12 @@ const readWorkerSessionControlPlaneStatus = async (
   results: Awaited<ReturnType<typeof summarizeWorkerSessionResultInspection>> & {
     reviews: {
       count: number;
-      counts: { reviewed: number; skipped: number };
+      counts: { reviewed: number; skipped: number; failed: number };
       recent: Awaited<ReturnType<typeof listWorkerSessionResultReviewRecords>>;
+      failedAttempts: {
+        count: number;
+        recent: Awaited<ReturnType<typeof listWorkerSessionResultReviewAttemptRecords>>;
+      };
     };
   };
   staleRuns: Awaited<ReturnType<typeof summarizeWorkerSessionStaleRunRecovery>>;
@@ -3921,6 +3925,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneTickWorkerNextSteps,
     branchRecovery,
     resultReviews,
+    resultReviewAttempts,
     staleRunRecovery,
     branchRecoveryExecutions,
     applyActionExecutions,
@@ -3943,6 +3948,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionControlPlaneTickWorkerNextSteps(settings.projectRoot, name),
     summarizeWorkerSessionBranchRecovery(db, session, lines),
     listWorkerSessionResultReviewRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
+    listWorkerSessionResultReviewAttemptRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
     summarizeWorkerSessionStaleRunRecovery(db, session, lines),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, lines),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, lines),
@@ -3997,8 +4003,13 @@ const readWorkerSessionControlPlaneStatus = async (
         counts: {
           reviewed: resultReviews.filter((review) => review.action === "reviewed").length,
           skipped: resultReviews.filter((review) => review.action === "skipped").length,
+          failed: resultReviewAttempts.length,
         },
         recent: resultReviews.slice(0, lines),
+        failedAttempts: {
+          count: resultReviewAttempts.length,
+          recent: resultReviewAttempts.slice(0, lines),
+        },
       },
     },
     staleRuns: staleRunRecovery,

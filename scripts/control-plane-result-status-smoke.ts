@@ -65,6 +65,7 @@ try {
   const recordScopedSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${run.id} --result-commit ${resultCommit} --record-skipped`;
   const recordNextSelectedReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed --run ${run.id} --result-commit ${resultCommit}`;
   const recordNextSelectedSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped --run ${run.id} --result-commit ${resultCommit}`;
+  const failedResultReviewAttemptsCommand = `npm run cli -- runs session-control-plane-timeline ${sessionName} --server --source result_review --event result_review_record_failed --status failed`;
 
   const summary = await cliJson<{
     commands: {
@@ -73,9 +74,11 @@ try {
       recordNextReviewed: string[];
       recordNextSkipped: string[];
       latestResultReviews: string[];
+      failedResultReviewAttempts: string[];
     };
     results: {
       counts: { resultCommits: number; pending: number; reviewed: number; skipped: number };
+      reviews: { counts: { failed: number }; failedAttempts: { count: number } };
       inspection: {
         count: number;
         nextSteps: Array<{
@@ -108,6 +111,9 @@ try {
   assert.equal(summary.commands.recordNextReviewed.join(" "), recordNextReviewedCommand);
   assert.equal(summary.commands.recordNextSkipped.join(" "), recordNextSkippedCommand);
   assert.equal(summary.commands.latestResultReviews.join(" "), latestResultReviewsCommand);
+  assert.equal(summary.commands.failedResultReviewAttempts.join(" "), failedResultReviewAttemptsCommand);
+  assert.equal(summary.results.reviews.counts.failed, 0);
+  assert.equal(summary.results.reviews.failedAttempts.count, 0);
 
   const commandSummary = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
     "runs",
@@ -142,6 +148,7 @@ try {
   assert.match(pendingStatusText, new RegExp(`record_reviewed: ${recordScopedReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_skipped: ${recordScopedSkippedCommand}`));
   assert.match(pendingStatusText, new RegExp(`latest: ${latestResultReviewsCommand}`));
+  assert.match(pendingStatusText, /result_reviews: count=0 reviewed=0 skipped=0 failed_attempts=0/);
 
   const reviewNext = await cliJson<{
     count: number;
@@ -351,6 +358,32 @@ try {
   assert.match(failedReviewTimeline.events[0]?.reason ?? "", /result commit changed/);
   assert.ok(failedReviewTimeline.events[0]?.runIds?.includes(run.id));
   assert.equal(failedReviewTimeline.events[0]?.expectedResultCommit, "ffffffffffffffffffffffffffffffffffffffff");
+
+  const failedAttemptStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(failedAttemptStatusText, /result_reviews: count=0 reviewed=0 skipped=0 failed_attempts=1/);
+  assert.match(failedAttemptStatusText, new RegExp(`failed_attempts: ${failedResultReviewAttemptsCommand}`));
+  assert.match(failedAttemptStatusText, /recent_failed_result_reviews:/);
+  assert.match(failedAttemptStatusText, new RegExp(`run: ${run.id}`));
+  assert.match(failedAttemptStatusText, /expected_result_commit: ffffffffffffffffffffffffffffffffffffffff/);
+  assert.match(failedAttemptStatusText, /error: run .* result commit changed/);
+
+  const failedAttemptStatusCommands = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+  ]);
+  assert.ok(failedAttemptStatusCommands.commands.some((command) => command.command.join(" ") === failedResultReviewAttemptsCommand));
 
   const nextRecordDryRun = await cliJson<{
     dryRun: boolean;

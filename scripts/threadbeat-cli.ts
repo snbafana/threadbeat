@@ -8220,6 +8220,19 @@ type WorkerSessionResultReviewRecord = {
   command: string[];
 };
 
+type WorkerSessionResultReviewAttemptRecord = {
+  attemptId: string;
+  session: string;
+  observedAt: string;
+  status: "failed";
+  runId?: string;
+  action?: "reviewed" | "skipped";
+  expectedResultCommit?: string;
+  reviewedBy?: string;
+  note?: string;
+  error: string;
+};
+
 type WorkerSessionResultReviewsResponse = {
   ok: true;
   session: string;
@@ -8525,8 +8538,12 @@ type WorkerSessionControlPlaneStatusResponse = {
     }>;
     reviews: {
       count: number;
-      counts: { reviewed: number; skipped: number };
+      counts: { reviewed: number; skipped: number; failed: number };
       recent: WorkerSessionResultReviewRecord[];
+      failedAttempts: {
+        count: number;
+        recent: WorkerSessionResultReviewAttemptRecord[];
+      };
     };
   };
   staleRuns: {
@@ -9736,9 +9753,12 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     );
   }
   lines.push(
-    `result_reviews: count=${summary.results.reviews.count} reviewed=${summary.results.reviews.counts.reviewed} skipped=${summary.results.reviews.counts.skipped}`,
+    `result_reviews: count=${summary.results.reviews.count} reviewed=${summary.results.reviews.counts.reviewed} skipped=${summary.results.reviews.counts.skipped} failed_attempts=${summary.results.reviews.failedAttempts.count}`,
     `  latest: ${formatShellCommand(summary.commands.latestResultReviews)}`,
   );
+  if (summary.results.reviews.failedAttempts.count > 0) {
+    lines.push(`  failed_attempts: ${formatShellCommand(summary.commands.failedResultReviewAttempts)}`);
+  }
   if (summary.results.reviews.recent.length > 0) {
     lines.push("recent_result_reviews:");
     for (const review of summary.results.reviews.recent) {
@@ -9748,6 +9768,18 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    run: ${review.runId}`,
         `    result_commit: ${review.resultCommit}`,
         `    reviewed_by: ${review.reviewedBy}`,
+      );
+    }
+  }
+  if (summary.results.reviews.failedAttempts.recent.length > 0) {
+    lines.push("recent_failed_result_reviews:");
+    for (const attempt of summary.results.reviews.failedAttempts.recent) {
+      lines.push(
+        `  - attempt: ${attempt.attemptId}`,
+        `    run: ${attempt.runId ?? ""}`,
+        `    expected_result_commit: ${attempt.expectedResultCommit ?? ""}`,
+        `    reviewed_by: ${attempt.reviewedBy ?? ""}`,
+        `    error: ${attempt.error}`,
       );
     }
   }
@@ -9851,6 +9883,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   if (summary.results.reviews.count > 0) {
     commands.push({ command: summary.commands.latestResultReviews });
+  }
+  if (summary.results.reviews.failedAttempts.count > 0) {
+    commands.push({ command: summary.commands.failedResultReviewAttempts });
   }
   for (const review of summary.results.reviews.recent) {
     commands.push({
@@ -10271,6 +10306,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     reviewedResultInspections: string[];
     skippedResultInspections: string[];
     latestResultReviews: string[];
+    failedResultReviewAttempts: string[];
   };
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
@@ -10403,6 +10439,10 @@ function summarizeWorkerSessionControlPlaneStatus(
       reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
       skippedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped"],
       latestResultReviews: ["npm", "run", "cli", "--", "runs", "session-result-reviews", status.session, "--server", "--latest"],
+      failedResultReviewAttempts: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", status.session, "--server",
+        "--source", "result_review", "--event", "result_review_record_failed", "--status", "failed",
+      ],
     },
   };
 }

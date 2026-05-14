@@ -1033,6 +1033,8 @@ when Threadbeat knows the selected result, so stale commands fail instead of
 recording a decision against a changed run result. Failed review-record attempts
 are written into the control-plane timeline as `result_review_record_failed`, so
 operators can inspect stale or rejected writes after the immediate CLI error.
+The control-plane status summary also shows recent failed result-review attempts
+and prints the exact timeline command for auditing them.
 Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving
