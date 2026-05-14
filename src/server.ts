@@ -124,6 +124,7 @@ type WorkerSessionControlPlaneRecoveryAttemptStatus = {
   selectedSurface: string | null;
   selectedAction: string | null;
   selectedReason: string | null;
+  selectedAdvanceId: string | null;
   selectedCommand: string[] | null;
   executedCommand: string[] | null;
   executedExitCode: number | null;
@@ -208,6 +209,10 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
     attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
     recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
     failedRecent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+    acknowledgements: {
+      attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
+      recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+    };
   };
   incompleteLoops: {
     count: number;
@@ -4072,6 +4077,7 @@ const readWorkerSessionControlPlaneStatus = async (
     recoverNextAttempts,
     recoverNextLoopStepAttempts,
     recoverNextResumeAttempts,
+    recoverNextResumeAcknowledgementAttempts,
     statusWatchExecutionAttempts,
     statusWatchAcknowledgementAttempts,
     workerReconciliations,
@@ -4117,6 +4123,10 @@ const readWorkerSessionControlPlaneStatus = async (
     }),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
       limit: Number.MAX_SAFE_INTEGER,
+      detailCommands: ["acknowledge_recover_next_resume_attempt"],
+    }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
       detailCommands: ["status_watch_execute_action"],
     }),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
@@ -4127,7 +4137,8 @@ const readWorkerSessionControlPlaneStatus = async (
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
   const resultInspection = await summarizeWorkerSessionResultInspection(db, session, lines, resultReviews);
-  const acknowledgedStatusWatchAdvanceIds = statusWatchAcknowledgedAdvanceIds(statusWatchAcknowledgementAttempts);
+  const acknowledgedStatusWatchAdvanceIds = controlPlaneAcknowledgedAdvanceIds(statusWatchAcknowledgementAttempts);
+  const acknowledgedRecoverNextResumeAdvanceIds = controlPlaneAcknowledgedAdvanceIds(recoverNextResumeAcknowledgementAttempts);
   return {
     ok: true,
     session: name,
@@ -4185,7 +4196,15 @@ const readWorkerSessionControlPlaneStatus = async (
       recentAttempts: controlPlaneRecoveryAttempts
         .slice(0, lines)
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
-      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(name, recoverNextAttempts, recoverNextLoopStepAttempts, recoverNextResumeAttempts, lines),
+      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(
+        name,
+        recoverNextAttempts,
+        recoverNextLoopStepAttempts,
+        recoverNextResumeAttempts,
+        recoverNextResumeAcknowledgementAttempts,
+        acknowledgedRecoverNextResumeAdvanceIds,
+        lines,
+      ),
       statusWatchExecutions: {
         attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(statusWatchExecutionAttempts),
         recent: statusWatchExecutionAttempts
@@ -4338,6 +4357,7 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
     selectedSurface: stringRecordField(selected, "surface"),
     selectedAction: stringRecordField(selected, "action"),
     selectedReason: stringRecordField(selected, "reason"),
+    selectedAdvanceId: stringRecordField(selected, "advanceId"),
     selectedCommand: stringArrayRecordField(selected, "command"),
     executedCommand: stringArrayRecordField(executedRecord, "command"),
     executedExitCode: numberRecordField(executedRecord, "exitCode"),
@@ -4351,7 +4371,7 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
   };
 };
 
-const statusWatchAcknowledgedAdvanceIds = (
+const controlPlaneAcknowledgedAdvanceIds = (
   records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
 ): Set<string> => {
   const acknowledged = new Set<string>();
@@ -4450,6 +4470,8 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
   records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
   loopStepRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
   resumeRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  resumeAcknowledgementRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  acknowledgedResumeAdvanceIds: Set<string>,
   lines: number,
 ): WorkerSessionControlPlaneRecoverNextHistoryStatus => {
   const completedLoopAdvanceIds = new Set(records
@@ -4517,8 +4539,15 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, record)),
       failedRecent: resumeRecords
         .filter((record) => controlPlaneAdvanceExecutionFailed(record.executed))
+        .filter((record) => !acknowledgedResumeAdvanceIds.has(record.advanceId))
         .slice(0, lines)
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, record)),
+      acknowledgements: {
+        attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(resumeAcknowledgementRecords),
+        recent: resumeAcknowledgementRecords
+          .slice(0, lines)
+          .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, record)),
+      },
     },
     incompleteLoops,
   };
@@ -4796,6 +4825,7 @@ type WorkerSessionControlPlaneAlertDetails =
     commands: {
       inspectAttempt: string[];
       inspectHistory: string[] | null;
+      acknowledgeAttempt: string[];
       inspectStatus: string[];
     };
   };
@@ -4967,6 +4997,11 @@ const readWorkerSessionControlPlaneAlertDetails = async (
         inspectHistory: attempt.loopAdvanceId
           ? ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", name, "--server", "--loop-advance-id", attempt.loopAdvanceId, "--recover-next-loop-history"]
           : null,
+        acknowledgeAttempt: [
+          "npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", name, "--server",
+          "--surface", "recover_next", "--reason", "failed_recover_next_resume_attempt", "--action", "inspect_recover_next_resume_attempt",
+          "--detail-command", "acknowledge_recover_next_resume_attempt", "--confirm", "--lines", String(lines),
+        ],
         inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", name, "--server", "--summary"],
       },
     };
@@ -5057,7 +5092,7 @@ const readWorkerSessionControlPlaneAlerts = async (
     ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
   ].filter(isWorkerSessionControlPlaneWorkerRecoveryStep);
-  const acknowledgedStatusWatchAdvanceIds = statusWatchAcknowledgedAdvanceIds(statusWatchAcknowledgementRecords);
+  const acknowledgedStatusWatchAdvanceIds = controlPlaneAcknowledgedAdvanceIds(statusWatchAcknowledgementRecords);
   const failedStatusWatchExecutions = statusWatchExecutionRecords
     .filter((record) => controlPlaneAdvanceExecutionFailed(record.executed))
     .filter((record) => !acknowledgedStatusWatchAdvanceIds.has(record.advanceId));
@@ -5289,6 +5324,7 @@ type WorkerSessionControlPlaneAlertDetailCommand =
   | "execute_apply_action"
   | "acknowledge_reset_audit"
   | "acknowledge_status_watch_execution"
+  | "acknowledge_recover_next_resume_attempt"
   | "run_selected_command"
   | "inspect_failed_drain_continuations"
   | "reset_failed_drain_continuations"
@@ -5309,6 +5345,7 @@ const parseControlPlaneAlertDetailCommand = (
     "execute_apply_action",
     "acknowledge_reset_audit",
     "acknowledge_status_watch_execution",
+    "acknowledge_recover_next_resume_attempt",
     "run_selected_command",
     "inspect_failed_drain_continuations",
     "reset_failed_drain_continuations",
@@ -5330,6 +5367,7 @@ const isMutatingControlPlaneAlertDetailCommand = (
   return detailCommand === "execute_apply_action"
     || detailCommand === "acknowledge_reset_audit"
     || detailCommand === "acknowledge_status_watch_execution"
+    || detailCommand === "acknowledge_recover_next_resume_attempt"
     || detailCommand === "run_selected_command"
     || detailCommand === "reset_failed_drain_continuations"
     || detailCommand === "reset_selected_failed_drain_continuations"
@@ -5444,6 +5482,11 @@ const selectControlPlaneAlertDetailCommand = (
   if (details?.kind === "recover_next_loop") {
     if (detailCommand === "resume_recover_next_loop") {
       return { detailCommand, action: detailCommand, command: details.commands.resumeLoop };
+    }
+  }
+  if (details?.kind === "recover_next_resume_attempt") {
+    if (detailCommand === "acknowledge_recover_next_resume_attempt") {
+      return { detailCommand, action: detailCommand, command: details.commands.acknowledgeAttempt };
     }
   }
   throw new Error(`detail command ${detailCommand} is not available for the selected alert`);
@@ -5710,7 +5753,7 @@ const executeWorkerSessionControlPlaneAlert = async (
       : null,
   };
   const executed = selected && !options.dryRun && !executionSafety.blocked
-    ? detailCommand === "acknowledge_status_watch_execution"
+    ? detailCommand === "acknowledge_status_watch_execution" || detailCommand === "acknowledge_recover_next_resume_attempt"
       ? {
           command: selected.command,
           exitCode: 0,

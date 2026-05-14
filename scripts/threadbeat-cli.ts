@@ -9183,6 +9183,7 @@ type WorkerSessionControlPlaneRecoveryAttemptResponse = {
   selectedSurface: string | null;
   selectedAction: string | null;
   selectedReason: string | null;
+  selectedAdvanceId: string | null;
   selectedCommand: string[] | null;
   executedCommand: string[] | null;
   executedExitCode: number | null;
@@ -9449,6 +9450,10 @@ type WorkerSessionControlPlaneStatusResponse = {
         attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
         recent: WorkerSessionControlPlaneRecoveryAttemptResponse[];
         failedRecent: WorkerSessionControlPlaneRecoveryAttemptResponse[];
+        acknowledgements: {
+          attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+          recent: WorkerSessionControlPlaneRecoveryAttemptResponse[];
+        };
       };
       incompleteLoops: {
         count: number;
@@ -9739,7 +9744,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
   } | {
     kind: "recover_next_resume_attempt";
     attempt: WorkerSessionControlPlaneRecoveryAttemptResponse;
-    commands: { inspectAttempt: string[]; inspectHistory: string[] | null; inspectStatus: string[] };
+    commands: { inspectAttempt: string[]; inspectHistory: string[] | null; acknowledgeAttempt: string[]; inspectStatus: string[] };
   }) | null;
   recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];
 };
@@ -10713,6 +10718,7 @@ function workerSessionControlPlaneAlertPreviewCommands(
   if (preview.details?.kind === "recover_next_resume_attempt") {
     commands.push(
       { ...base, action: "inspect_recover_next_resume_attempt", command: preview.details.commands.inspectAttempt },
+      { ...base, action: "acknowledge_recover_next_resume_attempt", command: preview.details.commands.acknowledgeAttempt },
       { ...base, action: "inspect_control_plane_status", command: preview.details.commands.inspectStatus },
     );
     if (preview.details.commands.inspectHistory) {
@@ -10859,6 +10865,7 @@ function formatRecoverNextResumeAttemptAlertDetails(
     "  commands:",
     `    inspect_recover_next_resume_attempt: ${formatShellCommand(details.commands.inspectAttempt)}`,
     ...(details.commands.inspectHistory ? [`    inspect_recover_next_loop_history: ${formatShellCommand(details.commands.inspectHistory)}`] : []),
+    `    acknowledge_recover_next_resume_attempt: ${formatShellCommand(details.commands.acknowledgeAttempt)}`,
     `    inspect_control_plane_status: ${formatShellCommand(details.commands.inspectStatus)}`,
   ];
 }
@@ -11213,6 +11220,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `recover_next_attempts: total=${summary.recovery.recoverNext.attempts.total} dry_run=${summary.recovery.recoverNext.attempts.dryRun} executed=${summary.recovery.recoverNext.attempts.executed} failed=${summary.recovery.recoverNext.attempts.failed}`,
     `recover_next_loop_steps: total=${summary.recovery.recoverNext.loopSteps.attempts.total} dry_run=${summary.recovery.recoverNext.loopSteps.attempts.dryRun} executed=${summary.recovery.recoverNext.loopSteps.attempts.executed} failed=${summary.recovery.recoverNext.loopSteps.attempts.failed}`,
     `recover_next_resume_attempts: total=${summary.recovery.recoverNext.resumeAttempts.attempts.total} dry_run=${summary.recovery.recoverNext.resumeAttempts.attempts.dryRun} executed=${summary.recovery.recoverNext.resumeAttempts.attempts.executed} failed=${summary.recovery.recoverNext.resumeAttempts.attempts.failed}`,
+    `recover_next_resume_acknowledgements: total=${summary.recovery.recoverNext.resumeAttempts.acknowledgements.attempts.total} executed=${summary.recovery.recoverNext.resumeAttempts.acknowledgements.attempts.executed} failed=${summary.recovery.recoverNext.resumeAttempts.acknowledgements.attempts.failed}`,
     `recover_next_incomplete_loops: ${summary.recovery.recoverNext.incompleteLoops.count}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
@@ -11512,6 +11520,19 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    selected_command: ${formatShellCommand(attempt.selectedCommand ?? [])}`,
         `    executed_exit_code: ${attempt.executedExitCode ?? ""}`,
         `    executed_command: ${formatShellCommand(attempt.executedCommand ?? [])}`,
+        `    inspect: ${formatShellCommand(attempt.command)}`,
+      );
+    }
+  }
+  if (summary.recovery.recoverNext.resumeAttempts.acknowledgements.recent.length > 0) {
+    lines.push("recent_recover_next_resume_acknowledgements:");
+    for (const attempt of summary.recovery.recoverNext.resumeAttempts.acknowledgements.recent) {
+      lines.push(
+        `  - advance: ${attempt.advanceId}`,
+        `    acknowledged_advance: ${attempt.selectedAdvanceId ?? ""}`,
+        `    executed: ${attempt.executed}`,
+        `    failed: ${attempt.failed}`,
+        `    executed_exit_code: ${attempt.executedExitCode ?? ""}`,
         `    inspect: ${formatShellCommand(attempt.command)}`,
       );
     }
@@ -20035,7 +20056,7 @@ Commands:
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|run_selected_command|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
+  runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|acknowledge_recover_next_resume_attempt|run_selected_command|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history [--execute-resume --confirm]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery] [--status-watch-executions] [--failed-recover-next-resumes] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
