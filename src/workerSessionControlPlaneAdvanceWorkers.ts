@@ -22,6 +22,7 @@ export type ControlPlaneAdvanceWorker = {
   completedAt?: string;
   completionResult?: { exitCode: number | null; signal: NodeJS.Signals | null };
   latestResult?: ControlPlaneAdvanceWorkerLatestResult | null;
+  recentProgress?: ControlPlaneAdvanceWorkerLatestResult[];
 };
 
 export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop";
@@ -191,20 +192,24 @@ export async function listWorkerSessionControlPlaneAdvanceWorkers(
           const worker = await readControlPlaneAdvanceWorker(projectRoot, sessionName, entry.name.replace(/\.json$/, ""));
           if (worker.retiredAt && !options.includeRetired) return null;
           if (options.mode && (worker.mode ?? "advance_loop") !== options.mode) return null;
+          let currentWorker = worker;
           const alive = processIsAlive(worker.pid);
           const recentStdoutResults = await readRecentWorkerJsonResults(worker.stdoutPath, worker.stdoutStartOffset ?? 0, 10);
           const latestStdoutResult = recentStdoutResults.at(-1) ?? null;
-          const recentProgress = recentStdoutResults.filter((result) => result.stoppedReason === "running").slice(-5);
-          const latestProgress = worker.latestResult ? null : latestStdoutResult;
-          const latestResult = worker.latestResult ?? latestProgress;
-          const latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource = worker.latestResult ? "recorded" : latestProgress ? "stdout" : "none";
+          const recentProgress = mergeRecentProgress(worker.recentProgress, recentStdoutResults.filter((result) => result.stoppedReason === "running"), 5);
+          if (!sameRecentProgress(worker.recentProgress, recentProgress)) {
+            currentWorker = await recordControlPlaneAdvanceWorkerRecentProgress(projectRoot, worker, recentProgress);
+          }
+          const latestProgress = currentWorker.latestResult ? null : latestStdoutResult;
+          const latestResult = currentWorker.latestResult ?? latestProgress;
+          const latestResultSource: ControlPlaneAdvanceWorkerLatestResultSource = currentWorker.latestResult ? "recorded" : latestProgress ? "stdout" : "none";
           return {
-            ...worker,
+            ...currentWorker,
             alive,
-            lifecycle: describeControlPlaneAdvanceWorkerLifecycle(worker, alive),
+            lifecycle: describeControlPlaneAdvanceWorkerLifecycle(currentWorker, alive),
             latestResult,
             latestProgress,
-            recentProgress,
+            recentProgress: currentWorker.recentProgress ?? recentProgress,
             latestResultSource,
             stdout: { path: worker.stdoutPath, lines: await tailFileLines(worker.stdoutPath, lines) },
             stderr: { path: worker.stderrPath, lines: await tailFileLines(worker.stderrPath, lines) },
@@ -460,12 +465,15 @@ function recordControlPlaneAdvanceWorkerCompletion(projectRoot: string, child: R
         throw error;
       });
       if (!current || current.pid !== child.pid || current.stoppedAt || current.retiredAt) return;
-      const latestResult = await readLatestWorkerJsonResult(current.stdoutPath, current.stdoutStartOffset ?? 0);
+      const recentStdoutResults = await readRecentWorkerJsonResults(current.stdoutPath, current.stdoutStartOffset ?? 0, 10);
+      const latestResult = recentStdoutResults.at(-1) ?? null;
+      const recentProgress = mergeRecentProgress(current.recentProgress, recentStdoutResults.filter((result) => result.stoppedReason === "running"), 5);
       await writeControlPlaneAdvanceWorker(projectRoot, {
         ...current,
         completedAt: new Date().toISOString(),
         completionResult: { exitCode, signal },
         latestResult,
+        recentProgress,
       });
     })().catch((error) => {
       console.error(`failed to record control-plane advance worker completion: ${error instanceof Error ? error.message : String(error)}`);
@@ -532,6 +540,7 @@ function toStoredControlPlaneAdvanceWorker(worker: ControlPlaneAdvanceWorker): C
     ...(worker.completedAt !== undefined ? { completedAt: worker.completedAt } : {}),
     ...(worker.completionResult !== undefined ? { completionResult: worker.completionResult } : {}),
     ...(worker.latestResult !== undefined ? { latestResult: worker.latestResult } : {}),
+    ...(worker.recentProgress !== undefined ? { recentProgress: worker.recentProgress } : {}),
   };
 }
 
@@ -589,8 +598,41 @@ async function fileSize(filePath: string): Promise<number> {
   }
 }
 
-async function readLatestWorkerJsonResult(filePath: string, startOffset: number): Promise<ControlPlaneAdvanceWorkerLatestResult | null> {
-  return (await readRecentWorkerJsonResults(filePath, startOffset, 1)).at(-1) ?? null;
+async function recordControlPlaneAdvanceWorkerRecentProgress(
+  projectRoot: string,
+  worker: ControlPlaneAdvanceWorker,
+  recentProgress: ControlPlaneAdvanceWorkerLatestResult[],
+): Promise<ControlPlaneAdvanceWorker> {
+  const current = await readControlPlaneAdvanceWorker(projectRoot, worker.session, worker.workerId).catch((error) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return worker;
+    throw error;
+  });
+  const merged = mergeRecentProgress(current.recentProgress, recentProgress, 5);
+  if (sameRecentProgress(current.recentProgress, merged)) return current;
+  const updated = { ...current, recentProgress: merged };
+  await writeControlPlaneAdvanceWorker(projectRoot, updated);
+  return updated;
+}
+
+function mergeRecentProgress(
+  stored: ControlPlaneAdvanceWorkerLatestResult[] | undefined,
+  observed: ControlPlaneAdvanceWorkerLatestResult[],
+  limit: number,
+): ControlPlaneAdvanceWorkerLatestResult[] {
+  const merged: ControlPlaneAdvanceWorkerLatestResult[] = [];
+  for (const item of [...(stored ?? []), ...observed]) {
+    if (!merged.some((candidate) => JSON.stringify(candidate) === JSON.stringify(item))) {
+      merged.push(item);
+    }
+  }
+  return merged.slice(-limit);
+}
+
+function sameRecentProgress(
+  left: ControlPlaneAdvanceWorkerLatestResult[] | undefined,
+  right: ControlPlaneAdvanceWorkerLatestResult[],
+): boolean {
+  return JSON.stringify(left ?? []) === JSON.stringify(right);
 }
 
 async function readRecentWorkerJsonResults(filePath: string, startOffset: number, limit: number): Promise<ControlPlaneAdvanceWorkerLatestResult[]> {

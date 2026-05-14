@@ -140,6 +140,9 @@ try {
   assert.equal(completedTopologyWorker.latestResult?.iterations, 1);
   assert.equal(completedTopologyWorker.latestResult?.totalCoreExecuted, 0);
   assert.equal(completedTopologyWorker.latestResult?.totalMutationExecuted, 0);
+  const completedWorkerRecord = await readTopologyWorkerRecord(workerId);
+  assert.equal(completedWorkerRecord.recentProgress?.length, 1);
+  assert.equal(completedWorkerRecord.recentProgress?.[0]?.iterations, 1);
 
   const aggregateBeforeStop = await cliJson<{
     summary: {
@@ -306,6 +309,10 @@ try {
   assert.equal(liveTopologyWorker.latestResultSource, "stdout");
   assert.equal(liveTopologyWorker.latestProgress?.iterations, 1);
   assert.equal(liveTopologyWorker.recentProgress.length, 1);
+  const liveWorkerRecord = await readTopologyWorkerRecord(liveWorkerId);
+  assert.equal(liveWorkerRecord.latestResult, null);
+  assert.equal(liveWorkerRecord.recentProgress?.length, 1);
+  assert.equal(liveWorkerRecord.recentProgress?.[0]?.iterations, 1);
   const liveAggregate = await cliJson<{
     summary: { topology: { latestResults: { count: number; recorded: number; progress: number; recentProgress: number; iterations: number } } };
     workers: Array<{ kind: string; workerId: string | null; latestResultSource?: string; latestProgress?: { iterations?: number } | null; recentProgress?: Array<{ iterations?: number }> }>;
@@ -422,6 +429,17 @@ async function waitForTopologyWorkerResult(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`topology worker ${workerId} did not record latestResult`);
+}
+
+async function readTopologyWorkerRecord(workerId: string): Promise<{
+  latestResult?: unknown;
+  recentProgress?: Array<{ iterations?: number; stoppedReason?: string }>;
+}> {
+  const text = await fs.readFile(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName, `${workerId}.json`), "utf8");
+  return JSON.parse(text) as {
+    latestResult?: unknown;
+    recentProgress?: Array<{ iterations?: number; stoppedReason?: string }>;
+  };
 }
 
 async function writeWorkerSessionRecord(): Promise<void> {
