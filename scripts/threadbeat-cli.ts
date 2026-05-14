@@ -8515,6 +8515,8 @@ type WorkerSessionControlPlaneStatusResponse = {
         inspectResult: string[];
         checkoutBranch: string[];
         reviewRun: string[];
+        recordReviewed: string[];
+        recordSkipped: string[];
       };
     }>;
     reviews: {
@@ -9714,6 +9716,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    inspect_result: ${formatShellCommand(step.commands.inspectResult)}`,
         `    review: ${formatShellCommand(step.commands.reviewRun)}`,
         `    checkout: ${formatShellCommand(step.commands.checkoutBranch)}`,
+        `    record_reviewed: ${formatShellCommand(step.commands.recordReviewed)}`,
+        `    record_skipped: ${formatShellCommand(step.commands.recordSkipped)}`,
       );
     }
   } else {
@@ -9821,6 +9825,8 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: step.commands.inspectResult });
     commands.push({ command: step.commands.checkoutBranch });
     commands.push({ command: step.commands.reviewRun });
+    commands.push({ command: step.commands.recordReviewed });
+    commands.push({ command: step.commands.recordSkipped });
   }
   commands.push({ command: summary.commands.resultInspections });
   if (summary.results.counts.pending > 0) {
@@ -10207,7 +10213,7 @@ function summarizeWorkerSessionControlPlaneStatus(
         workerId: string | null;
         commands: Pick<
           WorkerSessionControlPlaneStatusResponse["results"]["nextSteps"][number]["commands"],
-          "inspectRun" | "inspectResult" | "checkoutBranch" | "reviewRun"
+          "inspectRun" | "inspectResult" | "checkoutBranch" | "reviewRun" | "recordReviewed" | "recordSkipped"
         >;
       }>;
     };
@@ -10326,6 +10332,8 @@ function summarizeWorkerSessionControlPlaneStatus(
             inspectResult: step.commands.inspectResult,
             checkoutBranch: step.commands.checkoutBranch,
             reviewRun: step.commands.reviewRun,
+            recordReviewed: step.commands.recordReviewed,
+            recordSkipped: step.commands.recordSkipped,
           },
         })),
       },

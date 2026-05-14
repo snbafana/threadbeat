@@ -61,6 +61,8 @@ try {
   const latestResultReviewsCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --latest`;
   const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id}`;
   const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id}`;
+  const recordScopedReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${run.id} --record-reviewed`;
+  const recordScopedSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${run.id} --record-skipped`;
 
   const summary = await cliJson<{
     commands: {
@@ -77,7 +79,7 @@ try {
         nextSteps: Array<{
           runId: string;
           resultCommit: string;
-          commands: { checkoutBranch: string[]; reviewRun: string[] };
+          commands: { checkoutBranch: string[]; reviewRun: string[]; recordReviewed: string[]; recordSkipped: string[] };
         }>;
       };
     };
@@ -97,6 +99,8 @@ try {
   assert.equal(summary.results.inspection.nextSteps[0]?.resultCommit, resultCommit);
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.checkoutBranch.join(" "), checkoutCommand);
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.reviewRun.join(" "), reviewCommand);
+  assert.equal(summary.results.inspection.nextSteps[0]?.commands.recordReviewed.join(" "), recordScopedReviewedCommand);
+  assert.equal(summary.results.inspection.nextSteps[0]?.commands.recordSkipped.join(" "), recordScopedSkippedCommand);
   assert.equal(summary.commands.nextResultInspection.join(" "), nextResultInspectionCommand);
   assert.equal(summary.commands.nextResultReview.join(" "), nextResultReviewCommand);
   assert.equal(summary.commands.recordNextReviewed.join(" "), recordNextReviewedCommand);
@@ -113,6 +117,8 @@ try {
   ]);
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === checkoutCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === reviewCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordScopedReviewedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordScopedSkippedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === nextResultInspectionCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === nextResultReviewCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordNextReviewedCommand));
@@ -131,6 +137,8 @@ try {
   assert.match(pendingStatusText, new RegExp(`review_next: ${nextResultReviewCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_reviewed: ${recordNextReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_skipped: ${recordNextSkippedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`record_reviewed: ${recordScopedReviewedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`record_skipped: ${recordScopedSkippedCommand}`));
   assert.match(pendingStatusText, new RegExp(`latest: ${latestResultReviewsCommand}`));
 
   const reviewNext = await cliJson<{
@@ -191,6 +199,8 @@ try {
   ]);
   assert.match(shellSummary, new RegExp(checkoutCommand));
   assert.match(shellSummary, new RegExp(reviewCommand));
+  assert.match(shellSummary, new RegExp(recordScopedReviewedCommand));
+  assert.match(shellSummary, new RegExp(recordScopedSkippedCommand));
   assert.match(shellSummary, new RegExp(nextResultInspectionCommand));
   assert.match(shellSummary, new RegExp(nextResultReviewCommand));
   assert.match(shellSummary, new RegExp(recordNextReviewedCommand));

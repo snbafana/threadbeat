@@ -5814,6 +5814,8 @@ const summarizeWorkerSessionResultInspection = async (
       inspectResult: string[];
       checkoutBranch: string[];
       reviewRun: string[];
+      recordReviewed: string[];
+      recordSkipped: string[];
     };
   }>;
 }> => {
@@ -5847,6 +5849,8 @@ const summarizeWorkerSessionResultInspection = async (
         inspectResult: ["npm", "run", "cli", "--", "runs", "inspect-result", run.id, "--server"],
         checkoutBranch: ["npm", "run", "cli", "--", "runs", "checkout", run.id, "--dir", checkoutDir],
         reviewRun,
+        recordReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", session.session, "--server", "--run", run.id, "--record-reviewed"],
+        recordSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", session.session, "--server", "--run", run.id, "--record-skipped"],
       },
     };
   });

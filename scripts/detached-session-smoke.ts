@@ -2757,6 +2757,8 @@ try {
           inspectResult: string[];
           checkoutBranch: string[];
           reviewRun: string[];
+          recordReviewed: string[];
+          recordSkipped: string[];
         };
       }>;
       reviews: {
@@ -2869,6 +2871,8 @@ try {
     && step.commands.inspectResult.join(" ") === `npm run cli -- runs inspect-result ${controlPlaneResultPlan.run.id} --server`
     && step.commands.checkoutBranch.join(" ") === `npm run cli -- runs checkout ${controlPlaneResultPlan.run.id} --dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
     && step.commands.reviewRun.join(" ") === `npm run cli -- runs review ${controlPlaneResultPlan.run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${controlPlaneResultPlan.run.id}`
+    && step.commands.recordReviewed.join(" ") === `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${controlPlaneResultPlan.run.id} --record-reviewed`
+    && step.commands.recordSkipped.join(" ") === `npm run cli -- runs session-result-review-next ${sessionName} --server --run ${controlPlaneResultPlan.run.id} --record-skipped`
   )));
   assert.equal(controlPlaneStatus.staleRuns.counts.ready, controlPlaneStatus.staleRuns.actions.recover_session_run);
   assert.equal(controlPlaneStatus.staleRuns.counts.blocked, controlPlaneStatus.staleRuns.actions.inspect_run);
@@ -2932,6 +2936,8 @@ try {
             inspectResult: string[];
             checkoutBranch: string[];
             reviewRun: string[];
+            recordReviewed: string[];
+            recordSkipped: string[];
           };
         }>;
       };
