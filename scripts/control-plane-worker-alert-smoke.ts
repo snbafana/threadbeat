@@ -1517,6 +1517,18 @@ try {
             attempts: { total: number; executed: number; failed: number };
             recent: Array<{ selectedAdvanceId: string | null; executedExitCode: number | null }>;
           };
+          acknowledgedFailures: {
+            count: number;
+            recent: Array<{
+              acknowledgementAdvanceId: string;
+              acknowledgedAdvanceId: string | null;
+              loopAdvanceId: string | null;
+              status: string;
+              retryAttempts: number;
+              latestRetryAdvanceId: string | null;
+              latestRetryExitCode: number | null;
+            }>;
+          };
         };
       };
       failedRecoverNextResumeLoops: { count: number };
@@ -1534,7 +1546,90 @@ try {
   assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgements.attempts.failed, 0);
   assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgements.recent[0]?.selectedAdvanceId, failedResumeAdvanceId);
   assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgements.recent[0]?.executedExitCode, 0);
+  assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgedFailures.count, 1);
+  assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.acknowledgedAdvanceId, failedResumeAdvanceId);
+  assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.status, "acknowledged_only");
+  assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.retryAttempts, 0);
+  assert.equal(statusAfterRecoverNextResumeAck.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.latestRetryAdvanceId, null);
   assert.equal(statusAfterRecoverNextResumeAck.recovery.failedRecoverNextResumeLoops.count, 0);
+
+  const retriedResumeAdvanceId = `retried-resume-${Date.now().toString(36)}`;
+  await writeWorkerSessionControlPlaneAdvanceRecord(path.resolve("."), {
+    advanceId: retriedResumeAdvanceId,
+    session: sessionName,
+    observedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    dryRun: false,
+    selected: {
+      surface: "recover_next",
+      action: "resume_recover_next_loop",
+      reason: "retry_acknowledged_recover_next_resume",
+      loopAdvanceId: recoverNextLoopDryRun.advanceId,
+      command: interruptedLoop?.resumeCommand,
+    },
+    alert: {
+      surface: "recover_next",
+      severity: "warning",
+      reason: "retry_acknowledged_recover_next_resume",
+      action: "resume_recover_next_loop",
+      loopAdvanceId: recoverNextLoopDryRun.advanceId,
+    },
+    detailCommand: "resume_recover_next_loop",
+    recovery: null,
+    executed: { command: interruptedLoop?.resumeCommand, exitCode: 0, stdout: "retry ok", stderr: "" },
+    executionSafety: { detailCommand: "resume_recover_next_loop", mutating: true, confirmationRequired: true, confirmed: true, blocked: false },
+    before: null,
+    after: null,
+  });
+
+  const statusAfterAcknowledgedRecoverNextResumeRetry = await cliJson<{
+    recovery: {
+      recoverNext: {
+        resumeAttempts: {
+          acknowledgedFailures: {
+            count: number;
+            recent: Array<{
+              acknowledgedAdvanceId: string | null;
+              status: string;
+              retryAttempts: number;
+              latestRetryAdvanceId: string | null;
+              latestRetryExitCode: number | null;
+              latestRetryFailed: boolean | null;
+            }>;
+          };
+        };
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusAfterAcknowledgedRecoverNextResumeRetry.recovery.recoverNext.resumeAttempts.acknowledgedFailures.count, 1);
+  assert.equal(statusAfterAcknowledgedRecoverNextResumeRetry.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.acknowledgedAdvanceId, failedResumeAdvanceId);
+  assert.equal(statusAfterAcknowledgedRecoverNextResumeRetry.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.status, "retry_succeeded");
+  assert.equal(statusAfterAcknowledgedRecoverNextResumeRetry.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.retryAttempts, 1);
+  assert.equal(statusAfterAcknowledgedRecoverNextResumeRetry.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.latestRetryAdvanceId, retriedResumeAdvanceId);
+  assert.equal(statusAfterAcknowledgedRecoverNextResumeRetry.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.latestRetryExitCode, 0);
+  assert.equal(statusAfterAcknowledgedRecoverNextResumeRetry.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent[0]?.latestRetryFailed, false);
+
+  const statusAfterAcknowledgedRecoverNextResumeRetryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, /acknowledged_recover_next_resume_failures:/);
+  assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, new RegExp(`acknowledged_advance: ${failedResumeAdvanceId}`));
+  assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, /status: retry_succeeded/);
+  assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, /retry_attempts: 1/);
+  assert.match(statusAfterAcknowledgedRecoverNextResumeRetryText, new RegExp(`latest_retry: ${retriedResumeAdvanceId}`));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

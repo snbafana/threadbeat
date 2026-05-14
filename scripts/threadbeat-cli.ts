@@ -9454,6 +9454,25 @@ type WorkerSessionControlPlaneStatusResponse = {
           attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
           recent: WorkerSessionControlPlaneRecoveryAttemptResponse[];
         };
+        acknowledgedFailures: {
+          count: number;
+          recent: Array<{
+            acknowledgementAdvanceId: string;
+            acknowledgedAdvanceId: string | null;
+            acknowledgedAt: string;
+            loopAdvanceId: string | null;
+            status: "acknowledged_only" | "retry_succeeded" | "retry_failed" | "retry_recorded";
+            retryAttempts: number;
+            latestRetryAdvanceId: string | null;
+            latestRetryExitCode: number | null;
+            latestRetryFailed: boolean | null;
+            commands: {
+              inspectAcknowledgement: string[];
+              inspectAcknowledgedAttempt: string[] | null;
+              inspectHistory: string[] | null;
+            };
+          }>;
+        };
       };
       incompleteLoops: {
         count: number;
@@ -11537,6 +11556,27 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   }
+  if (summary.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent.length > 0) {
+    lines.push(
+      "acknowledged_recover_next_resume_failures:",
+      `  count: ${summary.recovery.recoverNext.resumeAttempts.acknowledgedFailures.count}`,
+    );
+    for (const acknowledgement of summary.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent) {
+      lines.push(
+        `  - acknowledgement: ${acknowledgement.acknowledgementAdvanceId}`,
+        `    acknowledged_advance: ${acknowledgement.acknowledgedAdvanceId ?? ""}`,
+        `    loop: ${acknowledgement.loopAdvanceId ?? ""}`,
+        `    status: ${acknowledgement.status}`,
+        `    retry_attempts: ${acknowledgement.retryAttempts}`,
+        `    latest_retry: ${acknowledgement.latestRetryAdvanceId ?? ""}`,
+        `    latest_retry_exit_code: ${acknowledgement.latestRetryExitCode ?? ""}`,
+        `    latest_retry_failed: ${acknowledgement.latestRetryFailed ?? ""}`,
+        `    inspect_acknowledgement: ${formatShellCommand(acknowledgement.commands.inspectAcknowledgement)}`,
+        ...(acknowledgement.commands.inspectAcknowledgedAttempt ? [`    inspect_acknowledged_attempt: ${formatShellCommand(acknowledgement.commands.inspectAcknowledgedAttempt)}`] : []),
+        ...(acknowledgement.commands.inspectHistory ? [`    inspect_history: ${formatShellCommand(acknowledgement.commands.inspectHistory)}`] : []),
+      );
+    }
+  }
   if (summary.recovery.recoverNext.incompleteLoops.recent.length > 0) {
     lines.push("incomplete_recover_next_loops:");
     for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
@@ -11738,6 +11778,15 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   for (const attempt of summary.recovery.recoverNext.resumeAttempts.recent) {
     commands.push({ command: attempt.command });
+  }
+  for (const acknowledgement of summary.recovery.recoverNext.resumeAttempts.acknowledgedFailures.recent) {
+    commands.push({ command: acknowledgement.commands.inspectAcknowledgement });
+    if (acknowledgement.commands.inspectAcknowledgedAttempt) {
+      commands.push({ command: acknowledgement.commands.inspectAcknowledgedAttempt });
+    }
+    if (acknowledgement.commands.inspectHistory) {
+      commands.push({ command: acknowledgement.commands.inspectHistory });
+    }
   }
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
     commands.push({ command: summary.commands.failedRecoverNextResumeAttempts });

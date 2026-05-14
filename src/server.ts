@@ -213,6 +213,25 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
       attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
       recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
     };
+    acknowledgedFailures: {
+      count: number;
+      recent: Array<{
+        acknowledgementAdvanceId: string;
+        acknowledgedAdvanceId: string | null;
+        acknowledgedAt: string;
+        loopAdvanceId: string | null;
+        status: "acknowledged_only" | "retry_succeeded" | "retry_failed" | "retry_recorded";
+        retryAttempts: number;
+        latestRetryAdvanceId: string | null;
+        latestRetryExitCode: number | null;
+        latestRetryFailed: boolean | null;
+        commands: {
+          inspectAcknowledgement: string[];
+          inspectAcknowledgedAttempt: string[] | null;
+          inspectHistory: string[] | null;
+        };
+      }>;
+    };
   };
   incompleteLoops: {
     count: number;
@@ -4548,8 +4567,73 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
           .slice(0, lines)
           .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, record)),
       },
+      acknowledgedFailures: summarizeRecoverNextResumeAcknowledgedFailures(
+        sessionName,
+        resumeRecords,
+        resumeAcknowledgementRecords,
+        lines,
+      ),
     },
     incompleteLoops,
+  };
+};
+
+const summarizeRecoverNextResumeAcknowledgedFailures = (
+  sessionName: string,
+  resumeRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  acknowledgementRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  lines: number,
+): WorkerSessionControlPlaneRecoverNextHistoryStatus["resumeAttempts"]["acknowledgedFailures"] => {
+  const resumeRecordsById = new Map(resumeRecords.map((record) => [record.advanceId, record]));
+  const acknowledged = acknowledgementRecords
+    .filter((record) => commandSucceeded(record.executed as TickCommandExecution | null))
+    .map((acknowledgement) => {
+      const acknowledgementSummary = summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, acknowledgement);
+      const acknowledgedAdvanceId = acknowledgementSummary.selectedAdvanceId;
+      const acknowledgedRecord = acknowledgedAdvanceId ? resumeRecordsById.get(acknowledgedAdvanceId) ?? null : null;
+      const acknowledgedSummary = acknowledgedRecord
+        ? summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, acknowledgedRecord)
+        : null;
+      const loopAdvanceId = acknowledgedSummary?.loopAdvanceId ?? acknowledgementSummary.loopAdvanceId;
+      const retryRecords = loopAdvanceId
+        ? resumeRecords
+          .filter((record) => record.advanceId !== acknowledgedAdvanceId)
+          .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(sessionName, record))
+          .filter((record) => record.loopAdvanceId === loopAdvanceId)
+          .filter((record) => record.observedAt > acknowledgement.observedAt)
+          .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+        : [];
+      const latestRetry = retryRecords[0] ?? null;
+      const status: WorkerSessionControlPlaneRecoverNextHistoryStatus["resumeAttempts"]["acknowledgedFailures"]["recent"][number]["status"] = latestRetry
+        ? latestRetry.executedExitCode === 0
+          ? "retry_succeeded"
+          : latestRetry.failed
+            ? "retry_failed"
+            : "retry_recorded"
+        : "acknowledged_only";
+      return {
+        acknowledgementAdvanceId: acknowledgement.advanceId,
+        acknowledgedAdvanceId,
+        acknowledgedAt: acknowledgement.observedAt,
+        loopAdvanceId,
+        status,
+        retryAttempts: retryRecords.length,
+        latestRetryAdvanceId: latestRetry?.advanceId ?? null,
+        latestRetryExitCode: latestRetry?.executedExitCode ?? null,
+        latestRetryFailed: latestRetry?.failed ?? null,
+        commands: {
+          inspectAcknowledgement: acknowledgementSummary.command,
+          inspectAcknowledgedAttempt: acknowledgedSummary?.command ?? null,
+          inspectHistory: loopAdvanceId
+            ? ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--recover-next-loop-history"]
+            : null,
+        },
+      };
+    })
+    .sort((left, right) => right.acknowledgedAt.localeCompare(left.acknowledgedAt));
+  return {
+    count: acknowledged.length,
+    recent: acknowledged.slice(0, lines),
   };
 };
 
