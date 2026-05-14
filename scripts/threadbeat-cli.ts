@@ -10557,6 +10557,8 @@ async function fetchWorkerSessionControlPlaneWorkers(
     inspectApplyActionWorkers: string[];
     inspectDrainWorkers: string[];
     inspectProgress: string[];
+    reconcileDryRun: string[];
+    reconcileConfirm: string[];
     restartNext: string[] | null;
   };
 }> {
@@ -10646,6 +10648,20 @@ async function fetchWorkerSessionControlPlaneWorkers(
         ...(options.includeRetired ? ["--include-retired"] : []),
         "--limit", "5",
       ],
+      reconcileDryRun: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+        "--dry-run",
+      ],
+      reconcileConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+        "--confirm",
+      ],
       restartNext: nextSteps[0]?.command ?? null,
     },
   };
@@ -10677,6 +10693,8 @@ function formatWorkerSessionControlPlaneWorkersText(
     `    inspect_apply_action: ${formatShellCommand(response.commands.inspectApplyActionWorkers)}`,
     `    inspect_drain: ${formatShellCommand(response.commands.inspectDrainWorkers)}`,
     `    inspect_progress: ${formatShellCommand(response.commands.inspectProgress)}`,
+    `    reconcile_dry_run: ${formatShellCommand(response.commands.reconcileDryRun)}`,
+    `    reconcile_confirm: ${formatShellCommand(response.commands.reconcileConfirm)}`,
     `    restart_next: ${response.commands.restartNext ? formatShellCommand(response.commands.restartNext) : "none"}`,
   ];
   if (response.nextSteps.length === 0) {

@@ -165,6 +165,14 @@ try {
   assert.equal(aggregate.summary.exitedUnrecorded, 2);
   assert.equal(aggregate.summary.advance.exitedUnrecorded, 1);
   assert.equal(aggregate.summary.tick.exitedUnrecorded, 1);
+  assert.equal(
+    aggregate.commands.reconcileDryRun.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --dry-run`,
+  );
+  assert.equal(
+    aggregate.commands.reconcileConfirm.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --confirm`,
+  );
   const aggregateText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-workers",
@@ -176,6 +184,8 @@ try {
   assert.match(aggregateText, /all: total=6 alive=0 stopped=4 completed=0 retired=0 exited_unrecorded=2 restartable=6/);
   assert.match(aggregateText, /advance: total=3 alive=0 stopped=2 completed=0 retired=0 exited_unrecorded=1 restartable=3/);
   assert.match(aggregateText, /tick: total=3 alive=0 stopped=2 completed=0 retired=0 exited_unrecorded=1 restartable=3/);
+  assert.match(aggregateText, new RegExp(`reconcile_dry_run: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --dry-run`));
+  assert.match(aggregateText, new RegExp(`reconcile_confirm: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --confirm`));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
@@ -208,6 +218,10 @@ type WorkerAggregateResponse = {
     exitedUnrecorded: number;
     advance: { exitedUnrecorded: number };
     tick: { exitedUnrecorded: number };
+  };
+  commands: {
+    reconcileDryRun: string[];
+    reconcileConfirm: string[];
   };
 };
 
