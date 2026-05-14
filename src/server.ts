@@ -3942,6 +3942,8 @@ const readWorkerSessionControlPlaneStatus = async (
         advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
         topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        result_review_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        bundle_recovery_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
       };
       latestResults: Array<{
         workerId: string;
@@ -6013,6 +6015,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
     confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
     topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
     result_review_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+    bundle_recovery_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   latestResults: Array<{
     workerId: string;
@@ -6030,6 +6033,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
     confirmation_drain: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "confirmation_drain")),
     topology_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "topology_loop")),
     result_review_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "result_review_loop")),
+    bundle_recovery_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "bundle_recovery_loop")),
   },
   latestResults: workers.flatMap((worker) => worker.latestResult
     ? [{

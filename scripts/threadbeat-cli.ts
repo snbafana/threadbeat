@@ -9066,7 +9066,7 @@ type WorkerSessionControlPlaneRecoveryNextStep = {
   action: string;
   reason: string;
   workerId: string;
-  mode?: "advance_loop" | "confirmation_drain";
+  mode?: ControlPlaneAdvanceWorkerMode;
   command: string[];
   commands: Record<string, string[]>;
   api?: unknown;
@@ -9085,8 +9085,15 @@ type WorkerSessionControlPlaneWorkerLatestResult = {
   maxSteps?: number;
   intervalMs?: number;
   maxConfirmations?: number;
+  maxPolls?: number;
   maxIterations?: number;
   loopIntervalMs?: number;
+  profileCount?: number;
+  planned?: number;
+  actionable?: number;
+  blocked?: number;
+  executed?: number;
+  polls?: number;
   iterations?: number;
   executedSteps?: number;
   attemptedConfirmations?: number;
@@ -9116,10 +9123,12 @@ type WorkerSessionControlPlaneStatusResponse = {
         advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
         topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        result_review_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        bundle_recovery_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
       };
       latestResults: Array<{
         workerId: string;
-        mode: "advance_loop" | "confirmation_drain" | "topology_loop";
+        mode: ControlPlaneAdvanceWorkerMode;
         lifecycle: { state: string; restartable: boolean; reason: string };
         latestResultSource: "recorded" | "stdout" | "none";
         latestProgress: WorkerSessionControlPlaneWorkerLatestResult | null;
@@ -10994,6 +11003,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `  advance_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.advance_loop)}`,
     `  confirmation_drain: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.confirmation_drain)}`,
     `  topology_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.topology_loop)}`,
+    `  result_review_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.result_review_loop)}`,
+    `  bundle_recovery_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.bundle_recovery_loop)}`,
     `  control_plane_tick: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneTick)}`,
   );
   const latestWorkerResults = summary.workers.controlPlaneAdvance.latestResults;
@@ -11015,6 +11026,12 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       `    steps: ${result.latestResult.executedSteps ?? ""}`,
       `    confirmations: ${result.latestResult.attemptedConfirmations ?? ""}`,
       `    available_confirmations: ${result.latestResult.availableConfirmations ?? ""}`,
+      `    profile_count: ${result.latestResult.profileCount ?? ""}`,
+      `    planned: ${result.latestResult.planned ?? ""}`,
+      `    actionable: ${result.latestResult.actionable ?? ""}`,
+      `    blocked: ${result.latestResult.blocked ?? ""}`,
+      `    executed: ${result.latestResult.executed ?? ""}`,
+      `    polls: ${result.latestResult.polls ?? ""}`,
       `    recent_progress: ${result.recentProgress.length}`,
       `    inspect: ${formatShellCommand(workerSessionControlPlaneLatestResultProgressCommand(summary.session, result))}`,
     );
@@ -11272,7 +11289,11 @@ function workerSessionControlPlaneLatestResultProgressCommand(
   sessionName: string,
   result: WorkerSessionControlPlaneStatusResponse["workers"]["controlPlaneAdvance"]["latestResults"][number],
 ): string[] {
-  const kind = result.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
+  const kind = result.mode === "topology_loop"
+    ? "control_plane_topology"
+    : result.mode === "result_review_loop"
+      ? "result_review"
+      : "control_plane_advance";
   return [
     "npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", sessionName, "--server",
     "--worker-id", result.workerId,

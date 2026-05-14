@@ -103,6 +103,8 @@ try {
   assert.match(text, /^worker_health:$/m);
   assert.match(text, /watch: total=0 alive=0 stopped=0 retired=0/);
   assert.match(text, /topology_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
+  assert.match(text, /result_review_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
+  assert.match(text, /bundle_recovery_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
   assert.match(text, /^control_plane_worker_progress:$/m);
   assert.match(text, /latest_results: count=0 recorded=0 progress=0 recent_progress=0/);
   const watchedSummary = await cliText(baseUrl, [
@@ -310,6 +312,93 @@ try {
     aggregateBeforeStop.commands.inspectProgress.join(" "),
     `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`,
   );
+
+  const bundleRecoveryWorkerId = "status-bundle-recovery-worker";
+  const startedBundleRecovery = await cliJson<{ worker: { workerId: string; mode: string; command: string[] } }>(baseUrl, [
+    "runs",
+    "start-control-plane-worker-bundle-recovery-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    bundleRecoveryWorkerId,
+    "--dry-run",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(startedBundleRecovery.worker.workerId, bundleRecoveryWorkerId);
+  assert.equal(startedBundleRecovery.worker.mode, "bundle_recovery_loop");
+  assert.deepEqual(startedBundleRecovery.worker.command, [
+    "runs",
+    "recover-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--loop",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+    "--lines",
+    "1",
+    "--progress-json",
+    "--dry-run",
+  ]);
+  const completedBundleRecoveryWorker = await waitForBundleRecoveryWorkerResult(baseUrl, bundleRecoveryWorkerId, { state: "completed" });
+  assert.equal(completedBundleRecoveryWorker.latestResult?.profileCount, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.planned, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.actionable, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.blocked, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.executed, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.polls, 1);
+  const bundleRecoveryStatus = await cliJson<{
+    workers: {
+      controlPlaneAdvance: {
+        modes: { bundle_recovery_loop: { total: number; alive: number; stopped: number; retired: number; completed: number } };
+        latestResults: Array<{ workerId: string; mode: string; latestResultSource: string; latestResult: { profileCount?: number; polls?: number } }>;
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.deepEqual(bundleRecoveryStatus.workers.controlPlaneAdvance.modes.bundle_recovery_loop, {
+    total: 1,
+    alive: 0,
+    stopped: 0,
+    retired: 0,
+    completed: 1,
+  });
+  const bundleRecoveryLatestResult = bundleRecoveryStatus.workers.controlPlaneAdvance.latestResults.find((result) => result.workerId === bundleRecoveryWorkerId);
+  assert.equal(bundleRecoveryLatestResult?.mode, "bundle_recovery_loop");
+  assert.equal(bundleRecoveryLatestResult?.latestResultSource, "recorded");
+  assert.equal(bundleRecoveryLatestResult?.latestResult.profileCount, 0);
+  assert.equal(bundleRecoveryLatestResult?.latestResult.polls, 1);
+  const bundleRecoveryStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(bundleRecoveryStatusText, /bundle_recovery_loop: total=1 alive=0 stopped=0 retired=0 completed=1/);
+  assert.match(bundleRecoveryStatusText, new RegExp(`worker: ${bundleRecoveryWorkerId}`));
+  assert.match(bundleRecoveryStatusText, /mode: bundle_recovery_loop/);
+  assert.match(bundleRecoveryStatusText, /profile_count: 0/);
+  assert.match(bundleRecoveryStatusText, /planned: 0/);
+  assert.match(bundleRecoveryStatusText, /actionable: 0/);
+  assert.match(bundleRecoveryStatusText, /blocked: 0/);
+  assert.match(bundleRecoveryStatusText, /executed: 0/);
+  assert.match(bundleRecoveryStatusText, /polls: 1/);
+  assert.match(bundleRecoveryStatusText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${bundleRecoveryWorkerId} --kind control-plane-advance --limit 5`));
   const completedProgress = await cliJson<{
     count: number;
     progress: Array<{ kind: string; workerId: string | null; state: string | null; source: string | null; iterations?: number; stoppedReason?: string }>;
@@ -1177,6 +1266,48 @@ async function waitForTopologyWorkerResult(
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`topology worker ${workerId} did not record latestResult`);
+}
+
+async function waitForBundleRecoveryWorkerResult(
+  baseUrl: string,
+  workerId: string,
+  options: { alive?: boolean; state?: string } = {},
+): Promise<{
+  alive: boolean;
+  lifecycle: { state: string };
+  latestResultSource: string;
+  latestResult: {
+    profileCount?: number;
+    planned?: number;
+    actionable?: number;
+    blocked?: number;
+    executed?: number;
+    polls?: number;
+  } | null;
+}> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const inspected = await cliJson<{ workers: Array<{ alive: boolean; lifecycle: { state: string }; latestResultSource: string; latestResult: { profileCount?: number; planned?: number; actionable?: number; blocked?: number; executed?: number; polls?: number } | null }> }>(baseUrl, [
+      "runs",
+      "session-control-plane-worker-bundle-recovery-workers",
+      sessionName,
+      "--server",
+      "--worker-id",
+      workerId,
+      "--include-retired",
+      "--lines",
+      "1",
+    ]);
+    const worker = inspected.workers[0];
+    if (
+      worker?.latestResult
+      && (options.alive === undefined || worker.alive === options.alive)
+      && (options.state === undefined || worker.lifecycle.state === options.state)
+    ) {
+      return worker;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`bundle recovery worker ${workerId} did not record latestResult`);
 }
 
 async function readTopologyWorkerRecord(workerId: string): Promise<{

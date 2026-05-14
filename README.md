@@ -853,7 +853,8 @@ it with `runs restart-control-plane-worker-bundle-recovery-worker`, or stop and
 retire it with `runs stop-control-plane-worker-bundle-recovery-worker`.
 `runs session-control-plane-status <name> --server`
 keeps the aggregate `workers.controlPlaneAdvance` totals and also breaks them
-out by `advance_loop` and `confirmation_drain` mode. It also includes
+out by `advance_loop`, `confirmation_drain`, `topology_loop`,
+`result_review_loop`, and `bundle_recovery_loop` mode. It also includes
 `workers.controlPlaneAdvance.latestResults` so the aggregate status shows the
 latest structured worker outcome without a separate worker-log read. The
 control-plane status summary also prints those latest loop outcomes and stdout
