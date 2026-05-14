@@ -4581,7 +4581,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             }
           : null;
         const executedAction = untilAction?.done && executeAction && action
-          ? await executeWorkerSessionControlPlaneWatchAction(action, { dryRun: options["dry-run"] === "1" })
+          ? await executeWorkerSessionControlPlaneWatchAction(requiredSessionName, action, {
+              dryRun: options["dry-run"] === "1",
+              observedAt,
+              before: status,
+              lines,
+            })
           : null;
         if (executedAction?.executed.exitCode !== undefined && executedAction.executed.exitCode !== null && executedAction.executed.exitCode !== 0) {
           process.exitCode = 1;
@@ -9754,23 +9759,75 @@ function workerSessionControlPlaneWatchAction(
 }
 
 async function executeWorkerSessionControlPlaneWatchAction(
+  sessionName: string,
   action: NonNullable<ReturnType<typeof workerSessionControlPlaneWatchAction>>,
-  options: { dryRun: boolean },
+  options: {
+    dryRun: boolean;
+    observedAt: string;
+    before: WorkerSessionControlPlaneStatusResponse;
+    lines: number;
+  },
 ): Promise<{
   dryRun: boolean;
   reason: string;
   command: string[];
-  executed: Awaited<ReturnType<typeof runCliWorker>>;
+  advanceId: string;
+  advancePath: string;
+  executed: {
+    command: string[];
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    output: unknown;
+  };
   result: unknown;
 }> {
   const command = options.dryRun ? action.dryRunCommand ?? action.command : action.command;
   const executed = await runCliWorker(cliCommandArgs(command));
+  const result = parseJsonMaybe(executed.stdout);
+  const after = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: options.lines });
+  const written = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+    session: sessionName,
+    observedAt: options.observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    selected: {
+      surface: "status_watch",
+      action: "execute_action",
+      reason: action.reason,
+      count: 1,
+      command,
+      dryRunCommand: action.dryRunCommand,
+    },
+    detailCommand: "status_watch_execute_action",
+    details: {
+      kind: "status_watch_action",
+      reason: action.reason,
+    },
+    executed: {
+      command,
+      exitCode: executed.exitCode,
+      stdout: executed.stdout,
+      stderr: executed.stderr,
+      output: result,
+    },
+    before: options.before,
+    after,
+  });
   return {
     dryRun: options.dryRun,
     reason: action.reason,
     command,
-    executed,
-    result: parseJsonMaybe(executed.stdout),
+    advanceId: written.record.advanceId,
+    advancePath: written.path,
+    executed: {
+      command,
+      exitCode: executed.exitCode,
+      stdout: executed.stdout,
+      stderr: executed.stderr,
+      output: result,
+    },
+    result,
   };
 }
 

@@ -460,14 +460,38 @@ try {
   const watchedUntilActionDryRunLines = watchedUntilActionDryRun.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
     poll: number;
     untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
-    executedAction?: { dryRun: boolean; reason: string; command: string[]; executed: { exitCode: number | null } };
+    executedAction?: { dryRun: boolean; reason: string; command: string[]; advanceId: string; advancePath: string; executed: { command: string[]; exitCode: number | null } };
   });
   assert.equal(watchedUntilActionDryRunLines.length, 1);
   assert.equal(watchedUntilActionDryRunLines[0]?.untilAction.done, true);
   assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.dryRun, true);
   assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.reason, "control_plane_action:restart_control_plane_advance_worker");
   assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.executed.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
   assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.executed.exitCode, 0);
+  assert.ok(watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  const watchActionAdvances = await cliJson<{
+    count: number;
+    advances: Array<{ advanceId: string; dryRun: boolean; detailCommand: string; selected: { surface: string; action: string; reason: string; command: string[] }; executed: { command: string[]; exitCode: number | null } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--detail-command",
+    "status_watch_execute_action",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(watchActionAdvances.count, 1);
+  assert.equal(watchActionAdvances.advances[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  assert.equal(watchActionAdvances.advances[0]?.dryRun, true);
+  assert.equal(watchActionAdvances.advances[0]?.detailCommand, "status_watch_execute_action");
+  assert.equal(watchActionAdvances.advances[0]?.selected.surface, "status_watch");
+  assert.equal(watchActionAdvances.advances[0]?.selected.action, "execute_action");
+  assert.equal(watchActionAdvances.advances[0]?.selected.reason, "control_plane_action:restart_control_plane_advance_worker");
+  assert.deepEqual(watchActionAdvances.advances[0]?.selected.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  assert.equal(watchActionAdvances.advances[0]?.executed.exitCode, 0);
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
