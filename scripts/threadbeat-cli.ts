@@ -4783,6 +4783,55 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "ensure-control-plane-worker-bundle") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-worker-bundle requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs ensure-control-plane-worker-bundle --format must be json or text");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (dryRun === confirm) {
+      throw new Error("runs ensure-control-plane-worker-bundle requires exactly one of --confirm or --dry-run");
+    }
+    const includeResultReviewWorker = options["include-result-review-worker"] === "1";
+    const reviewAction = includeResultReviewWorker
+      ? parseResultReviewWorkerAction(options, "runs ensure-control-plane-worker-bundle --include-result-review-worker")
+      : undefined;
+    if (!includeResultReviewWorker && (options["record-reviewed"] === "1" || options["record-skipped"] === "1")) {
+      throw new Error("runs ensure-control-plane-worker-bundle --record-reviewed|--record-skipped requires --include-result-review-worker");
+    }
+    const result = await ensureWorkerSessionControlPlaneWorkerBundle(
+      required(sessionName, "runs ensure-control-plane-worker-bundle <session> --server"),
+      {
+        topologyWorkerId: options["topology-worker-id"] ?? "threadbeat-control-plane-topology",
+        includeMutationWorkers: options["include-mutation-workers"] === "1",
+        workerDryRun: options["worker-dry-run"] === "1",
+        maxIterations: parsePositiveInteger(options["max-iterations"] ?? "60", "--max-iterations"),
+        loopIntervalMs: parseNonNegativeInteger(options["loop-interval-ms"] ?? "2000", "--loop-interval-ms"),
+        includeResultReviewWorker,
+        resultReviewWorkerId: options["result-review-worker-id"] ?? "threadbeat-result-review",
+        reviewAction,
+        maxResults: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
+        resultReviewIntervalMs: parseNonNegativeInteger(options["result-review-interval-ms"] ?? options["interval-ms"] ?? "1000", "--result-review-interval-ms"),
+        reviewedBy: options["reviewed-by"],
+        note: options.note,
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        dryRun,
+        confirm,
+      },
+    );
+    if (outputFormat === "text") {
+      printControlPlaneWorkerBundleText(result);
+    } else {
+      await printJson(result);
+    }
+    return;
+  }
   if (subcommandName === "session-result-reviews") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -7758,7 +7807,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "finalize" || key === "include-mutation-workers" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -14457,6 +14506,339 @@ function workerSessionControlPlaneTopologyLoopProgress(
   };
 }
 
+type ControlPlaneWorkerBundleOptions = {
+  topologyWorkerId: string;
+  includeMutationWorkers: boolean;
+  workerDryRun: boolean;
+  maxIterations: number;
+  loopIntervalMs: number;
+  includeResultReviewWorker: boolean;
+  resultReviewWorkerId: string;
+  reviewAction?: "reviewed" | "skipped";
+  maxResults: number;
+  resultReviewIntervalMs: number;
+  reviewedBy?: string;
+  note?: string;
+  lines: number;
+};
+
+type ControlPlaneWorkerBundlePlanStep = {
+  kind: Extract<ControlPlaneWorkerKind, "control_plane_topology" | "result_review">;
+  workerId: string;
+  action: "existing" | "ensure_control_plane_topology_worker" | "ensure_control_plane_result_review_worker" | "blocked";
+  reason: "running_worker_exists" | "restartable_worker_exists" | "no_worker_record" | "existing_worker_not_restartable";
+  command: string[];
+  worker: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>["workers"][number] | null;
+};
+
+function controlPlaneWorkerBundleEnsureCommand(
+  sessionName: string,
+  step: Pick<ControlPlaneWorkerBundlePlanStep, "kind" | "workerId">,
+  options: ControlPlaneWorkerBundleOptions,
+): string[] {
+  if (step.kind === "control_plane_topology") {
+    return [
+      "npm", "run", "cli", "--", "runs", "ensure-control-plane-topology-worker", sessionName, "--server",
+      "--worker-id", step.workerId,
+      options.workerDryRun ? "--dry-run" : "--confirm",
+      "--max-iterations", String(options.maxIterations),
+      "--loop-interval-ms", String(options.loopIntervalMs),
+      "--lines", String(options.lines),
+      ...(options.includeMutationWorkers ? ["--include-mutation-workers"] : []),
+    ];
+  }
+  return [
+    "npm", "run", "cli", "--", "runs", "ensure-control-plane-result-review-worker", sessionName, "--server",
+    "--worker-id", step.workerId,
+    options.reviewAction === "skipped" ? "--record-skipped" : "--record-reviewed",
+    ...(options.workerDryRun ? ["--dry-run"] : []),
+    "--max-results", String(options.maxResults),
+    "--interval-ms", String(options.resultReviewIntervalMs),
+    ...(options.reviewedBy ? ["--reviewed-by", options.reviewedBy] : []),
+    ...(options.note ? ["--note", options.note] : []),
+    "--lines", String(options.lines),
+  ];
+}
+
+function controlPlaneWorkerBundlePlan(
+  sessionName: string,
+  aggregate: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>,
+  options: ControlPlaneWorkerBundleOptions,
+): ControlPlaneWorkerBundlePlanStep[] {
+  const desired: Array<Pick<ControlPlaneWorkerBundlePlanStep, "kind" | "workerId">> = [
+    { kind: "control_plane_topology", workerId: options.topologyWorkerId },
+    ...(options.includeResultReviewWorker ? [{ kind: "result_review" as const, workerId: options.resultReviewWorkerId }] : []),
+  ];
+  return desired.map((workerSpec) => {
+    const worker = aggregate.workers.find((candidate) => candidate.kind === workerSpec.kind && candidate.workerId === workerSpec.workerId) ?? null;
+    const command = controlPlaneWorkerBundleEnsureCommand(sessionName, workerSpec, options);
+    const ensureAction = workerSpec.kind === "control_plane_topology"
+      ? "ensure_control_plane_topology_worker"
+      : "ensure_control_plane_result_review_worker";
+    if (worker?.alive === true) {
+      return {
+        ...workerSpec,
+        action: "existing",
+        reason: "running_worker_exists",
+        command: [],
+        worker,
+      };
+    }
+    if (worker?.restartable === true) {
+      return {
+        ...workerSpec,
+        action: ensureAction,
+        reason: "restartable_worker_exists",
+        command,
+        worker,
+      };
+    }
+    if (worker) {
+      return {
+        ...workerSpec,
+        action: "blocked",
+        reason: "existing_worker_not_restartable",
+        command: [],
+        worker,
+      };
+    }
+    return {
+      ...workerSpec,
+      action: ensureAction,
+      reason: "no_worker_record",
+      command,
+      worker,
+    };
+  });
+}
+
+async function executeControlPlaneWorkerBundleEnsureStep(
+  sessionName: string,
+  step: ControlPlaneWorkerBundlePlanStep,
+  options: ControlPlaneWorkerBundleOptions,
+): Promise<unknown> {
+  if (step.kind === "control_plane_topology") {
+    return await ensureWorkerSessionControlPlaneAdvanceWorker(sessionName, {
+      workerId: step.workerId,
+      dryRun: options.workerDryRun,
+      confirm: !options.workerDryRun,
+      maxSteps: options.maxIterations,
+      intervalMs: options.loopIntervalMs,
+      lines: options.lines,
+      topologyLoop: true,
+      includeMutationWorkers: options.includeMutationWorkers,
+      maxIterations: options.maxIterations,
+      loopIntervalMs: options.loopIntervalMs,
+    });
+  }
+  return await ensureWorkerSessionControlPlaneAdvanceWorker(sessionName, {
+    workerId: step.workerId,
+    dryRun: options.workerDryRun,
+    maxSteps: options.maxResults,
+    maxResults: options.maxResults,
+    intervalMs: options.resultReviewIntervalMs,
+    lines: options.lines,
+    resultReview: true,
+    reviewAction: options.reviewAction,
+    reviewedBy: options.reviewedBy,
+    note: options.note,
+  });
+}
+
+async function ensureWorkerSessionControlPlaneWorkerBundle(
+  sessionName: string,
+  options: ControlPlaneWorkerBundleOptions & { dryRun: boolean; confirm: boolean },
+): Promise<{
+  ok: true;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  passed: boolean | null;
+  observedAt: string;
+  completedAt: string;
+  desired: ControlPlaneWorkerBundleOptions;
+  before: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>;
+  after: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>> | null;
+  plan: {
+    expected: number;
+    actionable: number;
+    blocked: number;
+    existing: number;
+    steps: ControlPlaneWorkerBundlePlanStep[];
+    commands: string[][];
+  };
+  executed: Array<ControlPlaneWorkerBundlePlanStep & {
+    result: unknown;
+    actionResult: string | null;
+  }>;
+  checks: {
+    expectedCount: number;
+    actionableCount: number;
+    blockedCount: number;
+    executedCount: number | null;
+    seenAfterCount: number | null;
+  };
+  commands: {
+    inspectWorkers: string[];
+    dryRun: string[];
+    confirm: string[];
+  };
+}> {
+  if (options.includeResultReviewWorker && !options.reviewAction) {
+    throw new Error("control-plane worker bundle result review worker requires --record-reviewed or --record-skipped");
+  }
+  const observedAt = new Date().toISOString();
+  const desired: ControlPlaneWorkerBundleOptions = {
+    topologyWorkerId: options.topologyWorkerId,
+    includeMutationWorkers: options.includeMutationWorkers,
+    workerDryRun: options.workerDryRun,
+    maxIterations: options.maxIterations,
+    loopIntervalMs: options.loopIntervalMs,
+    includeResultReviewWorker: options.includeResultReviewWorker,
+    resultReviewWorkerId: options.resultReviewWorkerId,
+    reviewAction: options.reviewAction,
+    maxResults: options.maxResults,
+    resultReviewIntervalMs: options.resultReviewIntervalMs,
+    reviewedBy: options.reviewedBy,
+    note: options.note,
+    lines: options.lines,
+  };
+  const before = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    includeRetired: true,
+    lines: options.lines,
+  });
+  const steps = controlPlaneWorkerBundlePlan(sessionName, before, desired);
+  const actionableSteps = steps.filter((step) => step.command.length > 0);
+  const blockedSteps = steps.filter((step) => step.action === "blocked");
+  const existingSteps = steps.filter((step) => step.action === "existing");
+  const basePlan = {
+    expected: steps.length,
+    actionable: actionableSteps.length,
+    blocked: blockedSteps.length,
+    existing: existingSteps.length,
+    steps,
+    commands: actionableSteps.map((step) => step.command),
+  };
+  const commandBase = [
+    "npm", "run", "cli", "--", "runs", "ensure-control-plane-worker-bundle", sessionName, "--server",
+    "--topology-worker-id", options.topologyWorkerId,
+    ...(options.includeMutationWorkers ? ["--include-mutation-workers"] : []),
+    ...(options.workerDryRun ? ["--worker-dry-run", "1"] : []),
+    "--max-iterations", String(options.maxIterations),
+    "--loop-interval-ms", String(options.loopIntervalMs),
+    ...(options.includeResultReviewWorker ? [
+      "--include-result-review-worker",
+      "--result-review-worker-id", options.resultReviewWorkerId,
+      options.reviewAction === "skipped" ? "--record-skipped" : "--record-reviewed",
+      "--max-results", String(options.maxResults),
+      "--result-review-interval-ms", String(options.resultReviewIntervalMs),
+      ...(options.reviewedBy ? ["--reviewed-by", options.reviewedBy] : []),
+      ...(options.note ? ["--note", options.note] : []),
+    ] : []),
+    "--lines", String(options.lines),
+  ];
+  const commands = {
+    inspectWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-workers", sessionName, "--server", "--include-retired", "--lines", String(options.lines)],
+    dryRun: [...commandBase, "--dry-run"],
+    confirm: [...commandBase, "--confirm"],
+  };
+  if (options.dryRun || !options.confirm) {
+    return {
+      ok: true,
+      session: sessionName,
+      dryRun: options.dryRun,
+      confirmed: options.confirm,
+      passed: null,
+      observedAt,
+      completedAt: new Date().toISOString(),
+      desired,
+      before,
+      after: null,
+      plan: basePlan,
+      executed: [],
+      checks: {
+        expectedCount: steps.length,
+        actionableCount: actionableSteps.length,
+        blockedCount: blockedSteps.length,
+        executedCount: null,
+        seenAfterCount: null,
+      },
+      commands,
+    };
+  }
+  const executed: Array<ControlPlaneWorkerBundlePlanStep & { result: unknown; actionResult: string | null }> = [];
+  if (blockedSteps.length === 0) {
+    for (const step of actionableSteps) {
+      const result = await executeControlPlaneWorkerBundleEnsureStep(sessionName, step, desired);
+      executed.push({
+        ...step,
+        result,
+        actionResult: stringFromUnknown(plainRecord(result)?.action),
+      });
+    }
+  }
+  const after = await fetchWorkerSessionControlPlaneWorkers(sessionName, {
+    includeRetired: true,
+    lines: options.lines,
+  });
+  const seenAfter = steps.filter((step) => after.workers.some((worker) => worker.kind === step.kind && worker.workerId === step.workerId));
+  return {
+    ok: true,
+    session: sessionName,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    passed: blockedSteps.length === 0
+      && executed.length === actionableSteps.length
+      && executed.every((step) => step.actionResult === "started" || step.actionResult === "restarted" || step.actionResult === "existing")
+      && seenAfter.length === steps.length,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    desired,
+    before,
+    after,
+    plan: basePlan,
+    executed,
+    checks: {
+      expectedCount: steps.length,
+      actionableCount: actionableSteps.length,
+      blockedCount: blockedSteps.length,
+      executedCount: executed.length,
+      seenAfterCount: seenAfter.length,
+    },
+    commands,
+  };
+}
+
+function printControlPlaneWorkerBundleText(
+  response: Awaited<ReturnType<typeof ensureWorkerSessionControlPlaneWorkerBundle>>,
+): void {
+  const lines = [
+    "control_plane_worker_bundle:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  passed: ${response.passed ?? "pending"}`,
+    `  desired: topology=${response.desired.topologyWorkerId} include_mutation=${response.desired.includeMutationWorkers} include_result_review=${response.desired.includeResultReviewWorker} result_review=${response.desired.includeResultReviewWorker ? response.desired.resultReviewWorkerId : "none"} worker_dry_run=${response.desired.workerDryRun}`,
+    `  plan: expected=${response.plan.expected} actionable=${response.plan.actionable} blocked=${response.plan.blocked} existing=${response.plan.existing}`,
+    "  commands:",
+    `    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`,
+    `    dry_run: ${formatShellCommand(response.commands.dryRun)}`,
+    `    confirm: ${formatShellCommand(response.commands.confirm)}`,
+  ];
+  if (response.plan.steps.length === 0) {
+    lines.push("  planned_steps: none");
+  } else {
+    lines.push("  planned_steps:");
+    for (const step of response.plan.steps) {
+      lines.push(`    - ${step.kind} ${step.workerId} action=${step.action} reason=${step.reason}`);
+      if (step.command.length > 0) {
+        lines.push(`      command: ${formatShellCommand(step.command)}`);
+      }
+    }
+  }
+  console.log(lines.join("\n"));
+}
+
 function controlPlaneEnsureTopologyCommand(
   sessionName: string,
   options: ControlPlaneTopologyOptions,
@@ -18166,6 +18548,7 @@ Commands:
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
+  runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]

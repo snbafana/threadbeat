@@ -27,6 +27,7 @@
     "smoke:control-plane-advances": "tsx scripts/control-plane-advances-smoke.ts",
     "smoke:control-plane-alert-continuations": "tsx scripts/control-plane-alert-continuations-smoke.ts",
     "smoke:control-plane-worker-next": "tsx scripts/control-plane-worker-next-smoke.ts",
+    "smoke:control-plane-worker-bundle": "tsx scripts/control-plane-worker-bundle-smoke.ts",
     "smoke:control-plane-result-status": "tsx scripts/control-plane-result-status-smoke.ts",
     "smoke:control-plane-status-topology": "tsx scripts/control-plane-status-topology-smoke.ts",
     "smoke:control-plane-worker-restart-proof": "tsx scripts/control-plane-worker-restart-proof-smoke.ts",
