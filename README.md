@@ -1030,7 +1030,9 @@ next pending result commit and its exact branch-native review/record commands;
 add `--record-reviewed` or `--record-skipped` to record that selected next result
 without copying its run id. Generated record commands include `--result-commit`
 when Threadbeat knows the selected result, so stale commands fail instead of
-recording a decision against a changed run result.
+recording a decision against a changed run result. Failed review-record attempts
+are written into the control-plane timeline as `result_review_record_failed`, so
+operators can inspect stale or rejected writes after the immediate CLI error.
 Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving

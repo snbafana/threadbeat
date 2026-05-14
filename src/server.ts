@@ -37,8 +37,10 @@ import {
 } from "./workerSessionBranchRecovery.js";
 import {
   latestResultReviewByRunCommit,
+  listWorkerSessionResultReviewAttemptRecords,
   listWorkerSessionResultReviewRecords,
   resultReviewRunCommitKey,
+  writeWorkerSessionResultReviewAttemptRecord,
   writeWorkerSessionResultReviewRecord,
 } from "./workerSessionResultReviews.js";
 import {
@@ -552,9 +554,9 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
   });
 
   app.post("/api/worker-sessions/:name/result-reviews", async (request, reply) => {
+    const { name } = request.params as { name: string };
+    const body = requestBody(request.body);
     try {
-      const { name } = request.params as { name: string };
-      const body = requestBody(request.body);
       const runId = parseString(body.runId, "result review runId");
       const action = parseRequiredResultReviewAction(body.action ?? "reviewed");
       return await recordWorkerSessionResultReview(settings, db, name, {
@@ -566,6 +568,20 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         note: parseOptionalString(body.note),
       });
     } catch (error) {
+      const observedAt = new Date().toISOString();
+      const runId = parseOptionalString(body.runId);
+      const action = parseOptionalString(body.action);
+      await writeWorkerSessionResultReviewAttemptRecord(settings.projectRoot, {
+        session: name,
+        observedAt,
+        status: "failed",
+        ...(runId ? { runId } : {}),
+        ...(action === "reviewed" || action === "skipped" ? { action } : {}),
+        ...(parseOptionalString(body.resultCommit) ? { expectedResultCommit: parseOptionalString(body.resultCommit) } : {}),
+        ...(parseOptionalString(body.reviewedBy) ? { reviewedBy: parseOptionalString(body.reviewedBy) } : {}),
+        ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
+        error: messageOf(error),
+      });
       return reply.code(400).send({ ok: false, error: messageOf(error) });
     }
   });
@@ -3313,13 +3329,14 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
   source: "tick" | "advance" | "control_plane_advance_worker" | "control_plane_tick_worker" | "worker_reconcile_execution" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
-  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "worker_reconcile_executed" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded";
+  event: "tick_recorded" | "advance_recorded" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "worker_reconcile_executed" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded" | "result_review_record_failed";
   tickId?: string;
   advanceId?: string;
   workerId?: string;
   executionId?: string;
   reconciliationId?: string;
   reviewId?: string;
+  attemptId?: string;
   applyId?: string;
   applySource?: string;
   applyAction?: string;
@@ -3360,6 +3377,7 @@ type WorkerSessionControlPlaneTimelineEvent = {
   objective?: string;
   resultCommit?: string;
   reviewedBy?: string;
+  expectedResultCommit?: string;
   note?: string;
 };
 
@@ -3454,7 +3472,7 @@ const readWorkerSessionControlPlaneTimeline = async (
     options.runIds,
   ].some((values) => values.length > 0);
   const recordReadLimit = hasIdentityFilter ? Number.MAX_SAFE_INTEGER : options.limit;
-  const [ticks, advances, advanceWorkers, tickWorkers, workerReconciliations, applyActionExecutions, branchRecoveryExecutions, resultReviews] = await Promise.all([
+  const [ticks, advances, advanceWorkers, tickWorkers, workerReconciliations, applyActionExecutions, branchRecoveryExecutions, resultReviews, resultReviewAttempts] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, { limit: recordReadLimit }),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
@@ -3463,6 +3481,7 @@ const readWorkerSessionControlPlaneTimeline = async (
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionResultReviewRecords(settings.projectRoot, name, recordReadLimit),
+    listWorkerSessionResultReviewAttemptRecords(settings.projectRoot, name, recordReadLimit),
   ]);
   const events: WorkerSessionControlPlaneTimelineEvent[] = [];
   for (const tick of ticks) {
@@ -3711,6 +3730,21 @@ const readWorkerSessionControlPlaneTimeline = async (
       objective: review.objective,
       command: review.command,
       ...(review.note ? { note: review.note } : {}),
+    });
+  }
+  for (const attempt of resultReviewAttempts) {
+    events.push({
+      observedAt: attempt.observedAt,
+      source: "result_review",
+      event: "result_review_record_failed",
+      attemptId: attempt.attemptId,
+      status: attempt.status,
+      reason: attempt.error,
+      runIds: attempt.runId ? [attempt.runId] : [],
+      resultCommit: attempt.expectedResultCommit,
+      expectedResultCommit: attempt.expectedResultCommit,
+      reviewedBy: attempt.reviewedBy,
+      ...(attempt.note ? { note: attempt.note } : {}),
     });
   }
   const sourceFilter = options.sources.length > 0 ? new Set(options.sources) : null;

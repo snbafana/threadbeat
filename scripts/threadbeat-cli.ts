@@ -7443,6 +7443,7 @@ type ControlPlaneTimelineCommand = {
   workerId: string | null;
   executionId: string | null;
   reviewId: string | null;
+  attemptId: string | null;
   applyId: string | null;
   runIds: string[];
   command: string[];
@@ -7611,6 +7612,7 @@ function workerSessionControlPlaneTimelineCommands(
       workerId: event.workerId ?? null,
       executionId: event.executionId ?? null,
       reviewId: event.reviewId ?? null,
+      attemptId: event.attemptId ?? null,
       applyId: event.applyId ?? null,
       runIds: event.runIds ?? [],
     };
@@ -8862,6 +8864,7 @@ type WorkerSessionControlPlaneTimelineResponse = {
     executionId?: string;
     reconciliationId?: string;
     reviewId?: string;
+    attemptId?: string;
     applyId?: string;
     applySource?: string;
     applyAction?: string;
@@ -8899,6 +8902,7 @@ type WorkerSessionControlPlaneTimelineResponse = {
     agentId?: string;
     objective?: string;
     resultCommit?: string;
+    expectedResultCommit?: string;
     reviewedBy?: string;
     note?: string;
   }>;
@@ -10824,6 +10828,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
     executionId?: string;
     reconciliationId?: string;
     reviewId?: string;
+    attemptId?: string;
     status?: string;
     exitCode?: number | null;
     state?: string;
@@ -10848,6 +10853,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
     lastNextPlannedCount?: number | null;
     lastRemainingCount?: number | null;
     resultCommit?: string;
+    expectedResultCommit?: string;
     reviewedBy?: string;
   }>;
   commands: { fullTimeline: string[] };
@@ -10871,6 +10877,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
       executionId: event.executionId,
       reconciliationId: event.reconciliationId,
       reviewId: event.reviewId,
+      attemptId: event.attemptId,
       status: event.status,
       exitCode: event.exitCode,
       state: event.state,
@@ -10895,6 +10902,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
       lastNextPlannedCount: event.lastNextPlannedCount,
       lastRemainingCount: event.lastRemainingCount,
       resultCommit: event.resultCommit,
+      expectedResultCommit: event.expectedResultCommit,
       reviewedBy: event.reviewedBy,
     })),
     commands: {
@@ -16666,7 +16674,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--tick tick_id[,tick_id]] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--source tick,control_plane_advance_worker,control_plane_tick_worker,worker_reconcile_execution,branch_recovery_execution,result_review] [--event tick_recorded,worker_progress_recorded,worker_exited_unrecorded,worker_reconcile_executed,branch_recovery_executed,result_review_recorded] [--status executed,noop,running,reviewed,skipped] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,control_plane_advance_worker,control_plane_tick_worker,worker_reconcile_execution,branch_recovery_execution,result_review] [--event tick_recorded,worker_progress_recorded,worker_exited_unrecorded,worker_reconcile_executed,branch_recovery_executed,result_review_recorded,result_review_record_failed] [--status executed,noop,running,reviewed,skipped,failed] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]

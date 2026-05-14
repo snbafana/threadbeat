@@ -18,6 +18,19 @@ export type WorkerSessionResultReviewRecord = {
   command: string[];
 };
 
+export type WorkerSessionResultReviewAttemptRecord = {
+  attemptId: string;
+  session: string;
+  observedAt: string;
+  status: "failed";
+  runId?: string;
+  action?: "reviewed" | "skipped";
+  expectedResultCommit?: string;
+  reviewedBy?: string;
+  note?: string;
+  error: string;
+};
+
 export async function listWorkerSessionResultReviewRecords(
   projectRoot: string,
   sessionName: string,
@@ -32,6 +45,30 @@ export async function listWorkerSessionResultReviewRecords(
       .map(async (entry) => {
         const text = await fs.readFile(path.join(reviewDir, entry.name), "utf8");
         return JSON.parse(text) as WorkerSessionResultReviewRecord;
+      }));
+    return records
+      .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+      .slice(0, limit);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+export async function listWorkerSessionResultReviewAttemptRecords(
+  projectRoot: string,
+  sessionName: string,
+  limit = 20,
+): Promise<WorkerSessionResultReviewAttemptRecord[]> {
+  assertSafeWorkerSessionName(sessionName);
+  const attemptDir = workerSessionResultReviewAttemptDir(projectRoot, sessionName);
+  try {
+    const entries = await fs.readdir(attemptDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(attemptDir, entry.name), "utf8");
+        return JSON.parse(text) as WorkerSessionResultReviewAttemptRecord;
       }));
     return records
       .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
@@ -58,6 +95,22 @@ export async function writeWorkerSessionResultReviewRecord(
   return { path: reviewPath, record: reviewRecord };
 }
 
+export async function writeWorkerSessionResultReviewAttemptRecord(
+  projectRoot: string,
+  record: Omit<WorkerSessionResultReviewAttemptRecord, "attemptId"> & { attemptId?: string },
+): Promise<{ path: string; record: WorkerSessionResultReviewAttemptRecord }> {
+  assertSafeWorkerSessionName(record.session);
+  const attemptRecord: WorkerSessionResultReviewAttemptRecord = {
+    ...record,
+    attemptId: record.attemptId ?? createResultReviewId(record.observedAt),
+  };
+  assertSafeWorkerSessionName(attemptRecord.attemptId);
+  const attemptPath = workerSessionResultReviewAttemptPath(projectRoot, attemptRecord.session, attemptRecord.attemptId);
+  await fs.mkdir(path.dirname(attemptPath), { recursive: true });
+  await fs.writeFile(attemptPath, `${JSON.stringify(attemptRecord, null, 2)}\n`);
+  return { path: attemptPath, record: attemptRecord };
+}
+
 export function latestResultReviewByRunCommit(
   records: WorkerSessionResultReviewRecord[],
 ): Map<string, WorkerSessionResultReviewRecord> {
@@ -81,6 +134,17 @@ function workerSessionResultReviewPath(projectRoot: string, sessionName: string,
   assertSafeWorkerSessionName(sessionName);
   assertSafeWorkerSessionName(reviewId);
   return path.join(workerSessionResultReviewDir(projectRoot, sessionName), `${reviewId}.json`);
+}
+
+function workerSessionResultReviewAttemptDir(projectRoot: string, sessionName: string): string {
+  assertSafeWorkerSessionName(sessionName);
+  return path.join(projectRoot, ".threadbeat", "worker-sessions", "result-review-attempts", sessionName);
+}
+
+function workerSessionResultReviewAttemptPath(projectRoot: string, sessionName: string, attemptId: string): string {
+  assertSafeWorkerSessionName(sessionName);
+  assertSafeWorkerSessionName(attemptId);
+  return path.join(workerSessionResultReviewAttemptDir(projectRoot, sessionName), `${attemptId}.json`);
 }
 
 function createResultReviewId(observedAt: string): string {

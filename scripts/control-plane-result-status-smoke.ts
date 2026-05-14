@@ -310,6 +310,48 @@ try {
   ]);
   assert.match(staleGuard.stderr, /result commit changed: expected ffffffffffffffffffffffffffffffffffffffff/);
 
+  const failedReviewTimeline = await cliJson<{
+    count: number;
+    counts: Record<string, number>;
+    filter: { sources: string[]; events: string[]; statuses: string[]; runIds: string[] };
+    events: Array<{
+      source: string;
+      event: string;
+      attemptId?: string;
+      status?: string;
+      reason?: string;
+      runIds?: string[];
+      resultCommit?: string;
+      expectedResultCommit?: string;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "result_review",
+    "--event",
+    "result_review_record_failed",
+    "--status",
+    "failed",
+    "--run",
+    run.id,
+  ]);
+  assert.deepEqual(failedReviewTimeline.filter.sources, ["result_review"]);
+  assert.deepEqual(failedReviewTimeline.filter.events, ["result_review_record_failed"]);
+  assert.deepEqual(failedReviewTimeline.filter.statuses, ["failed"]);
+  assert.deepEqual(failedReviewTimeline.filter.runIds, [run.id]);
+  assert.equal(failedReviewTimeline.count, 1);
+  assert.equal(failedReviewTimeline.counts.result_review_record_failed, 1);
+  assert.equal(failedReviewTimeline.events[0]?.source, "result_review");
+  assert.equal(failedReviewTimeline.events[0]?.event, "result_review_record_failed");
+  assert.equal(failedReviewTimeline.events[0]?.status, "failed");
+  assert.ok(failedReviewTimeline.events[0]?.attemptId);
+  assert.match(failedReviewTimeline.events[0]?.reason ?? "", /result commit changed/);
+  assert.ok(failedReviewTimeline.events[0]?.runIds?.includes(run.id));
+  assert.equal(failedReviewTimeline.events[0]?.expectedResultCommit, "ffffffffffffffffffffffffffffffffffffffff");
+
   const nextRecordDryRun = await cliJson<{
     dryRun: boolean;
     recorded: boolean;
@@ -559,6 +601,8 @@ try {
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "result-review-attempts", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "result-reviews", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
