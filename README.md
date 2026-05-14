@@ -870,6 +870,11 @@ which keeps short bundle-recovery probes inspectable without forcing them to sta
 alive. Worker rows also include kind-scoped `session-control-plane-reconcile-workers`
 dry-run, confirm, and until-empty confirm commands so a stopped worker can be
 recovered through the generic reconcile path without guessing its worker kind.
+When restartable worker rows exist, the control-plane status summary/watch
+selects that bounded reconcile loop as its executable next recovery action, so
+`runs session-control-plane-status <name> --server --summary --watch
+--until-action --execute-action --dry-run|--confirm` can drive the same durable
+recovery path.
 Use `runs session-control-plane-worker-reconciliations <name> --server` to
 inspect the server-backed durable reconciliation history, replay commands, and
 matching timeline lookup commands after a reconcile pass or loop runs.

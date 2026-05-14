@@ -10932,10 +10932,10 @@ function workerSessionControlPlaneWatchAction(
   dryRunCommand: string[] | null;
 } | null {
   if (summary.nextRecovery) {
-    const surface = summary.nextRecovery.surface === "result_inspection" ? "result_inspection" : "status_watch";
+    const surface = summary.nextRecovery.surface ?? "status_watch";
     return {
       surface,
-      action: surface === "result_inspection" ? summary.nextRecovery.action : "execute_action",
+      action: surface === "status_watch" ? "execute_action" : summary.nextRecovery.action,
       reason: `${summary.nextRecovery.kind}:${summary.nextRecovery.action}`,
       command: summary.nextRecovery.command,
       dryRunCommand: summary.nextRecovery.dryRunCommand,
@@ -11406,6 +11406,8 @@ function workerSessionControlPlaneStatusSummaryCommands(
 ): CommandQueueOutput["commands"] {
   const commands: CommandQueueOutput["commands"] = [];
   if (summary.nextRecovery) {
+    commands.push({ command: summary.nextRecovery.dryRunCommand });
+    commands.push({ command: summary.nextRecovery.command });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--dry-run"] });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--confirm"] });
   }
@@ -11940,6 +11942,17 @@ function selectWorkerSessionControlPlaneNextRecovery(
   }
   const nextAction = nextActions[0];
   if (!nextAction) return null;
+  if (nextAction.surface === "worker_recovery") {
+    return {
+      kind: "control_plane_action",
+      surface: nextAction.surface,
+      action: "reconcile_control_plane_workers",
+      reason: "restartable_workers_pending_reconcile",
+      count: status.recovery.count,
+      command: workerSessionControlPlaneReconcileLoopCommand(status.session, false),
+      dryRunCommand: workerSessionControlPlaneReconcileLoopCommand(status.session, true),
+    };
+  }
   if (nextAction.surface === "status_watch" || nextAction.surface === "result_inspection") {
     return {
       kind: "control_plane_action",
@@ -11960,6 +11973,20 @@ function selectWorkerSessionControlPlaneNextRecovery(
     command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
     dryRunCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
   };
+}
+
+function workerSessionControlPlaneReconcileLoopCommand(
+  sessionName: string,
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+    "--lines", "20",
+    "--until-empty",
+    "--max-steps", "10",
+    "--interval-ms", "2000",
+    dryRun ? "--dry-run" : "--confirm",
+  ];
 }
 
 function summarizeWorkerSessionControlPlaneStatus(

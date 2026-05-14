@@ -235,6 +235,19 @@ try {
     "--lines",
     "5",
   ]);
+  assert.equal(statusSummary.needsAction, true);
+  assert.equal(statusSummary.nextRecovery?.surface, "worker_recovery");
+  assert.equal(statusSummary.nextRecovery?.action, "reconcile_control_plane_workers");
+  assert.equal(statusSummary.nextRecovery?.reason, "restartable_workers_pending_reconcile");
+  assert.equal(statusSummary.nextRecovery?.count, 6);
+  assert.equal(
+    statusSummary.nextRecovery?.dryRunCommand.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --dry-run`,
+  );
+  assert.equal(
+    statusSummary.nextRecovery?.command.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`,
+  );
   assert.equal(statusSummary.recovery.workerReconciliations.counts.total, 1);
   assert.equal(statusSummary.recovery.workerReconciliations.counts.dryRun, 1);
   assert.equal(statusSummary.recovery.workerReconciliations.counts.untilEmpty, 1);
@@ -256,6 +269,9 @@ try {
   assert.match(statusSummaryText, /worker_reconciliations: total=1 dry_run=1 executed=0 noop=0 failed=0 max_steps=0 until_empty=1/);
   assert.match(statusSummaryText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server`));
   assert.match(statusSummaryText, new RegExp(`reconciliation: ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
+  assert.match(statusSummaryText, /action: reconcile_control_plane_workers/);
+  assert.match(statusSummaryText, /reason: restartable_workers_pending_reconcile/);
+  assert.match(statusSummaryText, new RegExp(`command: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`));
   const statusSummaryShell = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -275,6 +291,14 @@ try {
   assert.match(
     statusSummaryShell,
     new RegExp(`npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server`),
+  );
+  assert.match(
+    statusSummaryShell,
+    new RegExp(`npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --dry-run`),
+  );
+  assert.match(
+    statusSummaryShell,
+    new RegExp(`npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`),
   );
   const workerReconciliations = await cliJson<WorkerReconciliationsResponse>(baseUrl, [
     "runs",
@@ -396,6 +420,15 @@ type WorkerAggregateResponse = {
 };
 
 type WorkerStatusSummaryResponse = {
+  needsAction: boolean;
+  nextRecovery: {
+    surface: string;
+    action: string;
+    reason: string;
+    count: number;
+    command: string[];
+    dryRunCommand: string[];
+  } | null;
   recovery: {
     workerReconciliations: {
       counts: {
