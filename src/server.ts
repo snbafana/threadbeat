@@ -492,17 +492,23 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       ];
       const runIdFilter = runIds.length > 0 ? new Set(runIds) : null;
       const actionFilter = query.action ? new Set(parseOptionalResultReviewActions(query.action)) : null;
+      const latestOnly = query.latest === "1" || query.latest === "true";
       const records = await listWorkerSessionResultReviewRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER);
-      const reviews = records
+      const matchingReviews = records
         .filter((record) => !reviewIdFilter || reviewIdFilter.has(record.reviewId))
-        .filter((record) => !runIdFilter || runIdFilter.has(record.runId))
+        .filter((record) => !runIdFilter || runIdFilter.has(record.runId));
+      const stateReviews = latestOnly
+        ? [...latestResultReviewByRunCommit(matchingReviews).values()]
+          .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+        : matchingReviews;
+      const reviews = stateReviews
         .filter((record) => !actionFilter || actionFilter.has(record.action))
         .slice(0, limit);
       return {
         ok: true,
         session: name,
         count: reviews.length,
-        filter: { reviewIds, runIds, action: actionFilter ? [...actionFilter] : [], limit },
+        filter: { reviewIds, runIds, action: actionFilter ? [...actionFilter] : [], latest: latestOnly, limit },
         reviews,
       };
     } catch (error) {

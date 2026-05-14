@@ -308,6 +308,43 @@ try {
   assert.equal(skipped.review.resultCommit, resultCommit);
   assert.equal(skipped.review.reviewedBy, "result-status-smoke");
 
+  const latestReviews = await cliJson<{
+    count: number;
+    filter: { latest: boolean; action: string[] };
+    reviews: Array<{ reviewId: string; action: string; runId: string; resultCommit: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-result-reviews",
+    sessionName,
+    "--server",
+    "--latest",
+    "--run",
+    run.id,
+  ]);
+  assert.equal(latestReviews.count, 1);
+  assert.equal(latestReviews.filter.latest, true);
+  assert.deepEqual(latestReviews.filter.action, []);
+  assert.equal(latestReviews.reviews[0]?.reviewId, skipped.review.reviewId);
+  assert.equal(latestReviews.reviews[0]?.action, "skipped");
+  assert.equal(latestReviews.reviews[0]?.runId, run.id);
+  assert.equal(latestReviews.reviews[0]?.resultCommit, resultCommit);
+
+  const latestReviewedReviews = await cliJson<{ count: number; filter: { latest: boolean; action: string[] }; reviews: unknown[] }>(baseUrl, [
+    "runs",
+    "session-result-reviews",
+    sessionName,
+    "--server",
+    "--latest",
+    "--run",
+    run.id,
+    "--action",
+    "reviewed",
+  ]);
+  assert.equal(latestReviewedReviews.count, 0);
+  assert.equal(latestReviewedReviews.filter.latest, true);
+  assert.deepEqual(latestReviewedReviews.filter.action, ["reviewed"]);
+  assert.deepEqual(latestReviewedReviews.reviews, []);
+
   const skippedStatusText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
