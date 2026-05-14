@@ -5259,7 +5259,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const executeConfirmation = options["execute-confirmation"] === "1";
     const executeNextConfirmation = options["execute-next-confirmation"] === "1";
     const drainConfirmations = options["drain-confirmations"] === "1";
+    const statusWatchExecutions = options["status-watch-executions"] === "1";
     const confirmationExecutionModes = [executeConfirmation, executeNextConfirmation, drainConfirmations].filter(Boolean).length;
+    if (statusWatchExecutions && options["detail-command"]) {
+      throw new Error("runs session-control-plane-advances --status-watch-executions cannot be combined with --detail-command");
+    }
     if (confirmationExecutionModes > 1) {
       throw new Error("runs session-control-plane-advances confirmation execution modes are mutually exclusive");
     }
@@ -5296,7 +5300,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         blocked: options.blocked === "1" || options["confirmation-queue"] === "1" || confirmationExecutionModes > 0 ? true : undefined,
         mutating: options.mutating === "1" || options["confirmation-queue"] === "1" || confirmationExecutionModes > 0 ? true : undefined,
         alertSurface: options["alert-surface"],
-        detailCommand: options["detail-command"],
+        detailCommand: statusWatchExecutions ? "status_watch_execute_action" : options["detail-command"],
       },
     );
     if (executeConfirmation || executeNextConfirmation) {
@@ -7500,7 +7504,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -16974,7 +16978,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]

@@ -478,8 +478,7 @@ try {
     "session-control-plane-advances",
     sessionName,
     "--server",
-    "--detail-command",
-    "status_watch_execute_action",
+    "--status-watch-executions",
     "--limit",
     "5",
   ]);
@@ -492,6 +491,17 @@ try {
   assert.equal(watchActionAdvances.advances[0]?.selected.reason, "control_plane_action:restart_control_plane_advance_worker");
   assert.deepEqual(watchActionAdvances.advances[0]?.selected.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
   assert.equal(watchActionAdvances.advances[0]?.executed.exitCode, 0);
+  const watchActionAdvancesText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--status-watch-executions",
+    "--format",
+    "text",
+  ]);
+  assert.match(watchActionAdvancesText, /detail_commands=status_watch_execute_action/);
+  assert.match(watchActionAdvancesText, /detail_command: status_watch_execute_action/);
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",

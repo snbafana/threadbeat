@@ -792,7 +792,8 @@ records with `runs session-control-plane-advances <name> --server` or
 `GET /api/worker-sessions/:name/control-plane-advances`; add `--advance <id>`
 to inspect one durable advance record, or add `--blocked` and `--mutating` to
 list only blocked mutating attempts, include their summary counts, and recover
-the confirmation command. Add `--confirmation-queue` to
+the confirmation command. Add `--status-watch-executions` to list only the
+durable handoffs written by status watch `--execute-action`. Add `--confirmation-queue` to
 group blocked confirmations by surface, action, detail command, and reason so
 operators can see the pending confirmation work without scanning each advance
 record. Add
