@@ -54,10 +54,12 @@ try {
 
   const checkoutCommand = `npm run cli -- runs checkout ${run.id} --dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
   const reviewCommand = `npm run cli -- runs review ${run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
+  const nextResultInspectionCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --next`;
   const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id}`;
   const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id}`;
 
   const summary = await cliJson<{
+    commands: { nextResultInspection: string[] };
     results: {
       counts: { resultCommits: number; pending: number };
       inspection: {
@@ -83,6 +85,7 @@ try {
   assert.equal(summary.results.inspection.nextSteps[0]?.resultCommit, resultCommit);
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.checkoutBranch.join(" "), checkoutCommand);
   assert.equal(summary.results.inspection.nextSteps[0]?.commands.reviewRun.join(" "), reviewCommand);
+  assert.equal(summary.commands.nextResultInspection.join(" "), nextResultInspectionCommand);
 
   const commandSummary = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
     "runs",
@@ -94,6 +97,18 @@ try {
   ]);
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === checkoutCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === reviewCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === nextResultInspectionCommand));
+
+  const pendingStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(pendingStatusText, new RegExp(`inspect_next: ${nextResultInspectionCommand}`));
 
   const shellSummary = await cliText(baseUrl, [
     "runs",
@@ -107,6 +122,7 @@ try {
   ]);
   assert.match(shellSummary, new RegExp(checkoutCommand));
   assert.match(shellSummary, new RegExp(reviewCommand));
+  assert.match(shellSummary, new RegExp(nextResultInspectionCommand));
 
   const resultInspectionCommands = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
     "runs",

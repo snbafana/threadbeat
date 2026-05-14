@@ -1017,7 +1017,9 @@ the CLI. Use `runs session-result-inspections <name> --server --format text`
 for a compact branch-native result-commit review board with GitHub result links,
 checkout/review commands, record-reviewed/skipped commands, and reviewed/skipped
 state. Add `--next` to default to the first pending result commit with
-`--limit 1`, so operators can review one branch-native result at a time. Add
+`--limit 1`, so operators can review one branch-native result at a time. The
+control-plane status summary surfaces the same next-result command when pending
+result commits exist. Add
 `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving
 the exact branch name and result commit on each command row. Add
