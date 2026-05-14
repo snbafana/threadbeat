@@ -5288,6 +5288,66 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     ));
     return;
   }
+  if (subcommandName === "start-control-plane-topology-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs start-control-plane-topology-worker requires --server");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (dryRun === confirm) {
+      throw new Error("runs start-control-plane-topology-worker requires exactly one of --confirm or --dry-run");
+    }
+    const maxIterations = parsePositiveInteger(options["max-iterations"] ?? "60", "--max-iterations");
+    const loopIntervalMs = parseNonNegativeInteger(options["loop-interval-ms"] ?? "2000", "--loop-interval-ms");
+    await printJson(await startWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs start-control-plane-topology-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun,
+        confirm,
+        maxSteps: maxIterations,
+        intervalMs: loopIntervalMs,
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        topologyLoop: true,
+        includeMutationWorkers: options["include-mutation-workers"] === "1",
+        maxIterations,
+        loopIntervalMs,
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "ensure-control-plane-topology-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-topology-worker requires --server");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (dryRun === confirm) {
+      throw new Error("runs ensure-control-plane-topology-worker requires exactly one of --confirm or --dry-run");
+    }
+    const maxIterations = parsePositiveInteger(options["max-iterations"] ?? "60", "--max-iterations");
+    const loopIntervalMs = parseNonNegativeInteger(options["loop-interval-ms"] ?? "2000", "--loop-interval-ms");
+    await printJson(await ensureWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs ensure-control-plane-topology-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun,
+        confirm,
+        maxSteps: maxIterations,
+        intervalMs: loopIntervalMs,
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        topologyLoop: true,
+        includeMutationWorkers: options["include-mutation-workers"] === "1",
+        maxIterations,
+        loopIntervalMs,
+      },
+    ));
+    return;
+  }
   if (subcommandName === "session-control-plane-advance-workers") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -9301,6 +9361,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `  ensure_confirm: ${formatShellCommand(summary.commands.ensureTopologyConfirm)}`,
     `  ensure_loop_dry_run: ${formatShellCommand(summary.commands.ensureTopologyLoopDryRun)}`,
     `  ensure_loop_confirm: ${formatShellCommand(summary.commands.ensureTopologyLoopConfirm)}`,
+    `  start_worker_dry_run: ${formatShellCommand(summary.commands.startTopologyWorkerDryRun)}`,
+    `  ensure_worker_confirm: ${formatShellCommand(summary.commands.ensureTopologyWorkerConfirm)}`,
   );
   if (summary.branches.inspection.count > 0) {
     lines.push(
@@ -9383,6 +9445,8 @@ function workerSessionControlPlaneStatusSummaryCommands(
   commands.push({ command: summary.commands.inspectTopology });
   commands.push({ command: summary.commands.ensureTopologyLoopDryRun });
   commands.push({ command: summary.commands.ensureTopologyLoopConfirm });
+  commands.push({ command: summary.commands.startTopologyWorkerDryRun });
+  commands.push({ command: summary.commands.ensureTopologyWorkerConfirm });
   for (const step of summary.branches.inspection.nextSteps) {
     commands.push({ command: step.commands.inspectResult });
     commands.push({ command: step.commands.reviewRun });
@@ -9582,6 +9646,8 @@ function summarizeWorkerSessionControlPlaneStatus(
     ensureTopologyConfirm: string[];
     ensureTopologyLoopDryRun: string[];
     ensureTopologyLoopConfirm: string[];
+    startTopologyWorkerDryRun: string[];
+    ensureTopologyWorkerConfirm: string[];
     advance: string[];
     advanceDryRun: string[];
     advanceLoop: string[];
@@ -9694,6 +9760,14 @@ function summarizeWorkerSessionControlPlaneStatus(
         "npm", "run", "cli", "--", "runs", "ensure-control-plane-topology-loop", status.session, "--server",
         "--confirm", "--max-iterations", "3", "--loop-interval-ms", "2000",
       ],
+      startTopologyWorkerDryRun: [
+        "npm", "run", "cli", "--", "runs", "start-control-plane-topology-worker", status.session, "--server",
+        "--dry-run", "--max-iterations", "60", "--loop-interval-ms", "2000",
+      ],
+      ensureTopologyWorkerConfirm: [
+        "npm", "run", "cli", "--", "runs", "ensure-control-plane-topology-worker", status.session, "--server",
+        "--confirm", "--max-iterations", "60", "--loop-interval-ms", "2000",
+      ],
       advance: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
       advanceDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
       advanceLoop: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance-loop", status.session, "--server"],
@@ -9754,7 +9828,21 @@ async function fetchWorkerSessionControlPlaneAdvances(
 
 async function startWorkerSessionControlPlaneAdvanceWorker(
   sessionName: string,
-  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number; untilEmpty?: boolean },
+  options: {
+    workerId?: string;
+    dryRun: boolean;
+    maxSteps: number;
+    intervalMs: number;
+    lines: number;
+    drainConfirmations?: boolean;
+    confirm?: boolean;
+    maxConfirmations?: number;
+    untilEmpty?: boolean;
+    topologyLoop?: boolean;
+    includeMutationWorkers?: boolean;
+    maxIterations?: number;
+    loopIntervalMs?: number;
+  },
 ): Promise<{
   ok: true;
   session: string;
@@ -9773,13 +9861,31 @@ async function startWorkerSessionControlPlaneAdvanceWorker(
       confirm: options.confirm ?? false,
       maxConfirmations: options.maxConfirmations ?? 3,
       untilEmpty: options.untilEmpty ?? false,
+      topologyLoop: options.topologyLoop ?? false,
+      includeMutationWorkers: options.includeMutationWorkers ?? false,
+      maxIterations: options.maxIterations ?? options.maxSteps,
+      loopIntervalMs: options.loopIntervalMs ?? options.intervalMs,
     },
   ) as { ok: true; session: string; worker: unknown };
 }
 
 async function ensureWorkerSessionControlPlaneAdvanceWorker(
   sessionName: string,
-  options: { workerId?: string; dryRun: boolean; maxSteps: number; intervalMs: number; lines: number; drainConfirmations?: boolean; confirm?: boolean; maxConfirmations?: number; untilEmpty?: boolean },
+  options: {
+    workerId?: string;
+    dryRun: boolean;
+    maxSteps: number;
+    intervalMs: number;
+    lines: number;
+    drainConfirmations?: boolean;
+    confirm?: boolean;
+    maxConfirmations?: number;
+    untilEmpty?: boolean;
+    topologyLoop?: boolean;
+    includeMutationWorkers?: boolean;
+    maxIterations?: number;
+    loopIntervalMs?: number;
+  },
 ): Promise<{
   ok: true;
   session: string;
@@ -9801,6 +9907,10 @@ async function ensureWorkerSessionControlPlaneAdvanceWorker(
       confirm: options.confirm ?? false,
       maxConfirmations: options.maxConfirmations ?? 3,
       untilEmpty: options.untilEmpty ?? false,
+      topologyLoop: options.topologyLoop ?? false,
+      includeMutationWorkers: options.includeMutationWorkers ?? false,
+      maxIterations: options.maxIterations ?? options.maxSteps,
+      loopIntervalMs: options.loopIntervalMs ?? options.intervalMs,
     },
   ) as {
     ok: true;
@@ -15257,6 +15367,8 @@ Commands:
   runs session-control-plane-advances <name> --server [--advance advance_id] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
+  runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]
+  runs ensure-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|shell]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]

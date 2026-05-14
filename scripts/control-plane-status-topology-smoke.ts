@@ -39,6 +39,8 @@ try {
       ensureTopologyConfirm: string[];
       ensureTopologyLoopDryRun: string[];
       ensureTopologyLoopConfirm: string[];
+      startTopologyWorkerDryRun: string[];
+      ensureTopologyWorkerConfirm: string[];
     };
   }>(baseUrl, [
     "runs",
@@ -52,6 +54,8 @@ try {
   assert.equal(summary.commands.ensureTopologyConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology ${sessionName} --server --confirm`);
   assert.equal(summary.commands.ensureTopologyLoopDryRun.join(" "), `npm run cli -- runs ensure-control-plane-topology-loop ${sessionName} --server --dry-run --max-iterations 3 --loop-interval-ms 2000`);
   assert.equal(summary.commands.ensureTopologyLoopConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology-loop ${sessionName} --server --confirm --max-iterations 3 --loop-interval-ms 2000`);
+  assert.equal(summary.commands.startTopologyWorkerDryRun.join(" "), `npm run cli -- runs start-control-plane-topology-worker ${sessionName} --server --dry-run --max-iterations 60 --loop-interval-ms 2000`);
+  assert.equal(summary.commands.ensureTopologyWorkerConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology-worker ${sessionName} --server --confirm --max-iterations 60 --loop-interval-ms 2000`);
 
   const commandQueue = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
     "runs",
@@ -64,6 +68,8 @@ try {
   assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.inspectTopology.join(" ")));
   assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyLoopDryRun.join(" ")));
   assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyLoopConfirm.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.startTopologyWorkerDryRun.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyWorkerConfirm.join(" ")));
 
   const text = await cliText(baseUrl, [
     "runs",
@@ -76,9 +82,54 @@ try {
   ]);
   assert.match(text, /^control_plane_topology:$/m);
   assert.match(text, new RegExp(`ensure_loop_dry_run: .*ensure-control-plane-topology-loop ${sessionName}`));
+  assert.match(text, new RegExp(`start_worker_dry_run: .*start-control-plane-topology-worker ${sessionName}`));
+
+  const workerId = "status-topology-worker";
+  const started = await cliJson<{ worker: { workerId: string; mode: string; command: string[] } }>(baseUrl, [
+    "runs",
+    "start-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--dry-run",
+    "--max-iterations",
+    "1",
+    "--loop-interval-ms",
+    "0",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(started.worker.workerId, workerId);
+  assert.equal(started.worker.mode, "topology_loop");
+  assert.deepEqual(started.worker.command, [
+    "runs",
+    "ensure-control-plane-topology-loop",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--max-iterations",
+    "1",
+    "--loop-interval-ms",
+    "0",
+    "--lines",
+    "5",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-advance-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 

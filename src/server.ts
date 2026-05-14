@@ -61,6 +61,7 @@ import {
 import {
   type ControlPlaneAdvanceWorkerLatestResult,
   type ControlPlaneAdvanceWorkerLifecycle,
+  type ControlPlaneAdvanceWorkerMode,
   listWorkerSessionControlPlaneAdvanceWorkerNextSteps,
   listWorkerSessionControlPlaneAdvanceWorkers,
   restartWorkerSessionControlPlaneAdvanceWorker,
@@ -912,6 +913,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           confirm: parseBoolean(body.confirm, false),
           maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
           untilEmpty: parseBoolean(body.untilEmpty, false),
+          topologyLoop: parseBoolean(body.topologyLoop, false),
+          includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
+          maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
+          loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
         },
       );
       return { ok: true, session: name, worker };
@@ -928,7 +933,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const workerId = parseOptionalString(body.workerId);
       const lines = parseOptionalInteger(body.lines) ?? 20;
       const drainConfirmations = parseBoolean(body.drainConfirmations, false);
-      const requestedMode = drainConfirmations ? "confirmation_drain" : "advance_loop";
+      const topologyLoop = parseBoolean(body.topologyLoop, false);
+      const requestedMode = topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
       const existingWorkers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
         sessionName: name,
         ...(workerId ? { workerId } : {}),
@@ -985,6 +991,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           confirm: parseBoolean(body.confirm, false),
           maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
           untilEmpty: parseBoolean(body.untilEmpty, false),
+          topologyLoop,
+          includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
+          maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
+          loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
         },
       );
       return {
@@ -3714,10 +3724,11 @@ const readWorkerSessionControlPlaneStatus = async (
       modes: {
         advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
       };
       latestResults: Array<{
         workerId: string;
-        mode: "advance_loop" | "confirmation_drain";
+        mode: ControlPlaneAdvanceWorkerMode;
         lifecycle: ControlPlaneAdvanceWorkerLifecycle;
         latestResult: ControlPlaneAdvanceWorkerLatestResult;
       }>;
@@ -5435,7 +5446,7 @@ const summarizeControlPlaneCompletedWorkers = <T extends { alive: boolean; retir
   completed: workers.filter((worker) => !worker.alive && Boolean(worker.completedAt) && !worker.stoppedAt && !worker.retiredAt).length,
 });
 
-const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string; mode?: "advance_loop" | "confirmation_drain"; lifecycle: ControlPlaneAdvanceWorkerLifecycle; latestResult: ControlPlaneAdvanceWorkerLatestResult | null }>(workers: T[]): {
+const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string; mode?: ControlPlaneAdvanceWorkerMode; lifecycle: ControlPlaneAdvanceWorkerLifecycle; latestResult: ControlPlaneAdvanceWorkerLatestResult | null }>(workers: T[]): {
   total: number;
   alive: number;
   stopped: number;
@@ -5444,10 +5455,11 @@ const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive
   modes: {
     advance_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
     confirmation_drain: { total: number; alive: number; stopped: number; retired: number; completed: number };
+    topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   latestResults: Array<{
     workerId: string;
-    mode: "advance_loop" | "confirmation_drain";
+    mode: ControlPlaneAdvanceWorkerMode;
     lifecycle: ControlPlaneAdvanceWorkerLifecycle;
     latestResult: ControlPlaneAdvanceWorkerLatestResult;
   }>;
@@ -5456,6 +5468,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends { workerId: string; alive
   modes: {
     advance_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => (worker.mode ?? "advance_loop") === "advance_loop")),
     confirmation_drain: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "confirmation_drain")),
+    topology_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "topology_loop")),
   },
   latestResults: workers.flatMap((worker) => worker.latestResult
     ? [{

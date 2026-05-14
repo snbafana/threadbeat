@@ -24,7 +24,7 @@ export type ControlPlaneAdvanceWorker = {
   latestResult?: ControlPlaneAdvanceWorkerLatestResult | null;
 };
 
-export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain";
+export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop";
 
 export type ControlPlaneAdvanceWorkerLifecycle = {
   state: "running" | "stopped" | "completed" | "retired" | "stopping_failed" | "exited_unrecorded";
@@ -47,9 +47,14 @@ export type ControlPlaneAdvanceWorkerLatestResult = {
   maxSteps?: number;
   intervalMs?: number;
   maxConfirmations?: number;
+  maxIterations?: number;
+  loopIntervalMs?: number;
+  iterations?: number;
   executedSteps?: number;
   attemptedConfirmations?: number;
   availableConfirmations?: number;
+  totalCoreExecuted?: number;
+  totalMutationExecuted?: number;
   cycles?: number;
   results?: number;
   sourceAdvanceId?: string;
@@ -97,6 +102,10 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     confirm?: boolean;
     maxConfirmations?: number;
     untilEmpty?: boolean;
+    topologyLoop?: boolean;
+    includeMutationWorkers?: boolean;
+    maxIterations?: number;
+    loopIntervalMs?: number;
   },
 ): Promise<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle }> {
   assertSafeWorkerSessionName(sessionName);
@@ -110,9 +119,12 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
   if (await pathExists(recordPath)) {
     throw new Error(`control-plane advance worker '${workerId}' already exists for session '${sessionName}'`);
   }
-  const mode: ControlPlaneAdvanceWorkerMode = options.drainConfirmations ? "confirmation_drain" : "advance_loop";
+  const mode: ControlPlaneAdvanceWorkerMode = options.topologyLoop ? "topology_loop" : options.drainConfirmations ? "confirmation_drain" : "advance_loop";
   if (mode === "confirmation_drain" && !options.confirm) {
     throw new Error("control-plane confirmation drain workers require --confirm");
+  }
+  if (mode === "topology_loop" && options.dryRun === Boolean(options.confirm)) {
+    throw new Error("control-plane topology workers require exactly one of dryRun or confirm");
   }
   const command = buildControlPlaneAdvanceWorkerCommand(sessionName, mode, options);
   const stdoutStartOffset = await fileSize(stdoutPath);
@@ -575,6 +587,7 @@ function parseLastJsonObject(text: string): unknown {
 }
 
 function summarizeLatestWorkerJsonResult(value: Record<string, unknown>): ControlPlaneAdvanceWorkerLatestResult {
+  const summary = isRecord(value.summary) ? value.summary : null;
   return {
     ...(typeof value.ok === "boolean" ? { ok: value.ok } : {}),
     ...(typeof value.session === "string" ? { session: value.session } : {}),
@@ -584,9 +597,14 @@ function summarizeLatestWorkerJsonResult(value: Record<string, unknown>): Contro
     ...(typeof value.maxSteps === "number" ? { maxSteps: value.maxSteps } : {}),
     ...(typeof value.intervalMs === "number" ? { intervalMs: value.intervalMs } : {}),
     ...(typeof value.maxConfirmations === "number" ? { maxConfirmations: value.maxConfirmations } : {}),
+    ...(typeof value.maxIterations === "number" ? { maxIterations: value.maxIterations } : {}),
+    ...(typeof value.loopIntervalMs === "number" ? { loopIntervalMs: value.loopIntervalMs } : {}),
+    ...(typeof summary?.iterations === "number" ? { iterations: summary.iterations } : {}),
     ...(typeof value.executedSteps === "number" ? { executedSteps: value.executedSteps } : {}),
     ...(typeof value.attemptedConfirmations === "number" ? { attemptedConfirmations: value.attemptedConfirmations } : {}),
     ...(typeof value.availableConfirmations === "number" ? { availableConfirmations: value.availableConfirmations } : {}),
+    ...(typeof summary?.totalCoreExecuted === "number" ? { totalCoreExecuted: summary.totalCoreExecuted } : {}),
+    ...(typeof summary?.totalMutationExecuted === "number" ? { totalMutationExecuted: summary.totalMutationExecuted } : {}),
     ...(Array.isArray(value.cycles) ? { cycles: value.cycles.length } : {}),
     ...(Array.isArray(value.results) ? { results: value.results.length } : {}),
     ...(typeof value.sourceAdvanceId === "string" ? { sourceAdvanceId: value.sourceAdvanceId } : {}),
@@ -636,8 +654,28 @@ function buildControlPlaneAdvanceWorkerCommand(
     lines: number;
     maxConfirmations?: number;
     untilEmpty?: boolean;
+    confirm?: boolean;
+    includeMutationWorkers?: boolean;
+    maxIterations?: number;
+    loopIntervalMs?: number;
   },
 ): string[] {
+  if (mode === "topology_loop") {
+    return [
+      "runs",
+      "ensure-control-plane-topology-loop",
+      sessionName,
+      "--server",
+      options.confirm ? "--confirm" : "--dry-run",
+      "--max-iterations",
+      String(options.maxIterations ?? options.maxSteps),
+      "--loop-interval-ms",
+      String(options.loopIntervalMs ?? options.intervalMs),
+      "--lines",
+      String(options.lines),
+      ...(options.includeMutationWorkers ? ["--include-mutation-workers"] : []),
+    ];
+  }
   if (mode === "confirmation_drain") {
     return [
       "runs",
