@@ -9647,6 +9647,7 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   for (const step of summary.results.inspection.nextSteps) {
     commands.push({ command: step.commands.inspectResult });
+    commands.push({ command: step.commands.checkoutBranch });
     commands.push({ command: step.commands.reviewRun });
   }
   commands.push({ command: summary.commands.resultInspections });
