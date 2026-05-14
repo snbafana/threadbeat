@@ -10436,7 +10436,7 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   };
 }
 
-type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_tick" | "apply_action" | "drain";
+type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "control_plane_tick" | "apply_action" | "drain";
 type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop";
 
 type ControlPlaneWorkerSummary = {
@@ -10465,6 +10465,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
   filter: { workerId: string | null; includeRetired: boolean; lines: number };
   summary: ControlPlaneWorkerSummary & {
     advance: ControlPlaneWorkerSummary;
+    topology: ControlPlaneWorkerSummary;
     tick: ControlPlaneWorkerSummary;
     applyAction: ControlPlaneWorkerSummary;
     drain: ControlPlaneWorkerSummary;
@@ -10486,6 +10487,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
   nextSteps: ControlPlaneWorkerAggregateNextStep[];
   commands: {
     inspectAdvanceWorkers: string[];
+    inspectTopologyWorkers: string[];
     inspectTickWorkers: string[];
     inspectApplyActionWorkers: string[];
     inspectDrainWorkers: string[];
@@ -10503,13 +10505,13 @@ async function fetchWorkerSessionControlPlaneWorkers(
     fetchWorkerSessionDrainWorkerNextSteps(sessionName),
   ]);
   const workers = [
-    ...advanceWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_advance", sessionName, worker, options.includeRetired)),
+    ...advanceWorkers.workers.map((worker) => normalizeControlPlaneWorker(controlPlaneAdvanceWorkerKind(worker), sessionName, worker, options.includeRetired)),
     ...tickWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_tick", sessionName, worker, options.includeRetired)),
     ...applyActionWorkers.workers.map((worker) => normalizeControlPlaneWorker("apply_action", sessionName, worker, options.includeRetired)),
     ...drainWorkers.workers.map((worker) => normalizeControlPlaneWorker("drain", sessionName, worker, options.includeRetired)),
   ];
   const allNextSteps = [
-    ...advanceNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_advance", step)),
+    ...advanceNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep(controlPlaneAdvanceWorkerKind(step), step)),
     ...tickNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_tick", step)),
     ...applyActionNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("apply_action", step)),
     ...drainNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("drain", step)),
@@ -10518,6 +10520,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     ? allNextSteps.filter((step) => step.workerId === options.workerId)
     : allNextSteps;
   const advanceSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_advance"));
+  const topologySummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_topology"));
   const tickSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_tick"));
   const applyActionSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "apply_action"));
   const drainSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "drain"));
@@ -10533,6 +10536,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     summary: {
       ...allSummary,
       advance: advanceSummary,
+      topology: topologySummary,
       tick: tickSummary,
       applyAction: applyActionSummary,
       drain: drainSummary,
@@ -10542,6 +10546,12 @@ async function fetchWorkerSessionControlPlaneWorkers(
     commands: {
       inspectAdvanceWorkers: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-advance-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      inspectTopologyWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-topology-workers", sessionName, "--server",
         ...(options.workerId ? ["--worker-id", options.workerId] : []),
         ...(options.includeRetired ? ["--include-retired"] : []),
         "--lines", String(options.lines),
@@ -10624,6 +10634,11 @@ function normalizeControlPlaneWorkerNextStep(kind: ControlPlaneWorkerKind, step:
   };
 }
 
+function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_topology"> {
+  const record = plainRecord(value) ?? {};
+  return record.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
+}
+
 function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean }>): ControlPlaneWorkerSummary {
   return {
     total: workers.length,
@@ -10646,6 +10661,29 @@ function controlPlaneWorkerCommands(
   stop: string[];
   retire: string[];
 } {
+  if (kind === "control_plane_topology") {
+    return {
+      inspect: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-topology-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      restart: [
+        "npm", "run", "cli", "--", "runs", "restart-control-plane-topology-worker", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      stop: [
+        "npm", "run", "cli", "--", "runs", "stop-control-plane-topology-worker", sessionName, "--server",
+        "--worker-id", workerId,
+      ],
+      retire: [
+        "npm", "run", "cli", "--", "runs", "stop-control-plane-topology-worker", sessionName, "--server",
+        "--worker-id", workerId,
+        "--retire",
+      ],
+    };
+  }
   const nouns = controlPlaneWorkerCommandNouns(kind);
   return {
     inspect: [
@@ -10679,6 +10717,7 @@ function controlPlaneWorkerCommandNouns(kind: ControlPlaneWorkerKind): string {
 
 function parseControlPlaneWorkerKind(value: string): ControlPlaneWorkerKind {
   if (value === "control-plane-advance" || value === "control_plane_advance" || value === "advance") return "control_plane_advance";
+  if (value === "control-plane-topology" || value === "control_plane_topology" || value === "topology") return "control_plane_topology";
   if (value === "control-plane-tick" || value === "control_plane_tick" || value === "tick") return "control_plane_tick";
   if (value === "apply-action" || value === "apply_action") return "apply_action";
   if (value === "drain") return "drain";
@@ -11953,6 +11992,9 @@ async function stopControlPlaneWorkerForDrill(
   if (options.kind === "control_plane_advance") {
     return await stopWorkerSessionControlPlaneAdvanceWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines });
   }
+  if (options.kind === "control_plane_topology") {
+    return await stopWorkerSessionControlPlaneAdvanceWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines, mode: "topology_loop" });
+  }
   if (options.kind === "control_plane_tick") {
     return await stopWorkerSessionControlPlaneTickWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines });
   }
@@ -11971,6 +12013,14 @@ async function restartControlPlaneWorkerForDrill(
       workerId: options.workerId,
       includeRetired: options.includeRetired,
       lines: options.lines,
+    });
+  }
+  if (options.kind === "control_plane_topology") {
+    return await restartWorkerSessionControlPlaneAdvanceWorker(sessionName, {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+      mode: "topology_loop",
     });
   }
   if (options.kind === "control_plane_tick") {
@@ -15451,8 +15501,8 @@ Commands:
   runs stop-control-plane-topology-worker <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|shell]
-  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
-  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--lines 20]
+  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--lines 20]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs ensure-control-plane-mutation-workers <name> --server (--confirm|--dry-run) [--apply-worker-id id] [--drain-worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--apply-interval-ms n] [--max-continuations n] [--lines 20]
   runs session-control-plane-advance-workers-next <name> --server [--worker-id id]

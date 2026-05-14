@@ -136,6 +136,35 @@ try {
   assert.equal(inspected.workers[0]?.workerId, workerId);
   assert.equal(inspected.workers[0]?.mode, "topology_loop");
 
+  const aggregateBeforeStop = await cliJson<{
+    summary: {
+      topology: { total: number };
+      advance: { total: number };
+    };
+    workers: Array<{ kind: string; workerId: string | null; commands: { restart: string[] } | null }>;
+    commands: { inspectTopologyWorkers: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(aggregateBeforeStop.summary.topology.total, 1);
+  assert.equal(aggregateBeforeStop.summary.advance.total, 0);
+  const aggregateTopologyWorker = aggregateBeforeStop.workers.find((worker) => worker.workerId === workerId);
+  assert.equal(aggregateTopologyWorker?.kind, "control_plane_topology");
+  assert.equal(
+    aggregateTopologyWorker?.commands?.restart.join(" "),
+    `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId} --include-retired`,
+  );
+  assert.equal(
+    aggregateBeforeStop.commands.inspectTopologyWorkers.join(" "),
+    `npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`,
+  );
+
   await cliJson(baseUrl, [
     "runs",
     "stop-control-plane-topology-worker",
@@ -157,6 +186,31 @@ try {
   assert.equal(nextSteps.count, 1);
   assert.equal(nextSteps.nextSteps[0]?.command.join(" "), `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`);
   assert.equal(nextSteps.nextSteps[0]?.commands.retireControlPlaneAdvanceWorker.join(" "), `npm run cli -- runs stop-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId} --retire`);
+
+  const aggregateAfterStop = await cliJson<{
+    summary: { topology: { stopped: number; restartable: number } };
+    nextSteps: Array<{ kind: string; workerId: string | null; command: string[] }>;
+    commands: { restartNext: string[] | null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(aggregateAfterStop.summary.topology.stopped, 1);
+  assert.equal(aggregateAfterStop.summary.topology.restartable, 1);
+  assert.ok(aggregateAfterStop.nextSteps.some((step) => (
+    step.kind === "control_plane_topology"
+    && step.workerId === workerId
+    && step.command.join(" ") === `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`
+  )));
+  assert.equal(
+    aggregateAfterStop.commands.restartNext?.join(" "),
+    `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`,
+  );
 
   await cliJson(baseUrl, [
     "runs",
