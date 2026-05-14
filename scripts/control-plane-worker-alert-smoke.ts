@@ -765,9 +765,11 @@ try {
   assert.match(recoverNextAlertText, /resume_recover_next_loop: npm run cli -- runs session-control-plane-recover-next/);
 
   const recoverNextResumeDryRun = await cliJson<{
+    advanceId: string;
     dryRun: boolean;
     detailCommand: string;
     selected: { surface: string; action: string; loopAdvanceId?: string; command: string[] } | null;
+    alert: { surface: string; reason: string; loopAdvanceId?: string } | null;
     executed: null;
     executionSafety: {
       blocked: boolean;
@@ -799,6 +801,58 @@ try {
   assert.equal(recoverNextResumeDryRun.executionSafety.confirmationRequired, true);
   assert.equal(recoverNextResumeDryRun.executionSafety.confirmed, false);
   assert.equal(recoverNextResumeDryRun.executionSafety.confirmationCommand, null);
+
+  const recoverNextResumeHistory = await cliJson<{
+    filter: { loopAdvanceIds: string[]; alertSurfaces: string[]; detailCommands: string[] };
+    advances: Array<{
+      advanceId: string;
+      detailCommand?: string;
+      selected: { surface: string; action: string; loopAdvanceId?: string } | null;
+      alert?: { surface: string; reason: string; loopAdvanceId?: string } | null;
+      executionSafety?: { blocked: boolean; mutating: boolean; confirmationRequired: boolean; confirmed: boolean };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+    "--alert-surface",
+    "recover_next",
+    "--detail-command",
+    "resume_recover_next_loop",
+  ]);
+  assert.deepEqual(recoverNextResumeHistory.filter.loopAdvanceIds, [recoverNextLoopDryRun.advanceId]);
+  assert.deepEqual(recoverNextResumeHistory.filter.alertSurfaces, ["recover_next"]);
+  assert.deepEqual(recoverNextResumeHistory.filter.detailCommands, ["resume_recover_next_loop"]);
+  const recoverNextResumeHistoryRecord = recoverNextResumeHistory.advances.find((advance) => advance.advanceId === recoverNextResumeDryRun.advanceId);
+  assert.equal(recoverNextResumeHistoryRecord?.detailCommand, "resume_recover_next_loop");
+  assert.equal(recoverNextResumeHistoryRecord?.selected?.surface, "recover_next");
+  assert.equal(recoverNextResumeHistoryRecord?.selected?.action, "resume_recover_next_loop");
+  assert.equal(recoverNextResumeHistoryRecord?.selected?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(recoverNextResumeHistoryRecord?.alert?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(recoverNextResumeHistoryRecord?.executionSafety?.mutating, true);
+  assert.equal(recoverNextResumeHistoryRecord?.executionSafety?.confirmationRequired, true);
+
+  const recoverNextResumeHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+    "--alert-surface",
+    "recover_next",
+    "--detail-command",
+    "resume_recover_next_loop",
+    "--format",
+    "text",
+  ]);
+  assert.match(recoverNextResumeHistoryText, new RegExp(`loops=${recoverNextLoopDryRun.advanceId}`));
+  assert.match(recoverNextResumeHistoryText, /detail_command: resume_recover_next_loop/);
+  assert.match(recoverNextResumeHistoryText, /alert: recover_next incomplete_recover_next_loop/);
+  assert.match(recoverNextResumeHistoryText, new RegExp(`loop: ${recoverNextLoopDryRun.advanceId}`));
 
   const interruptedSummaryText = await cliText(baseUrl, [
     "runs",

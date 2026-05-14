@@ -898,6 +898,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           ...parseOptionalList(query.detailCommand),
           ...parseOptionalList(query.detailCommands),
         ],
+        loopAdvanceIds: [
+          ...parseOptionalList(query.loop),
+          ...parseOptionalList(query.loopAdvanceId),
+          ...parseOptionalList(query.loopAdvanceIds),
+        ],
       };
       const advances = await listWorkerSessionControlPlaneAdvanceRecords(
         settings.projectRoot,
@@ -909,6 +914,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           mutating: filter.mutating,
           alertSurfaces: filter.alertSurfaces,
           detailCommands: filter.detailCommands,
+          loopAdvanceIds: filter.loopAdvanceIds,
         },
       );
       return {
@@ -921,6 +927,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           mutating: filter.mutating ?? null,
           alertSurfaces: filter.alertSurfaces,
           detailCommands: filter.detailCommands,
+          loopAdvanceIds: filter.loopAdvanceIds,
         },
         count: advances.length,
         summary: summarizeWorkerSessionControlPlaneAdvanceRecords(advances),

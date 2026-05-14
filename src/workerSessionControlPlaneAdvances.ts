@@ -27,6 +27,7 @@ export type WorkerSessionControlPlaneAdvanceListOptions = {
   mutating?: boolean;
   alertSurfaces?: string[];
   detailCommands?: string[];
+  loopAdvanceIds?: string[];
 };
 
 export type WorkerSessionControlPlaneAdvanceSummary = {
@@ -116,6 +117,7 @@ function matchesWorkerSessionControlPlaneAdvanceFilters(
   if (options.mutating !== undefined && executionSafetyBoolean(record, "mutating") !== options.mutating) return false;
   if (options.alertSurfaces && options.alertSurfaces.length > 0 && !options.alertSurfaces.includes(alertSurface(record))) return false;
   if (options.detailCommands && options.detailCommands.length > 0 && !options.detailCommands.includes(record.detailCommand ?? "")) return false;
+  if (options.loopAdvanceIds && options.loopAdvanceIds.length > 0 && !options.loopAdvanceIds.includes(loopAdvanceId(record) ?? "")) return false;
   return true;
 }
 
@@ -124,6 +126,16 @@ function alertSurface(record: WorkerSessionControlPlaneAdvanceRecord): string {
   if (!alert || typeof alert !== "object" || Array.isArray(alert)) return "";
   const surface = (alert as Record<string, unknown>).surface;
   return typeof surface === "string" ? surface : "";
+}
+
+function loopAdvanceId(record: WorkerSessionControlPlaneAdvanceRecord): string | null {
+  return recordLoopAdvanceId(record.selected) ?? recordLoopAdvanceId(record.alert) ?? recordLoopAdvanceId(record.recovery);
+}
+
+function recordLoopAdvanceId(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const loopAdvanceId = (value as Record<string, unknown>).loopAdvanceId;
+  return typeof loopAdvanceId === "string" ? loopAdvanceId : null;
 }
 
 function executionSafetyBoolean(
