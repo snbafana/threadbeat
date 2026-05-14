@@ -764,6 +764,42 @@ try {
   assert.match(recoverNextAlertText, /recover_next_loop:/);
   assert.match(recoverNextAlertText, /resume_recover_next_loop: npm run cli -- runs session-control-plane-recover-next/);
 
+  const recoverNextResumeDryRun = await cliJson<{
+    dryRun: boolean;
+    detailCommand: string;
+    selected: { surface: string; action: string; loopAdvanceId?: string; command: string[] } | null;
+    executed: null;
+    executionSafety: {
+      blocked: boolean;
+      mutating: boolean;
+      confirmationRequired: boolean;
+      confirmed: boolean;
+      confirmationCommand: string[] | null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--detail-command",
+    "resume_recover_next_loop",
+    "--dry-run",
+  ]);
+  assert.equal(recoverNextResumeDryRun.dryRun, true);
+  assert.equal(recoverNextResumeDryRun.detailCommand, "resume_recover_next_loop");
+  assert.equal(recoverNextResumeDryRun.selected?.surface, "recover_next");
+  assert.equal(recoverNextResumeDryRun.selected?.action, "resume_recover_next_loop");
+  assert.equal(recoverNextResumeDryRun.selected?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.deepEqual(recoverNextResumeDryRun.selected?.command, interruptedLoop?.resumeCommand);
+  assert.equal(recoverNextResumeDryRun.executed, null);
+  assert.equal(recoverNextResumeDryRun.executionSafety.blocked, false);
+  assert.equal(recoverNextResumeDryRun.executionSafety.mutating, true);
+  assert.equal(recoverNextResumeDryRun.executionSafety.confirmationRequired, true);
+  assert.equal(recoverNextResumeDryRun.executionSafety.confirmed, false);
+  assert.equal(recoverNextResumeDryRun.executionSafety.confirmationCommand, null);
+
   const interruptedSummaryText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",

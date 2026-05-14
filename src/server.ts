@@ -5059,7 +5059,8 @@ type WorkerSessionControlPlaneAlertDetailCommand =
   | "reset_selected_failed_drain_continuations"
   | "inspect_worker_recovery"
   | "restart_worker_recovery"
-  | "retire_worker_recovery";
+  | "retire_worker_recovery"
+  | "resume_recover_next_loop";
 
 const parseControlPlaneAlertDetailCommand = (
   value: string | undefined,
@@ -5078,6 +5079,7 @@ const parseControlPlaneAlertDetailCommand = (
     "inspect_worker_recovery",
     "restart_worker_recovery",
     "retire_worker_recovery",
+    "resume_recover_next_loop",
   ]);
   if (!allowed.has(value as WorkerSessionControlPlaneAlertDetailCommand)) {
     throw new Error(`unknown control-plane alert detail command: ${value}`);
@@ -5094,7 +5096,8 @@ const isMutatingControlPlaneAlertDetailCommand = (
     || detailCommand === "reset_failed_drain_continuations"
     || detailCommand === "reset_selected_failed_drain_continuations"
     || detailCommand === "restart_worker_recovery"
-    || detailCommand === "retire_worker_recovery";
+    || detailCommand === "retire_worker_recovery"
+    || detailCommand === "resume_recover_next_loop";
 };
 
 type WorkerSessionControlPlaneAlertExecutionSafety = {
@@ -5195,6 +5198,11 @@ const selectControlPlaneAlertDetailCommand = (
   if (details?.kind === "status_watch_execution") {
     if (detailCommand === "acknowledge_status_watch_execution") {
       return { detailCommand, action: detailCommand, command: details.commands.acknowledgeStatusWatchExecution };
+    }
+  }
+  if (details?.kind === "recover_next_loop") {
+    if (detailCommand === "resume_recover_next_loop") {
+      return { detailCommand, action: detailCommand, command: details.commands.resumeLoop };
     }
   }
   throw new Error(`detail command ${detailCommand} is not available for the selected alert`);
