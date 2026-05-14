@@ -728,6 +728,10 @@ try {
   assert.match(statusSummaryText, new RegExp(`advance: ${recoverNextLoopDryRun.advanceId}`));
   assert.match(statusSummaryText, new RegExp(`loop: ${recoverNextLoopDryRun.advanceId}`));
   assert.match(statusSummaryText, /inspect: npm run cli -- runs session-control-plane-advances/);
+  assert.match(statusSummaryText, /worker_reconciliations: total=2 dry_run=2 executed=0 noop=0 failed=0 max_steps=0 until_empty=0/);
+  assert.match(statusSummaryText, new RegExp(`latest: npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server --reconciliation \\d{8}T\\d{9}Z-[a-f0-9]+`));
+  assert.match(statusSummaryText, new RegExp(`latest_timeline: npm run cli -- runs session-control-plane-timeline ${sessionName} --server --source worker_reconcile_execution --execution \\d{8}T\\d{9}Z-[a-f0-9]+`));
+  assert.match(statusSummaryText, new RegExp(`reconciliation: ${workerRestartQueueDryRun.reconciliation.record.reconciliationId}`));
 
   const statusSummaryShell = await cliText(baseUrl, [
     "runs",
@@ -745,6 +749,8 @@ try {
   assert.ok(statusSummaryShellLines.some((line) => line === `npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recoverNextLoopDryRun.advanceId}`)));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recentRecoverLoopStep?.advanceId}`)));
+  assert.ok(statusSummaryShellLines.some((line) => line.includes(`--reconciliation ${workerRestartQueueDryRun.reconciliation.record.reconciliationId}`)));
+  assert.ok(statusSummaryShellLines.some((line) => line.includes(`--source worker_reconcile_execution --execution ${workerRestartQueueDryRun.reconciliation.record.reconciliationId}`)));
 
   await fs.rm(recoverNextLoopDryRun.advancePath, { force: true });
   const statusAfterRecoverNextInterruption = await cliJson<{

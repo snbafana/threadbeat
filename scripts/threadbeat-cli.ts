@@ -9699,6 +9699,33 @@ type WorkerSessionControlPlaneStatusResponse = {
         maxSteps: number;
         untilEmpty: number;
       };
+      latest: {
+        reconciliationId: string;
+        session: string;
+        observedAt: string;
+        completedAt: string;
+        dryRun: boolean;
+        confirmed: boolean;
+        untilEmpty: boolean;
+        status: string;
+        stoppedReason?: string;
+        filter: unknown;
+        summary: {
+          iterations: number;
+          totalPlanned: number;
+          totalExecuted: number;
+          lastPlannedCount: number | null;
+          lastNextPlannedCount: number | null;
+          lastRemainingCount: number | null;
+        };
+        commands: {
+          inspectWorkers?: string[];
+          dryRun?: string[];
+          confirm?: string[];
+          inspectRecord: string[];
+          timeline: string[];
+        };
+      } | null;
       recent: Array<{
         reconciliationId: string;
         session: string;
@@ -9722,6 +9749,8 @@ type WorkerSessionControlPlaneStatusResponse = {
           inspectWorkers?: string[];
           dryRun?: string[];
           confirm?: string[];
+          inspectRecord: string[];
+          timeline: string[];
         };
       }>;
     };
@@ -11869,6 +11898,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   lines.push(
     `worker_reconciliations: total=${workerReconciliations.counts.total} dry_run=${workerReconciliations.counts.dryRun} executed=${workerReconciliations.counts.executed} noop=${workerReconciliations.counts.noop} failed=${workerReconciliations.counts.failed} max_steps=${workerReconciliations.counts.maxSteps} until_empty=${workerReconciliations.counts.untilEmpty}`,
     `  inspect: ${formatShellCommand(summary.commands.workerReconciliations)}`,
+    `  latest: ${summary.commands.latestWorkerReconciliation ? formatShellCommand(summary.commands.latestWorkerReconciliation) : "none"}`,
+    `  latest_timeline: ${summary.commands.latestWorkerReconciliationTimeline ? formatShellCommand(summary.commands.latestWorkerReconciliationTimeline) : "none"}`,
   );
   if (workerReconciliations.recent.length > 0) {
     lines.push("recent_worker_reconciliations:");
@@ -11882,6 +11913,8 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    iterations: ${record.summary.iterations}`,
         `    total_planned: ${record.summary.totalPlanned}`,
         `    total_executed: ${record.summary.totalExecuted}`,
+        `    inspect: ${formatShellCommand(record.commands.inspectRecord)}`,
+        `    timeline: ${formatShellCommand(record.commands.timeline)}`,
       );
       if (record.commands.confirm) {
         lines.push(`    confirm: ${formatShellCommand(record.commands.confirm)}`);
@@ -12071,7 +12104,15 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: attempt.command });
   }
   commands.push({ command: summary.commands.workerReconciliations });
+  if (summary.commands.latestWorkerReconciliation) {
+    commands.push({ command: summary.commands.latestWorkerReconciliation });
+  }
+  if (summary.commands.latestWorkerReconciliationTimeline) {
+    commands.push({ command: summary.commands.latestWorkerReconciliationTimeline });
+  }
   for (const record of summary.recovery.workerReconciliations.recent) {
+    commands.push({ command: record.commands.inspectRecord });
+    commands.push({ command: record.commands.timeline });
     if (record.commands.confirm) {
       commands.push({ command: record.commands.confirm });
     }
@@ -12733,6 +12774,8 @@ function summarizeWorkerSessionControlPlaneStatus(
     statusWatchExecutions: string[];
     failedRecoverNextResumeAttempts: string[];
     workerReconciliations: string[];
+    latestWorkerReconciliation: string[] | null;
+    latestWorkerReconciliationTimeline: string[] | null;
   };
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
@@ -12885,6 +12928,8 @@ function summarizeWorkerSessionControlPlaneStatus(
       statusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--status-watch-executions"],
       failedRecoverNextResumeAttempts: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--failed-recover-next-resumes"],
       workerReconciliations: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", status.session, "--server"],
+      latestWorkerReconciliation: status.recovery.workerReconciliations.latest?.commands.inspectRecord ?? null,
+      latestWorkerReconciliationTimeline: status.recovery.workerReconciliations.latest?.commands.timeline ?? null,
     },
   };
 }

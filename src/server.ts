@@ -4066,7 +4066,8 @@ const readWorkerSessionControlPlaneStatus = async (
     };
     workerReconciliations: {
       counts: ReturnType<typeof summarizeWorkerSessionControlPlaneWorkerReconciliationRecords>;
-      recent: Awaited<ReturnType<typeof listWorkerSessionControlPlaneWorkerReconciliationRecords>>;
+      latest: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord | null;
+      recent: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord[];
     };
     nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
@@ -4243,7 +4244,12 @@ const readWorkerSessionControlPlaneStatus = async (
       },
       workerReconciliations: {
         counts: summarizeWorkerSessionControlPlaneWorkerReconciliationRecords(workerReconciliations),
-        recent: workerReconciliations.slice(0, lines),
+        latest: workerReconciliations[0]
+          ? decorateWorkerSessionControlPlaneWorkerReconciliationRecord(name, workerReconciliations[0])
+          : null,
+        recent: workerReconciliations
+          .slice(0, lines)
+          .map((record) => decorateWorkerSessionControlPlaneWorkerReconciliationRecord(name, record)),
       },
       nextSteps: {
         watchWorkers: watchWorkerNextSteps.nextSteps,
