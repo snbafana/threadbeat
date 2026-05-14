@@ -751,7 +751,9 @@ next-action commands. Add `--watch --max-polls <n> --interval-ms <ms>` to keep
 emitting those summaries as newline-delimited JSON or repeated text snapshots
 while long-running control-plane workers advance; add `--until-action` to stop
 as soon as a recovery action, blocked confirmation, or result inspection is
-available and include the selected command in the watch output. Use `runs session-control-plane-alerts <name> --server`
+available and include the selected command in the watch output. Add
+`--execute-action --dry-run` or `--execute-action --confirm` to run that
+selected command immediately after the watch finds it. Use `runs session-control-plane-alerts <name> --server`
 or `GET /api/worker-sessions/:name/control-plane-alerts` for a compact
 actionable-failures queue across failed apply executions, failed drain
 continuations, blocked branch/stale-run resumes, stopped workers, and recent

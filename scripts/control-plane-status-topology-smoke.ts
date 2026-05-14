@@ -442,6 +442,32 @@ try {
   assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.reason, "control_plane_action:restart_control_plane_advance_worker");
   assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server"]);
   assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.dryRunCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  const watchedUntilActionDryRun = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--execute-action",
+    "--dry-run",
+    "--max-polls",
+    "5",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedUntilActionDryRunLines = watchedUntilActionDryRun.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    poll: number;
+    untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
+    executedAction?: { dryRun: boolean; reason: string; command: string[]; executed: { exitCode: number | null } };
+  });
+  assert.equal(watchedUntilActionDryRunLines.length, 1);
+  assert.equal(watchedUntilActionDryRunLines[0]?.untilAction.done, true);
+  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.dryRun, true);
+  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.reason, "control_plane_action:restart_control_plane_advance_worker");
+  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.executed.exitCode, 0);
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
