@@ -129,6 +129,26 @@ try {
   assert.equal(watchedSummaryLines[1]?.poll, 2);
   assert.equal(watchedSummaryLines[0]?.summary.session, sessionName);
   assert.deepEqual(watchedSummaryLines[0]?.summary.workers.controlPlaneAdvance.latestResults, []);
+  const watchedUntilActionEmpty = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedUntilActionEmptyLines = watchedUntilActionEmpty.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    poll: number;
+    untilAction: { done: boolean; reason: string | null };
+  });
+  assert.equal(watchedUntilActionEmptyLines.length, 2);
+  assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.done, false);
+  assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.reason, null);
   const watchedText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -398,6 +418,27 @@ try {
     "--lines",
     "1",
   ]);
+  const watchedUntilActionStopped = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--max-polls",
+    "5",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedUntilActionStoppedLines = watchedUntilActionStopped.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    poll: number;
+    untilAction: { done: boolean; reason: string | null };
+  });
+  assert.equal(watchedUntilActionStoppedLines.length, 1);
+  assert.equal(watchedUntilActionStoppedLines[0]?.poll, 1);
+  assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.done, true);
+  assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.reason, "control_plane_action:restart_control_plane_advance_worker");
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",

@@ -749,7 +749,9 @@ suggestions. Add `--summary` for a compact operator checkpoint with worker
 health, queue pressure, branch/stale-run recovery counts, restart counts, and
 next-action commands. Add `--watch --max-polls <n> --interval-ms <ms>` to keep
 emitting those summaries as newline-delimited JSON or repeated text snapshots
-while long-running control-plane workers advance. Use `runs session-control-plane-alerts <name> --server`
+while long-running control-plane workers advance; add `--until-action` to stop
+as soon as a recovery action, blocked confirmation, or result inspection is
+available. Use `runs session-control-plane-alerts <name> --server`
 or `GET /api/worker-sessions/:name/control-plane-alerts` for a compact
 actionable-failures queue across failed apply executions, failed drain
 continuations, blocked branch/stale-run resumes, stopped workers, and recent

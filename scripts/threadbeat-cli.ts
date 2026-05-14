@@ -4543,6 +4543,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (watch && outputFormat !== "json" && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-status --watch --commands-only requires json output");
     }
+    if (options["until-action"] === "1" && !watch) {
+      throw new Error("runs session-control-plane-status --until-action requires --watch");
+    }
     const requiredSessionName = required(sessionName, "runs session-control-plane-status <session> --server");
     const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
     if (watch) {
@@ -4553,9 +4556,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
         const summary = summarizeWorkerSessionControlPlaneStatus(status);
         const observedAt = new Date().toISOString();
+        const actionReason = workerSessionControlPlaneWatchActionReason(summary);
+        const untilAction = options["until-action"] === "1"
+          ? {
+              done: actionReason !== null,
+              reason: actionReason,
+              poll: polls + 1,
+              maxPolls,
+            }
+          : null;
         if (outputFormat === "text") {
           console.log([
-            `control-plane status watch poll=${polls + 1} observed_at=${observedAt}`,
+            `control-plane status watch poll=${polls + 1} observed_at=${observedAt}${untilAction ? ` until_action=${actionReason ?? "waiting"}` : ""}`,
             ...formatWorkerSessionControlPlaneStatusSummaryText(summary),
           ].join("\n"));
         } else if (options["commands-only"] === "1") {
@@ -4564,6 +4576,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             session: summary.session,
             poll: polls + 1,
             observedAt,
+            ...(untilAction ? { untilAction } : {}),
             commands: workerSessionControlPlaneStatusSummaryCommands(summary),
           }));
         } else {
@@ -4572,10 +4585,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
             session: summary.session,
             poll: polls + 1,
             observedAt,
+            ...(untilAction ? { untilAction } : {}),
             summary,
           }));
         }
         polls += 1;
+        if (untilAction?.done) return;
         if (maxPolls !== null && polls >= maxPolls) return;
         await sleep(intervalMs);
       }
@@ -7454,7 +7469,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -9685,6 +9700,18 @@ function printWorkerSessionControlPlaneStatusSummaryText(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
 ): void {
   console.log(formatWorkerSessionControlPlaneStatusSummaryText(summary).join("\n"));
+}
+
+function workerSessionControlPlaneWatchActionReason(
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+): string | null {
+  if (summary.nextRecovery) {
+    return `${summary.nextRecovery.kind}:${summary.nextRecovery.action}`;
+  }
+  if (summary.results.inspection.count > 0) {
+    return "result_inspection:pending_result_commit";
+  }
+  return null;
 }
 
 function formatWorkerSessionControlPlaneStatusSummaryText(
@@ -16817,7 +16844,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
-  runs session-control-plane-status <name> --server [--summary] [--watch] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
