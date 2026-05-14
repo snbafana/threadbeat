@@ -3846,6 +3846,7 @@ const readWorkerSessionControlPlaneStatus = async (
   results: Awaited<ReturnType<typeof summarizeWorkerSessionResultInspection>> & {
     reviews: {
       count: number;
+      counts: { reviewed: number; skipped: number };
       recent: Awaited<ReturnType<typeof listWorkerSessionResultReviewRecords>>;
     };
   };
@@ -3952,6 +3953,10 @@ const readWorkerSessionControlPlaneStatus = async (
       ...resultInspection,
       reviews: {
         count: resultReviews.length,
+        counts: {
+          reviewed: resultReviews.filter((review) => review.action === "reviewed").length,
+          skipped: resultReviews.filter((review) => review.action === "skipped").length,
+        },
         recent: resultReviews.slice(0, lines),
       },
     },

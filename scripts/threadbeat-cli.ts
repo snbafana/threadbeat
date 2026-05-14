@@ -8424,6 +8424,7 @@ type WorkerSessionControlPlaneStatusResponse = {
     }>;
     reviews: {
       count: number;
+      counts: { reviewed: number; skipped: number };
       recent: WorkerSessionResultReviewRecord[];
     };
   };
@@ -9596,6 +9597,21 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       `  inspect_all: ${formatShellCommand(summary.commands.resultInspections)}`,
       `  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`,
     );
+  }
+  lines.push(
+    `result_reviews: count=${summary.results.reviews.count} reviewed=${summary.results.reviews.counts.reviewed} skipped=${summary.results.reviews.counts.skipped}`,
+  );
+  if (summary.results.reviews.recent.length > 0) {
+    lines.push("recent_result_reviews:");
+    for (const review of summary.results.reviews.recent) {
+      lines.push(
+        `  - review: ${review.reviewId}`,
+        `    action: ${review.action}`,
+        `    run: ${review.runId}`,
+        `    result_commit: ${review.resultCommit}`,
+        `    reviewed_by: ${review.reviewedBy}`,
+      );
+    }
   }
   if (summary.recovery.recoverNext.recent.length > 0) {
     lines.push("recent_recover_next:");
