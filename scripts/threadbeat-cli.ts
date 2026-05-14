@@ -9684,6 +9684,14 @@ function workerSessionControlPlaneStatusSummaryCommands(
   if (summary.results.counts.reviewed > 0) {
     commands.push({ command: summary.commands.reviewedResultInspections });
   }
+  for (const review of summary.results.reviews.recent) {
+    commands.push({
+      command: [
+        "npm", "run", "cli", "--", "runs", "session-result-reviews", summary.session, "--server",
+        "--review", review.reviewId, "--run", review.runId, "--limit", "20",
+      ],
+    });
+  }
   for (const attempt of summary.recovery.recoverNext.recent) {
     commands.push({ command: attempt.command });
   }

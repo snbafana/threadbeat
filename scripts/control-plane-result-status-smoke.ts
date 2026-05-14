@@ -167,6 +167,29 @@ try {
   assert.match(reviewedStatusText, /action: reviewed/);
   assert.match(reviewedStatusText, new RegExp(`run: ${run.id}`));
   assert.match(reviewedStatusText, /reviewed_by: result-status-smoke/);
+
+  const inspectReviewCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --review ${reviewed.review.reviewId} --run ${run.id} --limit 20`;
+  const reviewedStatusCommands = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+  ]);
+  assert.ok(reviewedStatusCommands.commands.some((command) => command.command.join(" ") === inspectReviewCommand));
+
+  const reviewedStatusShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(reviewedStatusShell, new RegExp(inspectReviewCommand));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
