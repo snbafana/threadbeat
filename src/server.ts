@@ -118,6 +118,7 @@ type WorkerSessionControlPlaneRecoveryAttemptStatus = {
   completedAt: string;
   detailCommand: string | null;
   workerId: string | null;
+  loopAdvanceId: string | null;
   action: string | null;
   reason: string | null;
   selectedSurface: string | null;
@@ -4331,6 +4332,7 @@ const summarizeWorkerSessionControlPlaneRecoveryAttempt = (
     completedAt: record.completedAt,
     detailCommand,
     workerId: stringRecordField(alert, "workerId") ?? stringRecordField(selected, "workerId"),
+    loopAdvanceId: stringRecordField(alert, "loopAdvanceId") ?? stringRecordField(selected, "loopAdvanceId"),
     action: stringRecordField(alert, "action") ?? stringRecordField(selected, "action"),
     reason: stringRecordField(alert, "reason") ?? stringRecordField(selected, "reason"),
     selectedSurface: stringRecordField(selected, "surface"),
@@ -4787,6 +4789,15 @@ type WorkerSessionControlPlaneAlertDetails =
       executeResumeHistory: string[];
       inspectStatus: string[];
     };
+  }
+  | {
+    kind: "recover_next_resume_attempt";
+    attempt: WorkerSessionControlPlaneRecoveryAttemptStatus;
+    commands: {
+      inspectAttempt: string[];
+      inspectHistory: string[] | null;
+      inspectStatus: string[];
+    };
   };
 
 const readWorkerSessionControlPlaneAlertDetails = async (
@@ -4920,7 +4931,7 @@ const readWorkerSessionControlPlaneAlertDetails = async (
       },
     };
   }
-  if (alert.surface === "recover_next" && alert.loopAdvanceId) {
+  if (alert.surface === "recover_next" && alert.loopAdvanceId && alert.reason === "incomplete_recover_next_loop") {
     const status = await readWorkerSessionControlPlaneStatus(settings, db, name, lines);
     const loop = status.recovery.recoverNext.incompleteLoops.recent.find((candidate) => (
       candidate.loopAdvanceId === alert.loopAdvanceId
@@ -4938,6 +4949,27 @@ const readWorkerSessionControlPlaneAlertDetails = async (
           },
         }
       : null;
+  }
+  if (alert.surface === "recover_next" && alert.advanceId) {
+    const records = await listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      advanceIds: [alert.advanceId],
+      detailCommands: ["resume_recover_next_loop"],
+    });
+    const record = records.find((candidate) => controlPlaneAdvanceExecutionFailed(candidate.executed));
+    if (!record) return null;
+    const attempt = summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record);
+    return {
+      kind: "recover_next_resume_attempt",
+      attempt,
+      commands: {
+        inspectAttempt: attempt.command,
+        inspectHistory: attempt.loopAdvanceId
+          ? ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", name, "--server", "--loop-advance-id", attempt.loopAdvanceId, "--recover-next-loop-history"]
+          : null,
+        inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", name, "--server", "--summary"],
+      },
+    };
   }
   return null;
 };
@@ -5030,6 +5062,16 @@ const readWorkerSessionControlPlaneAlerts = async (
     .filter((record) => controlPlaneAdvanceExecutionFailed(record.executed))
     .filter((record) => !acknowledgedStatusWatchAdvanceIds.has(record.advanceId));
   const allAlerts: WorkerSessionControlPlaneAlert[] = [
+    ...status.recovery.recoverNext.resumeAttempts.failedRecent.map((attempt) => ({
+      surface: "recover_next" as const,
+      severity: "error" as const,
+      reason: "failed_recover_next_resume_attempt",
+      count: 1,
+      command: attempt.command,
+      advanceId: attempt.advanceId,
+      loopAdvanceId: attempt.loopAdvanceId ?? undefined,
+      action: "inspect_recover_next_resume_attempt",
+    })),
     ...status.recovery.recoverNext.incompleteLoops.recent.map((loop) => ({
       surface: "recover_next" as const,
       severity: "warning" as const,

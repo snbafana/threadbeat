@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 
 import type { Settings } from "../src/config.js";
 import { buildServer } from "../src/server.js";
+import { writeWorkerSessionControlPlaneAdvanceRecord } from "../src/workerSessionControlPlaneAdvances.js";
 
 const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-worker-alert-smoke-"));
@@ -1186,6 +1187,115 @@ try {
       && step.stepIndex === 2
       && step.advanceId === `${recoverNextLoopDryRun.advanceId}-step-002`
   )));
+
+  const failedResumeAdvanceId = `failed-resume-${Date.now().toString(36)}`;
+  await writeWorkerSessionControlPlaneAdvanceRecord(path.resolve("."), {
+    advanceId: failedResumeAdvanceId,
+    session: sessionName,
+    observedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    dryRun: false,
+    selected: {
+      surface: "recover_next",
+      action: "resume_recover_next_loop",
+      reason: "incomplete_recover_next_loop",
+      loopAdvanceId: recoverNextLoopDryRun.advanceId,
+      command: interruptedLoop?.resumeCommand,
+    },
+    alert: {
+      surface: "recover_next",
+      severity: "warning",
+      reason: "incomplete_recover_next_loop",
+      action: "resume_recover_next_loop",
+      loopAdvanceId: recoverNextLoopDryRun.advanceId,
+    },
+    detailCommand: "resume_recover_next_loop",
+    recovery: null,
+    executed: { command: interruptedLoop?.resumeCommand, exitCode: 1, stdout: "", stderr: "resume failed" },
+    executionSafety: { detailCommand: "resume_recover_next_loop", mutating: true, confirmationRequired: true, confirmed: true, blocked: false },
+    before: null,
+    after: null,
+  });
+
+  const failedRecoverNextResumeAlerts = await cliJson<{
+    summary: { total: number; errors: number; warnings: number };
+    alerts: Array<{ surface: string; severity: string; reason: string; action?: string; advanceId?: string; loopAdvanceId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--reason",
+    "failed_recover_next_resume_attempt",
+  ]);
+  assert.equal(failedRecoverNextResumeAlerts.summary.total, 1);
+  assert.equal(failedRecoverNextResumeAlerts.summary.errors, 1);
+  assert.equal(failedRecoverNextResumeAlerts.summary.warnings, 0);
+  assert.equal(failedRecoverNextResumeAlerts.alerts[0]?.surface, "recover_next");
+  assert.equal(failedRecoverNextResumeAlerts.alerts[0]?.severity, "error");
+  assert.equal(failedRecoverNextResumeAlerts.alerts[0]?.reason, "failed_recover_next_resume_attempt");
+  assert.equal(failedRecoverNextResumeAlerts.alerts[0]?.action, "inspect_recover_next_resume_attempt");
+  assert.equal(failedRecoverNextResumeAlerts.alerts[0]?.advanceId, failedResumeAdvanceId);
+  assert.equal(failedRecoverNextResumeAlerts.alerts[0]?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.ok(failedRecoverNextResumeAlerts.alerts[0]?.command.includes(failedResumeAdvanceId));
+
+  const failedRecoverNextResumeAlert = await cliJson<{
+    alert: { reason: string; action?: string; advanceId?: string; loopAdvanceId?: string; command: string[] } | null;
+    details: {
+      kind: "recover_next_resume_attempt";
+      attempt: { advanceId: string; loopAdvanceId: string | null; failed: boolean; executedExitCode: number | null };
+      commands: { inspectAttempt: string[]; inspectHistory: string[] | null; inspectStatus: string[] };
+    } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--reason",
+    "failed_recover_next_resume_attempt",
+  ]);
+  assert.equal(failedRecoverNextResumeAlert.alert?.advanceId, failedResumeAdvanceId);
+  assert.equal(failedRecoverNextResumeAlert.alert?.action, "inspect_recover_next_resume_attempt");
+  assert.equal(failedRecoverNextResumeAlert.details?.kind, "recover_next_resume_attempt");
+  assert.equal(failedRecoverNextResumeAlert.details?.attempt.advanceId, failedResumeAdvanceId);
+  assert.equal(failedRecoverNextResumeAlert.details?.attempt.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(failedRecoverNextResumeAlert.details?.attempt.failed, true);
+  assert.equal(failedRecoverNextResumeAlert.details?.attempt.executedExitCode, 1);
+  assert.deepEqual(failedRecoverNextResumeAlert.details?.commands.inspectAttempt, failedRecoverNextResumeAlert.alert?.command);
+  assert.deepEqual(failedRecoverNextResumeAlert.details?.commands.inspectHistory, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+    "--recover-next-loop-history",
+  ]);
+
+  const failedRecoverNextResumeAlertText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--reason",
+    "failed_recover_next_resume_attempt",
+    "--format",
+    "text",
+  ]);
+  assert.match(failedRecoverNextResumeAlertText, /reason: failed_recover_next_resume_attempt/);
+  assert.match(failedRecoverNextResumeAlertText, /recover_next_resume_attempt:/);
+  assert.match(failedRecoverNextResumeAlertText, new RegExp(`advance: ${failedResumeAdvanceId}`));
+  assert.match(failedRecoverNextResumeAlertText, /inspect_recover_next_resume_attempt: npm run cli -- runs session-control-plane-advances/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

@@ -9162,6 +9162,7 @@ type WorkerSessionControlPlaneRecoveryAttemptResponse = {
   completedAt: string;
   detailCommand: string | null;
   workerId: string | null;
+  loopAdvanceId: string | null;
   action: string | null;
   reason: string | null;
   selectedSurface: string | null;
@@ -9720,6 +9721,10 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
       executeResumeHistory: string[];
       inspectStatus: string[];
     };
+  } | {
+    kind: "recover_next_resume_attempt";
+    attempt: WorkerSessionControlPlaneRecoveryAttemptResponse;
+    commands: { inspectAttempt: string[]; inspectHistory: string[] | null; inspectStatus: string[] };
   }) | null;
   recentTimeline: WorkerSessionControlPlaneAlertsResponse["recentTimeline"];
 };
@@ -10645,6 +10650,15 @@ function workerSessionControlPlaneAlertPreviewCommands(
       { ...base, action: "inspect_control_plane_status", command: preview.details.commands.inspectStatus },
     );
   }
+  if (preview.details?.kind === "recover_next_resume_attempt") {
+    commands.push(
+      { ...base, action: "inspect_recover_next_resume_attempt", command: preview.details.commands.inspectAttempt },
+      { ...base, action: "inspect_control_plane_status", command: preview.details.commands.inspectStatus },
+    );
+    if (preview.details.commands.inspectHistory) {
+      commands.push({ ...base, action: "inspect_recover_next_loop_history", command: preview.details.commands.inspectHistory });
+    }
+  }
   const seen = new Set<string>();
   return commands.filter((entry) => {
     const key = `${entry.action}:${commandKey(entry.command)}`;
@@ -10696,6 +10710,9 @@ function formatWorkerSessionControlPlaneAlertText(
   }
   if (preview.details?.kind === "recover_next_loop") {
     lines.push(...formatRecoverNextAlertDetails(preview.details));
+  }
+  if (preview.details?.kind === "recover_next_resume_attempt") {
+    lines.push(...formatRecoverNextResumeAttemptAlertDetails(preview.details));
   }
   return lines;
 }
@@ -10764,6 +10781,24 @@ function formatRecoverNextAlertDetails(
     `    inspect_recover_next_loop_step: ${formatShellCommand(details.commands.inspectLastStep)}`,
     `    inspect_recover_next_loop_history: ${formatShellCommand(details.commands.inspectHistory)}`,
     `    execute_recover_next_loop_history_resume: ${formatShellCommand(details.commands.executeResumeHistory)}`,
+    `    inspect_control_plane_status: ${formatShellCommand(details.commands.inspectStatus)}`,
+  ];
+}
+
+function formatRecoverNextResumeAttemptAlertDetails(
+  details: Extract<NonNullable<WorkerSessionControlPlaneAlertPreviewResponse["details"]>, { kind: "recover_next_resume_attempt" }>,
+): string[] {
+  return [
+    "recover_next_resume_attempt:",
+    `  advance: ${details.attempt.advanceId}`,
+    `  loop: ${details.attempt.loopAdvanceId ?? ""}`,
+    `  dry_run: ${details.attempt.dryRun}`,
+    `  executed: ${details.attempt.executed}`,
+    `  failed: ${details.attempt.failed}`,
+    `  executed_exit_code: ${details.attempt.executedExitCode ?? ""}`,
+    "  commands:",
+    `    inspect_recover_next_resume_attempt: ${formatShellCommand(details.commands.inspectAttempt)}`,
+    ...(details.commands.inspectHistory ? [`    inspect_recover_next_loop_history: ${formatShellCommand(details.commands.inspectHistory)}`] : []),
     `    inspect_control_plane_status: ${formatShellCommand(details.commands.inspectStatus)}`,
   ];
 }
