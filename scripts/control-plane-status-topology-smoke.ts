@@ -181,6 +181,21 @@ try {
     aggregateBeforeStop.commands.inspectTopologyWorkers.join(" "),
     `npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`,
   );
+  const aggregateTextBeforeStop = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateTextBeforeStop, /^control_plane_workers:$/m);
+  assert.match(aggregateTextBeforeStop, new RegExp(`session: ${sessionName}`));
+  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 restartable=0 latest_results=count=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextBeforeStop, new RegExp(`inspect_topology: npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`));
 
   await cliJson(baseUrl, [
     "runs",
@@ -228,6 +243,20 @@ try {
     aggregateAfterStop.commands.restartNext?.join(" "),
     `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`,
   );
+  const aggregateTextAfterStop = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 restartable=1 latest_results=count=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextAfterStop, new RegExp(`restart_next: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
+  assert.match(aggregateTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
 
   await cliJson(baseUrl, [
     "runs",

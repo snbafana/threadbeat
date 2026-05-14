@@ -5388,11 +5388,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-workers requires --server");
     }
-    if (outputFormat !== "json" && outputFormat !== "shell") {
-      throw new Error("runs session-control-plane-workers --format must be json or shell");
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-workers --format must be json, text, or shell");
     }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-control-plane-workers --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-workers --format text cannot be combined with --commands-only");
     }
     const aggregate = await fetchWorkerSessionControlPlaneWorkers(
       required(sessionName, "runs session-control-plane-workers <session> --server"),
@@ -5417,6 +5420,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         const { workers: _workers, nextSteps: _nextSteps, ...rest } = aggregate;
         await printJson({ ...rest, commands });
       }
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneWorkersText(aggregate);
       return;
     }
     await printJson(aggregate);
@@ -10588,6 +10595,74 @@ async function fetchWorkerSessionControlPlaneWorkers(
   };
 }
 
+function printWorkerSessionControlPlaneWorkersText(
+  response: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>,
+): void {
+  console.log(formatWorkerSessionControlPlaneWorkersText(response).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneWorkersText(
+  response: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>,
+): string[] {
+  const lines = [
+    "control_plane_workers:",
+    `  session: ${response.session}`,
+    `  filter: worker=${response.filter.workerId ?? "all"} include_retired=${response.filter.includeRetired} lines=${response.filter.lines}`,
+    `  all: ${formatControlPlaneWorkerSummary(response.summary)}`,
+    `  advance: ${formatControlPlaneWorkerSummary(response.summary.advance)}`,
+    `  topology: ${formatControlPlaneWorkerSummary(response.summary.topology)}`,
+    `  tick: ${formatControlPlaneWorkerSummary(response.summary.tick)}`,
+    `  apply_action: ${formatControlPlaneWorkerSummary(response.summary.applyAction)}`,
+    `  drain: ${formatControlPlaneWorkerSummary(response.summary.drain)}`,
+    "  commands:",
+    `    inspect_advance: ${formatShellCommand(response.commands.inspectAdvanceWorkers)}`,
+    `    inspect_topology: ${formatShellCommand(response.commands.inspectTopologyWorkers)}`,
+    `    inspect_tick: ${formatShellCommand(response.commands.inspectTickWorkers)}`,
+    `    inspect_apply_action: ${formatShellCommand(response.commands.inspectApplyActionWorkers)}`,
+    `    inspect_drain: ${formatShellCommand(response.commands.inspectDrainWorkers)}`,
+    `    restart_next: ${response.commands.restartNext ? formatShellCommand(response.commands.restartNext) : "none"}`,
+  ];
+  if (response.nextSteps.length === 0) {
+    lines.push("  next_steps: none");
+  } else {
+    lines.push("  next_steps:");
+    for (const step of response.nextSteps) {
+      lines.push(
+        `    - kind: ${step.kind}`,
+        `      worker: ${step.workerId ?? "<missing>"}`,
+        `      action: ${step.action ?? ""}`,
+        `      reason: ${step.reason ?? ""}`,
+        `      command: ${formatShellCommand(step.command)}`,
+      );
+    }
+  }
+  return lines;
+}
+
+function formatControlPlaneWorkerSummary(summary: ControlPlaneWorkerSummary): string {
+  return [
+    `total=${summary.total}`,
+    `alive=${summary.alive}`,
+    `stopped=${summary.stopped}`,
+    `completed=${summary.completed}`,
+    `retired=${summary.retired}`,
+    `restartable=${summary.restartable}`,
+    `latest_results=${formatControlPlaneWorkerLatestResults(summary.latestResults)}`,
+  ].join(" ");
+}
+
+function formatControlPlaneWorkerLatestResults(summary: ControlPlaneWorkerSummary["latestResults"]): string {
+  return [
+    `count=${summary.count}`,
+    `iterations=${summary.iterations}`,
+    `core=${summary.totalCoreExecuted}`,
+    `mutation=${summary.totalMutationExecuted}`,
+    `steps=${summary.executedSteps}`,
+    `confirmations=${summary.attemptedConfirmations}`,
+    `available_confirmations=${summary.availableConfirmations}`,
+  ].join(",");
+}
+
 function normalizeControlPlaneWorker(
   kind: ControlPlaneWorkerKind,
   sessionName: string,
@@ -15526,7 +15601,7 @@ Commands:
   runs restart-control-plane-topology-worker <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-topology-worker <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
-  runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|shell]
+  runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
   runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--lines 20]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
