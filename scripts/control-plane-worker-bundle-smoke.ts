@@ -372,7 +372,7 @@ try {
       resultReview: { total: number };
       bundleRecovery: { total: number; latestResults: { count: number; profileCount: number; planned: number; actionable: number; blocked: number; executed: number; polls: number } };
     };
-    workers: Array<{ kind: string; workerId: string | null; commands: { inspect: string[]; restart: string[]; stop: string[]; retire: string[]; reconcileDryRun: string[]; reconcileConfirm: string[] } | null }>;
+    workers: Array<{ kind: string; workerId: string | null; commands: { inspect: string[]; restart: string[]; stop: string[]; retire: string[]; reconcileDryRun: string[]; reconcileConfirm: string[]; reconcileUntilEmptyConfirm: string[] } | null }>;
     commands: { inspectBundleRecoveryWorkers: string[]; inspectProgress: string[] };
   }>(baseUrl, [
     "runs",
@@ -416,6 +416,10 @@ try {
   assert.equal(
     aggregateRecoveryWorker.commands?.reconcileConfirm.join(" "),
     `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --worker-id ${recoveryWorkerId} --kind control-plane-bundle-recovery --include-retired --confirm`,
+  );
+  assert.equal(
+    aggregateRecoveryWorker.commands?.reconcileUntilEmptyConfirm.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --worker-id ${recoveryWorkerId} --kind control-plane-bundle-recovery --include-retired --until-empty --max-steps 10 --interval-ms 2000 --confirm`,
   );
   assert.equal(
     aggregate.commands.inspectBundleRecoveryWorkers.join(" "),
@@ -639,6 +643,71 @@ try {
   const reconciledWorker = bundleRecoveryReconcile.after?.workers.find((worker) => worker.kind === "control_plane_bundle_recovery" && worker.workerId === recoveryWorkerId);
   assert.ok(reconciledWorker);
   assert.ok(reconciledWorker.state === "running" || reconciledWorker.state === "completed");
+
+  const stoppedForReconcileLoop = await cliJson<{ count: number }>(baseUrl, [
+    "runs",
+    "stop-control-plane-worker-bundle-recovery-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    recoveryWorkerId,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(stoppedForReconcileLoop.count, 1);
+
+  const bundleRecoveryReconcileLoop = await cliJson<{
+    confirmed: boolean;
+    untilEmpty: boolean;
+    passed: boolean | null;
+    stoppedReason: string;
+    filter: { workerId: string | null; kind: string | null; includeRetired: boolean };
+    summary: { iterations: number; totalPlanned: number; totalExecuted: number; lastNextPlannedCount: number | null; lastRemainingCount: number | null };
+    iterations: Array<{ step: number; result: { plan: { count: number }; executed: Array<{ kind: string; workerId: string; restartCount: number | null }>; checks: { remainingCount: number | null } }; nextPlannedCount: number | null }>;
+    commands: { confirm: string[] };
+    reconciliationRecord: { reconciliationId: string; path: string };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--kind",
+    "bundle-recovery",
+    "--worker-id",
+    recoveryWorkerId,
+    "--include-retired",
+    "--until-empty",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "1",
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(bundleRecoveryReconcileLoop.confirmed, true);
+  assert.equal(bundleRecoveryReconcileLoop.untilEmpty, true);
+  assert.equal(bundleRecoveryReconcileLoop.passed, true);
+  assert.equal(bundleRecoveryReconcileLoop.stoppedReason, "empty");
+  assert.equal(bundleRecoveryReconcileLoop.filter.workerId, recoveryWorkerId);
+  assert.equal(bundleRecoveryReconcileLoop.filter.kind, "control_plane_bundle_recovery");
+  assert.equal(bundleRecoveryReconcileLoop.filter.includeRetired, true);
+  assert.equal(bundleRecoveryReconcileLoop.summary.iterations, 1);
+  assert.equal(bundleRecoveryReconcileLoop.summary.totalPlanned, 1);
+  assert.equal(bundleRecoveryReconcileLoop.summary.totalExecuted, 1);
+  assert.equal(bundleRecoveryReconcileLoop.summary.lastNextPlannedCount, 0);
+  assert.equal(bundleRecoveryReconcileLoop.summary.lastRemainingCount, 0);
+  assert.equal(bundleRecoveryReconcileLoop.iterations[0]?.result.plan.count, 1);
+  assert.equal(bundleRecoveryReconcileLoop.iterations[0]?.result.executed[0]?.kind, "control_plane_bundle_recovery");
+  assert.equal(bundleRecoveryReconcileLoop.iterations[0]?.result.executed[0]?.workerId, recoveryWorkerId);
+  assert.equal(bundleRecoveryReconcileLoop.iterations[0]?.result.executed[0]?.restartCount, 1);
+  assert.equal(bundleRecoveryReconcileLoop.iterations[0]?.nextPlannedCount, 0);
+  assert.equal(
+    bundleRecoveryReconcileLoop.commands.confirm.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --worker-id ${recoveryWorkerId} --kind control-plane-bundle-recovery --include-retired --lines 1 --until-empty --max-steps 2 --interval-ms 1 --confirm`,
+  );
+  assert.ok(bundleRecoveryReconcileLoop.reconciliationRecord.reconciliationId);
+  assert.ok(bundleRecoveryReconcileLoop.reconciliationRecord.path.endsWith(".json"));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

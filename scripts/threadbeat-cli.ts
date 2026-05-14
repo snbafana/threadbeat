@@ -13091,6 +13091,7 @@ function normalizeControlPlaneWorker(
     retire: string[];
     reconcileDryRun: string[];
     reconcileConfirm: string[];
+    reconcileUntilEmptyConfirm: string[];
   } | null;
 } {
   const record = plainRecord(worker) ?? {};
@@ -13290,6 +13291,7 @@ function controlPlaneWorkerCommands(
   retire: string[];
   reconcileDryRun: string[];
   reconcileConfirm: string[];
+  reconcileUntilEmptyConfirm: string[];
 } {
   if (kind === "control_plane_topology") {
     return {
@@ -13324,6 +13326,16 @@ function controlPlaneWorkerCommands(
         "--worker-id", workerId,
         "--kind", controlPlaneWorkerKindFlag(kind),
         ...(includeRetired ? ["--include-retired"] : []),
+        "--confirm",
+      ],
+      reconcileUntilEmptyConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--until-empty",
+        "--max-steps", "10",
+        "--interval-ms", "2000",
         "--confirm",
       ],
     };
@@ -13363,6 +13375,16 @@ function controlPlaneWorkerCommands(
         ...(includeRetired ? ["--include-retired"] : []),
         "--confirm",
       ],
+      reconcileUntilEmptyConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--until-empty",
+        "--max-steps", "10",
+        "--interval-ms", "2000",
+        "--confirm",
+      ],
     };
   }
   if (kind === "control_plane_bundle_recovery") {
@@ -13400,6 +13422,16 @@ function controlPlaneWorkerCommands(
         ...(includeRetired ? ["--include-retired"] : []),
         "--confirm",
       ],
+      reconcileUntilEmptyConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--until-empty",
+        "--max-steps", "10",
+        "--interval-ms", "2000",
+        "--confirm",
+      ],
     };
   }
   const nouns = controlPlaneWorkerCommandNouns(kind);
@@ -13435,6 +13467,16 @@ function controlPlaneWorkerCommands(
       "--worker-id", workerId,
       "--kind", controlPlaneWorkerKindFlag(kind),
       ...(includeRetired ? ["--include-retired"] : []),
+      "--confirm",
+    ],
+    reconcileUntilEmptyConfirm: [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+      "--worker-id", workerId,
+      "--kind", controlPlaneWorkerKindFlag(kind),
+      ...(includeRetired ? ["--include-retired"] : []),
+      "--until-empty",
+      "--max-steps", "10",
+      "--interval-ms", "2000",
       "--confirm",
     ],
   };
