@@ -8765,6 +8765,22 @@ type WorkerSessionControlPlaneStatusResponse = {
         confirmed: boolean | null;
         command: string[];
       }>;
+      failedRecent: Array<{
+        advanceId: string;
+        observedAt: string;
+        completedAt: string;
+        detailCommand: string | null;
+        workerId: string | null;
+        action: string | null;
+        reason: string | null;
+        dryRun: boolean;
+        executed: boolean;
+        failed: boolean;
+        blocked: boolean | null;
+        mutating: boolean | null;
+        confirmed: boolean | null;
+        command: string[];
+      }>;
     };
     workerReconciliations: {
       counts: {
@@ -10163,6 +10179,18 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   }
+  if (summary.recovery.statusWatchExecutions.failedRecent.length > 0) {
+    lines.push("failed_status_watch_executions:");
+    for (const attempt of summary.recovery.statusWatchExecutions.failedRecent) {
+      lines.push(
+        `  - advance: ${attempt.advanceId}`,
+        `    observed_at: ${attempt.observedAt}`,
+        `    action: ${attempt.action ?? ""}`,
+        `    reason: ${attempt.reason ?? ""}`,
+        `    inspect: ${formatShellCommand(attempt.command)}`,
+      );
+    }
+  }
   const workerReconciliations = summary.recovery.workerReconciliations;
   lines.push(
     `worker_reconciliations: total=${workerReconciliations.counts.total} dry_run=${workerReconciliations.counts.dryRun} executed=${workerReconciliations.counts.executed} noop=${workerReconciliations.counts.noop} failed=${workerReconciliations.counts.failed} max_steps=${workerReconciliations.counts.maxSteps} until_empty=${workerReconciliations.counts.untilEmpty}`,
@@ -10291,7 +10319,13 @@ function workerSessionControlPlaneStatusSummaryCommands(
   if (summary.recovery.statusWatchExecutions.attempts.total > 0) {
     commands.push({ command: summary.commands.statusWatchExecutions });
   }
+  const statusWatchInspectAdvanceIds = new Set<string>();
+  for (const attempt of summary.recovery.statusWatchExecutions.failedRecent) {
+    statusWatchInspectAdvanceIds.add(attempt.advanceId);
+    commands.push({ command: attempt.command });
+  }
   for (const attempt of summary.recovery.statusWatchExecutions.recent) {
+    if (statusWatchInspectAdvanceIds.has(attempt.advanceId)) continue;
     commands.push({ command: attempt.command });
   }
   for (const record of summary.recovery.workerReconciliations.recent) {
@@ -10505,7 +10539,7 @@ function selectWorkerSessionControlPlaneNextActions(
   status: WorkerSessionControlPlaneStatusResponse,
 ): Array<WorkerSessionControlPlaneAdvanceAction> {
   const nextActions: Array<WorkerSessionControlPlaneAdvanceAction> = [];
-  const failedStatusWatchExecution = status.recovery.statusWatchExecutions.recent.find((attempt) => attempt.failed);
+  const failedStatusWatchExecution = status.recovery.statusWatchExecutions.failedRecent[0];
   if (failedStatusWatchExecution) {
     nextActions.push({
       surface: "status_watch",

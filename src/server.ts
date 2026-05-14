@@ -3925,6 +3925,7 @@ const readWorkerSessionControlPlaneStatus = async (
     statusWatchExecutions: {
       attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
       recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
+      failedRecent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
     };
     workerReconciliations: {
       counts: ReturnType<typeof summarizeWorkerSessionControlPlaneWorkerReconciliationRecords>;
@@ -4059,6 +4060,10 @@ const readWorkerSessionControlPlaneStatus = async (
       statusWatchExecutions: {
         attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(statusWatchExecutionAttempts),
         recent: statusWatchExecutionAttempts
+          .slice(0, lines)
+          .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
+        failedRecent: statusWatchExecutionAttempts
+          .filter((record) => controlPlaneAdvanceExecutionFailed(record.executed))
           .slice(0, lines)
           .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
       },

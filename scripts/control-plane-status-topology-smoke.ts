@@ -679,7 +679,7 @@ try {
     needsAction: boolean;
     nextRecovery: { surface: string; action: string; reason: string; count: number; command: string[]; dryRunCommand: string[] } | null;
     nextActions: Array<{ surface: string; action: string; reason: string; count: number; advanceId?: string; command: string[] }>;
-    recovery: { statusWatchExecutions: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; failed: boolean; command: string[] }> } };
+    recovery: { statusWatchExecutions: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; failed: boolean; command: string[] }>; failedRecent: Array<{ advanceId: string; failed: boolean; command: string[] }> } };
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -695,6 +695,8 @@ try {
   const failedStatusWatchSummaryAttempt = summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.recent.find((attempt) => attempt.advanceId === failedStatusWatch.record.advanceId);
   assert.equal(failedStatusWatchSummaryAttempt?.failed, true);
   assert.deepEqual(failedStatusWatchSummaryAttempt?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", failedStatusWatch.record.advanceId, "--status-watch-executions"]);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.failedRecent[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.failedRecent[0]?.failed, true);
   assert.equal(summaryAfterFailedStatusWatch.nextRecovery?.surface, "status_watch");
   assert.equal(summaryAfterFailedStatusWatch.nextRecovery?.action, "inspect_failed_status_watch_execution");
   assert.equal(summaryAfterFailedStatusWatch.nextRecovery?.reason, "failed_status_watch_execution");
@@ -719,6 +721,61 @@ try {
   assert.match(summaryTextAfterFailedStatusWatch, /next_recovery:\n  kind: control_plane_action\n  action: inspect_failed_status_watch_execution\n  reason: failed_status_watch_execution/);
   assert.match(summaryTextAfterFailedStatusWatch, /next_actions:\n  - surface: status_watch/);
   assert.match(summaryTextAfterFailedStatusWatch, new RegExp(`advance: ${failedStatusWatch.record.advanceId}`));
+  await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {
+    session: sessionName,
+    observedAt: "2026-05-14T00:00:04.000Z",
+    completedAt: "2026-05-14T00:00:05.000Z",
+    dryRun: false,
+    detailCommand: "status_watch_execute_action",
+    selected: {
+      surface: "status_watch",
+      action: "execute_action",
+      reason: "control_plane_action:successful_status_watch_smoke",
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+    },
+    executed: {
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      output: null,
+    },
+    before: null,
+    after: null,
+  });
+  const compactSummaryAfterFailedStatusWatch = await cliJson<{
+    nextRecovery: { surface: string; action: string; reason: string; count: number; command: string[]; dryRunCommand: string[] } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; count: number; advanceId?: string; command: string[] }>;
+    recovery: { statusWatchExecutions: { attempts: { total: number; failed: number }; recent: Array<{ advanceId: string; failed: boolean }>; failedRecent: Array<{ advanceId: string; failed: boolean; command: string[] }> } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.total, 3);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.failed, 1);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.recent.length, 1);
+  assert.notEqual(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.recent[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.failedRecent[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(compactSummaryAfterFailedStatusWatch.nextRecovery?.surface, "status_watch");
+  assert.equal(compactSummaryAfterFailedStatusWatch.nextActions[0]?.advanceId, failedStatusWatch.record.advanceId);
+  const compactSummaryTextAfterFailedStatusWatch = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(compactSummaryTextAfterFailedStatusWatch, /failed_status_watch_executions:/);
+  assert.match(compactSummaryTextAfterFailedStatusWatch, new RegExp(`advance: ${failedStatusWatch.record.advanceId}`));
   const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
     "runs",
     "session-control-plane-topology-workers-next",
