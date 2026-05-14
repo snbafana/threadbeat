@@ -54,6 +54,8 @@ try {
 
   const checkoutCommand = `npm run cli -- runs checkout ${run.id} --dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
   const reviewCommand = `npm run cli -- runs review ${run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
+  const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id}`;
+  const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id}`;
 
   const summary = await cliJson<{
     results: {
@@ -105,6 +107,34 @@ try {
   ]);
   assert.match(shellSummary, new RegExp(checkoutCommand));
   assert.match(shellSummary, new RegExp(reviewCommand));
+
+  const resultInspectionCommands = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "pending",
+    "--commands-only",
+  ]);
+  assert.ok(resultInspectionCommands.commands.some((command) => command.command.join(" ") === checkoutCommand));
+  assert.ok(resultInspectionCommands.commands.some((command) => command.command.join(" ") === reviewCommand));
+  assert.ok(resultInspectionCommands.commands.some((command) => command.command.join(" ") === recordReviewedCommand));
+  assert.ok(resultInspectionCommands.commands.some((command) => command.command.join(" ") === recordSkippedCommand));
+
+  const resultInspectionShell = await cliText(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "pending",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(resultInspectionShell, new RegExp(recordReviewedCommand));
+  assert.match(resultInspectionShell, new RegExp(recordSkippedCommand));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

@@ -4747,7 +4747,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : null,
       },
     );
-    const commands = resultInspections.resultCommits.map((result) => ({ command: result.nextStep.command }));
+    const commands = resultInspections.resultCommits.flatMap((result) => {
+      if (result.reviewState === "pending") {
+        return [
+          { command: result.commands.inspectResult },
+          { command: result.commands.checkoutBranch },
+          { command: result.commands.reviewRun },
+          { command: result.commands.recordReviewed },
+          { command: result.commands.recordSkipped },
+        ];
+      }
+      return [{ command: result.nextStep.command }];
+    });
     if (options["commands-only"] === "1") {
       if (outputFormat === "shell") {
         printCommandQueueShell(commands);
