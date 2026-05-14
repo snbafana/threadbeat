@@ -14,6 +14,7 @@ const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-worker-bund
 const sessionName = `worker-bundle-${Date.now().toString(36)}`;
 const topologyWorkerId = "bundle-topology-worker";
 const resultReviewWorkerId = "bundle-result-review-worker";
+const recoveryWorkerId = "bundle-recovery-worker";
 
 const settings: Settings = {
   projectRoot: path.resolve("."),
@@ -247,6 +248,45 @@ try {
   assert.equal(recoveryLoop.summary.actionable, 4);
   assert.equal(recoveryLoop.summary.executed, 0);
   assert.equal(recoveryLoop.summary.passed, null);
+
+  const recoveryWorker = await cliJson<{
+    worker: { workerId: string; mode: string; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "start-control-plane-worker-bundle-recovery-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    recoveryWorkerId,
+    "--dry-run",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(recoveryWorker.worker.workerId, recoveryWorkerId);
+  assert.equal(recoveryWorker.worker.mode, "bundle_recovery_loop");
+  assert.equal(recoveryWorker.worker.command.join(" "), `runs recover-control-plane-worker-bundles --server --session ${sessionName} --loop --max-polls 1 --interval-ms 1 --lines 1 --progress-json --dry-run`);
+
+  const recoveryWorkers = await cliJson<{
+    count: number;
+    workers: Array<{ workerId: string; mode: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundle-recovery-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    recoveryWorkerId,
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(recoveryWorkers.count, 1);
+  assert.equal(recoveryWorkers.workers[0]?.workerId, recoveryWorkerId);
+  assert.equal(recoveryWorkers.workers[0]?.mode, "bundle_recovery_loop");
 
   const recoveryConfirmed = await cliJson<{
     confirmed: boolean;

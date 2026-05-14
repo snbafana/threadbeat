@@ -997,8 +997,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           topologyLoop: parseBoolean(body.topologyLoop, false),
           includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
           resultReview: parseBoolean(body.resultReview, false),
+          bundleRecovery: parseBoolean(body.bundleRecovery, false),
           ...(body.reviewAction ? { reviewAction: parseRequiredResultReviewAction(body.reviewAction) } : {}),
           maxResults: parseOptionalInteger(body.maxResults) ?? 10,
+          maxPolls: parseOptionalInteger(body.maxPolls) ?? 60,
           ...(parseOptionalString(body.reviewedBy) ? { reviewedBy: parseOptionalString(body.reviewedBy) } : {}),
           ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
           maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
@@ -1021,7 +1023,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const drainConfirmations = parseBoolean(body.drainConfirmations, false);
       const topologyLoop = parseBoolean(body.topologyLoop, false);
       const resultReview = parseBoolean(body.resultReview, false);
-      const requestedMode = resultReview ? "result_review_loop" : topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
+      const bundleRecovery = parseBoolean(body.bundleRecovery, false);
+      const requestedMode = bundleRecovery ? "bundle_recovery_loop" : resultReview ? "result_review_loop" : topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
       const existingWorkers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
         sessionName: name,
         ...(workerId ? { workerId } : {}),
@@ -1081,8 +1084,10 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           topologyLoop,
           includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
           resultReview,
+          bundleRecovery,
           ...(body.reviewAction ? { reviewAction: parseRequiredResultReviewAction(body.reviewAction) } : {}),
           maxResults: parseOptionalInteger(body.maxResults) ?? 10,
+          maxPolls: parseOptionalInteger(body.maxPolls) ?? 60,
           ...(parseOptionalString(body.reviewedBy) ? { reviewedBy: parseOptionalString(body.reviewedBy) } : {}),
           ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
           maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
@@ -5855,6 +5860,7 @@ const parseControlPlaneAdvanceWorkerMode = (value: unknown): ControlPlaneAdvance
   if (value === "confirmation_drain" || value === "confirmation-drain" || value === "confirmation") return "confirmation_drain";
   if (value === "topology_loop" || value === "topology-loop" || value === "topology") return "topology_loop";
   if (value === "result_review_loop" || value === "result-review-loop" || value === "result_review" || value === "result-review") return "result_review_loop";
+  if (value === "bundle_recovery_loop" || value === "bundle-recovery-loop" || value === "bundle_recovery" || value === "bundle-recovery") return "bundle_recovery_loop";
   throw new Error(`unsupported control-plane advance worker mode: ${String(value)}`);
 };
 

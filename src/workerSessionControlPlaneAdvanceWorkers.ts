@@ -25,7 +25,7 @@ export type ControlPlaneAdvanceWorker = {
   recentProgress?: ControlPlaneAdvanceWorkerLatestResult[];
 };
 
-export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop";
+export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop" | "bundle_recovery_loop";
 export type ControlPlaneAdvanceWorkerLatestResultSource = "recorded" | "stdout" | "none";
 
 export type ControlPlaneAdvanceWorkerLifecycle = {
@@ -51,8 +51,15 @@ export type ControlPlaneAdvanceWorkerLatestResult = {
   intervalMs?: number;
   maxConfirmations?: number;
   maxResults?: number;
+  maxPolls?: number;
   maxIterations?: number;
   loopIntervalMs?: number;
+  profileCount?: number;
+  planned?: number;
+  actionable?: number;
+  blocked?: number;
+  executed?: number;
+  polls?: number;
   iterations?: number;
   executedSteps?: number;
   attemptedConfirmations?: number;
@@ -111,8 +118,10 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     topologyLoop?: boolean;
     includeMutationWorkers?: boolean;
     resultReview?: boolean;
+    bundleRecovery?: boolean;
     reviewAction?: "reviewed" | "skipped";
     maxResults?: number;
+    maxPolls?: number;
     reviewedBy?: string;
     note?: string;
     maxIterations?: number;
@@ -130,7 +139,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
   if (await pathExists(recordPath)) {
     throw new Error(`control-plane advance worker '${workerId}' already exists for session '${sessionName}'`);
   }
-  const mode: ControlPlaneAdvanceWorkerMode = options.resultReview ? "result_review_loop" : options.topologyLoop ? "topology_loop" : options.drainConfirmations ? "confirmation_drain" : "advance_loop";
+  const mode: ControlPlaneAdvanceWorkerMode = options.bundleRecovery ? "bundle_recovery_loop" : options.resultReview ? "result_review_loop" : options.topologyLoop ? "topology_loop" : options.drainConfirmations ? "confirmation_drain" : "advance_loop";
   if (mode === "confirmation_drain" && !options.confirm) {
     throw new Error("control-plane confirmation drain workers require --confirm");
   }
@@ -328,16 +337,22 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
         ? "restart-control-plane-topology-worker"
         : mode === "result_review_loop"
           ? "restart-control-plane-result-review-worker"
+          : mode === "bundle_recovery_loop"
+            ? "restart-control-plane-worker-bundle-recovery-worker"
           : "restart-control-plane-advance-workers";
       const inspectCommandName = mode === "topology_loop"
         ? "session-control-plane-topology-workers"
         : mode === "result_review_loop"
           ? "session-control-plane-result-review-workers"
+          : mode === "bundle_recovery_loop"
+            ? "session-control-plane-worker-bundle-recovery-workers"
           : "session-control-plane-advance-workers";
       const stopCommandName = mode === "topology_loop"
         ? "stop-control-plane-topology-worker"
         : mode === "result_review_loop"
           ? "stop-control-plane-result-review-worker"
+          : mode === "bundle_recovery_loop"
+            ? "stop-control-plane-worker-bundle-recovery-worker"
           : "stop-control-plane-advance-workers";
       const restartControlPlaneAdvanceWorker = ["npm", "run", "cli", "--", "runs", restartCommandName, sessionName, "--server", "--worker-id", worker.workerId];
       const encodedSession = encodeURIComponent(sessionName);
@@ -733,9 +748,16 @@ function summarizeLatestWorkerJsonResult(value: Record<string, unknown>): Contro
     ...(typeof value.intervalMs === "number" ? { intervalMs: value.intervalMs } : {}),
     ...(typeof value.maxConfirmations === "number" ? { maxConfirmations: value.maxConfirmations } : {}),
     ...(typeof value.maxResults === "number" ? { maxResults: value.maxResults } : {}),
+    ...(typeof value.maxPolls === "number" ? { maxPolls: value.maxPolls } : {}),
     ...(typeof value.maxIterations === "number" ? { maxIterations: value.maxIterations } : {}),
     ...(typeof value.loopIntervalMs === "number" ? { loopIntervalMs: value.loopIntervalMs } : {}),
     ...(typeof summary?.iterations === "number" ? { iterations: summary.iterations } : {}),
+    ...(typeof summary?.profileCount === "number" ? { profileCount: summary.profileCount } : {}),
+    ...(typeof summary?.planned === "number" ? { planned: summary.planned } : {}),
+    ...(typeof summary?.actionable === "number" ? { actionable: summary.actionable } : {}),
+    ...(typeof summary?.blocked === "number" ? { blocked: summary.blocked } : {}),
+    ...(typeof summary?.executed === "number" ? { executed: summary.executed } : {}),
+    ...(typeof summary?.polls === "number" ? { polls: summary.polls } : {}),
     ...(typeof value.executedSteps === "number" ? { executedSteps: value.executedSteps } : {}),
     ...(typeof value.attemptedConfirmations === "number" ? { attemptedConfirmations: value.attemptedConfirmations } : {}),
     ...(typeof value.availableConfirmations === "number" ? { availableConfirmations: value.availableConfirmations } : {}),
@@ -795,8 +817,10 @@ function buildControlPlaneAdvanceWorkerCommand(
     confirm?: boolean;
     includeMutationWorkers?: boolean;
     resultReview?: boolean;
+    bundleRecovery?: boolean;
     reviewAction?: "reviewed" | "skipped";
     maxResults?: number;
+    maxPolls?: number;
     reviewedBy?: string;
     note?: string;
     maxIterations?: number;
@@ -818,6 +842,24 @@ function buildControlPlaneAdvanceWorkerCommand(
       ...(options.dryRun ? ["--dry-run"] : []),
       ...(options.reviewedBy ? ["--reviewed-by", options.reviewedBy] : []),
       ...(options.note ? ["--note", options.note] : []),
+    ];
+  }
+  if (mode === "bundle_recovery_loop") {
+    return [
+      "runs",
+      "recover-control-plane-worker-bundles",
+      "--server",
+      "--session",
+      sessionName,
+      "--loop",
+      "--max-polls",
+      String(options.maxPolls ?? options.maxSteps),
+      "--interval-ms",
+      String(options.intervalMs),
+      "--lines",
+      String(options.lines),
+      "--progress-json",
+      options.confirm ? "--confirm" : "--dry-run",
     ];
   }
   if (mode === "topology_loop") {

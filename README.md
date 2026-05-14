@@ -844,7 +844,13 @@ blocked, and existing worker counts, and copyable recovery commands. Add
 mutating recovery pass. Use `runs recover-control-plane-worker-bundles --server
 --dry-run` to preview restarting missing saved bundle workers, or add
 `--confirm` to recover them; add `--loop --max-polls <n>` for a bounded
-foreground recovery poll.
+foreground recovery poll. Use `runs
+start-control-plane-worker-bundle-recovery-worker <name> --server --confirm`
+to detach that saved-profile recovery loop into the same durable worker record
+store as the other control-plane loops; inspect it with `runs
+session-control-plane-worker-bundle-recovery-workers <name> --server`, restart
+it with `runs restart-control-plane-worker-bundle-recovery-worker`, or stop and
+retire it with `runs stop-control-plane-worker-bundle-recovery-worker`.
 `runs session-control-plane-status <name> --server`
 keeps the aggregate `workers.controlPlaneAdvance` totals and also breaks them
 out by `advance_loop` and `confirmation_drain` mode. It also includes

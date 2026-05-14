@@ -4865,6 +4865,121 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "start-control-plane-worker-bundle-recovery-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs start-control-plane-worker-bundle-recovery-worker requires --server");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (dryRun === confirm) {
+      throw new Error("runs start-control-plane-worker-bundle-recovery-worker requires exactly one of --confirm or --dry-run");
+    }
+    await printJson(await startWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs start-control-plane-worker-bundle-recovery-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun,
+        confirm,
+        maxSteps: parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls"),
+        maxPolls: parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        bundleRecovery: true,
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "ensure-control-plane-worker-bundle-recovery-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs ensure-control-plane-worker-bundle-recovery-worker requires --server");
+    }
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (dryRun === confirm) {
+      throw new Error("runs ensure-control-plane-worker-bundle-recovery-worker requires exactly one of --confirm or --dry-run");
+    }
+    await printJson(await ensureWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs ensure-control-plane-worker-bundle-recovery-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        dryRun,
+        confirm,
+        maxSteps: parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls"),
+        maxPolls: parsePositiveInteger(options["max-polls"] ?? "60", "--max-polls"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        bundleRecovery: true,
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "session-control-plane-worker-bundle-recovery-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-worker-bundle-recovery-workers requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneAdvanceWorkers(
+      required(sessionName, "runs session-control-plane-worker-bundle-recovery-workers <session> --server"),
+      {
+        workerId: options["worker-id"],
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        mode: "bundle_recovery_loop",
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "session-control-plane-worker-bundle-recovery-workers-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-worker-bundle-recovery-workers-next requires --server");
+    }
+    await printJson(await fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(
+      required(sessionName, "runs session-control-plane-worker-bundle-recovery-workers-next <session> --server"),
+      { workerId: options["worker-id"], mode: "bundle_recovery_loop" },
+    ));
+    return;
+  }
+  if (subcommandName === "restart-control-plane-worker-bundle-recovery-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs restart-control-plane-worker-bundle-recovery-worker requires --server");
+    }
+    await printJson(await restartWorkerSessionControlPlaneAdvanceWorker(
+      required(sessionName, "runs restart-control-plane-worker-bundle-recovery-worker <session> --server"),
+      {
+        workerId: required(options["worker-id"], "runs restart-control-plane-worker-bundle-recovery-worker <session> --server --worker-id <id>"),
+        includeRetired: options["include-retired"] === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        mode: "bundle_recovery_loop",
+      },
+    ));
+    return;
+  }
+  if (subcommandName === "stop-control-plane-worker-bundle-recovery-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    if (options.server !== "1") {
+      throw new Error("runs stop-control-plane-worker-bundle-recovery-worker requires --server");
+    }
+    await printJson(await stopWorkerSessionControlPlaneAdvanceWorkers(
+      required(sessionName, "runs stop-control-plane-worker-bundle-recovery-worker <session> --server"),
+      {
+        workerId: options["worker-id"],
+        retire: options.retire === "1",
+        lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+        mode: "bundle_recovery_loop",
+      },
+    ));
+    return;
+  }
   if (subcommandName === "ensure-control-plane-worker-bundle") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -12046,8 +12161,10 @@ async function startWorkerSessionControlPlaneAdvanceWorker(
     topologyLoop?: boolean;
     includeMutationWorkers?: boolean;
     resultReview?: boolean;
+    bundleRecovery?: boolean;
     reviewAction?: "reviewed" | "skipped";
     maxResults?: number;
+    maxPolls?: number;
     reviewedBy?: string;
     note?: string;
     maxIterations?: number;
@@ -12074,8 +12191,10 @@ async function startWorkerSessionControlPlaneAdvanceWorker(
       topologyLoop: options.topologyLoop ?? false,
       includeMutationWorkers: options.includeMutationWorkers ?? false,
       resultReview: options.resultReview ?? false,
+      bundleRecovery: options.bundleRecovery ?? false,
       ...(options.reviewAction ? { reviewAction: options.reviewAction } : {}),
       maxResults: options.maxResults ?? options.maxSteps,
+      maxPolls: options.maxPolls ?? options.maxSteps,
       ...(options.reviewedBy ? { reviewedBy: options.reviewedBy } : {}),
       ...(options.note ? { note: options.note } : {}),
       maxIterations: options.maxIterations ?? options.maxSteps,
@@ -12099,8 +12218,10 @@ async function ensureWorkerSessionControlPlaneAdvanceWorker(
     topologyLoop?: boolean;
     includeMutationWorkers?: boolean;
     resultReview?: boolean;
+    bundleRecovery?: boolean;
     reviewAction?: "reviewed" | "skipped";
     maxResults?: number;
+    maxPolls?: number;
     reviewedBy?: string;
     note?: string;
     maxIterations?: number;
@@ -12130,8 +12251,10 @@ async function ensureWorkerSessionControlPlaneAdvanceWorker(
       topologyLoop: options.topologyLoop ?? false,
       includeMutationWorkers: options.includeMutationWorkers ?? false,
       resultReview: options.resultReview ?? false,
+      bundleRecovery: options.bundleRecovery ?? false,
       ...(options.reviewAction ? { reviewAction: options.reviewAction } : {}),
       maxResults: options.maxResults ?? options.maxSteps,
+      maxPolls: options.maxPolls ?? options.maxSteps,
       ...(options.reviewedBy ? { reviewedBy: options.reviewedBy } : {}),
       ...(options.note ? { note: options.note } : {}),
       maxIterations: options.maxIterations ?? options.maxSteps,
@@ -12621,7 +12744,7 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
 }
 
 type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_tick" | "apply_action" | "drain";
-type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop";
+type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop" | "bundle_recovery_loop";
 
 type ControlPlaneWorkerSummary = {
   total: number;
@@ -19178,6 +19301,12 @@ Commands:
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs session-control-plane-worker-bundle <name> --server [--lines 20] [--format json|text]
   runs session-control-plane-worker-bundles --server [--session name] [--lines 20] [--format json|text]
+  runs start-control-plane-worker-bundle-recovery-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--max-polls 60] [--interval-ms 2000] [--lines 20]
+  runs ensure-control-plane-worker-bundle-recovery-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--max-polls 60] [--interval-ms 2000] [--lines 20]
+  runs session-control-plane-worker-bundle-recovery-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
+  runs session-control-plane-worker-bundle-recovery-workers-next <name> --server [--worker-id id]
+  runs restart-control-plane-worker-bundle-recovery-worker <name> --server --worker-id id [--include-retired] [--lines 20]
+  runs stop-control-plane-worker-bundle-recovery-worker <name> --server [--worker-id id] [--retire] [--lines 20]
   runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--from-profile] [--save-profile] [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
   runs recover-control-plane-worker-bundles --server (--confirm|--dry-run) [--session name] [--loop --max-polls 60 --interval-ms 2000 --progress-json] [--lines 20] [--format json|text]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
