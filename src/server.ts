@@ -175,6 +175,27 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
     executedExitCode: number | null;
     command: string[];
   }>;
+  loopSteps: {
+    attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
+    recent: Array<{
+      advanceId: string;
+      observedAt: string;
+      completedAt: string;
+      detailCommand: string | null;
+      dryRun: boolean;
+      loopAdvanceId: string | null;
+      stepIndex: number | null;
+      selectedAction: string | null;
+      selectedKind: string | null;
+      selectedSurface: string | null;
+      selectedReason: string | null;
+      selectedCommand: string[] | null;
+      selectedDryRunCommand: string[] | null;
+      executedCommand: string[] | null;
+      executedExitCode: number | null;
+      command: string[];
+    }>;
+  };
 };
 
 export const buildServer = async (settings: Settings): Promise<AppParts> => {
@@ -3967,6 +3988,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneRecoveryAttempts,
     controlPlaneConfirmationAdvances,
     recoverNextAttempts,
+    recoverNextLoopStepAttempts,
     statusWatchExecutionAttempts,
     statusWatchAcknowledgementAttempts,
     workerReconciliations,
@@ -4001,6 +4023,10 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
       limit: Number.MAX_SAFE_INTEGER,
       detailCommands: ["recover_next", "recover_next_loop"],
+    }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
+      detailCommands: ["recover_next_loop_step"],
     }),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
       limit: Number.MAX_SAFE_INTEGER,
@@ -4072,7 +4098,7 @@ const readWorkerSessionControlPlaneStatus = async (
       recentAttempts: controlPlaneRecoveryAttempts
         .slice(0, lines)
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
-      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(name, recoverNextAttempts, lines),
+      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(name, recoverNextAttempts, recoverNextLoopStepAttempts, lines),
       statusWatchExecutions: {
         attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(statusWatchExecutionAttempts),
         recent: statusWatchExecutionAttempts
@@ -4246,6 +4272,7 @@ const summarizeWorkerSessionControlPlaneConfirmationQueue = (
 const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
   sessionName: string,
   records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  loopStepRecords: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
   lines: number,
 ): WorkerSessionControlPlaneRecoverNextHistoryStatus => {
   return {
@@ -4276,6 +4303,32 @@ const summarizeWorkerSessionControlPlaneRecoverNextHistory = (
         command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", record.advanceId],
       };
     }),
+    loopSteps: {
+      attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(loopStepRecords),
+      recent: loopStepRecords.slice(0, lines).map((record) => {
+        const recovery = objectRecord(record.recovery);
+        const selected = objectRecord(record.selected);
+        const executed = objectRecord(record.executed);
+        return {
+          advanceId: record.advanceId,
+          observedAt: record.observedAt,
+          completedAt: record.completedAt,
+          detailCommand: record.detailCommand ?? null,
+          dryRun: record.dryRun,
+          loopAdvanceId: stringRecordField(recovery, "loopAdvanceId"),
+          stepIndex: numberRecordField(recovery, "stepIndex"),
+          selectedAction: stringRecordField(selected, "action"),
+          selectedKind: stringRecordField(selected, "kind"),
+          selectedSurface: stringRecordField(selected, "surface"),
+          selectedReason: stringRecordField(selected, "reason"),
+          selectedCommand: stringArrayRecordField(selected, "command"),
+          selectedDryRunCommand: stringArrayRecordField(selected, "dryRunCommand"),
+          executedCommand: stringArrayRecordField(executed, "command"),
+          executedExitCode: numberRecordField(executed, "exitCode"),
+          command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", record.advanceId],
+        };
+      }),
+    },
   };
 };
 

@@ -450,6 +450,7 @@ try {
     untilEmpty: boolean;
     advanceId: string;
     advancePath: string;
+    loopAdvanceId: string;
     maxSteps: number;
     intervalMs: number;
     executedSteps: number;
@@ -474,6 +475,7 @@ try {
   assert.equal(recoverNextLoopDryRun.session, sessionName);
   assert.equal(recoverNextLoopDryRun.dryRun, true);
   assert.match(recoverNextLoopDryRun.advancePath, /control-plane-advances/);
+  assert.equal(recoverNextLoopDryRun.loopAdvanceId, recoverNextLoopDryRun.advanceId);
   assert.equal(recoverNextLoopDryRun.untilEmpty, true);
   assert.equal(recoverNextLoopDryRun.maxSteps, 3);
   assert.equal(recoverNextLoopDryRun.intervalMs, 0);
@@ -501,6 +503,20 @@ try {
           selectedKind: string | null;
           command: string[];
         }>;
+        loopSteps: {
+          attempts: { total: number; dryRun: number; executed: number; failed: number };
+          recent: Array<{
+            advanceId: string;
+            loopAdvanceId: string | null;
+            stepIndex: number | null;
+            detailCommand: string | null;
+            dryRun: boolean;
+            selectedAction: string | null;
+            selectedKind: string | null;
+            executedExitCode: number | null;
+            command: string[];
+          }>;
+        };
       };
     };
   }>(baseUrl, [
@@ -536,6 +552,19 @@ try {
     "--advance",
     recoverNextLoopDryRun.advanceId,
   ]);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.loopSteps.attempts.total, 1);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.loopSteps.attempts.dryRun, 1);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.loopSteps.attempts.executed, 1);
+  assert.equal(statusAfterRecoverNext.recovery.recoverNext.loopSteps.attempts.failed, 0);
+  const recentRecoverLoopStep = statusAfterRecoverNext.recovery.recoverNext.loopSteps.recent[0];
+  assert.equal(recentRecoverLoopStep?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(recentRecoverLoopStep?.stepIndex, 1);
+  assert.equal(recentRecoverLoopStep?.detailCommand, "recover_next_loop_step");
+  assert.equal(recentRecoverLoopStep?.dryRun, true);
+  assert.equal(recentRecoverLoopStep?.selectedKind, "confirmation_queue");
+  assert.equal(recentRecoverLoopStep?.selectedAction, "drain_control_plane_confirmations");
+  assert.equal(recentRecoverLoopStep?.executedExitCode, 0);
+  assert.match(recentRecoverLoopStep?.advanceId ?? "", new RegExp(`^${recoverNextLoopDryRun.advanceId}`));
 
   const statusSummaryText = await cliText(baseUrl, [
     "runs",
@@ -552,7 +581,10 @@ try {
   assert.match(statusSummaryText, /surface: worker_recovery/);
   assert.match(statusSummaryText, new RegExp(`command: npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.match(statusSummaryText, /pending_confirmations: 1/);
+  assert.match(statusSummaryText, /recover_next_loop_steps: total=1 dry_run=1 executed=1 failed=0/);
+  assert.match(statusSummaryText, /recent_recover_next_loop_steps:/);
   assert.match(statusSummaryText, new RegExp(`advance: ${recoverNextLoopDryRun.advanceId}`));
+  assert.match(statusSummaryText, new RegExp(`loop: ${recoverNextLoopDryRun.advanceId}`));
   assert.match(statusSummaryText, /inspect: npm run cli -- runs session-control-plane-advances/);
 
   const statusSummaryShell = await cliText(baseUrl, [
@@ -570,6 +602,7 @@ try {
   assert.ok(statusSummaryShellLines.some((line) => line.includes("--dry-run")));
   assert.ok(statusSummaryShellLines.some((line) => line === `npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recoverNextLoopDryRun.advanceId}`)));
+  assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recentRecoverLoopStep?.advanceId}`)));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

@@ -5000,11 +5000,41 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["until-empty"] === "1") {
       const maxSteps = parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps");
       const intervalMs = parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms");
+      const loopAdvanceId = createRecoverNextLoopAdvanceId(observedAt);
       const cycles: Array<Awaited<ReturnType<typeof executeNextRecovery>>> = [];
       let stoppedReason: "empty" | "dry_run" | "failed" | "max_steps" = "max_steps";
       for (let stepIndex = 0; stepIndex < maxSteps; stepIndex += 1) {
+        const stepObservedAt = new Date().toISOString();
         const cycle = await executeNextRecovery();
         cycles.push(cycle);
+        const stepAfter = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
+        const stepStoppedReason = !cycle.selected
+          ? "empty"
+          : !cycle.ok
+            ? "failed"
+            : dryRun
+              ? "dry_run"
+              : null;
+        await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+          advanceId: `${loopAdvanceId}-step-${String(stepIndex + 1).padStart(3, "0")}`,
+          session: requiredSessionName,
+          observedAt: stepObservedAt,
+          completedAt: new Date().toISOString(),
+          dryRun,
+          selected: cycle.selected,
+          detailCommand: "recover_next_loop_step",
+          recovery: {
+            untilEmpty: true,
+            loopAdvanceId,
+            stepIndex: stepIndex + 1,
+            maxSteps,
+            intervalMs,
+            stoppedReason: stepStoppedReason,
+          },
+          executed: cycle.executed ?? null,
+          before,
+          after: stepAfter,
+        });
         if (!cycle.selected) {
           stoppedReason = "empty";
           break;
@@ -5028,6 +5058,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         session: requiredSessionName,
         dryRun,
         untilEmpty: true,
+        loopAdvanceId,
         maxSteps,
         intervalMs,
         executedSteps: cycles.filter((cycle) => cycle.selected).length,
@@ -5035,6 +5066,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         cycles,
       };
       const written = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+        advanceId: loopAdvanceId,
         session: requiredSessionName,
         observedAt,
         completedAt: new Date().toISOString(),
@@ -8753,6 +8785,27 @@ type WorkerSessionControlPlaneStatusResponse = {
         executedExitCode: number | null;
         command: string[];
       }>;
+      loopSteps: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+        recent: Array<{
+          advanceId: string;
+          observedAt: string;
+          completedAt: string;
+          detailCommand: string | null;
+          dryRun: boolean;
+          loopAdvanceId: string | null;
+          stepIndex: number | null;
+          selectedAction: string | null;
+          selectedKind: string | null;
+          selectedSurface: string | null;
+          selectedReason: string | null;
+          selectedCommand: string[] | null;
+          selectedDryRunCommand: string[] | null;
+          executedCommand: string[] | null;
+          executedExitCode: number | null;
+          command: string[];
+        }>;
+      };
     };
     statusWatchExecutions: {
       attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
@@ -9978,6 +10031,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `needs_action: ${summary.needsAction}`,
     `pending_confirmations: ${summary.queues.controlPlaneConfirmations.summary.commands}`,
     `recover_next_attempts: total=${summary.recovery.recoverNext.attempts.total} dry_run=${summary.recovery.recoverNext.attempts.dryRun} executed=${summary.recovery.recoverNext.attempts.executed} failed=${summary.recovery.recoverNext.attempts.failed}`,
+    `recover_next_loop_steps: total=${summary.recovery.recoverNext.loopSteps.attempts.total} dry_run=${summary.recovery.recoverNext.loopSteps.attempts.dryRun} executed=${summary.recovery.recoverNext.loopSteps.attempts.executed} failed=${summary.recovery.recoverNext.loopSteps.attempts.failed}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
@@ -10199,6 +10253,24 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   }
+  if (summary.recovery.recoverNext.loopSteps.recent.length > 0) {
+    lines.push("recent_recover_next_loop_steps:");
+    for (const step of summary.recovery.recoverNext.loopSteps.recent) {
+      lines.push(
+        `  - advance: ${step.advanceId}`,
+        `    loop: ${step.loopAdvanceId ?? ""}`,
+        `    step: ${step.stepIndex ?? ""}`,
+        `    detail_command: ${step.detailCommand ?? ""}`,
+        `    dry_run: ${step.dryRun}`,
+        `    selected: ${step.selectedKind ?? ""} ${step.selectedSurface ?? ""} ${step.selectedAction ?? ""}`.trimEnd(),
+        `    reason: ${step.selectedReason ?? ""}`,
+        `    selected_command: ${formatShellCommand(step.selectedCommand ?? [])}`,
+        `    executed_exit_code: ${step.executedExitCode ?? ""}`,
+        `    executed_command: ${formatShellCommand(step.executedCommand ?? [])}`,
+        `    inspect: ${formatShellCommand(step.command)}`,
+      );
+    }
+  }
   if (summary.recovery.statusWatchExecutions.recent.length > 0) {
     lines.push("recent_status_watch_executions:");
     for (const attempt of summary.recovery.statusWatchExecutions.recent) {
@@ -10349,6 +10421,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   for (const attempt of summary.recovery.recoverNext.recent) {
     commands.push({ command: attempt.command });
+  }
+  for (const step of summary.recovery.recoverNext.loopSteps.recent) {
+    commands.push({ command: step.command });
   }
   if (summary.recovery.statusWatchExecutions.attempts.total > 0) {
     commands.push({ command: summary.commands.statusWatchExecutions });
@@ -14362,6 +14437,10 @@ async function writeWorkerSessionDrainContinuationRecord(
 
 function createDrainContinuationId(observedAt: string): string {
   return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createRecoverNextLoopAdvanceId(observedAt: string): string {
+  return `recover-next-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 async function git(args: string[], cwd = process.cwd()): Promise<string> {
