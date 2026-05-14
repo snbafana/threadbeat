@@ -529,9 +529,11 @@ try {
   assert.equal(watchedUntilActionStoppedLines.length, 1);
   assert.equal(watchedUntilActionStoppedLines[0]?.poll, 1);
   assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.done, true);
-  assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.reason, "control_plane_action:restart_control_plane_advance_worker");
-  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server"]);
-  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.dryRunCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  const workerRecoveryReconcileCommand = ["npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server", "--lines", "20", "--until-empty", "--max-steps", "10", "--interval-ms", "2000", "--confirm"];
+  const workerRecoveryReconcileDryRunCommand = ["npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server", "--lines", "20", "--until-empty", "--max-steps", "10", "--interval-ms", "2000", "--dry-run"];
+  assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.command, workerRecoveryReconcileCommand);
+  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.dryRunCommand, workerRecoveryReconcileDryRunCommand);
   const watchedUntilActionDryRun = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -555,9 +557,9 @@ try {
   assert.equal(watchedUntilActionDryRunLines.length, 1);
   assert.equal(watchedUntilActionDryRunLines[0]?.untilAction.done, true);
   assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.dryRun, true);
-  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.reason, "control_plane_action:restart_control_plane_advance_worker");
-  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
-  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.executed.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.command, workerRecoveryReconcileDryRunCommand);
+  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.executed.command, workerRecoveryReconcileDryRunCommand);
   assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.executed.exitCode, 0);
   assert.ok(watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
   const watchActionAdvances = await cliJson<{
@@ -576,10 +578,10 @@ try {
   assert.equal(watchActionAdvances.advances[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
   assert.equal(watchActionAdvances.advances[0]?.dryRun, true);
   assert.equal(watchActionAdvances.advances[0]?.detailCommand, "status_watch_execute_action");
-  assert.equal(watchActionAdvances.advances[0]?.selected.surface, "status_watch");
-  assert.equal(watchActionAdvances.advances[0]?.selected.action, "execute_action");
-  assert.equal(watchActionAdvances.advances[0]?.selected.reason, "control_plane_action:restart_control_plane_advance_worker");
-  assert.deepEqual(watchActionAdvances.advances[0]?.selected.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  assert.equal(watchActionAdvances.advances[0]?.selected.surface, "worker_recovery");
+  assert.equal(watchActionAdvances.advances[0]?.selected.action, "reconcile_control_plane_workers");
+  assert.equal(watchActionAdvances.advances[0]?.selected.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(watchActionAdvances.advances[0]?.selected.command, workerRecoveryReconcileDryRunCommand);
   assert.equal(watchActionAdvances.advances[0]?.executed.exitCode, 0);
   const watchActionAdvancesText = await cliText(baseUrl, [
     "runs",
@@ -650,7 +652,7 @@ try {
   assert.equal(statusWatchTimeline.events[0]?.status, "dry_run");
   assert.equal(statusWatchTimeline.events[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
   assert.equal(statusWatchTimeline.events[0]?.detailCommand, "status_watch_execute_action");
-  assert.deepEqual(statusWatchTimeline.events[0]?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--dry-run"]);
+  assert.deepEqual(statusWatchTimeline.events[0]?.command, workerRecoveryReconcileDryRunCommand);
   const statusWatchTimelineCommands = await cliJson<{ commands: Array<{ action: string; command: string[] }> }>(baseUrl, [
     "runs",
     "session-control-plane-timeline",
@@ -666,7 +668,7 @@ try {
   )));
   assert.ok(statusWatchTimelineCommands.commands.some((command) => (
     command.action === "run_selected_command"
-    && command.command.join(" ") === `npm run cli -- runs session-control-plane-advance ${sessionName} --server --dry-run`
+    && command.command.join(" ") === workerRecoveryReconcileDryRunCommand.join(" ")
   )));
   const failedStatusWatch = await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {
     session: sessionName,

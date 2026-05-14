@@ -26,6 +26,8 @@ export type WorkerSessionControlPlaneAdvanceListOptions = {
   blocked?: boolean;
   mutating?: boolean;
   alertSurfaces?: string[];
+  selectedSurfaces?: string[];
+  selectedActions?: string[];
   detailCommands?: string[];
   loopAdvanceIds?: string[];
 };
@@ -116,6 +118,8 @@ function matchesWorkerSessionControlPlaneAdvanceFilters(
   if (options.blocked !== undefined && executionSafetyBoolean(record, "blocked") !== options.blocked) return false;
   if (options.mutating !== undefined && executionSafetyBoolean(record, "mutating") !== options.mutating) return false;
   if (options.alertSurfaces && options.alertSurfaces.length > 0 && !options.alertSurfaces.includes(alertSurface(record))) return false;
+  if (options.selectedSurfaces && options.selectedSurfaces.length > 0 && !options.selectedSurfaces.includes(selectedString(record, "surface"))) return false;
+  if (options.selectedActions && options.selectedActions.length > 0 && !options.selectedActions.includes(selectedString(record, "action"))) return false;
   if (options.detailCommands && options.detailCommands.length > 0 && !options.detailCommands.includes(record.detailCommand ?? "")) return false;
   if (options.loopAdvanceIds && options.loopAdvanceIds.length > 0 && !options.loopAdvanceIds.includes(loopAdvanceId(record) ?? "")) return false;
   return true;
@@ -126,6 +130,13 @@ function alertSurface(record: WorkerSessionControlPlaneAdvanceRecord): string {
   if (!alert || typeof alert !== "object" || Array.isArray(alert)) return "";
   const surface = (alert as Record<string, unknown>).surface;
   return typeof surface === "string" ? surface : "";
+}
+
+function selectedString(record: WorkerSessionControlPlaneAdvanceRecord, key: string): string {
+  const selected = record.selected;
+  if (!selected || typeof selected !== "object" || Array.isArray(selected)) return "";
+  const value = (selected as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
 }
 
 function loopAdvanceId(record: WorkerSessionControlPlaneAdvanceRecord): string | null {

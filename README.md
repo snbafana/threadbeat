@@ -797,7 +797,9 @@ records with `runs session-control-plane-advances <name> --server` or
 to inspect one durable advance record, or add `--blocked` and `--mutating` to
 list only blocked mutating attempts, include their summary counts, and recover
 the confirmation command. Add `--status-watch-executions` to list only the
-durable handoffs written by status watch `--execute-action`. Add `--confirmation-queue` to
+durable handoffs written by status watch `--execute-action`; combine it with
+`--selected-surface <surface>` or `--selected-action <action>` to isolate, for
+example, status-watch worker reconciliation executions. Add `--confirmation-queue` to
 group blocked confirmations by surface, action, detail command, and reason so
 operators can see the pending confirmation work without scanning each advance
 record. Add

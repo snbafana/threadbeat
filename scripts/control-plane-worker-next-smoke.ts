@@ -340,6 +340,75 @@ try {
   ]);
   assert.match(workerReconciliationsShell, new RegExp(`npm run cli -- runs session-control-plane-worker-reconciliations ${sessionName} --server --reconciliation ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
   assert.match(workerReconciliationsShell, new RegExp(`npm run cli -- runs session-control-plane-timeline ${sessionName} --server --source worker_reconcile_execution --execution ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
+  const watchedWorkerRecovery = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--execute-action",
+    "--dry-run",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedWorkerRecoveryLines = watchedWorkerRecovery.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    executedAction?: {
+      advanceId: string;
+      reason: string;
+      command: string[];
+      executed: { command: string[]; exitCode: number | null };
+    };
+  });
+  assert.equal(watchedWorkerRecoveryLines.length, 1);
+  assert.equal(watchedWorkerRecoveryLines[0]?.executedAction?.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(
+    watchedWorkerRecoveryLines[0]?.executedAction?.command,
+    ["npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server", "--lines", "20", "--until-empty", "--max-steps", "10", "--interval-ms", "2000", "--dry-run"],
+  );
+  assert.equal(watchedWorkerRecoveryLines[0]?.executedAction?.executed.exitCode, 0);
+  const workerRecoveryStatusWatchAdvances = await cliJson<{
+    count: number;
+    filter: { selectedSurfaces: string[]; selectedActions: string[]; detailCommands: string[] };
+    advances: Array<{ advanceId: string; detailCommand: string; selected: { surface: string; action: string }; executed: { command: string[]; exitCode: number | null } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--status-watch-executions",
+    "--selected-surface",
+    "worker_recovery",
+    "--selected-action",
+    "reconcile_control_plane_workers",
+  ]);
+  assert.equal(workerRecoveryStatusWatchAdvances.count, 1);
+  assert.deepEqual(workerRecoveryStatusWatchAdvances.filter.selectedSurfaces, ["worker_recovery"]);
+  assert.deepEqual(workerRecoveryStatusWatchAdvances.filter.selectedActions, ["reconcile_control_plane_workers"]);
+  assert.deepEqual(workerRecoveryStatusWatchAdvances.filter.detailCommands, ["status_watch_execute_action"]);
+  assert.equal(workerRecoveryStatusWatchAdvances.advances[0]?.advanceId, watchedWorkerRecoveryLines[0]?.executedAction?.advanceId);
+  assert.equal(workerRecoveryStatusWatchAdvances.advances[0]?.detailCommand, "status_watch_execute_action");
+  assert.equal(workerRecoveryStatusWatchAdvances.advances[0]?.selected.surface, "worker_recovery");
+  assert.equal(workerRecoveryStatusWatchAdvances.advances[0]?.selected.action, "reconcile_control_plane_workers");
+  assert.equal(workerRecoveryStatusWatchAdvances.advances[0]?.executed.exitCode, 0);
+  const workerRecoveryStatusWatchText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--status-watch-executions",
+    "--selected-surface",
+    "worker_recovery",
+    "--selected-action",
+    "reconcile_control_plane_workers",
+    "--format",
+    "text",
+  ]);
+  assert.match(workerRecoveryStatusWatchText, /selected_surfaces=worker_recovery/);
+  assert.match(workerRecoveryStatusWatchText, /selected_actions=reconcile_control_plane_workers/);
   const reconcileLoopText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-reconcile-workers",

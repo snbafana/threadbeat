@@ -5701,6 +5701,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         mutating: options.mutating === "1" || options["confirmation-queue"] === "1" || confirmationExecutionModes > 0 ? true : undefined,
         alertSurface: options["alert-surface"],
         detailCommand: statusWatchExecutions ? "status_watch_execute_action" : options["detail-command"],
+        selectedSurface: options["selected-surface"],
+        selectedAction: options["selected-action"],
         loopAdvanceId: options["loop-advance-id"],
       },
     );
@@ -5797,6 +5799,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               mutating: true,
               alertSurface: options["alert-surface"],
               detailCommand: options["detail-command"],
+              selectedSurface: options["selected-surface"],
+              selectedAction: options["selected-action"],
               loopAdvanceId: options["loop-advance-id"],
             });
           }
@@ -9717,6 +9721,8 @@ type WorkerSessionControlPlaneAdvancesResponse = {
     blocked: boolean | null;
     mutating: boolean | null;
     alertSurfaces: string[];
+    selectedSurfaces: string[];
+    selectedActions: string[];
     detailCommands: string[];
     loopAdvanceIds: string[];
   };
@@ -10887,7 +10893,7 @@ function formatWorkerSessionControlPlaneAdvancesText(
     "control-plane advances",
     `session: ${response.session}`,
     `count: ${response.count}`,
-    `filter: advances=${response.filter.advanceIds.join(",") || "*"} blocked=${response.filter.blocked ?? "*"} mutating=${response.filter.mutating ?? "*"} alert_surfaces=${response.filter.alertSurfaces.join(",") || "*"} detail_commands=${response.filter.detailCommands.join(",") || "*"} loops=${response.filter.loopAdvanceIds.join(",") || "*"}`,
+    `filter: advances=${response.filter.advanceIds.join(",") || "*"} blocked=${response.filter.blocked ?? "*"} mutating=${response.filter.mutating ?? "*"} alert_surfaces=${response.filter.alertSurfaces.join(",") || "*"} selected_surfaces=${response.filter.selectedSurfaces.join(",") || "*"} selected_actions=${response.filter.selectedActions.join(",") || "*"} detail_commands=${response.filter.detailCommands.join(",") || "*"} loops=${response.filter.loopAdvanceIds.join(",") || "*"}`,
   ];
   for (const advance of response.advances) {
     lines.push(
@@ -12281,13 +12287,15 @@ async function executeWorkerSessionControlPlaneAdvanceLoop(
 
 async function fetchWorkerSessionControlPlaneAdvances(
   sessionName: string,
-  options: { limit: number; advanceId?: string; blocked?: boolean; mutating?: boolean; alertSurface?: string; detailCommand?: string; loopAdvanceId?: string },
+  options: { limit: number; advanceId?: string; blocked?: boolean; mutating?: boolean; alertSurface?: string; selectedSurface?: string; selectedAction?: string; detailCommand?: string; loopAdvanceId?: string },
 ): Promise<WorkerSessionControlPlaneAdvancesResponse> {
   const params = new URLSearchParams({ limit: String(options.limit) });
   if (options.advanceId) params.set("advanceId", options.advanceId);
   if (options.blocked !== undefined) params.set("blocked", String(options.blocked));
   if (options.mutating !== undefined) params.set("mutating", String(options.mutating));
   if (options.alertSurface) params.set("alertSurface", options.alertSurface);
+  if (options.selectedSurface) params.set("selectedSurface", options.selectedSurface);
+  if (options.selectedAction) params.set("selectedAction", options.selectedAction);
   if (options.detailCommand) params.set("detailCommand", options.detailCommand);
   if (options.loopAdvanceId) params.set("loopAdvanceId", options.loopAdvanceId);
   return await requestJson(
@@ -19720,7 +19728,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history [--execute-resume --confirm]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history [--execute-resume --confirm]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]

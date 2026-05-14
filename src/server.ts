@@ -910,6 +910,14 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           ...parseOptionalList(query.alertSurface),
           ...parseOptionalList(query.alertSurfaces),
         ],
+        selectedSurfaces: [
+          ...parseOptionalList(query.selectedSurface),
+          ...parseOptionalList(query.selectedSurfaces),
+        ],
+        selectedActions: [
+          ...parseOptionalList(query.selectedAction),
+          ...parseOptionalList(query.selectedActions),
+        ],
         detailCommands: [
           ...parseOptionalList(query.detailCommand),
           ...parseOptionalList(query.detailCommands),
@@ -929,6 +937,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           blocked: filter.blocked,
           mutating: filter.mutating,
           alertSurfaces: filter.alertSurfaces,
+          selectedSurfaces: filter.selectedSurfaces,
+          selectedActions: filter.selectedActions,
           detailCommands: filter.detailCommands,
           loopAdvanceIds: filter.loopAdvanceIds,
         },
@@ -942,6 +952,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           blocked: filter.blocked ?? null,
           mutating: filter.mutating ?? null,
           alertSurfaces: filter.alertSurfaces,
+          selectedSurfaces: filter.selectedSurfaces,
+          selectedActions: filter.selectedActions,
           detailCommands: filter.detailCommands,
           loopAdvanceIds: filter.loopAdvanceIds,
         },
