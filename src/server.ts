@@ -4405,7 +4405,7 @@ const summarizeIncompleteRecoverNextLoops = (
         dryRun ? "--dry-run" : "--confirm",
       ],
       inspectLastStepCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", last.advanceId],
-      inspectHistoryCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId],
+      inspectHistoryCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--recover-next-loop-history"],
     };
   }).sort((left, right) => right.lastObservedAt.localeCompare(left.lastObservedAt));
   return {

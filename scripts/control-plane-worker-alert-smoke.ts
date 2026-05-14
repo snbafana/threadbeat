@@ -669,6 +669,7 @@ try {
     "--server",
     "--loop-advance-id",
     recoverNextLoopDryRun.advanceId,
+    "--recover-next-loop-history",
   ]);
 
   const recoverNextAlerts = await cliJson<{
@@ -874,6 +875,81 @@ try {
   assert.match(recoverNextResumeHistoryText, /alert: recover_next incomplete_recover_next_loop/);
   assert.match(recoverNextResumeHistoryText, new RegExp(`loop: ${recoverNextLoopDryRun.advanceId}`));
 
+  const recoverNextLoopHistory = await cliJson<{
+    loopAdvanceId: string;
+    count: number;
+    summary: { completed: boolean; steps: number; resumeAttempts: number; failedExecutions: number; dryRunRecords: number; stoppedReasons: string[] };
+    commands: { inspectRaw: string[]; resumeLoop: string[] | null };
+    records: Array<{
+      kind: string;
+      advanceId: string;
+      detailCommand: string | null;
+      stepIndex: number | null;
+      stoppedReason: string | null;
+      selectedAction: string | null;
+      executedExitCode: number | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+    "--recover-next-loop-history",
+  ]);
+  assert.equal(recoverNextLoopHistory.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(recoverNextLoopHistory.count, 2);
+  assert.equal(recoverNextLoopHistory.summary.completed, false);
+  assert.equal(recoverNextLoopHistory.summary.steps, 1);
+  assert.equal(recoverNextLoopHistory.summary.resumeAttempts, 1);
+  assert.equal(recoverNextLoopHistory.summary.failedExecutions, 0);
+  assert.equal(recoverNextLoopHistory.summary.dryRunRecords, 2);
+  assert.deepEqual(recoverNextLoopHistory.summary.stoppedReasons, ["dry_run"]);
+  assert.deepEqual(recoverNextLoopHistory.commands.inspectRaw, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+  ]);
+  assert.deepEqual(recoverNextLoopHistory.commands.resumeLoop, interruptedLoop?.resumeCommand);
+  assert.ok(recoverNextLoopHistory.records.some((record) => (
+    record.kind === "step"
+    && record.advanceId === `${recoverNextLoopDryRun.advanceId}-step-001`
+    && record.detailCommand === "recover_next_loop_step"
+    && record.stepIndex === 1
+    && record.stoppedReason === "dry_run"
+  )));
+  assert.ok(recoverNextLoopHistory.records.some((record) => (
+    record.kind === "resume_attempt"
+    && record.advanceId === recoverNextResumeDryRun.advanceId
+    && record.detailCommand === "resume_recover_next_loop"
+    && record.selectedAction === "resume_recover_next_loop"
+  )));
+
+  const recoverNextLoopHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+    "--recover-next-loop-history",
+    "--format",
+    "text",
+  ]);
+  assert.match(recoverNextLoopHistoryText, /recover-next loop history/);
+  assert.match(recoverNextLoopHistoryText, /summary: completed=false steps=1 resume_attempts=1 failed=0 dry_run_records=2 stopped_reasons=dry_run/);
+  assert.match(recoverNextLoopHistoryText, /resume: npm run cli -- runs session-control-plane-recover-next/);
+  assert.match(recoverNextLoopHistoryText, /- step:/);
+  assert.match(recoverNextLoopHistoryText, /- resume_attempt:/);
+
   const interruptedSummaryText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -886,7 +962,7 @@ try {
   assert.match(interruptedSummaryText, /recover_next_incomplete_loops: 1/);
   assert.match(interruptedSummaryText, /incomplete_recover_next_loops:/);
   assert.match(interruptedSummaryText, new RegExp(`resume: npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --until-empty --resume-loop ${recoverNextLoopDryRun.advanceId}`));
-  assert.match(interruptedSummaryText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${recoverNextLoopDryRun.advanceId}`));
+  assert.match(interruptedSummaryText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${recoverNextLoopDryRun.advanceId} --recover-next-loop-history`));
   const interruptedSummaryShell = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",

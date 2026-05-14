@@ -5323,6 +5323,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const executeNextConfirmation = options["execute-next-confirmation"] === "1";
     const drainConfirmations = options["drain-confirmations"] === "1";
     const statusWatchExecutions = options["status-watch-executions"] === "1";
+    const recoverNextLoopHistory = options["recover-next-loop-history"] === "1";
     const confirmationExecutionModes = [executeConfirmation, executeNextConfirmation, drainConfirmations].filter(Boolean).length;
     if (statusWatchExecutions && options["detail-command"]) {
       throw new Error("runs session-control-plane-advances --status-watch-executions cannot be combined with --detail-command");
@@ -5350,6 +5351,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (outputFormat === "text" && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-advances --format text cannot be combined with --commands-only");
+    }
+    if (recoverNextLoopHistory && !options["loop-advance-id"]) {
+      throw new Error("runs session-control-plane-advances --recover-next-loop-history requires --loop-advance-id");
+    }
+    if (recoverNextLoopHistory && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-advances --recover-next-loop-history supports json or text output");
+    }
+    if (recoverNextLoopHistory && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-advances --recover-next-loop-history cannot be combined with --commands-only");
     }
     const limit = parsePositiveInteger(
       options.limit ?? (confirmationExecutionModes > 0 ? "100" : "20"),
@@ -5490,6 +5500,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       } else {
         const { advances: _advances, ...rest } = advances;
         await printJson({ ...rest, commands });
+      }
+      return;
+    }
+    if (recoverNextLoopHistory) {
+      const history = summarizeRecoverNextLoopHistory(requiredSessionName, advances, options["loop-advance-id"]);
+      if (outputFormat === "text") {
+        printRecoverNextLoopHistoryText(history);
+      } else {
+        await printJson(history);
       }
       return;
     }
@@ -7569,7 +7588,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "finalize" || key === "include-mutation-workers" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -9144,6 +9163,45 @@ type WorkerSessionControlPlaneAdvancesResponse = {
   }>;
 };
 
+type RecoverNextLoopHistoryRecord = {
+  kind: "loop" | "step" | "resume_attempt" | "other";
+  advanceId: string;
+  observedAt: string;
+  completedAt: string;
+  detailCommand: string | null;
+  dryRun: boolean;
+  stepIndex: number | null;
+  loopAdvanceId: string | null;
+  stoppedReason: string | null;
+  selectedKind: string | null;
+  selectedSurface: string | null;
+  selectedAction: string | null;
+  selectedReason: string | null;
+  selectedCommand: string[] | null;
+  executedExitCode: number | null;
+  inspectCommand: string[];
+};
+
+type RecoverNextLoopHistoryResponse = {
+  ok: true;
+  session: string;
+  loopAdvanceId: string;
+  count: number;
+  summary: {
+    completed: boolean;
+    steps: number;
+    resumeAttempts: number;
+    failedExecutions: number;
+    dryRunRecords: number;
+    stoppedReasons: string[];
+  };
+  commands: {
+    inspectRaw: string[];
+    resumeLoop: string[] | null;
+  };
+  records: RecoverNextLoopHistoryRecord[];
+};
+
 type WorkerSessionControlPlaneAdvanceLoopResponse = {
   ok: true;
   session: string;
@@ -9979,10 +10037,151 @@ function formatShellCommand(command: string[]): string {
   return command.map(shellArg).join(" ");
 }
 
+function unknownRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringRecordField(record: Record<string, unknown> | null, key: string): string | null {
+  const value = record?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function numberRecordField(record: Record<string, unknown> | null, key: string): number | null {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringArrayRecordField(record: Record<string, unknown> | null, key: string): string[] | null {
+  const value = record?.[key];
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
+}
+
 function printWorkerSessionControlPlaneAdvancesText(
   response: WorkerSessionControlPlaneAdvancesResponse,
 ): void {
   console.log(formatWorkerSessionControlPlaneAdvancesText(response).join("\n"));
+}
+
+function summarizeRecoverNextLoopHistory(
+  sessionName: string,
+  response: WorkerSessionControlPlaneAdvancesResponse,
+  loopAdvanceId: string,
+): RecoverNextLoopHistoryResponse {
+  const records = response.advances
+    .map((advance) => recoverNextLoopHistoryRecord(sessionName, advance))
+    .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+  const stoppedReasons = [...new Set(records.map((record) => record.stoppedReason).filter((reason): reason is string => Boolean(reason)))];
+  const latestStep = [...records].reverse().find((record) => record.kind === "step");
+  const maxSteps = latestStep ? numberRecordField(advanceRecovery(response, latestStep.advanceId), "maxSteps") : null;
+  const intervalMs = latestStep ? numberRecordField(advanceRecovery(response, latestStep.advanceId), "intervalMs") : null;
+  const resumeLoop = latestStep && !records.some((record) => record.kind === "loop")
+    ? [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", sessionName, "--server",
+        "--until-empty", "--resume-loop", loopAdvanceId,
+        "--max-steps", String(maxSteps ?? 10),
+        "--interval-ms", String(intervalMs ?? 2000),
+        latestStep.dryRun ? "--dry-run" : "--confirm",
+      ]
+    : null;
+  return {
+    ok: true,
+    session: sessionName,
+    loopAdvanceId,
+    count: records.length,
+    summary: {
+      completed: records.some((record) => record.kind === "loop"),
+      steps: records.filter((record) => record.kind === "step").length,
+      resumeAttempts: records.filter((record) => record.kind === "resume_attempt").length,
+      failedExecutions: records.filter((record) => record.executedExitCode !== null && record.executedExitCode !== 0).length,
+      dryRunRecords: records.filter((record) => record.dryRun).length,
+      stoppedReasons,
+    },
+    commands: {
+      inspectRaw: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId],
+      resumeLoop,
+    },
+    records,
+  };
+}
+
+function recoverNextLoopHistoryRecord(
+  sessionName: string,
+  advance: WorkerSessionControlPlaneAdvancesResponse["advances"][number],
+): RecoverNextLoopHistoryRecord {
+  const recovery = unknownRecord((advance as { recovery?: unknown }).recovery);
+  const selected = unknownRecord(advance.selected);
+  const executed = unknownRecord(advance.executed);
+  const detailCommand = advance.detailCommand ?? null;
+  return {
+    kind: recoverNextLoopHistoryRecordKind(detailCommand),
+    advanceId: advance.advanceId,
+    observedAt: advance.observedAt,
+    completedAt: advance.completedAt,
+    detailCommand,
+    dryRun: advance.dryRun,
+    stepIndex: numberRecordField(recovery, "stepIndex"),
+    loopAdvanceId: stringRecordField(recovery, "loopAdvanceId") ?? advance.alert?.loopAdvanceId ?? advance.selected?.loopAdvanceId ?? null,
+    stoppedReason: stringRecordField(recovery, "stoppedReason"),
+    selectedKind: stringRecordField(selected, "kind"),
+    selectedSurface: stringRecordField(selected, "surface"),
+    selectedAction: stringRecordField(selected, "action"),
+    selectedReason: stringRecordField(selected, "reason"),
+    selectedCommand: stringArrayRecordField(selected, "command"),
+    executedExitCode: numberRecordField(executed, "exitCode"),
+    inspectCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", advance.advanceId],
+  };
+}
+
+function recoverNextLoopHistoryRecordKind(detailCommand: string | null): RecoverNextLoopHistoryRecord["kind"] {
+  if (detailCommand === "recover_next_loop") return "loop";
+  if (detailCommand === "recover_next_loop_step") return "step";
+  if (detailCommand === "resume_recover_next_loop") return "resume_attempt";
+  return "other";
+}
+
+function advanceRecovery(
+  response: WorkerSessionControlPlaneAdvancesResponse,
+  advanceId: string,
+): Record<string, unknown> | null {
+  return unknownRecord((response.advances.find((advance) => advance.advanceId === advanceId) as { recovery?: unknown } | undefined)?.recovery);
+}
+
+function printRecoverNextLoopHistoryText(history: RecoverNextLoopHistoryResponse): void {
+  console.log(formatRecoverNextLoopHistoryText(history).join("\n"));
+}
+
+function formatRecoverNextLoopHistoryText(history: RecoverNextLoopHistoryResponse): string[] {
+  const lines = [
+    "recover-next loop history",
+    `session: ${history.session}`,
+    `loop: ${history.loopAdvanceId}`,
+    `count: ${history.count}`,
+    `summary: completed=${history.summary.completed} steps=${history.summary.steps} resume_attempts=${history.summary.resumeAttempts} failed=${history.summary.failedExecutions} dry_run_records=${history.summary.dryRunRecords} stopped_reasons=${history.summary.stoppedReasons.join(",") || "*"}`,
+    "commands:",
+    `  inspect_raw: ${formatShellCommand(history.commands.inspectRaw)}`,
+    ...(history.commands.resumeLoop ? [`  resume: ${formatShellCommand(history.commands.resumeLoop)}`] : []),
+    "records:",
+  ];
+  if (history.records.length === 0) {
+    lines.push("  <empty>");
+    return lines;
+  }
+  for (const record of history.records) {
+    lines.push(
+      `  - ${record.kind}: ${record.advanceId}`,
+      `    observed_at: ${record.observedAt}`,
+      `    detail_command: ${record.detailCommand ?? ""}`,
+      `    dry_run: ${record.dryRun}`,
+      `    step: ${record.stepIndex ?? ""}`,
+      `    stopped_reason: ${record.stoppedReason ?? ""}`,
+      `    selected: ${record.selectedKind ?? ""} ${record.selectedSurface ?? ""} ${record.selectedAction ?? ""}`.trimEnd(),
+      `    reason: ${record.selectedReason ?? ""}`,
+      `    selected_command: ${formatShellCommand(record.selectedCommand ?? [])}`,
+      `    executed_exit_code: ${record.executedExitCode ?? ""}`,
+      `    inspect: ${formatShellCommand(record.inspectCommand)}`,
+    );
+  }
+  return lines;
 }
 
 function formatWorkerSessionControlPlaneAdvancesText(
@@ -17405,7 +17604,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history] [--blocked] [--mutating] [--alert-surface worker_recovery] [--detail-command restart_worker_recovery|--status-watch-executions] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]
