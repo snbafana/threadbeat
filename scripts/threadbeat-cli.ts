@@ -11221,6 +11221,28 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
     lines.push(`failed_recover_next_resumes: ${formatShellCommand(summary.commands.failedRecoverNextResumeAttempts)}`);
   }
+  if (summary.recovery.failedRecoverNextResumeLoops.count > 0) {
+    lines.push(
+      "failed_recover_next_resume_loops:",
+      `  count: ${summary.recovery.failedRecoverNextResumeLoops.count}`,
+    );
+    for (const loop of summary.recovery.failedRecoverNextResumeLoops.recent) {
+      lines.push(
+        `  - loop: ${loop.loopAdvanceId ?? ""}`,
+        `    failed_attempts: ${loop.failedAttempts}`,
+        `    latest_failed_advance: ${loop.latestFailedAdvanceId}`,
+        `    latest_failed_exit_code: ${loop.latestFailedExitCode ?? ""}`,
+        `    incomplete: ${loop.incomplete}`,
+        `    steps: ${loop.steps ?? ""}`,
+        `    last_step: ${loop.lastStepIndex ?? ""}`,
+        `    stopped_reason: ${loop.stoppedReason ?? ""}`,
+        `    inspect_failed_resumes: ${formatShellCommand(loop.commands.inspectFailedResumes)}`,
+        ...(loop.commands.inspectHistory ? [`    inspect_history: ${formatShellCommand(loop.commands.inspectHistory)}`] : []),
+        ...(loop.commands.resumeLoop ? [`    resume: ${formatShellCommand(loop.commands.resumeLoop)}`] : []),
+        ...(loop.commands.executeResumeHistory ? [`    execute_resume: ${formatShellCommand(loop.commands.executeResumeHistory)}`] : []),
+      );
+    }
+  }
   if (summary.nextRecovery) {
     lines.push(
       "next_recovery:",
@@ -11698,6 +11720,18 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
     commands.push({ command: summary.commands.failedRecoverNextResumeAttempts });
+  }
+  for (const loop of summary.recovery.failedRecoverNextResumeLoops.recent) {
+    commands.push({ command: loop.commands.inspectFailedResumes });
+    if (loop.commands.inspectHistory) {
+      commands.push({ command: loop.commands.inspectHistory });
+    }
+    if (loop.commands.resumeLoop) {
+      commands.push({ command: loop.commands.resumeLoop });
+    }
+    if (loop.commands.executeResumeHistory) {
+      commands.push({ command: loop.commands.executeResumeHistory });
+    }
   }
   for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
     commands.push({ command: loop.resumeCommand });
@@ -12205,6 +12239,67 @@ function workerSessionControlPlaneReconcileLoopCommand(
   ];
 }
 
+type FailedRecoverNextResumeLoopSummary = {
+  loopAdvanceId: string | null;
+  failedAttempts: number;
+  latestFailedAdvanceId: string;
+  latestFailedObservedAt: string;
+  latestFailedExitCode: number | null;
+  incomplete: boolean;
+  steps: number | null;
+  lastStepIndex: number | null;
+  stoppedReason: string | null;
+  commands: {
+    inspectFailedResumes: string[];
+    inspectHistory: string[] | null;
+    resumeLoop: string[] | null;
+    executeResumeHistory: string[] | null;
+  };
+};
+
+function summarizeFailedRecoverNextResumeLoops(
+  sessionName: string,
+  recoverNext: WorkerSessionControlPlaneStatusResponse["recovery"]["recoverNext"],
+): { count: number; recent: FailedRecoverNextResumeLoopSummary[] } {
+  const incompleteLoopsById = new Map(recoverNext.incompleteLoops.recent.map((loop) => [loop.loopAdvanceId, loop]));
+  const grouped = new Map<string, WorkerSessionControlPlaneRecoveryAttemptResponse[]>();
+  for (const attempt of recoverNext.resumeAttempts.failedRecent) {
+    const groupKey = attempt.loopAdvanceId ?? `advance:${attempt.advanceId}`;
+    const attempts = grouped.get(groupKey) ?? [];
+    attempts.push(attempt);
+    grouped.set(groupKey, attempts);
+  }
+  const recent = [...grouped.values()].map((attempts) => {
+    const sorted = [...attempts].sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+    const latest = sorted[0]!;
+    const loop = latest.loopAdvanceId ? incompleteLoopsById.get(latest.loopAdvanceId) ?? null : null;
+    return {
+      loopAdvanceId: latest.loopAdvanceId,
+      failedAttempts: attempts.length,
+      latestFailedAdvanceId: latest.advanceId,
+      latestFailedObservedAt: latest.observedAt,
+      latestFailedExitCode: latest.executedExitCode,
+      incomplete: Boolean(loop),
+      steps: loop?.steps ?? null,
+      lastStepIndex: loop?.lastStepIndex ?? null,
+      stoppedReason: loop?.stoppedReason ?? null,
+      commands: {
+        inspectFailedResumes: [
+          "npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server",
+          "--failed-recover-next-resumes",
+          ...(latest.loopAdvanceId ? ["--loop-advance-id", latest.loopAdvanceId] : []),
+        ],
+        inspectHistory: latest.loopAdvanceId
+          ? ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", latest.loopAdvanceId, "--recover-next-loop-history"]
+          : null,
+        resumeLoop: loop?.resumeCommand ?? null,
+        executeResumeHistory: loop?.executeResumeCommand ?? null,
+      },
+    };
+  }).sort((left, right) => right.latestFailedObservedAt.localeCompare(left.latestFailedObservedAt));
+  return { count: recent.length, recent };
+}
+
 function summarizeWorkerSessionControlPlaneStatus(
   status: WorkerSessionControlPlaneStatusResponse,
 ): {
@@ -12270,6 +12365,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     attempts: WorkerSessionControlPlaneStatusResponse["recovery"]["attempts"];
     recentAttempts: WorkerSessionControlPlaneStatusResponse["recovery"]["recentAttempts"];
     recoverNext: WorkerSessionControlPlaneStatusResponse["recovery"]["recoverNext"];
+    failedRecoverNextResumeLoops: { count: number; recent: FailedRecoverNextResumeLoopSummary[] };
     statusWatchExecutions: WorkerSessionControlPlaneStatusResponse["recovery"]["statusWatchExecutions"];
     workerReconciliations: WorkerSessionControlPlaneStatusResponse["recovery"]["workerReconciliations"];
   };
@@ -12321,6 +12417,7 @@ function summarizeWorkerSessionControlPlaneStatus(
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
   const nextRecovery = selectWorkerSessionControlPlaneNextRecovery(status, nextActions);
+  const failedRecoverNextResumeLoops = summarizeFailedRecoverNextResumeLoops(status.session, status.recovery.recoverNext);
   return {
     ok: true,
     session: status.session,
@@ -12404,6 +12501,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       attempts: status.recovery.attempts,
       recentAttempts: status.recovery.recentAttempts,
       recoverNext: status.recovery.recoverNext,
+      failedRecoverNextResumeLoops,
       statusWatchExecutions: status.recovery.statusWatchExecutions,
       workerReconciliations: status.recovery.workerReconciliations,
     },

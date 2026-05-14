@@ -1349,6 +1349,67 @@ try {
   assert.match(failedRecoverNextResumeCommands, new RegExp(`--advance ${failedResumeAdvanceId}`));
   assert.match(failedRecoverNextResumeCommands, /--alert-surface recover_next --detail-command resume_recover_next_loop/);
 
+  const statusAfterFailedRecoverNextResume = await cliJson<{
+    recovery: {
+      failedRecoverNextResumeLoops: {
+        count: number;
+        recent: Array<{
+          loopAdvanceId: string | null;
+          failedAttempts: number;
+          latestFailedAdvanceId: string;
+          latestFailedExitCode: number | null;
+          incomplete: boolean;
+          commands: {
+            inspectFailedResumes: string[];
+            inspectHistory: string[] | null;
+            resumeLoop: string[] | null;
+            executeResumeHistory: string[] | null;
+          };
+        }>;
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.count, 1);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.failedAttempts, 1);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.latestFailedAdvanceId, failedResumeAdvanceId);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.latestFailedExitCode, 1);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.incomplete, false);
+  assert.deepEqual(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.commands.inspectFailedResumes, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--failed-recover-next-resumes",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+  ]);
+  assert.deepEqual(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.commands.inspectHistory, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    recoverNextLoopDryRun.advanceId,
+    "--recover-next-loop-history",
+  ]);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.commands.resumeLoop, null);
+  assert.equal(statusAfterFailedRecoverNextResume.recovery.failedRecoverNextResumeLoops.recent[0]?.commands.executeResumeHistory, null);
+
   const statusAfterFailedRecoverNextResumeText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -1360,6 +1421,12 @@ try {
   ]);
   assert.match(statusAfterFailedRecoverNextResumeText, /failed_recover_next_resumes: npm run cli -- runs session-control-plane-advances/);
   assert.match(statusAfterFailedRecoverNextResumeText, /--failed-recover-next-resumes/);
+  assert.match(statusAfterFailedRecoverNextResumeText, /failed_recover_next_resume_loops:/);
+  assert.match(statusAfterFailedRecoverNextResumeText, new RegExp(`loop: ${recoverNextLoopDryRun.advanceId}`));
+  assert.match(statusAfterFailedRecoverNextResumeText, new RegExp(`latest_failed_advance: ${failedResumeAdvanceId}`));
+  assert.match(statusAfterFailedRecoverNextResumeText, /incomplete: false/);
+  assert.match(statusAfterFailedRecoverNextResumeText, new RegExp(`inspect_failed_resumes: npm run cli -- runs session-control-plane-advances ${sessionName} --server --failed-recover-next-resumes --loop-advance-id ${recoverNextLoopDryRun.advanceId}`));
+  assert.match(statusAfterFailedRecoverNextResumeText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${recoverNextLoopDryRun.advanceId} --recover-next-loop-history`));
 
   const statusAfterFailedRecoverNextResumeShell = await cliText(baseUrl, [
     "runs",
@@ -1371,7 +1438,10 @@ try {
     "--format",
     "shell",
   ]);
-  assert.ok(statusAfterFailedRecoverNextResumeShell.trim().split("\n").some((line) => line.includes("--failed-recover-next-resumes")));
+  const statusAfterFailedRecoverNextResumeShellLines = statusAfterFailedRecoverNextResumeShell.trim().split("\n");
+  assert.ok(statusAfterFailedRecoverNextResumeShellLines.some((line) => line.includes("--failed-recover-next-resumes")));
+  assert.ok(statusAfterFailedRecoverNextResumeShellLines.some((line) => line.includes(`--failed-recover-next-resumes --loop-advance-id ${recoverNextLoopDryRun.advanceId}`)));
+  assert.ok(statusAfterFailedRecoverNextResumeShellLines.some((line) => line.includes(`--loop-advance-id ${recoverNextLoopDryRun.advanceId} --recover-next-loop-history`)));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
