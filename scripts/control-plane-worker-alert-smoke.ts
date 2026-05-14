@@ -280,6 +280,14 @@ try {
       command: string[];
       dryRunCommand: string[];
     } | null;
+    nextActions: Array<{
+      surface: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      workerId?: string;
+    }>;
     recovery: {
       attempts: {
         total: number;
@@ -325,6 +333,11 @@ try {
   assert.equal(statusSummary.nextRecovery?.action, "drain_control_plane_confirmations");
   assert.equal(statusSummary.nextRecovery?.reason, "blocked_mutating_control_plane_confirmations");
   assert.equal(statusSummary.nextRecovery?.count, 1);
+  assert.ok(statusSummary.nextActions.some((action) => (
+    action.surface === "worker_recovery"
+    && action.action === "restart_control_plane_advance_worker"
+    && action.workerId === workerId
+  )));
   assert.deepEqual(statusSummary.queues.controlPlaneConfirmations.commands.inspectQueue, [
     "npm",
     "run",
@@ -535,6 +548,9 @@ try {
   ]);
   assert.match(statusSummaryText, /control-plane status summary/);
   assert.match(statusSummaryText, /next_recovery:/);
+  assert.match(statusSummaryText, /next_actions:/);
+  assert.match(statusSummaryText, /surface: worker_recovery/);
+  assert.match(statusSummaryText, new RegExp(`command: npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.match(statusSummaryText, /pending_confirmations: 1/);
   assert.match(statusSummaryText, new RegExp(`advance: ${recoverNextLoopDryRun.advanceId}`));
   assert.match(statusSummaryText, /inspect: npm run cli -- runs session-control-plane-advances/);
@@ -552,6 +568,7 @@ try {
   const statusSummaryShellLines = statusSummaryShell.trim().split("\n").filter(Boolean);
   assert.ok(statusSummaryShellLines.some((line) => line.includes("session-control-plane-recover-next")));
   assert.ok(statusSummaryShellLines.some((line) => line.includes("--dry-run")));
+  assert.ok(statusSummaryShellLines.some((line) => line === `npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recoverNextLoopDryRun.advanceId}`)));
 } finally {
   await app.close();

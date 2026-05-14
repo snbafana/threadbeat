@@ -1018,10 +1018,13 @@ for a compact branch-native result-commit review board with GitHub result links,
 checkout/review commands, record-reviewed/skipped commands, and reviewed/skipped
 state. Add `--next` to default to the first pending result commit with
 `--limit 1`, so operators can review one branch-native result at a time. The
-control-plane status summary surfaces the same next-result and review-next
-commands when pending result commits exist, plus reviewed/skipped inspection
-commands, run-scoped record-reviewed/skipped commands for each surfaced pending
-result, and the latest review audit command when those review states are present. Use
+control-plane status summary prints a prioritized `next_actions` queue with the
+direct recovery/resume command for each surfaced action, and `--commands-only`
+includes those same branch-native action commands. It also surfaces the same
+next-result and review-next commands when pending result commits exist, plus
+reviewed/skipped inspection commands, run-scoped record-reviewed/skipped
+commands for each surfaced pending result, and the latest review audit command
+when those review states are present. Use
 `runs session-result-reviews <name> --server --latest` to collapse the append-only
 review log to the current durable decision per run/result commit; add
 `--format text` for a readable CLI audit. Use

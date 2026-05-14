@@ -9656,6 +9656,22 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   } else {
     lines.push("next_recovery: none");
   }
+  if (summary.nextActions.length > 0) {
+    lines.push("next_actions:");
+    for (const action of summary.nextActions) {
+      lines.push(
+        `  - surface: ${action.surface}`,
+        `    action: ${action.action}`,
+        `    reason: ${action.reason}`,
+        `    count: ${action.count}`,
+        `    run: ${action.runId ?? ""}`,
+        `    worker: ${action.workerId ?? ""}`,
+        `    command: ${formatShellCommand(action.command)}`,
+      );
+    }
+  } else {
+    lines.push("next_actions: none");
+  }
   lines.push(
     "control_plane_topology:",
     `  inspect: ${formatShellCommand(summary.commands.inspectTopology)}`,
@@ -9846,6 +9862,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
   if (summary.nextRecovery) {
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--dry-run"] });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--confirm"] });
+  }
+  for (const action of summary.nextActions) {
+    commands.push({ command: action.command });
   }
   commands.push({ command: summary.commands.inspectTopology });
   commands.push({ command: summary.commands.ensureTopologyLoopDryRun });
