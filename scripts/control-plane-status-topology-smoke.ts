@@ -398,7 +398,7 @@ try {
   assert.match(bundleRecoveryStatusText, /blocked: 0/);
   assert.match(bundleRecoveryStatusText, /executed: 0/);
   assert.match(bundleRecoveryStatusText, /polls: 1/);
-  assert.match(bundleRecoveryStatusText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${bundleRecoveryWorkerId} --kind control-plane-advance --limit 5`));
+  assert.match(bundleRecoveryStatusText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${bundleRecoveryWorkerId} --kind control-plane-bundle-recovery --limit 5`));
   const completedProgress = await cliJson<{
     count: number;
     progress: Array<{ kind: string; workerId: string | null; state: string | null; source: string | null; iterations?: number; stoppedReason?: string }>;

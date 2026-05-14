@@ -861,7 +861,10 @@ control-plane status summary also prints those latest loop outcomes and stdout
 progress rows with per-worker progress inspection commands, so operators can see
 whether long-running advance/topology workers are moving without opening logs. The
 aggregate status includes `workers.controlPlaneAdvance` and advance-worker
-restart next steps alongside the other worker recovery surfaces. The `branches` block
+restart next steps alongside the other worker recovery surfaces; `runs
+session-control-plane-workers <name> --server` exposes bundle-recovery loops as
+`control_plane_bundle_recovery` workers with matching progress, inspect,
+restart, stop, and retire commands. The `branches` block
 counts stopped run branches that are ready to resume versus blocked by a running
 sandbox, and includes exact bulk resume, dry-run, and branch-inspection
 commands. Each branch next-step row includes objective, branch name, worker

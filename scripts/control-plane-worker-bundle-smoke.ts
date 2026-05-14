@@ -367,8 +367,13 @@ try {
   assert.match(recoveryText, /profile_count: 1/);
 
   const aggregate = await cliJson<{
-    summary: { topology: { total: number }; resultReview: { total: number } };
-    workers: Array<{ kind: string; workerId: string | null }>;
+    summary: {
+      topology: { total: number };
+      resultReview: { total: number };
+      bundleRecovery: { total: number; latestResults: { count: number; profileCount: number; planned: number; actionable: number; blocked: number; executed: number; polls: number } };
+    };
+    workers: Array<{ kind: string; workerId: string | null; commands: { inspect: string[]; restart: string[]; stop: string[]; retire: string[] } | null }>;
+    commands: { inspectBundleRecoveryWorkers: string[]; inspectProgress: string[] };
   }>(baseUrl, [
     "runs",
     "session-control-plane-workers",
@@ -380,8 +385,74 @@ try {
   ]);
   assert.equal(aggregate.summary.topology.total, 1);
   assert.equal(aggregate.summary.resultReview.total, 1);
+  assert.equal(aggregate.summary.bundleRecovery.total, 1);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.count, 1);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.profileCount, 1);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.planned, 2);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.actionable, 2);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.blocked, 0);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.executed, 0);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.polls, 1);
   assert.ok(aggregate.workers.some((worker) => worker.kind === "control_plane_topology" && worker.workerId === topologyWorkerId));
   assert.ok(aggregate.workers.some((worker) => worker.kind === "result_review" && worker.workerId === resultReviewWorkerId));
+  const aggregateRecoveryWorker = aggregate.workers.find((worker) => worker.kind === "control_plane_bundle_recovery" && worker.workerId === recoveryWorkerId);
+  assert.ok(aggregateRecoveryWorker);
+  assert.equal(
+    aggregateRecoveryWorker.commands?.inspect.join(" "),
+    `npm run cli -- runs session-control-plane-worker-bundle-recovery-workers ${sessionName} --server --worker-id ${recoveryWorkerId} --include-retired`,
+  );
+  assert.equal(
+    aggregateRecoveryWorker.commands?.restart.join(" "),
+    `npm run cli -- runs restart-control-plane-worker-bundle-recovery-worker ${sessionName} --server --worker-id ${recoveryWorkerId} --include-retired`,
+  );
+  assert.equal(
+    aggregateRecoveryWorker.commands?.stop.join(" "),
+    `npm run cli -- runs stop-control-plane-worker-bundle-recovery-worker ${sessionName} --server --worker-id ${recoveryWorkerId}`,
+  );
+  assert.equal(
+    aggregate.commands.inspectBundleRecoveryWorkers.join(" "),
+    `npm run cli -- runs session-control-plane-worker-bundle-recovery-workers ${sessionName} --server --include-retired --lines 1`,
+  );
+
+  const aggregateText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateText, /bundle_recovery: total=1 alive=0 stopped=0 completed=1 retired=0 exited_unrecorded=0 restartable=0/);
+  assert.match(aggregateText, /profile_count=1,planned=2,actionable=2,blocked=0,executed=0,polls=1/);
+  assert.match(aggregateText, new RegExp(`inspect_bundle_recovery: npm run cli -- runs session-control-plane-worker-bundle-recovery-workers ${sessionName} --server --include-retired --lines 1`));
+
+  const bundleProgress = await cliJson<{
+    count: number;
+    progress: Array<{ kind: string; workerId: string | null; profileCount?: number; polls?: number }>;
+    commands: { refresh: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--kind",
+    "bundle-recovery",
+    "--include-retired",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(bundleProgress.count, 1);
+  assert.equal(bundleProgress.progress[0]?.kind, "control_plane_bundle_recovery");
+  assert.equal(bundleProgress.progress[0]?.workerId, recoveryWorkerId);
+  assert.equal(bundleProgress.progress[0]?.profileCount, 1);
+  assert.equal(bundleProgress.progress[0]?.polls, 1);
+  assert.equal(
+    bundleProgress.commands.refresh.join(" "),
+    `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --kind control-plane-bundle-recovery --include-retired --limit 5`,
+  );
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
