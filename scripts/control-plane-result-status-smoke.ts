@@ -136,6 +136,26 @@ try {
   assert.match(resultInspectionShell, new RegExp(recordReviewedCommand));
   assert.match(resultInspectionShell, new RegExp(recordSkippedCommand));
 
+  const resultInspectionText = await cliText(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "pending",
+    "--format",
+    "text",
+  ]);
+  assert.match(resultInspectionText, /result_inspections:/);
+  assert.match(resultInspectionText, /review_state: pending/);
+  assert.match(resultInspectionText, new RegExp(`run: ${run.id}`));
+  assert.match(resultInspectionText, new RegExp(`result_commit: ${resultCommit}`));
+  assert.match(resultInspectionText, new RegExp(`checkout: ${checkoutCommand}`));
+  assert.match(resultInspectionText, new RegExp(`review: ${reviewCommand}`));
+  assert.match(resultInspectionText, new RegExp(`record_reviewed: ${recordReviewedCommand}`));
+  assert.match(resultInspectionText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
+  assert.match(resultInspectionText, /result_commit_url: https:\/\/github.com\/threadbeat-result-status-smoke\/agent\/commit\//);
+
   const reviewed = await cliJson<{ review: { reviewId: string; action: string; runId: string; resultCommit: string; reviewedBy: string } }>(baseUrl, [
     "runs",
     "session-result-reviews",
@@ -190,6 +210,23 @@ try {
     "shell",
   ]);
   assert.match(reviewedStatusShell, new RegExp(inspectReviewCommand));
+
+  const reviewedResultInspectionCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --review ${reviewed.review.reviewId} --limit 20`;
+  const reviewedInspectionText = await cliText(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "reviewed",
+    "--format",
+    "text",
+  ]);
+  assert.match(reviewedInspectionText, /result_inspections:/);
+  assert.match(reviewedInspectionText, /review_state: reviewed/);
+  assert.match(reviewedInspectionText, new RegExp(`latest_review: ${reviewed.review.reviewId}`));
+  assert.match(reviewedInspectionText, /reviewed_by: result-status-smoke/);
+  assert.match(reviewedInspectionText, new RegExp(`next: ${reviewedResultInspectionCommand}`));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

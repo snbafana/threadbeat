@@ -1013,7 +1013,10 @@ watch-worker restart cues and a recommended next command,
 branch-native result commits, resumable stopped branches, GitHub links, and
 review/resume commands through the server API, or
 `runs session-branches <name> --server --resumable` for the same readout from
-the CLI. Add `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
+the CLI. Use `runs session-result-inspections <name> --server --format text`
+for a compact branch-native result-commit review board with GitHub result links,
+checkout/review commands, record-reviewed/skipped commands, and reviewed/skipped
+state. Add `--branch-action resume_branch|review_branch`, `--run`, `--limit`,
 and `--offset` to narrow or page the server-backed branch queue while preserving
 the exact branch name and result commit on each command row. Add
 `--commands-only --format shell` to print only the recommended review/resume

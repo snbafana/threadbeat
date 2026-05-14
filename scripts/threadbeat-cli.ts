@@ -4736,8 +4736,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options.server !== "1") {
       throw new Error("runs session-result-inspections requires --server");
     }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-result-inspections --format must be json, text, or shell");
+    }
     if (outputFormat === "shell" && options["commands-only"] !== "1") {
       throw new Error("runs session-result-inspections --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-result-inspections --commands-only supports --format json or shell");
     }
     const resultInspections = await fetchWorkerSessionResultInspections(
       required(sessionName, "runs session-result-inspections <session> --server"),
@@ -4765,6 +4771,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       } else {
         await printJson({ ...resultInspections, commands });
       }
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionResultInspectionsText(resultInspections);
       return;
     }
     await printJson(resultInspections);
@@ -9736,6 +9746,63 @@ function workerSessionControlPlaneStatusSummaryCommands(
     }
   }
   return commands;
+}
+
+function printWorkerSessionResultInspectionsText(response: WorkerSessionResultInspectionsResponse): void {
+  console.log(formatWorkerSessionResultInspectionsText(response).join("\n"));
+}
+
+function formatWorkerSessionResultInspectionsText(response: WorkerSessionResultInspectionsResponse): string[] {
+  const runIds = stringListFromUnknown(response.filter.runIds);
+  const reviewStates = stringListFromUnknown(response.filter.reviewStates);
+  const lines = [
+    "result_inspections:",
+    `  session: ${response.session}`,
+    `  filter: run=${runIds.length > 0 ? runIds.join(",") : "all"} review_state=${reviewStates.length > 0 ? reviewStates.join(",") : "all"} limit=${formatOptionalNumber(response.filter.limit)}`,
+    `  summary: result_commits=${response.summary.resultCommits} pending=${response.summary.pending} reviewed=${response.summary.reviewed} skipped=${response.summary.skipped}`,
+  ];
+  if (response.resultCommits.length === 0) {
+    lines.push("  result_commits: none");
+    return lines;
+  }
+  lines.push("  result_commits:");
+  for (const result of response.resultCommits) {
+    lines.push(
+      `    - run: ${result.runId}`,
+      `      objective: ${result.objective}`,
+      `      status: ${result.status}`,
+      `      review_state: ${result.reviewState}`,
+      `      branch: ${result.branchName}`,
+      `      result_commit: ${result.resultCommit}`,
+      `      worker: ${result.workerId ?? ""}`,
+      `      branch_tree: ${result.links.branchTreeUrl ?? ""}`,
+      `      result_tree: ${result.links.resultTreeUrl ?? ""}`,
+      `      result_commit_url: ${result.links.resultCommitUrl ?? ""}`,
+      `      result_compare: ${result.links.resultCompareUrl ?? ""}`,
+      `      inspect_result: ${formatShellCommand(result.commands.inspectResult)}`,
+      `      checkout: ${formatShellCommand(result.commands.checkoutBranch)}`,
+      `      review: ${formatShellCommand(result.commands.reviewRun)}`,
+      `      inspect_reviews: ${formatShellCommand(result.commands.inspectReviews)}`,
+      `      next: ${formatShellCommand(result.nextStep.command)}`,
+    );
+    if (result.reviewState === "pending") {
+      lines.push(
+        `      record_reviewed: ${formatShellCommand(result.commands.recordReviewed)}`,
+        `      record_skipped: ${formatShellCommand(result.commands.recordSkipped)}`,
+      );
+    }
+    if (result.latestReview) {
+      lines.push(
+        `      latest_review: ${result.latestReview.reviewId}`,
+        `      reviewed_by: ${result.latestReview.reviewedBy}`,
+        `      reviewed_at: ${result.latestReview.observedAt}`,
+      );
+      if (result.latestReview.note) {
+        lines.push(`      note: ${result.latestReview.note}`);
+      }
+    }
+  }
+  return lines;
 }
 
 function selectWorkerSessionControlPlaneNextActions(
@@ -16296,7 +16363,7 @@ Commands:
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--record-reviewed|--record-skipped] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20]
-  runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--commands-only] [--format json|shell] [--limit 20]
+  runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--commands-only] [--format json|text|shell] [--limit 20]
   runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,apply_action,drain_continuation,worker_recovery] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
