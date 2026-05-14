@@ -8485,6 +8485,42 @@ type WorkerSessionControlPlaneStatusResponse = {
         command: string[];
       }>;
     };
+    workerReconciliations: {
+      counts: {
+        total: number;
+        dryRun: number;
+        executed: number;
+        noop: number;
+        failed: number;
+        maxSteps: number;
+        untilEmpty: number;
+      };
+      recent: Array<{
+        reconciliationId: string;
+        session: string;
+        observedAt: string;
+        completedAt: string;
+        dryRun: boolean;
+        confirmed: boolean;
+        untilEmpty: boolean;
+        status: string;
+        stoppedReason?: string;
+        filter: unknown;
+        summary: {
+          iterations: number;
+          totalPlanned: number;
+          totalExecuted: number;
+          lastPlannedCount: number | null;
+          lastNextPlannedCount: number | null;
+          lastRemainingCount: number | null;
+        };
+        commands: {
+          inspectWorkers?: string[];
+          dryRun?: string[];
+          confirm?: string[];
+        };
+      }>;
+    };
     nextSteps: {
       watchWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       drainWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
@@ -9565,6 +9601,28 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   }
+  const workerReconciliations = summary.recovery.workerReconciliations;
+  lines.push(
+    `worker_reconciliations: total=${workerReconciliations.counts.total} dry_run=${workerReconciliations.counts.dryRun} executed=${workerReconciliations.counts.executed} noop=${workerReconciliations.counts.noop} failed=${workerReconciliations.counts.failed} max_steps=${workerReconciliations.counts.maxSteps} until_empty=${workerReconciliations.counts.untilEmpty}`,
+  );
+  if (workerReconciliations.recent.length > 0) {
+    lines.push("recent_worker_reconciliations:");
+    for (const record of workerReconciliations.recent) {
+      lines.push(
+        `  - reconciliation: ${record.reconciliationId}`,
+        `    status: ${record.status}`,
+        `    dry_run: ${record.dryRun}`,
+        `    until_empty: ${record.untilEmpty}`,
+        `    stopped_reason: ${record.stoppedReason ?? ""}`,
+        `    iterations: ${record.summary.iterations}`,
+        `    total_planned: ${record.summary.totalPlanned}`,
+        `    total_executed: ${record.summary.totalExecuted}`,
+      );
+      if (record.commands.confirm) {
+        lines.push(`    confirm: ${formatShellCommand(record.commands.confirm)}`);
+      }
+    }
+  }
   return lines;
 }
 
@@ -9600,6 +9658,11 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   for (const attempt of summary.recovery.recoverNext.recent) {
     commands.push({ command: attempt.command });
+  }
+  for (const record of summary.recovery.workerReconciliations.recent) {
+    if (record.commands.confirm) {
+      commands.push({ command: record.commands.confirm });
+    }
   }
   return commands;
 }
@@ -9772,6 +9835,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     attempts: WorkerSessionControlPlaneStatusResponse["recovery"]["attempts"];
     recentAttempts: WorkerSessionControlPlaneStatusResponse["recovery"]["recentAttempts"];
     recoverNext: WorkerSessionControlPlaneStatusResponse["recovery"]["recoverNext"];
+    workerReconciliations: WorkerSessionControlPlaneStatusResponse["recovery"]["workerReconciliations"];
   };
   nextRecovery: ReturnType<typeof selectWorkerSessionControlPlaneNextRecovery>;
   nextActions: WorkerSessionControlPlaneAdvanceAction[];
@@ -9882,6 +9946,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       attempts: status.recovery.attempts,
       recentAttempts: status.recovery.recentAttempts,
       recoverNext: status.recovery.recoverNext,
+      workerReconciliations: status.recovery.workerReconciliations,
     },
     nextRecovery,
     nextActions,

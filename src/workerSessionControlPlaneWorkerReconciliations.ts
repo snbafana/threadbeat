@@ -28,6 +28,30 @@ export type WorkerSessionControlPlaneWorkerReconciliationRecord = {
   };
 };
 
+export type WorkerSessionControlPlaneWorkerReconciliationSummary = {
+  total: number;
+  dryRun: number;
+  executed: number;
+  noop: number;
+  failed: number;
+  maxSteps: number;
+  untilEmpty: number;
+};
+
+export function summarizeWorkerSessionControlPlaneWorkerReconciliationRecords(
+  records: WorkerSessionControlPlaneWorkerReconciliationRecord[],
+): WorkerSessionControlPlaneWorkerReconciliationSummary {
+  return {
+    total: records.length,
+    dryRun: records.filter((record) => record.status === "dry_run").length,
+    executed: records.filter((record) => record.status === "executed").length,
+    noop: records.filter((record) => record.status === "noop").length,
+    failed: records.filter((record) => record.status === "failed").length,
+    maxSteps: records.filter((record) => record.status === "max_steps").length,
+    untilEmpty: records.filter((record) => record.untilEmpty).length,
+  };
+}
+
 export async function listWorkerSessionControlPlaneWorkerReconciliationRecords(
   projectRoot: string,
   sessionName: string,

@@ -33,6 +33,7 @@ const settings: Settings = {
 const { app } = await buildServer(settings);
 
 try {
+  await writeWorkerSessionRecord();
   await writeAdvanceWorker(selectedAdvanceWorkerId);
   await writeAdvanceWorker(otherAdvanceWorkerId);
   await writeAdvanceWorker(exitedAdvanceWorkerId, { stopped: false });
@@ -225,6 +226,35 @@ try {
   assert.equal(reconcileTimeline.events[0]?.iterations, 1);
   assert.equal(reconcileTimeline.events[0]?.totalPlanned, 6);
   assert.equal(reconcileTimeline.events[0]?.totalExecuted, 0);
+  const statusSummary = await cliJson<WorkerStatusSummaryResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(statusSummary.recovery.workerReconciliations.counts.total, 1);
+  assert.equal(statusSummary.recovery.workerReconciliations.counts.dryRun, 1);
+  assert.equal(statusSummary.recovery.workerReconciliations.counts.untilEmpty, 1);
+  assert.equal(
+    statusSummary.recovery.workerReconciliations.recent[0]?.reconciliationId,
+    reconcileLoopPreview.reconciliationRecord.reconciliationId,
+  );
+  const statusSummaryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(statusSummaryText, /worker_reconciliations: total=1 dry_run=1 executed=0 noop=0 failed=0 max_steps=0 until_empty=1/);
+  assert.match(statusSummaryText, new RegExp(`reconciliation: ${reconcileLoopPreview.reconciliationRecord.reconciliationId}`));
   const reconcileLoopText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-reconcile-workers",
@@ -259,6 +289,7 @@ try {
   assert.match(aggregateText, new RegExp(`reconcile_until_empty_confirm: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`));
 } finally {
   await app.close();
+  await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-tick-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-worker-reconciliations", sessionName), { recursive: true, force: true });
@@ -303,6 +334,23 @@ type WorkerAggregateResponse = {
   };
 };
 
+type WorkerStatusSummaryResponse = {
+  recovery: {
+    workerReconciliations: {
+      counts: {
+        total: number;
+        dryRun: number;
+        executed: number;
+        noop: number;
+        failed: number;
+        maxSteps: number;
+        untilEmpty: number;
+      };
+      recent: Array<{ reconciliationId: string }>;
+    };
+  };
+};
+
 type WorkerReconcileLoopResponse = {
   ok: true;
   untilEmpty: true;
@@ -322,6 +370,19 @@ type WorkerReconcileLoopResponse = {
     reconciliationId: string;
   };
 };
+
+async function writeWorkerSessionRecord(): Promise<void> {
+  const sessionDir = path.join(".threadbeat", "worker-sessions");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(path.join(sessionDir, `${sessionName}.json`), `${JSON.stringify({
+    session: sessionName,
+    baseUrl: "http://127.0.0.1:0",
+    startedAt: "2026-05-14T00:00:00.000Z",
+    command: ["runs", "work", "--agent", "agt_worker_next"],
+    workers: [],
+    stoppedAt: "2026-05-14T00:00:01.000Z",
+  }, null, 2)}\n`);
+}
 
 async function writeAdvanceWorker(workerId: string, options: { stopped?: boolean } = {}): Promise<void> {
   const dir = path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName);

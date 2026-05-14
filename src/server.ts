@@ -53,6 +53,7 @@ import {
 } from "./workerSessionControlPlaneTicks.js";
 import {
   listWorkerSessionControlPlaneWorkerReconciliationRecords,
+  summarizeWorkerSessionControlPlaneWorkerReconciliationRecords,
 } from "./workerSessionControlPlaneWorkerReconciliations.js";
 import {
   listWorkerSessionControlPlaneTickWorkerNextSteps,
@@ -3855,6 +3856,10 @@ const readWorkerSessionControlPlaneStatus = async (
     attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
     recentAttempts: WorkerSessionControlPlaneRecoveryAttemptStatus[];
     recoverNext: WorkerSessionControlPlaneRecoverNextHistoryStatus;
+    workerReconciliations: {
+      counts: ReturnType<typeof summarizeWorkerSessionControlPlaneWorkerReconciliationRecords>;
+      recent: Awaited<ReturnType<typeof listWorkerSessionControlPlaneWorkerReconciliationRecords>>;
+    };
     nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
   };
 }> => {
@@ -3880,6 +3885,7 @@ const readWorkerSessionControlPlaneStatus = async (
     controlPlaneRecoveryAttempts,
     controlPlaneConfirmationAdvances,
     recoverNextAttempts,
+    workerReconciliations,
   ] = await Promise.all([
     listWorkerSessionApplyRecords(settings.projectRoot, name),
     listWorkerSessionDrainContinuationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
@@ -3911,6 +3917,7 @@ const readWorkerSessionControlPlaneStatus = async (
       limit: Number.MAX_SAFE_INTEGER,
       detailCommands: ["recover_next", "recover_next_loop"],
     }),
+    listWorkerSessionControlPlaneWorkerReconciliationRecords(settings.projectRoot, name, Number.MAX_SAFE_INTEGER),
   ]);
   const applyActionQueue = summarizeWorkerSessionApplyActionQueue(applyRecords);
   const resultInspection = await summarizeWorkerSessionResultInspection(db, session, lines, resultReviews);
@@ -3963,6 +3970,10 @@ const readWorkerSessionControlPlaneStatus = async (
         .slice(0, lines)
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
       recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(name, recoverNextAttempts, lines),
+      workerReconciliations: {
+        counts: summarizeWorkerSessionControlPlaneWorkerReconciliationRecords(workerReconciliations),
+        recent: workerReconciliations.slice(0, lines),
+      },
       nextSteps: {
         watchWorkers: watchWorkerNextSteps.nextSteps,
         drainWorkers: drainWorkerNextSteps.nextSteps,
