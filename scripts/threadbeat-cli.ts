@@ -14379,6 +14379,17 @@ function selectWorkerSessionControlPlaneNextRecovery(
       dryRunCommand: workerSessionRecoverNextIncompleteLoopExecuteCommand(status.session, true),
     };
   }
+  if (status.recovery.continueDeferred.resumableLoops.count > 0) {
+    return {
+      kind: "control_plane_action",
+      surface: "status_watch",
+      action: "resume_continue_deferred_loop",
+      reason: "resumable_continue_deferred_loop",
+      count: status.recovery.continueDeferred.resumableLoops.count,
+      command: workerSessionControlPlaneContinueDeferredNextCommand(status.session, false),
+      dryRunCommand: workerSessionControlPlaneContinueDeferredNextCommand(status.session, true),
+    };
+  }
   return {
     kind: "control_plane_action",
     surface: nextAction.surface,
@@ -14433,6 +14444,13 @@ function workerSessionRecoverNextIncompleteLoopExecuteCommand(
     "--action", "resume_recover_next_loop", "--detail-command", "resume_recover_next_loop",
     dryRun ? "--dry-run" : "--confirm",
     "--lines", "5",
+  ];
+}
+
+function workerSessionControlPlaneContinueDeferredNextCommand(sessionName: string, dryRun: boolean): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred-next", sessionName, "--server",
+    dryRun ? "--dry-run" : "--confirm",
   ];
 }
 
@@ -14791,10 +14809,10 @@ function summarizeWorkerSessionControlPlaneStatus(
       statusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--status-watch-executions"],
       continueDeferredLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--detail-command", "continue_deferred_loop"],
       continueDeferredNextDryRun: status.recovery.continueDeferred.resumableLoops.count > 0
-        ? ["npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred-next", status.session, "--server", "--dry-run"]
+        ? workerSessionControlPlaneContinueDeferredNextCommand(status.session, true)
         : null,
       continueDeferredNextConfirm: status.recovery.continueDeferred.resumableLoops.count > 0
-        ? ["npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred-next", status.session, "--server", "--confirm"]
+        ? workerSessionControlPlaneContinueDeferredNextCommand(status.session, false)
         : null,
       recoverNextIncompleteLoopQueue: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-alert", status.session, "--server",

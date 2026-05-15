@@ -2785,6 +2785,8 @@ try {
   )));
 
   const statusAfterContinueDeferredResume = await cliJson<{
+    nextRecovery: { action: string; reason: string; count: number; command: string[]; dryRunCommand: string[] } | null;
+    commands: { continueDeferredNextDryRun: string[] | null; continueDeferredNextConfirm: string[] | null };
     recovery: {
       continueDeferred: {
         attempts: { total: number; dryRun: number; executed: number; failed: number };
@@ -2815,6 +2817,8 @@ try {
   assert.equal(statusAfterContinueDeferredResume.recovery.continueDeferred.attempts.executed, 0);
   assert.equal(statusAfterContinueDeferredResume.recovery.continueDeferred.attempts.failed, 0);
   assert.equal(statusAfterContinueDeferredResume.recovery.continueDeferred.resumableLoops.count, 1);
+  assert.equal(statusAfterContinueDeferredResume.nextRecovery?.action, "drain_control_plane_confirmations");
+  assert.equal(statusAfterContinueDeferredResume.nextRecovery?.reason, "blocked_mutating_control_plane_confirmations");
   const resumableContinueDeferredLoop = statusAfterContinueDeferredResume.recovery.continueDeferred.resumableLoops.recent[0];
   assert.equal(resumableContinueDeferredLoop?.loopAdvanceId, continueDeferredLoopId);
   assert.equal(resumableContinueDeferredLoop?.attempts, 2);
@@ -2837,6 +2841,7 @@ try {
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_loop_queue: npm run cli -- runs session-control-plane-advances/);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_dry_run: npm run cli -- runs session-control-plane-continue-deferred-next/);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_confirm: npm run cli -- runs session-control-plane-continue-deferred-next/);
+  assert.match(statusTextAfterContinueDeferredResume, /next_recovery:\n  kind: confirmation_queue\n  action: drain_control_plane_confirmations/);
   assert.match(statusTextAfterContinueDeferredResume, /resumable_continue_deferred_loops:/);
   assert.match(statusTextAfterContinueDeferredResume, new RegExp(`loop: ${continueDeferredLoopId}`));
   assert.match(statusTextAfterContinueDeferredResume, /resume: npm run cli -- runs session-control-plane-continue-deferred/);
