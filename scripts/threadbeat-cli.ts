@@ -12121,6 +12121,9 @@ async function continueDeferredWorkerSessionControlPlane(
   startedAt: string;
   completedAt: string;
   untilEmpty: true;
+  loopAdvanceId: string;
+  advanceId: string;
+  advancePath: string;
   maxSteps: number;
   intervalMs: number;
   stoppedReason: "idle" | "dry_run" | "operator_failed" | "max_steps";
@@ -12142,9 +12145,13 @@ async function continueDeferredWorkerSessionControlPlane(
     rerunConfirm: string[];
     status: string[];
     operatorRuns: string[];
+    inspectLoopRecord: string[];
+    listContinuationLoops: string[];
   };
 }> {
   const startedAt = new Date().toISOString();
+  const loopAdvanceId = createContinueDeferredLoopAdvanceId(startedAt);
+  const beforeStatus = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines });
   const steps: Array<{
     step: number;
     operatorRunId: string;
@@ -12158,7 +12165,7 @@ async function continueDeferredWorkerSessionControlPlane(
     };
   }> = [];
   let stoppedReason: "idle" | "dry_run" | "operator_failed" | "max_steps" = "max_steps";
-  let latestSummary = summarizeWorkerSessionControlPlaneStatus(await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines }));
+  let latestSummary = summarizeWorkerSessionControlPlaneStatus(beforeStatus);
   for (let step = 1; step <= execution.maxSteps; step += 1) {
     const operatorRun = await operateWorkerSessionControlPlane(sessionName, options, {
       dryRun: execution.dryRun,
@@ -12208,6 +12215,32 @@ async function continueDeferredWorkerSessionControlPlane(
     "--cycle-interval-ms", String(execution.cycleIntervalMs),
     "--lines", String(execution.lines),
   ];
+  const writtenLoopRecord = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+    advanceId: loopAdvanceId,
+    session: sessionName,
+    observedAt: startedAt,
+    completedAt,
+    dryRun: execution.dryRun,
+    selected: {
+      kind: "continue_deferred_loop",
+      loopAdvanceId,
+      operatorRunIds: steps.map((step) => step.operatorRunId),
+    },
+    detailCommand: "continue_deferred_loop",
+    recovery: {
+      untilEmpty: true,
+      loopAdvanceId,
+      maxSteps: execution.maxSteps,
+      intervalMs: execution.intervalMs,
+      maxCycles: execution.maxCycles,
+      cycleIntervalMs: execution.cycleIntervalMs,
+      stoppedReason,
+      steps,
+    },
+    executed: null,
+    before: summarizeWorkerSessionControlPlaneStatus(beforeStatus),
+    after: latestSummary,
+  });
   return {
     ok: stoppedReason !== "operator_failed",
     session: sessionName,
@@ -12216,6 +12249,9 @@ async function continueDeferredWorkerSessionControlPlane(
     startedAt,
     completedAt,
     untilEmpty: true,
+    loopAdvanceId,
+    advanceId: writtenLoopRecord.record.advanceId,
+    advancePath: writtenLoopRecord.path,
     maxSteps: execution.maxSteps,
     intervalMs: execution.intervalMs,
     stoppedReason,
@@ -12226,6 +12262,8 @@ async function continueDeferredWorkerSessionControlPlane(
       rerunConfirm: [...commandBase, "--confirm"],
       status: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
       operatorRuns: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server"],
+      inspectLoopRecord: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", writtenLoopRecord.record.advanceId],
+      listContinuationLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--detail-command", "continue_deferred_loop"],
     },
   };
 }
@@ -12238,9 +12276,12 @@ function printContinueDeferredWorkerSessionControlPlaneText(
     `  session: ${response.session}`,
     `  dry_run: ${response.dryRun}`,
     `  confirmed: ${response.confirmed}`,
+    `  loop: ${response.loopAdvanceId}`,
     `  stopped_reason: ${response.stoppedReason}`,
     `  steps: ${response.steps.length}`,
     `  needs_action_after: ${response.latestSummary.needsAction}`,
+    `  inspect_loop: ${formatShellCommand(response.commands.inspectLoopRecord)}`,
+    `  list_loops: ${formatShellCommand(response.commands.listContinuationLoops)}`,
     `  status: ${formatShellCommand(response.commands.status)}`,
     `  operator_runs: ${formatShellCommand(response.commands.operatorRuns)}`,
     `  rerun_dry_run: ${formatShellCommand(response.commands.rerunDryRun)}`,
@@ -19351,6 +19392,10 @@ function createDrainContinuationId(observedAt: string): string {
 
 function createRecoverNextLoopAdvanceId(observedAt: string): string {
   return `recover-next-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createContinueDeferredLoopAdvanceId(observedAt: string): string {
+  return `continue-deferred-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function recoverNextLoopStepLoopId(record: { recovery?: unknown }): string | null {

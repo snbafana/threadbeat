@@ -2686,7 +2686,10 @@ try {
   ]);
   assert.match(continueDeferredDispatchText, /control_plane_continue_deferred:/);
   assert.match(continueDeferredDispatchText, /dry_run: true/);
+  assert.match(continueDeferredDispatchText, /loop: continue-deferred-loop-/);
   assert.match(continueDeferredDispatchText, /stopped_reason: dry_run/);
+  assert.match(continueDeferredDispatchText, /inspect_loop: npm run cli -- runs session-control-plane-advances/);
+  assert.match(continueDeferredDispatchText, /list_loops: npm run cli -- runs session-control-plane-advances/);
   assert.match(continueDeferredDispatchText, /operator_run:/);
   assert.match(continueDeferredDispatchText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
   assert.match(continueDeferredDispatchText, /inspect_operator_timeline: npm run cli -- runs session-control-plane-timeline/);
