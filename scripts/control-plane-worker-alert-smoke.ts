@@ -888,6 +888,93 @@ try {
     "--status-watch-executions",
   ]);
 
+  const operatorWorkerId = "operator-worker-smoke";
+  const operatorWorkerStart = await cliJson<{
+    worker: {
+      workerId: string;
+      mode: string;
+      command: string[];
+      alive: boolean;
+      lifecycle: { state: string; restartable: boolean; reason: string };
+    };
+  }>(baseUrl, [
+    "runs",
+    "start-control-plane-operator-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    operatorWorkerId,
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "1",
+    "--reconcile-workers",
+    "--include-retired",
+    "--limit",
+    "1",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(operatorWorkerStart.worker.workerId, operatorWorkerId);
+  assert.equal(operatorWorkerStart.worker.mode, "operator_loop");
+  assert.ok(operatorWorkerStart.worker.command.includes("session-control-plane-operate"));
+  assert.ok(operatorWorkerStart.worker.command.includes("--dry-run"));
+  assert.ok(operatorWorkerStart.worker.command.includes("--reconcile-workers"));
+
+  const operatorWorkers = await cliJson<{
+    count: number;
+    workers: Array<{ workerId: string; mode: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-operator-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    operatorWorkerId,
+    "--include-retired",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(operatorWorkers.count, 1);
+  assert.equal(operatorWorkers.workers[0]?.workerId, operatorWorkerId);
+  assert.equal(operatorWorkers.workers[0]?.mode, "operator_loop");
+
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-operator-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    operatorWorkerId,
+  ]);
+
+  const operatorWorkerNext = await cliJson<{
+    count: number;
+    nextSteps: Array<{
+      workerId: string;
+      mode: string;
+      commands: {
+        restartControlPlaneAdvanceWorker: string[];
+        inspectControlPlaneAdvanceWorkers: string[];
+        retireControlPlaneAdvanceWorker: string[];
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-operator-workers-next",
+    sessionName,
+    "--server",
+    "--worker-id",
+    operatorWorkerId,
+  ]);
+  assert.equal(operatorWorkerNext.count, 1);
+  assert.equal(operatorWorkerNext.nextSteps[0]?.workerId, operatorWorkerId);
+  assert.equal(operatorWorkerNext.nextSteps[0]?.mode, "operator_loop");
+  assert.ok(operatorWorkerNext.nextSteps[0]?.commands.restartControlPlaneAdvanceWorker.includes("restart-control-plane-operator-worker"));
+  assert.ok(operatorWorkerNext.nextSteps[0]?.commands.inspectControlPlaneAdvanceWorkers.includes("session-control-plane-operator-workers"));
+  assert.ok(operatorWorkerNext.nextSteps[0]?.commands.retireControlPlaneAdvanceWorker.includes("stop-control-plane-operator-worker"));
+
   const operatorRuns = await cliJson<{
     counts: { total: number; dryRun: number; withReconciliation: number };
     records: Array<{

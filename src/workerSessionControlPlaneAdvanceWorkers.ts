@@ -25,7 +25,7 @@ export type ControlPlaneAdvanceWorker = {
   recentProgress?: ControlPlaneAdvanceWorkerLatestResult[];
 };
 
-export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop" | "bundle_recovery_loop";
+export type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop" | "bundle_recovery_loop" | "operator_loop";
 export type ControlPlaneAdvanceWorkerLatestResultSource = "recorded" | "stdout" | "none";
 
 export type ControlPlaneAdvanceWorkerLifecycle = {
@@ -126,6 +126,12 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     note?: string;
     maxIterations?: number;
     loopIntervalMs?: number;
+    operatorLoop?: boolean;
+    maxCycles?: number;
+    cycleIntervalMs?: number;
+    reconcileWorkers?: boolean;
+    includeRetired?: boolean;
+    limit?: number | null;
   },
 ): Promise<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle }> {
   assertSafeWorkerSessionName(sessionName);
@@ -139,7 +145,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
   if (await pathExists(recordPath)) {
     throw new Error(`control-plane advance worker '${workerId}' already exists for session '${sessionName}'`);
   }
-  const mode: ControlPlaneAdvanceWorkerMode = options.bundleRecovery ? "bundle_recovery_loop" : options.resultReview ? "result_review_loop" : options.topologyLoop ? "topology_loop" : options.drainConfirmations ? "confirmation_drain" : "advance_loop";
+  const mode: ControlPlaneAdvanceWorkerMode = options.operatorLoop ? "operator_loop" : options.bundleRecovery ? "bundle_recovery_loop" : options.resultReview ? "result_review_loop" : options.topologyLoop ? "topology_loop" : options.drainConfirmations ? "confirmation_drain" : "advance_loop";
   if (mode === "confirmation_drain" && !options.confirm) {
     throw new Error("control-plane confirmation drain workers require --confirm");
   }
@@ -148,6 +154,9 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
   }
   if (mode === "result_review_loop" && !options.reviewAction) {
     throw new Error("control-plane result review workers require a review action");
+  }
+  if (mode === "operator_loop" && options.dryRun === Boolean(options.confirm)) {
+    throw new Error("control-plane operator workers require exactly one of dryRun or confirm");
   }
   const command = buildControlPlaneAdvanceWorkerCommand(sessionName, mode, options);
   const stdoutStartOffset = await fileSize(stdoutPath);
@@ -340,21 +349,27 @@ export async function listWorkerSessionControlPlaneAdvanceWorkerNextSteps(
           ? "restart-control-plane-result-review-worker"
           : mode === "bundle_recovery_loop"
             ? "restart-control-plane-worker-bundle-recovery-worker"
-          : "restart-control-plane-advance-workers";
+            : mode === "operator_loop"
+              ? "restart-control-plane-operator-worker"
+              : "restart-control-plane-advance-workers";
       const inspectCommandName = mode === "topology_loop"
         ? "session-control-plane-topology-workers"
         : mode === "result_review_loop"
           ? "session-control-plane-result-review-workers"
           : mode === "bundle_recovery_loop"
             ? "session-control-plane-worker-bundle-recovery-workers"
-          : "session-control-plane-advance-workers";
+            : mode === "operator_loop"
+              ? "session-control-plane-operator-workers"
+              : "session-control-plane-advance-workers";
       const stopCommandName = mode === "topology_loop"
         ? "stop-control-plane-topology-worker"
         : mode === "result_review_loop"
           ? "stop-control-plane-result-review-worker"
           : mode === "bundle_recovery_loop"
             ? "stop-control-plane-worker-bundle-recovery-worker"
-          : "stop-control-plane-advance-workers";
+            : mode === "operator_loop"
+              ? "stop-control-plane-operator-worker"
+              : "stop-control-plane-advance-workers";
       const restartControlPlaneAdvanceWorker = ["npm", "run", "cli", "--", "runs", restartCommandName, sessionName, "--server", "--worker-id", worker.workerId];
       const encodedSession = encodeURIComponent(sessionName);
       const encodedWorker = encodeURIComponent(worker.workerId);
@@ -832,8 +847,38 @@ function buildControlPlaneAdvanceWorkerCommand(
     note?: string;
     maxIterations?: number;
     loopIntervalMs?: number;
+    maxCycles?: number;
+    cycleIntervalMs?: number;
+    reconcileWorkers?: boolean;
+    includeRetired?: boolean;
+    limit?: number | null;
   },
 ): string[] {
+  if (mode === "operator_loop") {
+    return [
+      "runs",
+      "session-control-plane-operate",
+      sessionName,
+      "--server",
+      options.confirm ? "--confirm" : "--dry-run",
+      "--max-cycles",
+      String(options.maxCycles ?? options.maxSteps),
+      "--cycle-interval-ms",
+      String(options.cycleIntervalMs ?? options.intervalMs),
+      "--lines",
+      String(options.lines),
+      ...(options.reconcileWorkers ? ["--reconcile-workers"] : []),
+      ...(options.includeRetired ? ["--include-retired"] : []),
+      ...(options.limit !== undefined && options.limit !== null ? ["--limit", String(options.limit)] : []),
+      ...(options.untilEmpty ? [
+        "--until-empty",
+        "--max-steps",
+        String(options.maxSteps),
+        "--interval-ms",
+        String(options.intervalMs),
+      ] : []),
+    ];
+  }
   if (mode === "result_review_loop") {
     return [
       "runs",

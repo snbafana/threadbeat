@@ -1088,6 +1088,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
           maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
           loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
+          operatorLoop: parseBoolean(body.operatorLoop, false),
+          maxCycles: parseOptionalInteger(body.maxCycles) ?? 60,
+          cycleIntervalMs: parseOptionalNonNegativeInteger(body.cycleIntervalMs) ?? 2000,
+          reconcileWorkers: parseBoolean(body.reconcileWorkers, false),
+          includeRetired: parseBoolean(body.includeRetired, false),
+          limit: parseOptionalInteger(body.limit) ?? null,
         },
       );
       return { ok: true, session: name, worker };
@@ -1107,7 +1113,8 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const topologyLoop = parseBoolean(body.topologyLoop, false);
       const resultReview = parseBoolean(body.resultReview, false);
       const bundleRecovery = parseBoolean(body.bundleRecovery, false);
-      const requestedMode = bundleRecovery ? "bundle_recovery_loop" : resultReview ? "result_review_loop" : topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
+      const operatorLoop = parseBoolean(body.operatorLoop, false);
+      const requestedMode = operatorLoop ? "operator_loop" : bundleRecovery ? "bundle_recovery_loop" : resultReview ? "result_review_loop" : topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
       const existingWorkers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
         sessionName: name,
         ...(workerId ? { workerId } : {}),
@@ -1175,6 +1182,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
           maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
           loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
+          operatorLoop,
+          maxCycles: parseOptionalInteger(body.maxCycles) ?? 60,
+          cycleIntervalMs: parseOptionalNonNegativeInteger(body.cycleIntervalMs) ?? 2000,
+          reconcileWorkers: parseBoolean(body.reconcileWorkers, false),
+          includeRetired: parseBoolean(body.includeRetired, false),
+          limit: parseOptionalInteger(body.limit) ?? null,
         },
       );
       return {
@@ -4046,6 +4059,7 @@ const readWorkerSessionControlPlaneStatus = async (
         topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         result_review_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
         bundle_recovery_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+        operator_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
       };
       latestResults: Array<{
         workerId: string;
@@ -6331,6 +6345,7 @@ const parseControlPlaneAdvanceWorkerMode = (value: unknown): ControlPlaneAdvance
   if (value === "topology_loop" || value === "topology-loop" || value === "topology") return "topology_loop";
   if (value === "result_review_loop" || value === "result-review-loop" || value === "result_review" || value === "result-review") return "result_review_loop";
   if (value === "bundle_recovery_loop" || value === "bundle-recovery-loop" || value === "bundle_recovery" || value === "bundle-recovery") return "bundle_recovery_loop";
+  if (value === "operator_loop" || value === "operator-loop" || value === "operator") return "operator_loop";
   throw new Error(`unsupported control-plane advance worker mode: ${String(value)}`);
 };
 
@@ -6484,6 +6499,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
     topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
     result_review_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
     bundle_recovery_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
+    operator_loop: { total: number; alive: number; stopped: number; retired: number; completed: number };
   };
   latestResults: Array<{
     workerId: string;
@@ -6502,6 +6518,7 @@ const summarizeControlPlaneAdvanceWorkers = <T extends {
     topology_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "topology_loop")),
     result_review_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "result_review_loop")),
     bundle_recovery_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "bundle_recovery_loop")),
+    operator_loop: summarizeControlPlaneCompletedWorkers(workers.filter((worker) => worker.mode === "operator_loop")),
   },
   latestResults: workers.flatMap((worker) => worker.latestResult
     ? [{
