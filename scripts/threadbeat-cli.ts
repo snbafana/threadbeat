@@ -4783,6 +4783,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "0", "--cycle-interval-ms"),
         maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
         intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "0", "--interval-ms"),
+        resumeLoopAdvanceId: options["resume-loop"],
       });
       if (outputFormat === "text") {
         printContinueDeferredWorkerSessionControlPlaneText(response);
@@ -5885,6 +5886,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const drainConfirmations = options["drain-confirmations"] === "1";
     const statusWatchExecutions = options["status-watch-executions"] === "1";
     const recoverNextLoopHistory = options["recover-next-loop-history"] === "1";
+    const continueDeferredLoopHistory = options["continue-deferred-loop-history"] === "1";
     const acknowledgedRecoverNextResumeHistory = options["acknowledged-recover-next-resume-history"] === "1";
     const executeResume = options["execute-resume"] === "1";
     const failedRecoverNextResumes = options["failed-recover-next-resumes"] === "1";
@@ -5898,11 +5900,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (failedRecoverNextResumes && statusWatchExecutions) {
       throw new Error("runs session-control-plane-advances --failed-recover-next-resumes cannot be combined with --status-watch-executions");
     }
-    if (failedRecoverNextResumes && (confirmationExecutionModes > 0 || recoverNextLoopHistory || options["confirmation-queue"] === "1")) {
+    if (failedRecoverNextResumes && (confirmationExecutionModes > 0 || recoverNextLoopHistory || continueDeferredLoopHistory || options["confirmation-queue"] === "1")) {
       throw new Error("runs session-control-plane-advances --failed-recover-next-resumes cannot be combined with execution, confirmation queue, or recover-next loop history modes");
     }
-    if (acknowledgedRecoverNextResumeHistory && (confirmationExecutionModes > 0 || recoverNextLoopHistory || failedRecoverNextResumes || statusWatchExecutions || options["confirmation-queue"] === "1")) {
+    if (acknowledgedRecoverNextResumeHistory && (confirmationExecutionModes > 0 || recoverNextLoopHistory || continueDeferredLoopHistory || failedRecoverNextResumes || statusWatchExecutions || options["confirmation-queue"] === "1")) {
       throw new Error("runs session-control-plane-advances --acknowledged-recover-next-resume-history cannot be combined with other advance modes");
+    }
+    if (recoverNextLoopHistory && continueDeferredLoopHistory) {
+      throw new Error("runs session-control-plane-advances loop history modes are mutually exclusive");
     }
     if (acknowledgedRecoverNextResumeHistory && outputFormat === "shell") {
       throw new Error("runs session-control-plane-advances --acknowledged-recover-next-resume-history supports json or text output");
@@ -5937,14 +5942,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recoverNextLoopHistory && !options["loop-advance-id"]) {
       throw new Error("runs session-control-plane-advances --recover-next-loop-history requires --loop-advance-id");
     }
-    if (recoverNextLoopHistory && outputFormat === "shell") {
-      throw new Error("runs session-control-plane-advances --recover-next-loop-history supports json or text output");
+    if (continueDeferredLoopHistory && !options["loop-advance-id"]) {
+      throw new Error("runs session-control-plane-advances --continue-deferred-loop-history requires --loop-advance-id");
     }
-    if (recoverNextLoopHistory && options["commands-only"] === "1") {
-      throw new Error("runs session-control-plane-advances --recover-next-loop-history cannot be combined with --commands-only");
+    if ((recoverNextLoopHistory || continueDeferredLoopHistory) && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-advances loop history modes support json or text output");
     }
-    if (executeResume && !recoverNextLoopHistory) {
-      throw new Error("runs session-control-plane-advances --execute-resume requires --recover-next-loop-history");
+    if ((recoverNextLoopHistory || continueDeferredLoopHistory) && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-advances loop history modes cannot be combined with --commands-only");
+    }
+    if (executeResume && !recoverNextLoopHistory && !continueDeferredLoopHistory) {
+      throw new Error("runs session-control-plane-advances --execute-resume requires a loop history mode");
     }
     if (executeResume && outputFormat !== "json") {
       throw new Error("runs session-control-plane-advances --execute-resume requires json output");
@@ -6128,6 +6136,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       if (outputFormat === "text") {
         printRecoverNextLoopHistoryText(history);
+      } else {
+        await printJson(history);
+      }
+      return;
+    }
+    if (continueDeferredLoopHistory) {
+      const history = summarizeContinueDeferredLoopHistory(requiredSessionName, advances, options["loop-advance-id"]);
+      if (executeResume) {
+        const response = await executeContinueDeferredLoopHistoryResume(requiredSessionName, history, { limit });
+        if (response.executed.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+          process.exitCode = 1;
+        }
+        await printJson(response);
+        return;
+      }
+      if (outputFormat === "text") {
+        printContinueDeferredLoopHistoryText(history);
       } else {
         await printJson(history);
       }
@@ -8592,7 +8617,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -10583,6 +10608,63 @@ type RecoverNextLoopHistoryResumeResponse = {
   after: RecoverNextLoopHistoryResponse;
 };
 
+type ContinueDeferredLoopHistoryRecord = {
+  kind: "loop" | "resume_attempt" | "other";
+  advanceId: string;
+  observedAt: string;
+  completedAt: string;
+  detailCommand: string | null;
+  dryRun: boolean;
+  loopAdvanceId: string | null;
+  resumedLoopAdvanceId: string | null;
+  stoppedReason: string | null;
+  steps: number;
+  previousSteps: number | null;
+  maxSteps: number | null;
+  intervalMs: number | null;
+  maxCycles: number | null;
+  cycleIntervalMs: number | null;
+  lines: number | null;
+  needsActionAfter: boolean | null;
+  inspectCommand: string[];
+};
+
+type ContinueDeferredLoopHistoryResponse = {
+  ok: true;
+  session: string;
+  loopAdvanceId: string;
+  count: number;
+  summary: {
+    resumeAttempts: number;
+    totalSteps: number;
+    failedLoops: number;
+    dryRunRecords: number;
+    stoppedReasons: string[];
+  };
+  commands: {
+    inspectRaw: string[];
+    resumeLoop: string[] | null;
+    executeResume: string[] | null;
+  };
+  records: ContinueDeferredLoopHistoryRecord[];
+};
+
+type ContinueDeferredLoopHistoryResumeResponse = {
+  ok: boolean;
+  session: string;
+  loopAdvanceId: string;
+  command: string[];
+  before: ContinueDeferredLoopHistoryResponse;
+  executed: {
+    command: string[];
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    output: unknown;
+  };
+  after: ContinueDeferredLoopHistoryResponse;
+};
+
 type WorkerSessionControlPlaneAdvanceLoopResponse = {
   ok: true;
   session: string;
@@ -11565,6 +11647,11 @@ function numberRecordField(record: Record<string, unknown> | null, key: string):
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function booleanRecordField(record: Record<string, unknown> | null, key: string): boolean | null {
+  const value = record?.[key];
+  return typeof value === "boolean" ? value : null;
+}
+
 function stringArrayRecordField(record: Record<string, unknown> | null, key: string): string[] | null {
   const value = record?.[key];
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
@@ -11702,6 +11789,114 @@ async function executeRecoverNextLoopHistoryResume(
   };
 }
 
+function summarizeContinueDeferredLoopHistory(
+  sessionName: string,
+  response: WorkerSessionControlPlaneAdvancesResponse,
+  loopAdvanceId: string,
+): ContinueDeferredLoopHistoryResponse {
+  const records = response.advances
+    .filter((advance) => advance.detailCommand === "continue_deferred_loop")
+    .map((advance) => continueDeferredLoopHistoryRecord(sessionName, advance, loopAdvanceId))
+    .sort((left, right) => left.observedAt.localeCompare(right.observedAt));
+  const stoppedReasons = [...new Set(records.map((record) => record.stoppedReason).filter((reason): reason is string => Boolean(reason)))];
+  const latest = records.at(-1) ?? null;
+  const resumeLoop = latest
+    ? [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred", sessionName, "--server",
+        "--until-empty", "--resume-loop", loopAdvanceId,
+        "--max-steps", String(latest.maxSteps ?? 10),
+        "--interval-ms", String(latest.intervalMs ?? 0),
+        "--max-cycles", String(latest.maxCycles ?? 2),
+        "--cycle-interval-ms", String(latest.cycleIntervalMs ?? 0),
+        "--lines", String(latest.lines ?? 5),
+        latest.dryRun ? "--dry-run" : "--confirm",
+      ]
+    : null;
+  return {
+    ok: true,
+    session: sessionName,
+    loopAdvanceId,
+    count: records.length,
+    summary: {
+      resumeAttempts: records.filter((record) => record.kind === "resume_attempt").length,
+      totalSteps: records.reduce((total, record) => total + record.steps, 0),
+      failedLoops: records.filter((record) => record.stoppedReason === "operator_failed").length,
+      dryRunRecords: records.filter((record) => record.dryRun).length,
+      stoppedReasons,
+    },
+    commands: {
+      inspectRaw: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "continue_deferred_loop"],
+      resumeLoop,
+      executeResume: resumeLoop
+        ? ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--continue-deferred-loop-history", "--execute-resume", "--confirm"]
+        : null,
+    },
+    records,
+  };
+}
+
+async function executeContinueDeferredLoopHistoryResume(
+  sessionName: string,
+  history: ContinueDeferredLoopHistoryResponse,
+  options: { limit: number },
+): Promise<ContinueDeferredLoopHistoryResumeResponse> {
+  if (!history.commands.resumeLoop) {
+    throw new Error(`continue-deferred loop ${history.loopAdvanceId} has no resume command`);
+  }
+  const command = history.commands.resumeLoop;
+  const executed = await runCliWorker(cliCommandArgs(command));
+  const afterAdvances = await fetchWorkerSessionControlPlaneAdvances(sessionName, {
+    limit: options.limit,
+    loopAdvanceId: history.loopAdvanceId,
+  });
+  const after = summarizeContinueDeferredLoopHistory(sessionName, afterAdvances, history.loopAdvanceId);
+  return {
+    ok: executed.exitCode === 0,
+    session: sessionName,
+    loopAdvanceId: history.loopAdvanceId,
+    command,
+    before: history,
+    executed: {
+      command,
+      exitCode: executed.exitCode,
+      stdout: executed.stdout,
+      stderr: executed.stderr,
+      output: parseJsonMaybe(executed.stdout),
+    },
+    after,
+  };
+}
+
+function continueDeferredLoopHistoryRecord(
+  sessionName: string,
+  advance: WorkerSessionControlPlaneAdvancesResponse["advances"][number],
+  loopAdvanceId: string,
+): ContinueDeferredLoopHistoryRecord {
+  const recovery = unknownRecord((advance as { recovery?: unknown }).recovery);
+  const steps = Array.isArray(recovery?.steps) ? recovery.steps.length : 0;
+  const after = unknownRecord((advance as { after?: unknown }).after);
+  return {
+    kind: advance.advanceId === loopAdvanceId ? "loop" : advance.detailCommand === "continue_deferred_loop" ? "resume_attempt" : "other",
+    advanceId: advance.advanceId,
+    observedAt: advance.observedAt,
+    completedAt: advance.completedAt,
+    detailCommand: advance.detailCommand ?? null,
+    dryRun: advance.dryRun,
+    loopAdvanceId: stringRecordField(recovery, "loopAdvanceId") ?? advance.selected?.loopAdvanceId ?? null,
+    resumedLoopAdvanceId: stringRecordField(recovery, "resumedLoopAdvanceId"),
+    stoppedReason: stringRecordField(recovery, "stoppedReason"),
+    steps,
+    previousSteps: numberRecordField(recovery, "previousSteps"),
+    maxSteps: numberRecordField(recovery, "maxSteps"),
+    intervalMs: numberRecordField(recovery, "intervalMs"),
+    maxCycles: numberRecordField(recovery, "maxCycles"),
+    cycleIntervalMs: numberRecordField(recovery, "cycleIntervalMs"),
+    lines: numberRecordField(recovery, "lines"),
+    needsActionAfter: booleanRecordField(after, "needsAction"),
+    inspectCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", advance.advanceId],
+  };
+}
+
 function recoverNextLoopHistoryRecord(
   sessionName: string,
   advance: WorkerSessionControlPlaneAdvancesResponse["advances"][number],
@@ -11746,6 +11941,10 @@ function advanceRecovery(
 
 function printRecoverNextLoopHistoryText(history: RecoverNextLoopHistoryResponse): void {
   console.log(formatRecoverNextLoopHistoryText(history).join("\n"));
+}
+
+function printContinueDeferredLoopHistoryText(history: ContinueDeferredLoopHistoryResponse): void {
+  console.log(formatContinueDeferredLoopHistoryText(history).join("\n"));
 }
 
 function printAcknowledgedRecoverNextResumeHistoryText(response: AcknowledgedRecoverNextResumeHistoryResponse): void {
@@ -11815,6 +12014,43 @@ function formatRecoverNextLoopHistoryText(history: RecoverNextLoopHistoryRespons
       `    reason: ${record.selectedReason ?? ""}`,
       `    selected_command: ${formatShellCommand(record.selectedCommand ?? [])}`,
       `    executed_exit_code: ${record.executedExitCode ?? ""}`,
+      `    inspect: ${formatShellCommand(record.inspectCommand)}`,
+    );
+  }
+  return lines;
+}
+
+function formatContinueDeferredLoopHistoryText(history: ContinueDeferredLoopHistoryResponse): string[] {
+  const lines = [
+    "continue-deferred loop history",
+    `session: ${history.session}`,
+    `loop: ${history.loopAdvanceId}`,
+    `count: ${history.count}`,
+    `summary: resume_attempts=${history.summary.resumeAttempts} total_steps=${history.summary.totalSteps} failed_loops=${history.summary.failedLoops} dry_run_records=${history.summary.dryRunRecords} stopped_reasons=${history.summary.stoppedReasons.join(",") || "*"}`,
+    "commands:",
+    `  inspect_raw: ${formatShellCommand(history.commands.inspectRaw)}`,
+    ...(history.commands.resumeLoop ? [`  resume: ${formatShellCommand(history.commands.resumeLoop)}`] : []),
+    ...(history.commands.executeResume ? [`  execute_resume: ${formatShellCommand(history.commands.executeResume)}`] : []),
+    "records:",
+  ];
+  if (history.records.length === 0) {
+    lines.push("  <empty>");
+    return lines;
+  }
+  for (const record of history.records) {
+    lines.push(
+      `  - ${record.kind}: ${record.advanceId}`,
+      `    observed_at: ${record.observedAt}`,
+      `    detail_command: ${record.detailCommand ?? ""}`,
+      `    dry_run: ${record.dryRun}`,
+      `    resumed_loop: ${record.resumedLoopAdvanceId ?? ""}`,
+      `    stopped_reason: ${record.stoppedReason ?? ""}`,
+      `    steps: ${record.steps}`,
+      `    previous_steps: ${record.previousSteps ?? ""}`,
+      `    max_steps: ${record.maxSteps ?? ""}`,
+      `    max_cycles: ${record.maxCycles ?? ""}`,
+      `    lines: ${record.lines ?? ""}`,
+      `    needs_action_after: ${record.needsActionAfter ?? ""}`,
       `    inspect: ${formatShellCommand(record.inspectCommand)}`,
     );
   }
@@ -12112,6 +12348,7 @@ async function continueDeferredWorkerSessionControlPlane(
     cycleIntervalMs: number;
     maxSteps: number;
     intervalMs: number;
+    resumeLoopAdvanceId?: string;
   },
 ): Promise<{
   ok: boolean;
@@ -12121,6 +12358,9 @@ async function continueDeferredWorkerSessionControlPlane(
   startedAt: string;
   completedAt: string;
   untilEmpty: true;
+  resumed: boolean;
+  resumedLoopAdvanceId: string | null;
+  previousSteps: number;
   loopAdvanceId: string;
   advanceId: string;
   advancePath: string;
@@ -12146,11 +12386,31 @@ async function continueDeferredWorkerSessionControlPlane(
     status: string[];
     operatorRuns: string[];
     inspectLoopRecord: string[];
+    inspectLoopHistory: string[];
     listContinuationLoops: string[];
   };
 }> {
   const startedAt = new Date().toISOString();
-  const loopAdvanceId = createContinueDeferredLoopAdvanceId(startedAt);
+  const resumedLoopAdvanceId = execution.resumeLoopAdvanceId ?? null;
+  if (resumedLoopAdvanceId && !/^[A-Za-z0-9._-]+$/.test(resumedLoopAdvanceId)) {
+    throw new Error(`unsafe --resume-loop value: ${resumedLoopAdvanceId}`);
+  }
+  const previousLoopRecords = resumedLoopAdvanceId
+    ? await listWorkerSessionControlPlaneAdvanceRecords(process.cwd(), sessionName, {
+        limit: Number.MAX_SAFE_INTEGER,
+        loopAdvanceIds: [resumedLoopAdvanceId],
+        detailCommands: ["continue_deferred_loop"],
+      })
+    : [];
+  if (resumedLoopAdvanceId && previousLoopRecords.length === 0) {
+    throw new Error(`runs session-control-plane-continue-deferred --resume-loop ${resumedLoopAdvanceId} has no continue-deferred loop records`);
+  }
+  const loopAdvanceId = resumedLoopAdvanceId ?? createContinueDeferredLoopAdvanceId(startedAt);
+  const recordAdvanceId = resumedLoopAdvanceId ? createContinueDeferredLoopAdvanceId(startedAt) : loopAdvanceId;
+  const previousSteps = previousLoopRecords.reduce((total, record) => {
+    const recovery = unknownRecord(record.recovery);
+    return total + (Array.isArray(recovery?.steps) ? recovery.steps.length : 0);
+  }, 0);
   const beforeStatus = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines });
   const steps: Array<{
     step: number;
@@ -12209,6 +12469,7 @@ async function continueDeferredWorkerSessionControlPlane(
   const commandBase = [
     "npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred", sessionName, "--server",
     "--until-empty",
+    ...(resumedLoopAdvanceId ? ["--resume-loop", resumedLoopAdvanceId] : []),
     "--max-steps", String(execution.maxSteps),
     "--interval-ms", String(execution.intervalMs),
     "--max-cycles", String(execution.maxCycles),
@@ -12216,7 +12477,7 @@ async function continueDeferredWorkerSessionControlPlane(
     "--lines", String(execution.lines),
   ];
   const writtenLoopRecord = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
-    advanceId: loopAdvanceId,
+    advanceId: recordAdvanceId,
     session: sessionName,
     observedAt: startedAt,
     completedAt,
@@ -12230,10 +12491,13 @@ async function continueDeferredWorkerSessionControlPlane(
     recovery: {
       untilEmpty: true,
       loopAdvanceId,
+      resumedLoopAdvanceId,
+      previousSteps,
       maxSteps: execution.maxSteps,
       intervalMs: execution.intervalMs,
       maxCycles: execution.maxCycles,
       cycleIntervalMs: execution.cycleIntervalMs,
+      lines: execution.lines,
       stoppedReason,
       steps,
     },
@@ -12249,6 +12513,9 @@ async function continueDeferredWorkerSessionControlPlane(
     startedAt,
     completedAt,
     untilEmpty: true,
+    resumed: Boolean(resumedLoopAdvanceId),
+    resumedLoopAdvanceId,
+    previousSteps,
     loopAdvanceId,
     advanceId: writtenLoopRecord.record.advanceId,
     advancePath: writtenLoopRecord.path,
@@ -12263,6 +12530,7 @@ async function continueDeferredWorkerSessionControlPlane(
       status: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
       operatorRuns: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server"],
       inspectLoopRecord: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", writtenLoopRecord.record.advanceId],
+      inspectLoopHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--continue-deferred-loop-history"],
       listContinuationLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--detail-command", "continue_deferred_loop"],
     },
   };
@@ -12277,10 +12545,14 @@ function printContinueDeferredWorkerSessionControlPlaneText(
     `  dry_run: ${response.dryRun}`,
     `  confirmed: ${response.confirmed}`,
     `  loop: ${response.loopAdvanceId}`,
+    `  resumed: ${response.resumed}`,
+    `  resumed_loop: ${response.resumedLoopAdvanceId ?? ""}`,
+    `  previous_steps: ${response.previousSteps}`,
     `  stopped_reason: ${response.stoppedReason}`,
     `  steps: ${response.steps.length}`,
     `  needs_action_after: ${response.latestSummary.needsAction}`,
     `  inspect_loop: ${formatShellCommand(response.commands.inspectLoopRecord)}`,
+    `  inspect_history: ${formatShellCommand(response.commands.inspectLoopHistory)}`,
     `  list_loops: ${formatShellCommand(response.commands.listContinuationLoops)}`,
     `  status: ${formatShellCommand(response.commands.status)}`,
     `  operator_runs: ${formatShellCommand(response.commands.operatorRuns)}`,
@@ -22223,7 +22495,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
-  runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
+  runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
@@ -22248,7 +22520,7 @@ Commands:
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|acknowledge_recover_next_resume_attempt|run_selected_command|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
-  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history [--execute-resume --confirm]] [--acknowledged-recover-next-resume-history [--advance acknowledgement_or_attempt_or_loop_id]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery] [--status-watch-executions] [--failed-recover-next-resumes] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history|--continue-deferred-loop-history [--execute-resume --confirm]] [--acknowledged-recover-next-resume-history [--advance acknowledgement_or_attempt_or_loop_id]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery] [--status-watch-executions] [--failed-recover-next-resumes] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]

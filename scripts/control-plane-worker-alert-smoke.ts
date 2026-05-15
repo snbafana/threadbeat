@@ -2689,10 +2689,95 @@ try {
   assert.match(continueDeferredDispatchText, /loop: continue-deferred-loop-/);
   assert.match(continueDeferredDispatchText, /stopped_reason: dry_run/);
   assert.match(continueDeferredDispatchText, /inspect_loop: npm run cli -- runs session-control-plane-advances/);
+  assert.match(continueDeferredDispatchText, /inspect_history: npm run cli -- runs session-control-plane-advances/);
   assert.match(continueDeferredDispatchText, /list_loops: npm run cli -- runs session-control-plane-advances/);
   assert.match(continueDeferredDispatchText, /operator_run:/);
   assert.match(continueDeferredDispatchText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
   assert.match(continueDeferredDispatchText, /inspect_operator_timeline: npm run cli -- runs session-control-plane-timeline/);
+  const continueDeferredLoopId = /loop: (continue-deferred-loop-\S+)/.exec(continueDeferredDispatchText)?.[1];
+  assert.ok(continueDeferredLoopId);
+  const continueDeferredLoopHistory = await cliJson<{
+    loopAdvanceId: string;
+    count: number;
+    summary: { resumeAttempts: number; totalSteps: number; dryRunRecords: number; stoppedReasons: string[] };
+    commands: { resumeLoop: string[] | null; executeResume: string[] | null };
+    records: Array<{ kind: string; advanceId: string; steps: number; stoppedReason: string | null }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    continueDeferredLoopId,
+    "--continue-deferred-loop-history",
+  ]);
+  assert.equal(continueDeferredLoopHistory.loopAdvanceId, continueDeferredLoopId);
+  assert.equal(continueDeferredLoopHistory.count, 1);
+  assert.equal(continueDeferredLoopHistory.summary.resumeAttempts, 0);
+  assert.equal(continueDeferredLoopHistory.summary.totalSteps, 1);
+  assert.equal(continueDeferredLoopHistory.summary.dryRunRecords, 1);
+  assert.deepEqual(continueDeferredLoopHistory.summary.stoppedReasons, ["dry_run"]);
+  assert.ok(continueDeferredLoopHistory.commands.resumeLoop?.includes("--resume-loop"));
+  assert.ok(continueDeferredLoopHistory.commands.resumeLoop?.includes(continueDeferredLoopId));
+  assert.ok(continueDeferredLoopHistory.commands.executeResume?.includes("--continue-deferred-loop-history"));
+  assert.ok(continueDeferredLoopHistory.records.some((record) => (
+    record.kind === "loop"
+    && record.advanceId === continueDeferredLoopId
+    && record.steps === 1
+    && record.stoppedReason === "dry_run"
+  )));
+
+  const continueDeferredLoopHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    continueDeferredLoopId,
+    "--continue-deferred-loop-history",
+    "--format",
+    "text",
+  ]);
+  assert.match(continueDeferredLoopHistoryText, /continue-deferred loop history/);
+  assert.match(continueDeferredLoopHistoryText, /summary: resume_attempts=0 total_steps=1/);
+  assert.match(continueDeferredLoopHistoryText, /resume: npm run cli -- runs session-control-plane-continue-deferred/);
+  assert.match(continueDeferredLoopHistoryText, /execute_resume: npm run cli -- runs session-control-plane-advances/);
+
+  const resumedContinueDeferredLoop = await cliJson<{
+    ok: boolean;
+    loopAdvanceId: string;
+    executed: {
+      exitCode: number | null;
+      output: { ok: boolean; resumed: boolean; resumedLoopAdvanceId: string | null; previousSteps: number; loopAdvanceId: string; advanceId: string };
+    };
+    after: { count: number; summary: { resumeAttempts: number; totalSteps: number }; records: Array<{ kind: string; advanceId: string; resumedLoopAdvanceId: string | null }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    continueDeferredLoopId,
+    "--continue-deferred-loop-history",
+    "--execute-resume",
+    "--confirm",
+  ]);
+  assert.equal(resumedContinueDeferredLoop.ok, true);
+  assert.equal(resumedContinueDeferredLoop.loopAdvanceId, continueDeferredLoopId);
+  assert.equal(resumedContinueDeferredLoop.executed.exitCode, 0);
+  assert.equal(resumedContinueDeferredLoop.executed.output.ok, true);
+  assert.equal(resumedContinueDeferredLoop.executed.output.resumed, true);
+  assert.equal(resumedContinueDeferredLoop.executed.output.resumedLoopAdvanceId, continueDeferredLoopId);
+  assert.equal(resumedContinueDeferredLoop.executed.output.previousSteps, 1);
+  assert.equal(resumedContinueDeferredLoop.executed.output.loopAdvanceId, continueDeferredLoopId);
+  assert.notEqual(resumedContinueDeferredLoop.executed.output.advanceId, continueDeferredLoopId);
+  assert.equal(resumedContinueDeferredLoop.after.count, 2);
+  assert.equal(resumedContinueDeferredLoop.after.summary.resumeAttempts, 1);
+  assert.equal(resumedContinueDeferredLoop.after.summary.totalSteps, 2);
+  assert.ok(resumedContinueDeferredLoop.after.records.some((record) => (
+    record.kind === "resume_attempt"
+    && record.resumedLoopAdvanceId === continueDeferredLoopId
+  )));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
