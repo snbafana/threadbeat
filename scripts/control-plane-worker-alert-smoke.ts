@@ -810,7 +810,13 @@ try {
       } | null;
       afterSummary: { recovery: { workerReconciliations: { counts: { total: number; dryRun: number } } } };
     }>;
-    commands: { inspectStatusWatchExecutions: string[]; inspectWorkerReconciliations: string[] };
+    operatorRunRecord: { operatorRunId: string; status: string; path: string };
+    commands: {
+      inspectOperatorRuns: string[];
+      inspectOperatorRunTimeline: string[];
+      inspectStatusWatchExecutions: string[];
+      inspectWorkerReconciliations: string[];
+    };
   }>(baseUrl, [
     "runs",
     "session-control-plane-operate",
@@ -828,6 +834,8 @@ try {
   ]);
   assert.equal(operatedDryRun.ok, true);
   assert.equal(operatedDryRun.stoppedReason, "max_cycles");
+  assert.equal(operatedDryRun.operatorRunRecord.status, "dry_run");
+  assert.ok(operatedDryRun.operatorRunRecord.operatorRunId);
   assert.equal(operatedDryRun.cycles.length, 1);
   assert.equal(operatedDryRun.cycles[0]?.status, "executed");
   assert.equal(operatedDryRun.cycles[0]?.action?.reason, "confirmation_queue:drain_control_plane_confirmations");
@@ -842,6 +850,32 @@ try {
   assert.ok(operatedDryRun.cycles[0]?.executedReconciliation?.record?.reconciliationId);
   assert.ok((operatedDryRun.cycles[0]?.afterSummary.recovery.workerReconciliations.counts.total ?? 0) >= 4);
   assert.ok((operatedDryRun.cycles[0]?.afterSummary.recovery.workerReconciliations.counts.dryRun ?? 0) >= 4);
+  assert.deepEqual(operatedDryRun.commands.inspectOperatorRuns, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-operator-runs",
+    sessionName,
+    "--server",
+    "--operator-run",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+  ]);
+  assert.deepEqual(operatedDryRun.commands.inspectOperatorRunTimeline, [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "operator_run",
+    "--execution",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+  ]);
   assert.deepEqual(operatedDryRun.commands.inspectStatusWatchExecutions, [
     "npm",
     "run",
@@ -853,6 +887,38 @@ try {
     "--server",
     "--status-watch-executions",
   ]);
+
+  const operatorRuns = await cliJson<{
+    counts: { total: number; dryRun: number; withReconciliation: number };
+    records: Array<{
+      operatorRunId: string;
+      status: string;
+      stoppedReason: string;
+      bounds: { reconcileWorkers: boolean };
+      summary: { cycles: number; actionReasons: string[]; advanceIds: string[]; reconciliationIds: string[] };
+      commands: { timeline: string[] };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-operator-runs",
+    sessionName,
+    "--server",
+    "--operator-run",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+  ]);
+  assert.equal(operatorRuns.records.length, 1);
+  assert.equal(operatorRuns.records[0]?.operatorRunId, operatedDryRun.operatorRunRecord.operatorRunId);
+  assert.equal(operatorRuns.records[0]?.status, "dry_run");
+  assert.equal(operatorRuns.records[0]?.stoppedReason, "max_cycles");
+  assert.equal(operatorRuns.records[0]?.bounds.reconcileWorkers, true);
+  assert.equal(operatorRuns.records[0]?.summary.cycles, 1);
+  assert.deepEqual(operatorRuns.records[0]?.summary.actionReasons, ["confirmation_queue:drain_control_plane_confirmations"]);
+  assert.deepEqual(operatorRuns.records[0]?.summary.advanceIds, [operatedDryRun.cycles[0]?.executedAction?.advanceId]);
+  assert.deepEqual(operatorRuns.records[0]?.summary.reconciliationIds, [operatedDryRun.cycles[0]?.executedReconciliation?.record?.reconciliationId]);
+  assert.deepEqual(operatorRuns.records[0]?.commands.timeline, operatedDryRun.commands.inspectOperatorRunTimeline);
+  assert.ok(operatorRuns.counts.total >= 1);
+  assert.ok(operatorRuns.counts.dryRun >= 1);
+  assert.ok(operatorRuns.counts.withReconciliation >= 1);
   assert.deepEqual(operatedDryRun.commands.inspectWorkerReconciliations, [
     "npm",
     "run",
@@ -883,9 +949,47 @@ try {
   ]);
   assert.match(operatedDryRunText, /control_plane_operate:/);
   assert.match(operatedDryRunText, /stopped_reason: max_cycles/);
+  assert.match(operatedDryRunText, /operator_run: \d{8}T\d{9}Z-[a-f0-9]+/);
   assert.match(operatedDryRunText, /action: confirmation_queue:drain_control_plane_confirmations/);
   assert.match(operatedDryRunText, /reconciliation: \d{8}T\d{9}Z-[a-f0-9]+/);
+  assert.match(operatedDryRunText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
   assert.match(operatedDryRunText, /inspect_status_watch_executions: npm run cli -- runs session-control-plane-advances/);
+
+  const operatorRunsText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-operator-runs",
+    sessionName,
+    "--server",
+    "--operator-run",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+    "--format",
+    "text",
+  ]);
+  assert.match(operatorRunsText, /control_plane_operator_runs:/);
+  assert.match(operatorRunsText, new RegExp(`operator_run: ${operatedDryRun.operatorRunRecord.operatorRunId}`));
+  assert.match(operatorRunsText, /status: dry_run/);
+  assert.match(operatorRunsText, /timeline: npm run cli -- runs session-control-plane-timeline/);
+
+  const operatorRunTimeline = await cliJson<{
+    counts: { operator_run_recorded: number };
+    events: Array<{ source: string; event: string; executionId: string; operatorRunId: string; status: string; totalExecuted: number }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "operator_run",
+    "--execution",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+  ]);
+  assert.equal(operatorRunTimeline.counts.operator_run_recorded, 1);
+  assert.equal(operatorRunTimeline.events[0]?.source, "operator_run");
+  assert.equal(operatorRunTimeline.events[0]?.event, "operator_run_recorded");
+  assert.equal(operatorRunTimeline.events[0]?.executionId, operatedDryRun.operatorRunRecord.operatorRunId);
+  assert.equal(operatorRunTimeline.events[0]?.operatorRunId, operatedDryRun.operatorRunRecord.operatorRunId);
+  assert.equal(operatorRunTimeline.events[0]?.status, "dry_run");
+  assert.equal(operatorRunTimeline.events[0]?.totalExecuted, 1);
 
   const statusReconcileDryRun = await cliJson<{
     reconciliation: {

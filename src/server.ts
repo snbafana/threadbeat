@@ -59,6 +59,11 @@ import {
   type WorkerSessionControlPlaneWorkerReconciliationRecord,
 } from "./workerSessionControlPlaneWorkerReconciliations.js";
 import {
+  listWorkerSessionControlPlaneOperatorRunRecords,
+  summarizeWorkerSessionControlPlaneOperatorRunRecords,
+  type WorkerSessionControlPlaneOperatorRunRecord,
+} from "./workerSessionControlPlaneOperatorRuns.js";
+import {
   listWorkerSessionControlPlaneTickWorkerNextSteps,
   listWorkerSessionControlPlaneTickWorkers,
   restartWorkerSessionControlPlaneTickWorker,
@@ -799,6 +804,20 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       return await readWorkerSessionControlPlaneWorkerReconciliations(settings, name, {
         limit: parseOptionalInteger(query.limit) ?? 20,
         reconciliationId: parseOptionalString(query.reconciliation),
+        latest: parseBoolean(query.latest, false),
+      });
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/control-plane-operator-runs", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      return await readWorkerSessionControlPlaneOperatorRuns(settings, name, {
+        limit: parseOptionalInteger(query.limit) ?? 20,
+        operatorRunId: parseOptionalString(query.operatorRun),
         latest: parseBoolean(query.latest, false),
       });
     } catch (error) {
@@ -3459,13 +3478,14 @@ const requestBody = (body: unknown): Record<string, unknown> => {
 
 type WorkerSessionControlPlaneTimelineEvent = {
   observedAt: string;
-  source: "tick" | "advance" | "status_watch_execution" | "control_plane_advance_worker" | "control_plane_tick_worker" | "worker_reconcile_execution" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
-  event: "tick_recorded" | "advance_recorded" | "status_watch_executed" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "worker_reconcile_executed" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded" | "result_review_record_failed";
+  source: "tick" | "advance" | "status_watch_execution" | "control_plane_advance_worker" | "control_plane_tick_worker" | "worker_reconcile_execution" | "operator_run" | "apply_action_execution" | "branch_recovery_execution" | "result_review";
+  event: "tick_recorded" | "advance_recorded" | "status_watch_executed" | "worker_started" | "worker_restarted" | "worker_progress_recorded" | "worker_exited_unrecorded" | "worker_stopped" | "worker_completed" | "worker_retired" | "worker_reconcile_executed" | "operator_run_recorded" | "apply_action_executed" | "branch_recovery_executed" | "result_review_recorded" | "result_review_record_failed";
   tickId?: string;
   advanceId?: string;
   workerId?: string;
   executionId?: string;
   reconciliationId?: string;
+  operatorRunId?: string;
   reviewId?: string;
   attemptId?: string;
   applyId?: string;
@@ -3604,12 +3624,13 @@ const readWorkerSessionControlPlaneTimeline = async (
     options.runIds,
   ].some((values) => values.length > 0);
   const recordReadLimit = hasIdentityFilter ? Number.MAX_SAFE_INTEGER : options.limit;
-  const [ticks, advances, advanceWorkers, tickWorkers, workerReconciliations, applyActionExecutions, branchRecoveryExecutions, resultReviews, resultReviewAttempts] = await Promise.all([
+  const [ticks, advances, advanceWorkers, tickWorkers, workerReconciliations, operatorRuns, applyActionExecutions, branchRecoveryExecutions, resultReviews, resultReviewAttempts] = await Promise.all([
     listWorkerSessionControlPlaneTickRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, { limit: recordReadLimit }),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, options.lines),
     listWorkerSessionControlPlaneWorkerReconciliationRecords(settings.projectRoot, name, recordReadLimit),
+    listWorkerSessionControlPlaneOperatorRunRecords(settings.projectRoot, name, { limit: recordReadLimit }),
     listWorkerSessionApplyActionExecutionRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionBranchRecoveryExecutionRecords(settings.projectRoot, name, recordReadLimit),
     listWorkerSessionResultReviewRecords(settings.projectRoot, name, recordReadLimit),
@@ -3828,6 +3849,23 @@ const readWorkerSessionControlPlaneTimeline = async (
       lastNextPlannedCount: reconciliation.summary.lastNextPlannedCount,
       lastRemainingCount: reconciliation.summary.lastRemainingCount,
       command: reconciliation.commands.confirm,
+    });
+  }
+  for (const operatorRun of operatorRuns) {
+    events.push({
+      observedAt: operatorRun.observedAt,
+      source: "operator_run",
+      event: "operator_run_recorded",
+      operatorRunId: operatorRun.operatorRunId,
+      executionId: operatorRun.operatorRunId,
+      status: operatorRun.status,
+      dryRun: operatorRun.dryRun,
+      reason: operatorRun.stoppedReason,
+      iterations: operatorRun.summary.cycles,
+      totalPlanned: operatorRun.summary.actionReasons.length,
+      totalExecuted: operatorRun.summary.executedCycles,
+      lastRemainingCount: operatorRun.summary.needsActionAfter === null ? null : operatorRun.summary.needsActionAfter ? 1 : 0,
+      command: operatorRun.commands.confirm,
     });
   }
   for (const execution of applyActionExecutions) {
@@ -4341,6 +4379,91 @@ const decorateWorkerSessionControlPlaneWorkerReconciliationRecord = (
       "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server",
       "--source", "worker_reconcile_execution",
       "--execution", record.reconciliationId,
+    ],
+  },
+});
+
+type WorkerSessionControlPlaneOperatorRunInspectionRecord =
+  WorkerSessionControlPlaneOperatorRunRecord & {
+    commands: WorkerSessionControlPlaneOperatorRunRecord["commands"] & {
+      inspectRecord: string[];
+      timeline: string[];
+    };
+  };
+
+const readWorkerSessionControlPlaneOperatorRuns = async (
+  settings: Settings,
+  name: string,
+  options: {
+    limit: number;
+    operatorRunId?: string;
+    latest: boolean;
+  },
+): Promise<{
+  ok: true;
+  session: string;
+  filter: {
+    limit: number;
+    latest: boolean;
+    operatorRunId: string | null;
+    totalRecords: number;
+    visibleRecords: number;
+  };
+  counts: ReturnType<typeof summarizeWorkerSessionControlPlaneOperatorRunRecords>;
+  latest: WorkerSessionControlPlaneOperatorRunInspectionRecord | null;
+  records: WorkerSessionControlPlaneOperatorRunInspectionRecord[];
+  commands: {
+    list: string[];
+    latest: string[];
+    inspectLatest: string[] | null;
+    timelineLatest: string[] | null;
+  };
+}> => {
+  const allRecords = await listWorkerSessionControlPlaneOperatorRunRecords(settings.projectRoot, name, { limit: Number.MAX_SAFE_INTEGER });
+  const selectedRecords = options.operatorRunId
+    ? allRecords.filter((record) => record.operatorRunId === options.operatorRunId)
+    : options.latest
+      ? allRecords.slice(0, 1)
+      : allRecords.slice(0, options.limit);
+  const records = selectedRecords.map((record) => decorateWorkerSessionControlPlaneOperatorRunRecord(name, record));
+  const latest = allRecords[0] ? decorateWorkerSessionControlPlaneOperatorRunRecord(name, allRecords[0]) : null;
+  return {
+    ok: true,
+    session: name,
+    filter: {
+      limit: options.limit,
+      latest: options.latest,
+      operatorRunId: options.operatorRunId ?? null,
+      totalRecords: allRecords.length,
+      visibleRecords: records.length,
+    },
+    counts: summarizeWorkerSessionControlPlaneOperatorRunRecords(allRecords),
+    latest,
+    records,
+    commands: {
+      list: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", name, "--server", "--limit", String(options.limit)],
+      latest: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", name, "--server", "--latest"],
+      inspectLatest: latest?.commands.inspectRecord ?? null,
+      timelineLatest: latest?.commands.timeline ?? null,
+    },
+  };
+};
+
+const decorateWorkerSessionControlPlaneOperatorRunRecord = (
+  sessionName: string,
+  record: WorkerSessionControlPlaneOperatorRunRecord,
+): WorkerSessionControlPlaneOperatorRunInspectionRecord => ({
+  ...record,
+  commands: {
+    ...record.commands,
+    inspectRecord: [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server",
+      "--operator-run", record.operatorRunId,
+    ],
+    timeline: [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server",
+      "--source", "operator_run",
+      "--execution", record.operatorRunId,
     ],
   },
 });

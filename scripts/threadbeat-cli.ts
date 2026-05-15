@@ -10,6 +10,11 @@ import {
 } from "../src/workerSessionControlPlaneAdvances.js";
 import { summarizeWorkerSessionControlPlaneTickDecision } from "../src/workerSessionControlPlaneTicks.js";
 import {
+  type WorkerSessionControlPlaneOperatorRunRecord,
+  type WorkerSessionControlPlaneOperatorRunSummary,
+  writeWorkerSessionControlPlaneOperatorRunRecord,
+} from "../src/workerSessionControlPlaneOperatorRuns.js";
+import {
   type WorkerSessionControlPlaneWorkerReconciliationRecord,
   writeWorkerSessionControlPlaneWorkerReconciliationRecord,
 } from "../src/workerSessionControlPlaneWorkerReconciliations.js";
@@ -4746,6 +4751,46 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     });
     if (outputFormat === "text") {
       printWorkerSessionControlPlaneOperateText(response);
+    } else {
+      await printJson(response);
+    }
+    return;
+  }
+  if (subcommandName === "session-control-plane-operator-runs") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-operator-runs requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-operator-runs --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-operator-runs --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-operator-runs --commands-only supports --format json or shell");
+    }
+    const response = await fetchWorkerSessionControlPlaneOperatorRuns(
+      required(sessionName, "runs session-control-plane-operator-runs <session> --server"),
+      {
+        limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
+        operatorRunId: options["operator-run"],
+        latest: options.latest === "1",
+      },
+    );
+    if (options["commands-only"] === "1") {
+      const commands = workerSessionControlPlaneOperatorRunCommandQueue(response);
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        await printJson({ ...response, commands });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneOperatorRunsText(response);
     } else {
       await printJson(response);
     }
@@ -9898,6 +9943,35 @@ type WorkerSessionControlPlaneWorkerReconciliationsResponse = {
   };
 };
 
+type WorkerSessionControlPlaneOperatorRunInspectionRecord =
+  WorkerSessionControlPlaneOperatorRunRecord & {
+    commands: WorkerSessionControlPlaneOperatorRunRecord["commands"] & {
+      inspectRecord: string[];
+      timeline: string[];
+    };
+  };
+
+type WorkerSessionControlPlaneOperatorRunsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    limit: number;
+    latest: boolean;
+    operatorRunId: string | null;
+    totalRecords: number;
+    visibleRecords: number;
+  };
+  counts: WorkerSessionControlPlaneOperatorRunSummary;
+  latest: WorkerSessionControlPlaneOperatorRunInspectionRecord | null;
+  records: WorkerSessionControlPlaneOperatorRunInspectionRecord[];
+  commands: {
+    list: string[];
+    latest: string[];
+    inspectLatest: string[] | null;
+    timelineLatest: string[] | null;
+  };
+};
+
 type WorkerSessionControlPlaneAlertsResponse = {
   ok: true;
   session: string;
@@ -10279,6 +10353,7 @@ type WorkerSessionControlPlaneTimelineResponse = {
     workerId?: string;
     executionId?: string;
     reconciliationId?: string;
+    operatorRunId?: string;
     reviewId?: string;
     attemptId?: string;
     applyId?: string;
@@ -10807,6 +10882,22 @@ async function fetchWorkerSessionControlPlaneWorkerReconciliations(
       params,
     ),
   ) as WorkerSessionControlPlaneWorkerReconciliationsResponse;
+}
+
+async function fetchWorkerSessionControlPlaneOperatorRuns(
+  sessionName: string,
+  options: { limit: number; operatorRunId?: string; latest: boolean },
+): Promise<WorkerSessionControlPlaneOperatorRunsResponse> {
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.operatorRunId) params.set("operatorRun", options.operatorRunId);
+  if (options.latest) params.set("latest", "true");
+  return await requestJson(
+    "GET",
+    withQuery(
+      `/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-operator-runs`,
+      params,
+    ),
+  ) as WorkerSessionControlPlaneOperatorRunsResponse;
 }
 
 async function fetchWorkerSessionControlPlaneAlerts(
@@ -11517,9 +11608,16 @@ async function operateWorkerSessionControlPlane(
     } & Awaited<ReturnType<typeof executeWorkerSessionControlPlaneStatusReconciliation>>)) | null;
     afterSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
   }>;
+  operatorRunRecord: {
+    path: string;
+    operatorRunId: string;
+    status: WorkerSessionControlPlaneOperatorRunRecord["status"];
+  };
   commands: {
     rerunDryRun: string[];
     rerunConfirm: string[];
+    inspectOperatorRuns: string[];
+    inspectOperatorRunTimeline: string[];
     inspectStatusWatchExecutions: string[];
     inspectWorkerReconciliations: string[];
   };
@@ -11609,6 +11707,7 @@ async function operateWorkerSessionControlPlane(
     }
   }
 
+  const completedAt = new Date().toISOString();
   const commandBase = [
     "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
     "--max-cycles", String(execution.maxCycles),
@@ -11621,24 +11720,64 @@ async function operateWorkerSessionControlPlane(
     ...(options["max-steps"] ? ["--max-steps", options["max-steps"]] : []),
     ...(options["interval-ms"] ? ["--interval-ms", options["interval-ms"]] : []),
   ];
-  return {
+  const operatorStatus = workerSessionControlPlaneOperatorRunStatus({
+    dryRun: execution.dryRun,
+    stoppedReason,
+  });
+  const writtenOperatorRun = await writeWorkerSessionControlPlaneOperatorRunRecord(process.cwd(), {
+    session: sessionName,
+    observedAt: startedAt,
+    completedAt,
+    dryRun: execution.dryRun,
+    confirmed: execution.confirm,
+    status: operatorStatus,
+    stoppedReason,
+    bounds: {
+      maxCycles: execution.maxCycles,
+      cycleIntervalMs: execution.cycleIntervalMs,
+      lines: execution.lines,
+      reconcileWorkers: execution.reconcileWorkers,
+    },
+    summary: summarizeWorkerSessionControlPlaneOperatorRunCycles(cycles),
+    commands: {
+      dryRun: [...commandBase, "--dry-run"],
+      confirm: [...commandBase, "--confirm"],
+      status: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
+    },
+  });
+  const response = {
     ok: stoppedReason !== "action_failed",
     session: sessionName,
     dryRun: execution.dryRun,
     confirmed: execution.confirm,
     startedAt,
-    completedAt: new Date().toISOString(),
+    completedAt,
     maxCycles: execution.maxCycles,
     cycleIntervalMs: execution.cycleIntervalMs,
     stoppedReason,
     cycles,
+    operatorRunRecord: {
+      path: writtenOperatorRun.path,
+      operatorRunId: writtenOperatorRun.record.operatorRunId,
+      status: writtenOperatorRun.record.status,
+    },
     commands: {
       rerunDryRun: [...commandBase, "--dry-run"],
       rerunConfirm: [...commandBase, "--confirm"],
+      inspectOperatorRuns: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server",
+        "--operator-run", writtenOperatorRun.record.operatorRunId,
+      ],
+      inspectOperatorRunTimeline: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server",
+        "--source", "operator_run",
+        "--execution", writtenOperatorRun.record.operatorRunId,
+      ],
       inspectStatusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions"],
       inspectWorkerReconciliations: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", sessionName, "--server"],
     },
   };
+  return response;
 }
 
 function printWorkerSessionControlPlaneOperateText(
@@ -11650,7 +11789,11 @@ function printWorkerSessionControlPlaneOperateText(
     `  dry_run: ${response.dryRun}`,
     `  confirmed: ${response.confirmed}`,
     `  stopped_reason: ${response.stoppedReason}`,
+    `  operator_run: ${response.operatorRunRecord.operatorRunId}`,
+    `  operator_run_status: ${response.operatorRunRecord.status}`,
     `  cycles: ${response.cycles.length}`,
+    `  inspect_operator_run: ${formatShellCommand(response.commands.inspectOperatorRuns)}`,
+    `  inspect_operator_timeline: ${formatShellCommand(response.commands.inspectOperatorRunTimeline)}`,
     `  inspect_status_watch_executions: ${formatShellCommand(response.commands.inspectStatusWatchExecutions)}`,
     `  inspect_worker_reconciliations: ${formatShellCommand(response.commands.inspectWorkerReconciliations)}`,
     ...response.cycles.flatMap((cycle) => [
@@ -11662,6 +11805,106 @@ function printWorkerSessionControlPlaneOperateText(
       `    needs_action_after: ${cycle.afterSummary.needsAction}`,
     ]),
   ].join("\n"));
+}
+
+function workerSessionControlPlaneOperatorRunStatus(input: {
+  dryRun: boolean;
+  stoppedReason: "idle" | "max_cycles" | "action_failed";
+}): WorkerSessionControlPlaneOperatorRunRecord["status"] {
+  if (input.stoppedReason === "action_failed") return "failed";
+  if (input.stoppedReason === "idle") return "idle";
+  return input.dryRun ? "dry_run" : "executed";
+}
+
+function summarizeWorkerSessionControlPlaneOperatorRunCycles(
+  cycles: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>["cycles"],
+): WorkerSessionControlPlaneOperatorRunRecord["summary"] {
+  const advanceIds = cycles
+    .map((cycle) => cycle.executedAction?.advanceId)
+    .filter((advanceId): advanceId is string => Boolean(advanceId));
+  const reconciliationIds = cycles
+    .map((cycle) => cycle.executedReconciliation?.skipped === false ? cycle.executedReconciliation.record.reconciliationId : null)
+    .filter((reconciliationId): reconciliationId is string => Boolean(reconciliationId));
+  return {
+    cycles: cycles.length,
+    executedCycles: cycles.filter((cycle) => cycle.status === "executed").length,
+    failedCycles: cycles.filter((cycle) => cycle.status === "failed").length,
+    idleCycles: cycles.filter((cycle) => cycle.status === "idle").length,
+    actionReasons: [...new Set(cycles.map((cycle) => cycle.action?.reason).filter((reason): reason is string => Boolean(reason)))],
+    advanceIds,
+    reconciliationIds,
+    needsActionAfter: cycles.at(-1)?.afterSummary.needsAction ?? null,
+  };
+}
+
+function workerSessionControlPlaneOperatorRunCommandQueue(
+  response: WorkerSessionControlPlaneOperatorRunsResponse,
+): CommandQueueOutput["commands"] {
+  const commands: string[][] = [
+    response.commands.list,
+    response.commands.latest,
+    ...(response.commands.inspectLatest ? [response.commands.inspectLatest] : []),
+    ...(response.commands.timelineLatest ? [response.commands.timelineLatest] : []),
+  ];
+  for (const record of response.records) {
+    commands.push(
+      record.commands.inspectRecord,
+      record.commands.timeline,
+      record.commands.status,
+      record.commands.dryRun,
+      record.commands.confirm,
+    );
+  }
+  return uniqueCommandQueue(commands).map((command) => ({ command }));
+}
+
+function printWorkerSessionControlPlaneOperatorRunsText(
+  response: WorkerSessionControlPlaneOperatorRunsResponse,
+): void {
+  console.log(formatWorkerSessionControlPlaneOperatorRunsText(response).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneOperatorRunsText(
+  response: WorkerSessionControlPlaneOperatorRunsResponse,
+): string[] {
+  const lines = [
+    "control_plane_operator_runs:",
+    `  session: ${response.session}`,
+    `  filter: operator_run=${response.filter.operatorRunId ?? "all"} latest=${response.filter.latest} limit=${response.filter.limit}`,
+    `  counts: total=${response.counts.total} dry_run=${response.counts.dryRun} executed=${response.counts.executed} idle=${response.counts.idle} failed=${response.counts.failed} max_cycles=${response.counts.maxCycles} with_reconciliation=${response.counts.withReconciliation}`,
+    "  commands:",
+    `    list: ${formatShellCommand(response.commands.list)}`,
+    `    latest: ${formatShellCommand(response.commands.latest)}`,
+    `    inspect_latest: ${formatShellCommand(response.commands.inspectLatest ?? [])}`,
+    `    timeline_latest: ${formatShellCommand(response.commands.timelineLatest ?? [])}`,
+  ];
+  if (response.records.length === 0) {
+    lines.push("  records: none");
+    return lines;
+  }
+  lines.push("  records:");
+  for (const record of response.records) {
+    lines.push(
+      `    - operator_run: ${record.operatorRunId}`,
+      `      observed_at: ${record.observedAt}`,
+      `      completed_at: ${record.completedAt}`,
+      `      status: ${record.status}`,
+      `      stopped_reason: ${record.stoppedReason}`,
+      `      dry_run: ${record.dryRun}`,
+      `      confirmed: ${record.confirmed}`,
+      `      bounds: max_cycles=${record.bounds.maxCycles} interval_ms=${record.bounds.cycleIntervalMs} lines=${record.bounds.lines} reconcile_workers=${record.bounds.reconcileWorkers}`,
+      `      summary: cycles=${record.summary.cycles} executed=${record.summary.executedCycles} failed=${record.summary.failedCycles} idle=${record.summary.idleCycles} needs_action_after=${record.summary.needsActionAfter ?? "unknown"}`,
+      `      actions: ${record.summary.actionReasons.join(",") || "none"}`,
+      `      advances: ${record.summary.advanceIds.join(",") || "none"}`,
+      `      reconciliations: ${record.summary.reconciliationIds.join(",") || "none"}`,
+      `      inspect_record: ${formatShellCommand(record.commands.inspectRecord)}`,
+      `      timeline: ${formatShellCommand(record.commands.timeline)}`,
+      `      status: ${formatShellCommand(record.commands.status)}`,
+      `      dry_run: ${formatShellCommand(record.commands.dryRun)}`,
+      `      confirm: ${formatShellCommand(record.commands.confirm)}`,
+    );
+  }
+  return lines;
 }
 
 async function executeWorkerSessionControlPlaneStatusReconciliation(
@@ -13739,6 +13982,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
     workerId?: string;
     executionId?: string;
     reconciliationId?: string;
+    operatorRunId?: string;
     reviewId?: string;
     attemptId?: string;
     status?: string;
@@ -13789,6 +14033,7 @@ function summarizeWorkerSessionControlPlaneTimeline(
       workerId: event.workerId,
       executionId: event.executionId,
       reconciliationId: event.reconciliationId,
+      operatorRunId: event.operatorRunId,
       reviewId: event.reviewId,
       attemptId: event.attemptId,
       status: event.status,
@@ -20869,6 +21114,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
+  runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
@@ -20921,7 +21167,7 @@ Commands:
   runs session-control-plane-tick <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-tick-loop <name> --server [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-ticks <name> [--server] [--tick tick_id[,tick_id]] [--limit 20]
-  runs session-control-plane-timeline <name> --server [--summary] [--source tick,advance,status_watch_execution,control_plane_advance_worker,control_plane_tick_worker,worker_reconcile_execution,branch_recovery_execution,result_review] [--event tick_recorded,advance_recorded,status_watch_executed,worker_progress_recorded,worker_exited_unrecorded,worker_reconcile_executed,branch_recovery_executed,result_review_recorded,result_review_record_failed] [--status dry_run,executed,noop,running,reviewed,skipped,failed] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
+  runs session-control-plane-timeline <name> --server [--summary] [--source tick,advance,status_watch_execution,control_plane_advance_worker,control_plane_tick_worker,worker_reconcile_execution,operator_run,branch_recovery_execution,result_review] [--event tick_recorded,advance_recorded,status_watch_executed,worker_progress_recorded,worker_exited_unrecorded,worker_reconcile_executed,operator_run_recorded,branch_recovery_executed,result_review_recorded,result_review_record_failed] [--status dry_run,executed,noop,running,reviewed,skipped,failed,idle] [--tick tick_id] [--advance advance_id] [--worker worker_id] [--execution execution_id] [--apply apply_id] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs start-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 5]
   runs ensure-control-plane-tick-worker <name> --server [--worker-id id] [--dry-run] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs session-control-plane-tick-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
