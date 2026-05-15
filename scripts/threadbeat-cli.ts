@@ -12615,6 +12615,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       `  result_commits: ${formatShellCommand(summary.commands.resultCommitView)}`,
       `  inspect_pending: ${formatShellCommand(summary.commands.pendingResultInspections)}`,
       `  pending_result_commits: ${formatShellCommand(summary.commands.pendingResultCommitView)}`,
+      `  pending_result_queue: ${formatShellCommand(summary.commands.pendingResultCommandQueue)}`,
     );
     if (summary.results.counts.pending > 0) {
       lines.push(`  inspect_next: ${formatShellCommand(summary.commands.nextResultInspection)}`);
@@ -12971,6 +12972,7 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: summary.commands.recordPendingSkipped });
     commands.push({ command: summary.commands.pendingResultInspections });
     commands.push({ command: summary.commands.pendingResultCommitView });
+    commands.push({ command: summary.commands.pendingResultCommandQueue });
   }
   if (summary.results.counts.reviewed > 0) {
     commands.push({ command: summary.commands.reviewedResultInspections });
@@ -13736,6 +13738,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     recordPendingSkipped: string[];
     pendingResultInspections: string[];
     pendingResultCommitView: string[];
+    pendingResultCommandQueue: string[];
     reviewedResultInspections: string[];
     reviewedResultCommitView: string[];
     skippedResultInspections: string[];
@@ -13887,6 +13890,10 @@ function summarizeWorkerSessionControlPlaneStatus(
       recordPendingSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped", "--until-empty"],
       pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
       pendingResultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending", "--result-commits"],
+      pendingResultCommandQueue: [
+        "npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server",
+        "--review-state", "pending", "--limit", "5", "--result-commits", "--commands-only", "--format", "shell",
+      ],
       reviewedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed"],
       reviewedResultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "reviewed", "--result-commits"],
       skippedResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "skipped"],

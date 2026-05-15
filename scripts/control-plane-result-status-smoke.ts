@@ -59,6 +59,7 @@ try {
   const nextResultReviewCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server`;
   const resultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --result-commits`;
   const pendingResultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`;
+  const pendingResultCommandQueueCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --limit 5 --result-commits --commands-only --format shell`;
   const recordNextReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed`;
   const recordNextSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped`;
   const previewPendingReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed --until-empty --dry-run`;
@@ -91,6 +92,7 @@ try {
       nextResultReview: string[];
       resultCommitView: string[];
       pendingResultCommitView: string[];
+      pendingResultCommandQueue: string[];
       recordNextReviewed: string[];
       recordNextSkipped: string[];
       previewPendingReviewed: string[];
@@ -149,6 +151,7 @@ try {
   assert.equal(summary.commands.nextResultReview.join(" "), nextResultReviewCommand);
   assert.equal(summary.commands.resultCommitView.join(" "), resultCommitViewCommand);
   assert.equal(summary.commands.pendingResultCommitView.join(" "), pendingResultCommitViewCommand);
+  assert.equal(summary.commands.pendingResultCommandQueue.join(" "), pendingResultCommandQueueCommand);
   assert.equal(summary.commands.recordNextReviewed.join(" "), recordNextReviewedCommand);
   assert.equal(summary.commands.recordNextSkipped.join(" "), recordNextSkippedCommand);
   assert.equal(summary.commands.previewPendingReviewed.join(" "), previewPendingReviewedCommand);
@@ -264,6 +267,7 @@ try {
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === nextResultReviewCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === resultCommitViewCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === pendingResultCommitViewCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === pendingResultCommandQueueCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordNextReviewedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordNextSkippedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === previewPendingReviewedCommand));
@@ -283,6 +287,7 @@ try {
   assert.match(pendingStatusText, new RegExp(`inspect_next: ${nextResultInspectionCommand}`));
   assert.match(pendingStatusText, new RegExp(`result_commits: ${resultCommitViewCommand}`));
   assert.match(pendingStatusText, new RegExp(`pending_result_commits: ${pendingResultCommitViewCommand}`));
+  assert.match(pendingStatusText, new RegExp(`pending_result_queue: ${pendingResultCommandQueueCommand}`));
   assert.match(pendingStatusText, new RegExp(`review_next: ${nextResultReviewCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_reviewed: ${recordNextReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_next_skipped: ${recordNextSkippedCommand}`));
