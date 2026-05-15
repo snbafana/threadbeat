@@ -10311,6 +10311,27 @@ type WorkerSessionControlPlaneAdvanceAction = {
   continuationIds?: string[];
 };
 
+type WorkerSessionControlPlaneNextRecovery = {
+  kind: "confirmation_queue" | "control_plane_action";
+  action: string;
+  reason: string;
+  count: number;
+  command: string[];
+  dryRunCommand: string[];
+  surface?: WorkerSessionControlPlaneAdvanceAction["surface"];
+};
+
+type WorkerSessionControlPlaneDeferredNextAction = WorkerSessionControlPlaneAdvanceAction & {
+  blockedBy: {
+    kind: "confirmation_queue";
+    action: "drain_control_plane_confirmations";
+    reason: "blocked_mutating_control_plane_confirmations";
+    count: number;
+    command: string[];
+    dryRunCommand: string[];
+  };
+};
+
 type WorkerSessionControlPlaneAdvanceResponse = {
   ok: true;
   session: string;
@@ -12505,6 +12526,22 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   } else {
     lines.push("next_actions: none");
   }
+  if (summary.deferredNextActions.length > 0) {
+    lines.push("deferred_next_actions:");
+    for (const action of summary.deferredNextActions) {
+      lines.push(
+        `  - surface: ${action.surface}`,
+        `    action: ${action.action}`,
+        `    reason: ${action.reason}`,
+        `    count: ${action.count}`,
+        `    blocked_by: ${action.blockedBy.kind}:${action.blockedBy.action}`,
+        `    unblock: ${formatShellCommand(action.blockedBy.command)}`,
+        `    command_after_unblock: ${formatShellCommand(action.command)}`,
+      );
+    }
+  } else {
+    lines.push("deferred_next_actions: none");
+  }
   lines.push(
     "control_plane_topology:",
     `  inspect: ${formatShellCommand(summary.commands.inspectTopology)}`,
@@ -13529,15 +13566,7 @@ function selectWorkerSessionControlPlaneNextActions(
 function selectWorkerSessionControlPlaneNextRecovery(
   status: WorkerSessionControlPlaneStatusResponse,
   nextActions: WorkerSessionControlPlaneAdvanceAction[],
-): {
-  kind: "confirmation_queue" | "control_plane_action";
-  action: string;
-  reason: string;
-  count: number;
-  command: string[];
-  dryRunCommand: string[];
-  surface?: WorkerSessionControlPlaneAdvanceAction["surface"];
-} | null {
+): WorkerSessionControlPlaneNextRecovery | null {
   if (status.queues.controlPlaneConfirmations.summary.commands > 0) {
     return {
       kind: "confirmation_queue",
@@ -13592,6 +13621,25 @@ function selectWorkerSessionControlPlaneNextRecovery(
     command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server"],
     dryRunCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", status.session, "--server", "--dry-run"],
   };
+}
+
+function selectWorkerSessionControlPlaneDeferredNextActions(
+  nextRecovery: WorkerSessionControlPlaneNextRecovery | null,
+  nextActions: WorkerSessionControlPlaneAdvanceAction[],
+): WorkerSessionControlPlaneDeferredNextAction[] {
+  if (nextRecovery?.kind !== "confirmation_queue") return [];
+  const blockedBy: WorkerSessionControlPlaneDeferredNextAction["blockedBy"] = {
+    kind: nextRecovery.kind,
+    action: "drain_control_plane_confirmations",
+    reason: "blocked_mutating_control_plane_confirmations",
+    count: nextRecovery.count,
+    command: nextRecovery.command,
+    dryRunCommand: nextRecovery.dryRunCommand,
+  };
+  return nextActions.map((action) => ({
+    ...action,
+    blockedBy,
+  }));
 }
 
 function workerSessionControlPlaneReconcileLoopCommand(
@@ -13751,8 +13799,9 @@ function summarizeWorkerSessionControlPlaneStatus(
     statusWatchExecutions: WorkerSessionControlPlaneStatusResponse["recovery"]["statusWatchExecutions"];
     workerReconciliations: WorkerSessionControlPlaneStatusResponse["recovery"]["workerReconciliations"];
   };
-  nextRecovery: ReturnType<typeof selectWorkerSessionControlPlaneNextRecovery>;
+  nextRecovery: WorkerSessionControlPlaneNextRecovery | null;
   nextActions: WorkerSessionControlPlaneAdvanceAction[];
+  deferredNextActions: WorkerSessionControlPlaneDeferredNextAction[];
   commands: {
     fullStatus: string[];
     inspectTopology: string[];
@@ -13806,6 +13855,7 @@ function summarizeWorkerSessionControlPlaneStatus(
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
   const nextRecovery = selectWorkerSessionControlPlaneNextRecovery(status, nextActions);
+  const deferredNextActions = selectWorkerSessionControlPlaneDeferredNextActions(nextRecovery, nextActions);
   const failedRecoverNextResumeLoops = summarizeFailedRecoverNextResumeLoops(status.session, status.recovery.recoverNext);
   return {
     ok: true,
@@ -13896,6 +13946,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     },
     nextRecovery,
     nextActions,
+    deferredNextActions,
     commands: {
       fullStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server"],
       inspectTopology: ["npm", "run", "cli", "--", "runs", "session-control-plane-topology", status.session, "--server"],

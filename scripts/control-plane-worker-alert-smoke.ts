@@ -289,6 +289,22 @@ try {
       command: string[];
       workerId?: string;
     }>;
+    deferredNextActions: Array<{
+      surface: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      workerId?: string;
+      blockedBy: {
+        kind: string;
+        action: string;
+        reason: string;
+        count: number;
+        command: string[];
+        dryRunCommand: string[];
+      };
+    }>;
     recovery: {
       attempts: {
         total: number;
@@ -339,6 +355,13 @@ try {
     && action.action === "restart_control_plane_advance_worker"
     && action.workerId === workerId
   )));
+  const deferredWorkerRecoveryAction = statusSummary.deferredNextActions.find((action) => action.surface === "worker_recovery");
+  assert.equal(deferredWorkerRecoveryAction?.action, "restart_control_plane_advance_worker");
+  assert.equal(deferredWorkerRecoveryAction?.workerId, workerId);
+  assert.equal(deferredWorkerRecoveryAction?.blockedBy.kind, "confirmation_queue");
+  assert.equal(deferredWorkerRecoveryAction?.blockedBy.action, "drain_control_plane_confirmations");
+  assert.equal(deferredWorkerRecoveryAction?.blockedBy.reason, "blocked_mutating_control_plane_confirmations");
+  assert.equal(deferredWorkerRecoveryAction?.blockedBy.count, 1);
   assert.deepEqual(statusSummary.queues.controlPlaneConfirmations.commands.inspectQueue, [
     "npm",
     "run",
@@ -365,6 +388,8 @@ try {
   ]);
   assert.deepEqual(statusSummary.nextRecovery?.command, statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmations);
   assert.deepEqual(statusSummary.nextRecovery?.dryRunCommand, statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmationsDryRun);
+  assert.deepEqual(deferredWorkerRecoveryAction?.blockedBy.command, statusSummary.nextRecovery?.command);
+  assert.deepEqual(deferredWorkerRecoveryAction?.blockedBy.dryRunCommand, statusSummary.nextRecovery?.dryRunCommand);
   const confirmationGroup = statusSummary.queues.controlPlaneConfirmations.groups[0];
   assert.equal(confirmationGroup?.surface, "worker_recovery");
   assert.equal(confirmationGroup?.action, "restart_worker_recovery");
@@ -719,7 +744,10 @@ try {
   assert.match(statusSummaryText, /control-plane status summary/);
   assert.match(statusSummaryText, /next_recovery:/);
   assert.match(statusSummaryText, /next_actions:/);
+  assert.match(statusSummaryText, /deferred_next_actions:/);
   assert.match(statusSummaryText, /surface: worker_recovery/);
+  assert.match(statusSummaryText, /blocked_by: confirmation_queue:drain_control_plane_confirmations/);
+  assert.match(statusSummaryText, /command_after_unblock: npm run cli -- runs restart-control-plane-advance-workers/);
   assert.match(statusSummaryText, new RegExp(`command: npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.match(statusSummaryText, /restart_queue: npm run cli -- runs session-control-plane-worker-restart-queue/);
   assert.match(statusSummaryText, /pending_confirmations: 1/);
@@ -1438,6 +1466,14 @@ try {
     commands: {
       recoverNextIncompleteLoopQueue: string[];
     };
+    nextRecovery: {
+      kind: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      dryRunCommand: string[];
+    } | null;
     nextActions: Array<{
       surface?: string;
       action: string;
@@ -1446,6 +1482,23 @@ try {
       command: string[];
       detailCommand?: string;
       loopAdvanceId?: string;
+    }>;
+    deferredNextActions: Array<{
+      surface?: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      detailCommand?: string;
+      loopAdvanceId?: string;
+      blockedBy: {
+        kind: string;
+        action: string;
+        reason: string;
+        count: number;
+        command: string[];
+        dryRunCommand: string[];
+      };
     }>;
   }>(baseUrl, [
     "runs",
@@ -1555,6 +1608,16 @@ try {
   assert.equal(recoverNextNextAction?.detailCommand, "resume_recover_next_loop");
   assert.equal(recoverNextNextAction?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
   assert.deepEqual(recoverNextNextAction?.command, recoverNextIncompleteLoopConfirmCommand);
+  assert.equal(statusAfterRecoverNextInterruption.nextRecovery?.kind, "confirmation_queue");
+  const deferredRecoverNextAction = statusAfterRecoverNextInterruption.deferredNextActions.find((action) => action.surface === "recover_next");
+  assert.equal(deferredRecoverNextAction?.action, "resume_recover_next_loop");
+  assert.equal(deferredRecoverNextAction?.reason, "incomplete_recover_next_loop");
+  assert.equal(deferredRecoverNextAction?.count, 1);
+  assert.equal(deferredRecoverNextAction?.detailCommand, "resume_recover_next_loop");
+  assert.equal(deferredRecoverNextAction?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.deepEqual(deferredRecoverNextAction?.command, recoverNextIncompleteLoopConfirmCommand);
+  assert.deepEqual(deferredRecoverNextAction?.blockedBy.command, statusAfterRecoverNextInterruption.nextRecovery?.command);
+  assert.deepEqual(deferredRecoverNextAction?.blockedBy.dryRunCommand, statusAfterRecoverNextInterruption.nextRecovery?.dryRunCommand);
 
   const recoverNextAlerts = await cliJson<{
     summary: { total: number; errors: number; warnings: number };
@@ -1913,6 +1976,10 @@ try {
   assert.match(interruptedSummaryText, /detail_command: resume_recover_next_loop/);
   assert.match(interruptedSummaryText, /recover_next_incomplete_loops: 1/);
   assert.match(interruptedSummaryText, new RegExp(`recover_next_incomplete_loop_queue: npm run cli -- runs session-control-plane-alert ${sessionName} --server --surface recover_next --reason incomplete_recover_next_loop --commands-only --format shell`));
+  assert.match(interruptedSummaryText, /deferred_next_actions:/);
+  assert.match(interruptedSummaryText, /surface: recover_next/);
+  assert.match(interruptedSummaryText, /blocked_by: confirmation_queue:drain_control_plane_confirmations/);
+  assert.match(interruptedSummaryText, /command_after_unblock: npm run cli -- runs session-control-plane-alert-execute/);
   assert.match(interruptedSummaryText, /incomplete_recover_next_loops:/);
   assert.match(interruptedSummaryText, new RegExp(`resume: npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --until-empty --resume-loop ${recoverNextLoopDryRun.advanceId}`));
   assert.match(interruptedSummaryText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${recoverNextLoopDryRun.advanceId} --recover-next-loop-history`));
