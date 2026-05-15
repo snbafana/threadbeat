@@ -10017,6 +10017,31 @@ type WorkerSessionControlPlaneStatusResponse = {
         }>;
       };
     };
+    continueDeferred: {
+      attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+      resumableLoops: {
+        count: number;
+        recent: Array<{
+          loopAdvanceId: string;
+          latestAdvanceId: string;
+          attempts: number;
+          totalSteps: number;
+          dryRun: boolean;
+          lastObservedAt: string;
+          lastCompletedAt: string;
+          stoppedReason: string | null;
+          maxSteps: number | null;
+          intervalMs: number | null;
+          maxCycles: number | null;
+          cycleIntervalMs: number | null;
+          lines: number | null;
+          resumeCommand: string[];
+          inspectLatestCommand: string[];
+          inspectHistoryCommand: string[];
+          executeResumeCommand: string[];
+        }>;
+      };
+    };
     statusWatchExecutions: {
       attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
       recent: Array<{
@@ -13035,12 +13060,16 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `recover_next_resume_attempts: total=${summary.recovery.recoverNext.resumeAttempts.attempts.total} dry_run=${summary.recovery.recoverNext.resumeAttempts.attempts.dryRun} executed=${summary.recovery.recoverNext.resumeAttempts.attempts.executed} failed=${summary.recovery.recoverNext.resumeAttempts.attempts.failed}`,
     `recover_next_resume_acknowledgements: total=${summary.recovery.recoverNext.resumeAttempts.acknowledgements.attempts.total} executed=${summary.recovery.recoverNext.resumeAttempts.acknowledgements.attempts.executed} failed=${summary.recovery.recoverNext.resumeAttempts.acknowledgements.attempts.failed}`,
     `recover_next_incomplete_loops: ${summary.recovery.recoverNext.incompleteLoops.count}`,
+    `continue_deferred_loops: total=${summary.recovery.continueDeferred.attempts.total} dry_run=${summary.recovery.continueDeferred.attempts.dryRun} executed=${summary.recovery.continueDeferred.attempts.executed} failed=${summary.recovery.continueDeferred.attempts.failed} resumable=${summary.recovery.continueDeferred.resumableLoops.count}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
   ];
   if (summary.recovery.recoverNext.incompleteLoops.count > 0) {
     lines.push(`recover_next_incomplete_loop_queue: ${formatShellCommand(summary.commands.recoverNextIncompleteLoopQueue)}`);
+  }
+  if (summary.recovery.continueDeferred.resumableLoops.count > 0) {
+    lines.push(`continue_deferred_loop_queue: ${formatShellCommand(summary.commands.continueDeferredLoops)}`);
   }
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
     lines.push(`failed_recover_next_resumes: ${formatShellCommand(summary.commands.failedRecoverNextResumeAttempts)}`);
@@ -13420,6 +13449,28 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       );
     }
   }
+  if (summary.recovery.continueDeferred.resumableLoops.recent.length > 0) {
+    lines.push("resumable_continue_deferred_loops:");
+    for (const loop of summary.recovery.continueDeferred.resumableLoops.recent) {
+      lines.push(
+        `  - loop: ${loop.loopAdvanceId}`,
+        `    latest_advance: ${loop.latestAdvanceId}`,
+        `    attempts: ${loop.attempts}`,
+        `    total_steps: ${loop.totalSteps}`,
+        `    dry_run: ${loop.dryRun}`,
+        `    max_steps: ${loop.maxSteps ?? ""}`,
+        `    interval_ms: ${loop.intervalMs ?? ""}`,
+        `    max_cycles: ${loop.maxCycles ?? ""}`,
+        `    cycle_interval_ms: ${loop.cycleIntervalMs ?? ""}`,
+        `    lines: ${loop.lines ?? ""}`,
+        `    stopped_reason: ${loop.stoppedReason ?? ""}`,
+        `    resume: ${formatShellCommand(loop.resumeCommand)}`,
+        `    inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
+        `    inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+        `    execute_resume: ${formatShellCommand(loop.executeResumeCommand)}`,
+      );
+    }
+  }
   if (summary.recovery.statusWatchExecutions.recent.length > 0) {
     lines.push("recent_status_watch_executions:");
     for (const attempt of summary.recovery.statusWatchExecutions.recent) {
@@ -13666,6 +13717,15 @@ function workerSessionControlPlaneStatusSummaryCommands(
   for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
     commands.push({ command: loop.resumeCommand });
     commands.push({ command: loop.inspectLastStepCommand });
+    commands.push({ command: loop.inspectHistoryCommand });
+    commands.push({ command: loop.executeResumeCommand });
+  }
+  if (summary.recovery.continueDeferred.resumableLoops.count > 0) {
+    commands.push({ command: summary.commands.continueDeferredLoops });
+  }
+  for (const loop of summary.recovery.continueDeferred.resumableLoops.recent) {
+    commands.push({ command: loop.resumeCommand });
+    commands.push({ command: loop.inspectLatestCommand });
     commands.push({ command: loop.inspectHistoryCommand });
     commands.push({ command: loop.executeResumeCommand });
   }
@@ -14379,6 +14439,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     attempts: WorkerSessionControlPlaneStatusResponse["recovery"]["attempts"];
     recentAttempts: WorkerSessionControlPlaneStatusResponse["recovery"]["recentAttempts"];
     recoverNext: WorkerSessionControlPlaneStatusResponse["recovery"]["recoverNext"];
+    continueDeferred: WorkerSessionControlPlaneStatusResponse["recovery"]["continueDeferred"];
     failedRecoverNextResumeLoops: { count: number; recent: FailedRecoverNextResumeLoopSummary[] };
     statusWatchExecutions: WorkerSessionControlPlaneStatusResponse["recovery"]["statusWatchExecutions"];
     workerReconciliations: WorkerSessionControlPlaneStatusResponse["recovery"]["workerReconciliations"];
@@ -14430,6 +14491,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     branchRecoveryCommandQueue: string[];
     branchResumeCommandQueue: string[];
     statusWatchExecutions: string[];
+    continueDeferredLoops: string[];
     recoverNextIncompleteLoopQueue: string[];
     failedRecoverNextResumeAttempts: string[];
     workerReconciliations: string[];
@@ -14526,6 +14588,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       attempts: status.recovery.attempts,
       recentAttempts: status.recovery.recentAttempts,
       recoverNext: status.recovery.recoverNext,
+      continueDeferred: status.recovery.continueDeferred,
       failedRecoverNextResumeLoops,
       statusWatchExecutions: status.recovery.statusWatchExecutions,
       workerReconciliations: status.recovery.workerReconciliations,
@@ -14601,6 +14664,7 @@ function summarizeWorkerSessionControlPlaneStatus(
         "--resumable", "--branch-action", "resume_branch", "--limit", "5", "--commands-only", "--format", "shell",
       ],
       statusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--status-watch-executions"],
+      continueDeferredLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--detail-command", "continue_deferred_loop"],
       recoverNextIncompleteLoopQueue: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-alert", status.session, "--server",
         "--surface", "recover_next", "--reason", "incomplete_recover_next_loop", "--commands-only", "--format", "shell",
