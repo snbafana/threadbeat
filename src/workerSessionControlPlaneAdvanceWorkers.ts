@@ -130,6 +130,7 @@ export async function startWorkerSessionControlPlaneAdvanceWorker(
     maxCycles?: number;
     cycleIntervalMs?: number;
     reconcileWorkers?: boolean;
+    recoverWorkerBundles?: boolean;
     includeRetired?: boolean;
     limit?: number | null;
   },
@@ -850,6 +851,7 @@ function buildControlPlaneAdvanceWorkerCommand(
     maxCycles?: number;
     cycleIntervalMs?: number;
     reconcileWorkers?: boolean;
+    recoverWorkerBundles?: boolean;
     includeRetired?: boolean;
     limit?: number | null;
   },
@@ -867,6 +869,7 @@ function buildControlPlaneAdvanceWorkerCommand(
       String(options.cycleIntervalMs ?? options.intervalMs),
       "--lines",
       String(options.lines),
+      ...(options.recoverWorkerBundles ? ["--recover-worker-bundles"] : []),
       ...(options.reconcileWorkers ? ["--reconcile-workers"] : []),
       ...(options.includeRetired ? ["--include-retired"] : []),
       ...(options.limit !== undefined && options.limit !== null ? ["--limit", String(options.limit)] : []),

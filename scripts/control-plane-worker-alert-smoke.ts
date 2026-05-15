@@ -905,6 +905,7 @@ try {
     "--worker-id",
     operatorWorkerId,
     "--dry-run",
+    "--recover-worker-bundles",
     "--max-cycles",
     "1",
     "--cycle-interval-ms",
@@ -920,6 +921,7 @@ try {
   assert.equal(operatorWorkerStart.worker.mode, "operator_loop");
   assert.ok(operatorWorkerStart.worker.command.includes("session-control-plane-operate"));
   assert.ok(operatorWorkerStart.worker.command.includes("--dry-run"));
+  assert.ok(operatorWorkerStart.worker.command.includes("--recover-worker-bundles"));
   assert.ok(operatorWorkerStart.worker.command.includes("--reconcile-workers"));
 
   const operatorWorkers = await cliJson<{

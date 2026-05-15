@@ -53,6 +53,7 @@ try {
     topologyWorkerId,
     "--operator-worker-id",
     operatorWorkerId,
+    "--operator-recover-worker-bundles",
     "--operator-reconcile-workers",
     "--operator-max-cycles",
     "1",
@@ -103,12 +104,12 @@ try {
   assert.equal(dryRun.plan.steps[1]?.kind, "control_plane_operator");
   assert.equal(dryRun.plan.steps[1]?.workerId, operatorWorkerId);
   assert.equal(dryRun.plan.steps[1]?.action, "ensure_control_plane_operator_worker");
-  assert.equal(dryRun.plan.steps[1]?.command.join(" "), `npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --worker-id ${operatorWorkerId} --dry-run --reconcile-workers --max-cycles 1 --cycle-interval-ms 1 --lines 1`);
+  assert.equal(dryRun.plan.steps[1]?.command.join(" "), `npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --worker-id ${operatorWorkerId} --dry-run --recover-worker-bundles --reconcile-workers --max-cycles 1 --cycle-interval-ms 1 --lines 1`);
   assert.equal(dryRun.plan.steps[2]?.kind, "result_review");
   assert.equal(dryRun.plan.steps[2]?.workerId, resultReviewWorkerId);
   assert.equal(dryRun.plan.steps[2]?.action, "ensure_control_plane_result_review_worker");
   assert.equal(dryRun.plan.steps[2]?.command.join(" "), `npm run cli -- runs ensure-control-plane-result-review-worker ${sessionName} --server --worker-id ${resultReviewWorkerId} --record-reviewed --dry-run --max-results 1 --interval-ms 1 --reviewed-by worker-bundle-smoke --lines 1`);
-  assert.equal(dryRun.commands.confirm.join(" "), `npm run cli -- runs ensure-control-plane-worker-bundle ${sessionName} --server --topology-worker-id ${topologyWorkerId} --worker-dry-run 1 --max-iterations 1 --loop-interval-ms 1 --include-operator-worker --operator-worker-id ${operatorWorkerId} --operator-reconcile-workers --operator-max-cycles 1 --operator-cycle-interval-ms 1 --include-result-review-worker --result-review-worker-id ${resultReviewWorkerId} --record-reviewed --max-results 1 --result-review-interval-ms 1 --reviewed-by worker-bundle-smoke --lines 1 --confirm`);
+  assert.equal(dryRun.commands.confirm.join(" "), `npm run cli -- runs ensure-control-plane-worker-bundle ${sessionName} --server --topology-worker-id ${topologyWorkerId} --worker-dry-run 1 --max-iterations 1 --loop-interval-ms 1 --include-operator-worker --operator-worker-id ${operatorWorkerId} --operator-recover-worker-bundles --operator-reconcile-workers --operator-max-cycles 1 --operator-cycle-interval-ms 1 --include-result-review-worker --result-review-worker-id ${resultReviewWorkerId} --record-reviewed --max-results 1 --result-review-interval-ms 1 --reviewed-by worker-bundle-smoke --lines 1 --confirm`);
 
   const confirmed = await cliJson<{
     confirmed: boolean;
@@ -275,6 +276,21 @@ try {
     operateWithBundleRecovery.commands.inspectWorkerBundle.join(" "),
     `npm run cli -- runs session-control-plane-worker-bundle ${sessionName} --server --lines 1`,
   );
+  const recoveredOperatorRuns = await cliJson<{
+    counts: { withBundleRecovery: number };
+    records: Array<{ bounds: { recoverWorkerBundles: boolean }; commands: { dryRun: string[]; confirm: string[] } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-operator-runs",
+    sessionName,
+    "--server",
+    "--operator-run",
+    operateWithBundleRecovery.operatorRunRecord.operatorRunId,
+  ]);
+  assert.equal(recoveredOperatorRuns.records[0]?.bounds.recoverWorkerBundles, true);
+  assert.ok(recoveredOperatorRuns.counts.withBundleRecovery >= 1);
+  assert.ok(recoveredOperatorRuns.records[0]?.commands.dryRun.includes("--recover-worker-bundles"));
+  assert.ok(recoveredOperatorRuns.records[0]?.commands.confirm.includes("--recover-worker-bundles"));
 
   const recoveryLoop = await cliJson<{
     dryRun: boolean;

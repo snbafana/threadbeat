@@ -16,6 +16,7 @@ export type WorkerSessionControlPlaneOperatorRunRecord = {
     cycleIntervalMs: number;
     lines: number;
     reconcileWorkers: boolean;
+    recoverWorkerBundles?: boolean;
   };
   summary: {
     cycles: number;
@@ -42,6 +43,7 @@ export type WorkerSessionControlPlaneOperatorRunSummary = {
   failed: number;
   maxCycles: number;
   withReconciliation: number;
+  withBundleRecovery: number;
 };
 
 export async function listWorkerSessionControlPlaneOperatorRunRecords(
@@ -80,6 +82,7 @@ export function summarizeWorkerSessionControlPlaneOperatorRunRecords(
     failed: records.filter((record) => record.status === "failed").length,
     maxCycles: records.filter((record) => record.stoppedReason === "max_cycles").length,
     withReconciliation: records.filter((record) => record.bounds.reconcileWorkers).length,
+    withBundleRecovery: records.filter((record) => record.bounds.recoverWorkerBundles === true).length,
   };
 }
 
