@@ -896,7 +896,7 @@ try {
       stoppedReason: string;
       bounds: { reconcileWorkers: boolean };
       summary: { cycles: number; actionReasons: string[]; advanceIds: string[]; reconciliationIds: string[] };
-      commands: { timeline: string[] };
+      commands: { timeline: string[]; dryRun: string[]; confirm: string[] };
     }>;
   }>(baseUrl, [
     "runs",
@@ -990,6 +990,62 @@ try {
   assert.equal(operatorRunTimeline.events[0]?.operatorRunId, operatedDryRun.operatorRunRecord.operatorRunId);
   assert.equal(operatorRunTimeline.events[0]?.status, "dry_run");
   assert.equal(operatorRunTimeline.events[0]?.totalExecuted, 1);
+
+  const operatorNext = await cliJson<{
+    operatorRun: { operatorRunId: string; status: string; summary: { needsActionAfter: boolean } } | null;
+    selected: {
+      action: string;
+      reason: string;
+      command: string[];
+      dryRunCommand: string[] | null;
+      confirmCommand: string[] | null;
+      timelineCommand: string[] | null;
+      statusCommand: string[] | null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-operator-runs-next",
+    sessionName,
+    "--server",
+    "--operator-run",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+  ]);
+  assert.equal(operatorNext.operatorRun?.operatorRunId, operatedDryRun.operatorRunRecord.operatorRunId);
+  assert.equal(operatorNext.operatorRun?.status, "dry_run");
+  assert.equal(operatorNext.operatorRun?.summary.needsActionAfter, true);
+  assert.equal(operatorNext.selected.action, "confirm_operator_run");
+  assert.equal(operatorNext.selected.reason, "dry_run_needs_confirmation");
+  assert.deepEqual(operatorNext.selected.command, operatorRuns.records[0]?.commands.confirm);
+  assert.deepEqual(operatorNext.selected.dryRunCommand, operatorRuns.records[0]?.commands.dryRun);
+  assert.deepEqual(operatorNext.selected.confirmCommand, operatorRuns.records[0]?.commands.confirm);
+  assert.deepEqual(operatorNext.selected.timelineCommand, operatedDryRun.commands.inspectOperatorRunTimeline);
+
+  const operatorNextText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-operator-runs-next",
+    sessionName,
+    "--server",
+    "--operator-run",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+    "--format",
+    "text",
+  ]);
+  assert.match(operatorNextText, /control_plane_operator_next:/);
+  assert.match(operatorNextText, /action: confirm_operator_run/);
+  assert.match(operatorNextText, /reason: dry_run_needs_confirmation/);
+
+  const operatorNextShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-operator-runs-next",
+    sessionName,
+    "--server",
+    "--operator-run",
+    operatedDryRun.operatorRunRecord.operatorRunId,
+    "--format",
+    "shell",
+  ]);
+  assert.match(operatorNextShell, /session-control-plane-operate/);
+  assert.match(operatorNextShell, /--confirm/);
 
   const statusReconcileDryRun = await cliJson<{
     reconciliation: {

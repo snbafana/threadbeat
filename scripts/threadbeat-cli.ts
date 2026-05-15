@@ -4796,6 +4796,34 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-operator-runs-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-operator-runs-next requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-operator-runs-next --format must be json, text, or shell");
+    }
+    const requiredSessionName = required(sessionName, "runs session-control-plane-operator-runs-next <session> --server");
+    const operatorRuns = await fetchWorkerSessionControlPlaneOperatorRuns(requiredSessionName, {
+      limit: 1,
+      operatorRunId: options["operator-run"],
+      latest: options["operator-run"] !== undefined ? false : true,
+    });
+    const response = workerSessionControlPlaneOperatorRunNextResponse(requiredSessionName, operatorRuns);
+    if (outputFormat === "shell") {
+      printCommandQueueShell(workerSessionControlPlaneOperatorRunNextCommandQueue(response));
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneOperatorRunNextText(response);
+      return;
+    }
+    await printJson(response);
+    return;
+  }
   if (subcommandName === "session-control-plane-topology") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -9972,6 +10000,25 @@ type WorkerSessionControlPlaneOperatorRunsResponse = {
   };
 };
 
+type WorkerSessionControlPlaneOperatorRunNextResponse = {
+  ok: true;
+  session: string;
+  operatorRun: WorkerSessionControlPlaneOperatorRunInspectionRecord | null;
+  selected: {
+    action: "confirm_operator_run" | "continue_operator_run" | "inspect_failed_operator_run" | "inspect_status" | "start_operator_run";
+    reason: "dry_run_needs_confirmation" | "max_cycles_needs_continue" | "action_failed" | "no_action_needed" | "no_operator_runs";
+    command: string[];
+    dryRunCommand: string[] | null;
+    confirmCommand: string[] | null;
+    timelineCommand: string[] | null;
+    statusCommand: string[] | null;
+  };
+  commands: {
+    operatorRuns: string[];
+    latestOperatorRun: string[];
+  };
+};
+
 type WorkerSessionControlPlaneAlertsResponse = {
   ok: true;
   session: string;
@@ -11905,6 +11952,113 @@ function formatWorkerSessionControlPlaneOperatorRunsText(
     );
   }
   return lines;
+}
+
+function workerSessionControlPlaneOperatorRunNextResponse(
+  sessionName: string,
+  response: WorkerSessionControlPlaneOperatorRunsResponse,
+): WorkerSessionControlPlaneOperatorRunNextResponse {
+  const operatorRun = response.records[0] ?? response.latest;
+  return {
+    ok: true,
+    session: sessionName,
+    operatorRun,
+    selected: workerSessionControlPlaneOperatorRunNextStep(sessionName, operatorRun),
+    commands: {
+      operatorRuns: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server"],
+      latestOperatorRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server", "--latest"],
+    },
+  };
+}
+
+function workerSessionControlPlaneOperatorRunNextStep(
+  sessionName: string,
+  operatorRun: WorkerSessionControlPlaneOperatorRunInspectionRecord | null,
+): WorkerSessionControlPlaneOperatorRunNextResponse["selected"] {
+  if (!operatorRun) {
+    const command = [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
+      "--dry-run",
+    ];
+    return {
+      action: "start_operator_run",
+      reason: "no_operator_runs",
+      command,
+      dryRunCommand: command,
+      confirmCommand: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
+        "--confirm",
+      ],
+      timelineCommand: null,
+      statusCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
+    };
+  }
+  if (operatorRun.status === "failed") {
+    return {
+      action: "inspect_failed_operator_run",
+      reason: "action_failed",
+      command: operatorRun.commands.timeline,
+      dryRunCommand: null,
+      confirmCommand: operatorRun.commands.confirm,
+      timelineCommand: operatorRun.commands.timeline,
+      statusCommand: operatorRun.commands.status,
+    };
+  }
+  if (operatorRun.summary.needsActionAfter === true) {
+    const dryRunNeedsConfirmation = operatorRun.status === "dry_run";
+    return {
+      action: dryRunNeedsConfirmation ? "confirm_operator_run" : "continue_operator_run",
+      reason: dryRunNeedsConfirmation ? "dry_run_needs_confirmation" : "max_cycles_needs_continue",
+      command: operatorRun.commands.confirm,
+      dryRunCommand: operatorRun.commands.dryRun,
+      confirmCommand: operatorRun.commands.confirm,
+      timelineCommand: operatorRun.commands.timeline,
+      statusCommand: operatorRun.commands.status,
+    };
+  }
+  return {
+    action: "inspect_status",
+    reason: "no_action_needed",
+    command: operatorRun.commands.status,
+    dryRunCommand: operatorRun.commands.dryRun,
+    confirmCommand: operatorRun.commands.confirm,
+    timelineCommand: operatorRun.commands.timeline,
+    statusCommand: operatorRun.commands.status,
+  };
+}
+
+function workerSessionControlPlaneOperatorRunNextCommandQueue(
+  response: WorkerSessionControlPlaneOperatorRunNextResponse,
+): CommandQueueOutput["commands"] {
+  return uniqueCommandQueue([
+    response.selected.command,
+    ...(response.selected.dryRunCommand ? [response.selected.dryRunCommand] : []),
+    ...(response.selected.confirmCommand ? [response.selected.confirmCommand] : []),
+    ...(response.selected.timelineCommand ? [response.selected.timelineCommand] : []),
+    ...(response.selected.statusCommand ? [response.selected.statusCommand] : []),
+    response.commands.latestOperatorRun,
+    response.commands.operatorRuns,
+  ]).map((command) => ({ command }));
+}
+
+function printWorkerSessionControlPlaneOperatorRunNextText(
+  response: WorkerSessionControlPlaneOperatorRunNextResponse,
+): void {
+  console.log([
+    "control_plane_operator_next:",
+    `  session: ${response.session}`,
+    `  operator_run: ${response.operatorRun?.operatorRunId ?? "none"}`,
+    `  status: ${response.operatorRun?.status ?? "none"}`,
+    `  stopped_reason: ${response.operatorRun?.stoppedReason ?? "none"}`,
+    `  needs_action_after: ${response.operatorRun?.summary.needsActionAfter ?? "unknown"}`,
+    `  action: ${response.selected.action}`,
+    `  reason: ${response.selected.reason}`,
+    `  command: ${formatShellCommand(response.selected.command)}`,
+    `  dry_run: ${formatShellCommand(response.selected.dryRunCommand ?? [])}`,
+    `  confirm: ${formatShellCommand(response.selected.confirmCommand ?? [])}`,
+    `  timeline: ${formatShellCommand(response.selected.timelineCommand ?? [])}`,
+    `  status_command: ${formatShellCommand(response.selected.statusCommand ?? [])}`,
+  ].join("\n"));
 }
 
 async function executeWorkerSessionControlPlaneStatusReconciliation(
@@ -21115,6 +21269,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
