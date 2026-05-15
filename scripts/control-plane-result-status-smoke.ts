@@ -605,6 +605,40 @@ try {
   assert.match(resultCommitViewText, new RegExp(`record_reviewed: ${recordReviewedCommand}`));
   assert.match(resultCommitViewText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
 
+  const resultCommitViewCommands = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "pending",
+    "--result-commits",
+    "--commands-only",
+  ]);
+  assert.ok(resultCommitViewCommands.commands.some((command) => command.command.join(" ") === inspectResultCommand));
+  assert.ok(resultCommitViewCommands.commands.some((command) => command.command.join(" ") === checkoutCommand));
+  assert.ok(resultCommitViewCommands.commands.some((command) => command.command.join(" ") === reviewCommand));
+  assert.ok(resultCommitViewCommands.commands.some((command) => command.command.join(" ") === recordReviewedCommand));
+  assert.ok(resultCommitViewCommands.commands.some((command) => command.command.join(" ") === recordSkippedCommand));
+
+  const resultCommitViewShell = await cliText(baseUrl, [
+    "runs",
+    "session-result-inspections",
+    sessionName,
+    "--server",
+    "--review-state",
+    "pending",
+    "--result-commits",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(resultCommitViewShell, new RegExp(inspectResultCommand));
+  assert.match(resultCommitViewShell, new RegExp(checkoutCommand));
+  assert.match(resultCommitViewShell, new RegExp(reviewCommand));
+  assert.match(resultCommitViewShell, new RegExp(recordReviewedCommand));
+  assert.match(resultCommitViewShell, new RegExp(recordSkippedCommand));
+
   const nextResultInspection = await cliJson<{
     count: number;
     filter: { reviewStates: string[]; limit: number };

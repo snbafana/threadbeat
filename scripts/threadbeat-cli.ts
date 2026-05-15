@@ -5414,12 +5414,6 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "text" && options["commands-only"] === "1") {
       throw new Error("runs session-result-inspections --commands-only supports --format json or shell");
     }
-    if (options["result-commits"] === "1" && options["commands-only"] === "1") {
-      throw new Error("runs session-result-inspections --result-commits cannot be combined with --commands-only");
-    }
-    if (options["result-commits"] === "1" && outputFormat === "shell") {
-      throw new Error("runs session-result-inspections --result-commits supports --format json or text");
-    }
     const nextOnly = options.next === "1";
     const reviewState = options["review-state"] ?? (nextOnly ? "pending" : undefined);
     const limit = options.limit
@@ -5438,6 +5432,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const commands = workerSessionResultInspectionCommands(resultInspections);
     if (options["result-commits"] === "1") {
       const resultCommitView = workerSessionResultCommitView(resultInspections);
+      if (options["commands-only"] === "1") {
+        const resultCommitViewCommands = workerSessionResultCommitViewCommands(resultCommitView);
+        if (outputFormat === "shell") {
+          printCommandQueueShell(resultCommitViewCommands);
+        } else {
+          await printJson({ ...resultCommitView, commands: resultCommitViewCommands });
+        }
+        return;
+      }
       if (outputFormat === "text") {
         printWorkerSessionResultCommitViewText(resultCommitView);
       } else {
@@ -13362,6 +13365,30 @@ function formatWorkerSessionResultCommitViewText(response: WorkerSessionResultCo
     }
   }
   return lines;
+}
+
+function workerSessionResultCommitViewCommands(
+  response: WorkerSessionResultCommitViewResponse,
+): CommandQueueOutput["commands"] {
+  const commands: string[][] = [
+    ...(response.commands.inspectNextResult ? [response.commands.inspectNextResult] : []),
+    ...(response.commands.checkoutNextBranch ? [response.commands.checkoutNextBranch] : []),
+    response.commands.reviewNext,
+  ];
+  for (const result of response.resultCommits) {
+    commands.push(
+      result.commands.inspectResult,
+      result.commands.checkoutBranch,
+      result.commands.reviewRun,
+      result.commands.inspectReviews,
+    );
+    if (result.reviewState === "pending") {
+      commands.push(result.commands.recordReviewed, result.commands.recordSkipped);
+    } else {
+      commands.push(result.nextStep.command);
+    }
+  }
+  return uniqueCommandQueue(commands).map((command) => ({ command }));
 }
 
 function workerSessionResultInspectionCommands(
