@@ -5827,6 +5827,18 @@ const findWorkerRecoveryCommand = (
 const selectWorkerSessionControlPlaneAdvanceAction = (
   status: WorkerSessionControlPlaneStatus,
 ): WorkerSessionControlPlaneAdvanceAction | null => {
+  const incompleteRecoverNextLoop = status.recovery.recoverNext.incompleteLoops.recent[0];
+  if (incompleteRecoverNextLoop) {
+    return {
+      surface: "recover_next",
+      action: "resume_recover_next_loop",
+      reason: "incomplete_recover_next_loop",
+      count: status.recovery.recoverNext.incompleteLoops.count,
+      command: recoverNextIncompleteLoopAlertExecuteCommand(status.session, false),
+      detailCommand: "resume_recover_next_loop",
+      loopAdvanceId: incompleteRecoverNextLoop.loopAdvanceId,
+    };
+  }
   const staleRun = status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run");
   if (staleRun) {
     return {
@@ -5889,6 +5901,19 @@ const selectWorkerSessionControlPlaneAdvanceAction = (
     };
   }
   return null;
+};
+
+const recoverNextIncompleteLoopAlertExecuteCommand = (
+  sessionName: string,
+  dryRun: boolean,
+): string[] => {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", sessionName, "--server",
+    "--surface", "recover_next", "--reason", "incomplete_recover_next_loop",
+    "--action", "resume_recover_next_loop", "--detail-command", "resume_recover_next_loop",
+    dryRun ? "--dry-run" : "--confirm",
+    "--lines", "5",
+  ];
 };
 
 const runWorkerSessionControlPlaneAdvance = async (

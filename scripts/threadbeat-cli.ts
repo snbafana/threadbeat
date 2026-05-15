@@ -13437,6 +13437,18 @@ function selectWorkerSessionControlPlaneNextActions(
       advanceId: failedStatusWatchExecution.advanceId,
     });
   }
+  const incompleteRecoverNextLoop = status.recovery.recoverNext.incompleteLoops.recent[0];
+  if (incompleteRecoverNextLoop) {
+    nextActions.push({
+      surface: "recover_next",
+      action: "resume_recover_next_loop",
+      reason: "incomplete_recover_next_loop",
+      count: status.recovery.recoverNext.incompleteLoops.count,
+      command: workerSessionRecoverNextIncompleteLoopExecuteCommand(status.session, false),
+      detailCommand: "resume_recover_next_loop",
+      loopAdvanceId: incompleteRecoverNextLoop.loopAdvanceId,
+    });
+  }
   const staleRun = status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run");
   if (staleRun) {
     nextActions.push({
@@ -13560,6 +13572,17 @@ function selectWorkerSessionControlPlaneNextRecovery(
       dryRunCommand: nextAction.command,
     };
   }
+  if (nextAction.surface === "recover_next" && nextAction.action === "resume_recover_next_loop") {
+    return {
+      kind: "control_plane_action",
+      surface: nextAction.surface,
+      action: nextAction.action,
+      reason: nextAction.reason,
+      count: nextAction.count,
+      command: nextAction.command,
+      dryRunCommand: workerSessionRecoverNextIncompleteLoopExecuteCommand(status.session, true),
+    };
+  }
   return {
     kind: "control_plane_action",
     surface: nextAction.surface,
@@ -13582,6 +13605,19 @@ function workerSessionControlPlaneReconcileLoopCommand(
     "--max-steps", "10",
     "--interval-ms", "2000",
     dryRun ? "--dry-run" : "--confirm",
+  ];
+}
+
+function workerSessionRecoverNextIncompleteLoopExecuteCommand(
+  sessionName: string,
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", sessionName, "--server",
+    "--surface", "recover_next", "--reason", "incomplete_recover_next_loop",
+    "--action", "resume_recover_next_loop", "--detail-command", "resume_recover_next_loop",
+    dryRun ? "--dry-run" : "--confirm",
+    "--lines", "5",
   ];
 }
 

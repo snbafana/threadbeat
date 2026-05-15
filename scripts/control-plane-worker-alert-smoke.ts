@@ -1438,6 +1438,15 @@ try {
     commands: {
       recoverNextIncompleteLoopQueue: string[];
     };
+    nextActions: Array<{
+      surface?: string;
+      action: string;
+      reason: string;
+      count: number;
+      command: string[];
+      detailCommand?: string;
+      loopAdvanceId?: string;
+    }>;
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -1517,7 +1526,35 @@ try {
     "--format",
     "shell",
   ];
+  const recoverNextIncompleteLoopConfirmCommand = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--reason",
+    "incomplete_recover_next_loop",
+    "--action",
+    "resume_recover_next_loop",
+    "--detail-command",
+    "resume_recover_next_loop",
+    "--confirm",
+    "--lines",
+    "5",
+  ];
   assert.deepEqual(statusAfterRecoverNextInterruption.commands.recoverNextIncompleteLoopQueue, recoverNextIncompleteLoopQueueCommand);
+  const recoverNextNextAction = statusAfterRecoverNextInterruption.nextActions.find((action) => action.surface === "recover_next");
+  assert.equal(recoverNextNextAction?.action, "resume_recover_next_loop");
+  assert.equal(recoverNextNextAction?.reason, "incomplete_recover_next_loop");
+  assert.equal(recoverNextNextAction?.count, 1);
+  assert.equal(recoverNextNextAction?.detailCommand, "resume_recover_next_loop");
+  assert.equal(recoverNextNextAction?.loopAdvanceId, recoverNextLoopDryRun.advanceId);
+  assert.deepEqual(recoverNextNextAction?.command, recoverNextIncompleteLoopConfirmCommand);
 
   const recoverNextAlerts = await cliJson<{
     summary: { total: number; errors: number; warnings: number };
