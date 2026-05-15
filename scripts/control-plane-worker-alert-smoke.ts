@@ -372,14 +372,10 @@ try {
     "cli",
     "--",
     "runs",
-    "session-control-plane-operate",
+    "session-control-plane-continue-deferred",
     sessionName,
     "--server",
     "--dry-run",
-    "--max-cycles",
-    "2",
-    "--cycle-interval-ms",
-    "0",
   ];
   const continueDeferredConfirmCommand = [
     "npm",
@@ -387,14 +383,10 @@ try {
     "cli",
     "--",
     "runs",
-    "session-control-plane-operate",
+    "session-control-plane-continue-deferred",
     sessionName,
     "--server",
     "--confirm",
-    "--max-cycles",
-    "2",
-    "--cycle-interval-ms",
-    "0",
   ];
   assert.deepEqual(statusSummary.commands.continueDeferredDryRun, continueDeferredDryRunCommand);
   assert.deepEqual(statusSummary.commands.continueDeferredConfirm, continueDeferredConfirmCommand);
@@ -782,8 +774,8 @@ try {
   assert.match(statusSummaryText, /next_actions:/);
   assert.match(statusSummaryText, /deferred_next_actions:/);
   assert.match(statusSummaryText, /surface: worker_recovery/);
-  assert.match(statusSummaryText, /continue_dry_run: npm run cli -- runs session-control-plane-operate/);
-  assert.match(statusSummaryText, /continue_confirm: npm run cli -- runs session-control-plane-operate/);
+  assert.match(statusSummaryText, /continue_dry_run: npm run cli -- runs session-control-plane-continue-deferred/);
+  assert.match(statusSummaryText, /continue_confirm: npm run cli -- runs session-control-plane-continue-deferred/);
   assert.match(statusSummaryText, /blocked_by: confirmation_queue:drain_control_plane_confirmations/);
   assert.match(statusSummaryText, /command_after_unblock: npm run cli -- runs restart-control-plane-advance-workers/);
   assert.match(statusSummaryText, new RegExp(`command: npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
@@ -2675,6 +2667,19 @@ try {
   assert.match(acknowledgedRecoverNextResumeHistoryText, /status: retry_succeeded/);
   assert.match(acknowledgedRecoverNextResumeHistoryText, /recover-next loop history/);
   assert.match(acknowledgedRecoverNextResumeHistoryText, new RegExp(`latest_retry: ${retriedResumeAdvanceId}`));
+
+  const continueDeferredDispatchText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-continue-deferred",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--format",
+    "text",
+  ]);
+  assert.match(continueDeferredDispatchText, /control_plane_operate:/);
+  assert.match(continueDeferredDispatchText, /dry_run: true/);
+  assert.match(continueDeferredDispatchText, /operator_run:/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

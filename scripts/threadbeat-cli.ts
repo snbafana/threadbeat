@@ -4758,6 +4758,38 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-continue-deferred") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-continue-deferred requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-continue-deferred --format must be json or text");
+    }
+    if (dryRun === confirm) {
+      throw new Error("runs session-control-plane-continue-deferred requires exactly one of --dry-run or --confirm");
+    }
+    const requiredSessionName = required(sessionName, "runs session-control-plane-continue-deferred <session> --server");
+    const response = await operateWorkerSessionControlPlane(requiredSessionName, options, {
+      dryRun,
+      confirm,
+      lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+      maxCycles: parsePositiveInteger(options["max-cycles"] ?? "2", "--max-cycles"),
+      cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "0", "--cycle-interval-ms"),
+      reconcileWorkers: false,
+      recoverWorkerBundles: false,
+    });
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneOperateText(response);
+    } else {
+      await printJson(response);
+    }
+    return;
+  }
   if (subcommandName === "session-control-plane-operator-runs") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -14102,10 +14134,8 @@ function summarizeWorkerSessionControlPlaneStatus(
 
 function workerSessionControlPlaneContinueDeferredCommand(sessionName: string, dryRun: boolean): string[] {
   return [
-    "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
+    "npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred", sessionName, "--server",
     dryRun ? "--dry-run" : "--confirm",
-    "--max-cycles", "2",
-    "--cycle-interval-ms", "0",
   ];
 }
 
@@ -21973,6 +22003,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
+  runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
