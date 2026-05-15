@@ -5610,6 +5610,43 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(resultInspections);
     return;
   }
+  if (subcommandName === "session-branch-native-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-branch-native-next requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-branch-native-next --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-branch-native-next --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-branch-native-next --commands-only supports --format json or shell");
+    }
+    const requiredSessionName = required(sessionName, "runs session-branch-native-next <session> --server");
+    const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines: parsePositiveInteger(options.lines ?? "5", "--lines") });
+    const summary = summarizeWorkerSessionControlPlaneStatus(status);
+    const response = workerSessionBranchNativeNext(summary, {
+      limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
+    });
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(response.commands);
+      } else {
+        await printJson(response);
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionBranchNativeNextText(response);
+    } else {
+      await printJson(response);
+    }
+    return;
+  }
   if (subcommandName === "session-control-plane-recover-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -13480,6 +13517,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     lines.push(
       "branch_inspection:",
       `  count: ${summary.branches.inspection.count}`,
+      `  branch_native_next: ${formatShellCommand(summary.commands.branchNativeNext)}`,
       `  resume_queue: ${formatShellCommand(summary.commands.branchResumeCommandQueue)}`,
     );
     for (const step of summary.branches.inspection.nextSteps) {
@@ -13499,7 +13537,10 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       }
     }
   } else {
-    lines.push("branch_inspection: none");
+    lines.push(
+      "branch_inspection: none",
+      `  branch_native_next: ${formatShellCommand(summary.commands.branchNativeNext)}`,
+    );
   }
   lines.push(
     `branch_recovery_executions: recent=${summary.branches.executions.counts.recent} executed=${summary.branches.executions.counts.executed} partial=${summary.branches.executions.counts.partial} noop=${summary.branches.executions.counts.noop}`,
@@ -13531,6 +13572,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       `  inspect_pending: ${formatShellCommand(summary.commands.pendingResultInspections)}`,
       `  pending_result_commits: ${formatShellCommand(summary.commands.pendingResultCommitView)}`,
       `  pending_result_queue: ${formatShellCommand(summary.commands.pendingResultCommandQueue)}`,
+      `  branch_native_next: ${formatShellCommand(summary.commands.branchNativeNext)}`,
     );
     if (summary.results.counts.pending > 0) {
       lines.push(`  inspect_next: ${formatShellCommand(summary.commands.nextResultInspection)}`);
@@ -13871,6 +13913,7 @@ function workerSessionControlPlaneStatusSummaryCommands(
   for (const action of summary.nextActions) {
     commands.push({ command: action.command });
   }
+  commands.push({ command: summary.commands.branchNativeNext });
   commands.push({ command: summary.commands.branchRecoveryExecutions });
   commands.push({ command: summary.commands.branchRecoveryCommandQueue });
   if (summary.branches.counts.ready > 0) {
@@ -14382,6 +14425,134 @@ function workerSessionResultInspectionCommands(
   });
 }
 
+type WorkerSessionBranchNativeNextResponse = {
+  ok: true;
+  session: string;
+  observedAt: string;
+  limit: number;
+  counts: {
+    branchReady: number;
+    branchActions: number;
+    branchRecoveryExecutions: number;
+    resultCommits: number;
+    resultPending: number;
+    resultReviewed: number;
+    resultSkipped: number;
+  };
+  branchActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["branches"]["inspection"]["nextSteps"];
+  resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
+  commands: CommandQueueOutput["commands"];
+};
+
+function workerSessionBranchNativeNext(
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+  options: { limit: number },
+): WorkerSessionBranchNativeNextResponse {
+  const branchActions = summary.branches.inspection.nextSteps.slice(0, options.limit);
+  const resultActions = summary.results.inspection.nextSteps.slice(0, options.limit);
+  const commands = uniqueCommandQueue([
+    ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"],
+    summary.commands.branchNativeNext,
+    summary.commands.branchRecoveryExecutions,
+    summary.commands.branchRecoveryCommandQueue,
+    ...(summary.branches.counts.ready > 0 ? [summary.commands.branchResumeCommandQueue] : []),
+    ...branchActions.flatMap((action) => [
+      action.commands.inspectResult,
+      action.commands.checkoutBranch,
+      action.commands.reviewRun,
+      ...(action.commands.resumeBranch ? [action.commands.resumeBranch] : []),
+    ]),
+    summary.commands.resultCommitView,
+    summary.commands.pendingResultCommitView,
+    ...(summary.results.counts.pending > 0
+      ? [
+        summary.commands.nextResultInspection,
+        summary.commands.nextResultReview,
+        summary.commands.pendingResultCommandQueue,
+        summary.commands.previewPendingReviewed,
+        summary.commands.previewPendingSkipped,
+        summary.commands.recordPendingReviewed,
+        summary.commands.recordPendingSkipped,
+      ]
+      : []),
+    ...resultActions.flatMap((action) => [
+      action.commands.inspectResult,
+      action.commands.checkoutBranch,
+      action.commands.reviewRun,
+      action.commands.recordReviewed,
+      action.commands.recordSkipped,
+    ]),
+  ]).map((command) => ({ command }));
+  return {
+    ok: true,
+    session: summary.session,
+    observedAt: new Date().toISOString(),
+    limit: options.limit,
+    counts: {
+      branchReady: summary.branches.counts.ready,
+      branchActions: summary.branches.inspection.count,
+      branchRecoveryExecutions: summary.branches.executions.counts.recent,
+      resultCommits: summary.results.counts.resultCommits,
+      resultPending: summary.results.counts.pending,
+      resultReviewed: summary.results.counts.reviewed,
+      resultSkipped: summary.results.counts.skipped,
+    },
+    branchActions,
+    resultActions,
+    commands,
+  };
+}
+
+function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNativeNextResponse): void {
+  console.log([
+    "branch_native_next:",
+    `  session: ${response.session}`,
+    `  branch_ready: ${response.counts.branchReady}`,
+    `  branch_actions: ${response.counts.branchActions}`,
+    `  branch_recovery_executions: ${response.counts.branchRecoveryExecutions}`,
+    `  result_commits: ${response.counts.resultCommits}`,
+    `  result_pending: ${response.counts.resultPending}`,
+    `  result_reviewed: ${response.counts.resultReviewed}`,
+    `  result_skipped: ${response.counts.resultSkipped}`,
+    `  commands: ${response.commands.length}`,
+    ...(response.branchActions.length > 0
+      ? [
+        "  branch_actions:",
+        ...response.branchActions.flatMap((action) => [
+          `    - run: ${action.runId}`,
+          `      action: ${action.action}`,
+          `      reason: ${action.reason}`,
+          `      branch: ${action.branchName}`,
+          `      result_commit: ${action.resultCommit ?? ""}`,
+          `      inspect_result: ${formatShellCommand(action.commands.inspectResult)}`,
+          `      checkout: ${formatShellCommand(action.commands.checkoutBranch)}`,
+          `      review: ${formatShellCommand(action.commands.reviewRun)}`,
+          ...(action.commands.resumeBranch ? [`      resume: ${formatShellCommand(action.commands.resumeBranch)}`] : []),
+        ]),
+      ]
+      : ["  branch_actions: none"]),
+    ...(response.resultActions.length > 0
+      ? [
+        "  result_actions:",
+        ...response.resultActions.flatMap((action) => [
+          `    - run: ${action.runId}`,
+          `      action: ${action.action}`,
+          `      reason: ${action.reason}`,
+          `      branch: ${action.branchName}`,
+          `      result_commit: ${action.resultCommit}`,
+          `      inspect_result: ${formatShellCommand(action.commands.inspectResult)}`,
+          `      checkout: ${formatShellCommand(action.commands.checkoutBranch)}`,
+          `      review: ${formatShellCommand(action.commands.reviewRun)}`,
+          `      record_reviewed: ${formatShellCommand(action.commands.recordReviewed)}`,
+          `      record_skipped: ${formatShellCommand(action.commands.recordSkipped)}`,
+        ]),
+      ]
+      : ["  result_actions: none"]),
+    "  command_queue:",
+    ...response.commands.map((item) => `    - ${formatShellCommand(item.command)}`),
+  ].join("\n"));
+}
+
 function selectWorkerSessionControlPlaneNextActions(
   status: WorkerSessionControlPlaneStatusResponse,
 ): Array<WorkerSessionControlPlaneAdvanceAction> {
@@ -14793,6 +14964,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     branchRecoveryExecutions: string[];
     branchRecoveryCommandQueue: string[];
     branchResumeCommandQueue: string[];
+    branchNativeNext: string[];
     statusWatchExecutions: string[];
     continueDeferredLoops: string[];
     continueDeferredNextInspect: string[] | null;
@@ -14970,6 +15142,7 @@ function summarizeWorkerSessionControlPlaneStatus(
         "npm", "run", "cli", "--", "runs", "session-branches", status.session, "--server",
         "--resumable", "--branch-action", "resume_branch", "--limit", "5", "--commands-only", "--format", "shell",
       ],
+      branchNativeNext: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", status.session, "--server"],
       statusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--status-watch-executions"],
       continueDeferredLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--detail-command", "continue_deferred_loop"],
       continueDeferredNextInspect: status.recovery.continueDeferred.resumableLoops.count > 0
@@ -22898,6 +23071,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
