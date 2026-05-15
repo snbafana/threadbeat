@@ -50,8 +50,11 @@ try {
   const branchNativeNextCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server`;
   const branchNativeRecoverDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --dry-run`;
   const branchNativeRecoverConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --confirm`;
+  const branchNativeRecoverLoopDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --until-empty --dry-run`;
+  const branchNativeRecoverLoopConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --until-empty --confirm`;
   const controlPlaneRecoverNextDryRunCommand = `npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --dry-run`;
   const controlPlaneRecoverNextConfirmCommand = `npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --confirm`;
+  const controlPlaneRecoverNextLoopConfirmCommand = `npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --confirm --until-empty --max-steps 3 --interval-ms 0 --lines 1`;
   const resumeBranchCommand = `npm run cli -- runs resume-branch ${run.id}`;
 
   const summary = await cliJson<{
@@ -131,6 +134,8 @@ try {
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeNextCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecoverDryRunCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecoverConfirmCommand));
+  assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecoverLoopDryRunCommand));
+  assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecoverLoopConfirmCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchResumeQueueCommand));
 
   const branchNativeRecoverDryRun = await cliJson<{
@@ -227,6 +232,130 @@ try {
   assert.equal(branchNativeAfterConfirm.counts.branchReady, 0);
   assert.equal(branchNativeAfterConfirm.counts.branchActions, 0);
   assert.equal(branchNativeAfterConfirm.branchActions.length, 0);
+
+  const loopRunA = await db.createAgentRun({
+    agentId: agent.id,
+    objective: "control-plane branch native recover loop a",
+    inputRef: "main",
+    runBranch: `threadbeat/runs/${sessionName}-loop-a`,
+  });
+  const loopRunB = await db.createAgentRun({
+    agentId: agent.id,
+    objective: "control-plane branch native recover loop b",
+    inputRef: "main",
+    runBranch: `threadbeat/runs/${sessionName}-loop-b`,
+  });
+  await db.updateAgentRunCompleted({ id: loopRunA.id, status: "stopped" });
+  await db.updateAgentRunCompleted({ id: loopRunB.id, status: "stopped" });
+
+  const branchNativeBeforeLoop = await cliJson<{
+    counts: { branchReady: number; branchActions: number };
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(branchNativeBeforeLoop.counts.branchReady, 2);
+  assert.equal(branchNativeBeforeLoop.counts.branchActions, 2);
+  assert.ok(branchNativeBeforeLoop.commands.some((command) => command.command.join(" ") === branchNativeRecoverLoopDryRunCommand));
+  assert.ok(branchNativeBeforeLoop.commands.some((command) => command.command.join(" ") === branchNativeRecoverLoopConfirmCommand));
+
+  const branchNativeRecoverLoopConfirm = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    recoverNext: {
+      untilEmpty: boolean;
+      executedSteps: number;
+      stoppedReason: string;
+      loopAdvanceId: string;
+      advanceId: string;
+      advancePath: string;
+      cycles: Array<{ ok: boolean; selected: null | { surface?: string; action?: string } }>;
+    };
+    executed: { command: string[]; exitCode: number | null };
+    after: { counts: { branchReady: number; branchActions: number } };
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--recover-next",
+    "--until-empty",
+    "--confirm",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(branchNativeRecoverLoopConfirm.dryRun, false);
+  assert.equal(branchNativeRecoverLoopConfirm.confirmed, true);
+  assert.equal(branchNativeRecoverLoopConfirm.selectedAction, "recover_next");
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.untilEmpty, true);
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.executedSteps, 2);
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.stoppedReason, "empty");
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.loopAdvanceId, branchNativeRecoverLoopConfirm.recoverNext.advanceId);
+  assert.match(branchNativeRecoverLoopConfirm.recoverNext.advancePath, /control-plane-advances/);
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.cycles.length, 3);
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.cycles[0]?.selected?.surface, "branch");
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.cycles[0]?.selected?.action, "resume_branch");
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.cycles[1]?.selected?.surface, "branch");
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.cycles[1]?.selected?.action, "resume_branch");
+  assert.equal(branchNativeRecoverLoopConfirm.recoverNext.cycles[2]?.selected, null);
+  assert.equal(branchNativeRecoverLoopConfirm.executed.command.join(" "), controlPlaneRecoverNextLoopConfirmCommand);
+  assert.equal(branchNativeRecoverLoopConfirm.executed.exitCode, 0);
+  assert.equal(branchNativeRecoverLoopConfirm.after.counts.branchReady, 0);
+  assert.equal(branchNativeRecoverLoopConfirm.after.counts.branchActions, 0);
+
+  const requeuedLoopRunA = await db.getAgentRun(loopRunA.id);
+  const requeuedLoopRunB = await db.getAgentRun(loopRunB.id);
+  assert.equal(requeuedLoopRunA?.status, "planned");
+  assert.equal(requeuedLoopRunA?.worker_id, null);
+  assert.equal(requeuedLoopRunB?.status, "planned");
+  assert.equal(requeuedLoopRunB?.worker_id, null);
+
+  const recoverNextLoopHistory = await cliJson<{
+    loopAdvanceId: string;
+    count: number;
+    summary: { completed: boolean; steps: number; resumeAttempts: number; failedExecutions: number; dryRunRecords: number; stoppedReasons: string[] };
+    records: Array<{ kind: string; stepIndex: number | null; stoppedReason: string | null; selectedSurface: string | null; selectedAction: string | null }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    branchNativeRecoverLoopConfirm.recoverNext.loopAdvanceId,
+    "--recover-next-loop-history",
+  ]);
+  assert.equal(recoverNextLoopHistory.loopAdvanceId, branchNativeRecoverLoopConfirm.recoverNext.loopAdvanceId);
+  assert.equal(recoverNextLoopHistory.count, 4);
+  assert.equal(recoverNextLoopHistory.summary.completed, true);
+  assert.equal(recoverNextLoopHistory.summary.steps, 3);
+  assert.equal(recoverNextLoopHistory.summary.resumeAttempts, 0);
+  assert.equal(recoverNextLoopHistory.summary.failedExecutions, 0);
+  assert.equal(recoverNextLoopHistory.summary.dryRunRecords, 0);
+  assert.deepEqual(recoverNextLoopHistory.summary.stoppedReasons, ["empty"]);
+  assert.ok(recoverNextLoopHistory.records.some((record) => (
+    record.kind === "step"
+    && record.stepIndex === 1
+    && record.selectedSurface === "branch"
+    && record.selectedAction === "resume_branch"
+  )));
+  assert.ok(recoverNextLoopHistory.records.some((record) => (
+    record.kind === "step"
+    && record.stepIndex === 2
+    && record.selectedSurface === "branch"
+    && record.selectedAction === "resume_branch"
+  )));
+  assert.ok(recoverNextLoopHistory.records.some((record) => (
+    record.kind === "loop"
+    && record.stoppedReason === "empty"
+  )));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

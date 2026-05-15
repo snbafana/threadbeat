@@ -5832,7 +5832,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       }
       return;
     }
-    const executeNextRecovery = async (): Promise<{
+    const executeNextRecovery = async (activeLoopAdvanceId: string | null = null): Promise<{
       ok: boolean;
       session: string;
       dryRun: boolean;
@@ -5842,7 +5842,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       executed?: { command: string[]; exitCode: number | null; stdout: string; stderr: string };
     }> => {
       const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
-      const summary = summarizeWorkerSessionControlPlaneStatus(status);
+      const summary = summarizeWorkerSessionControlPlaneStatus(
+        omitActiveRecoverNextLoop(status, activeLoopAdvanceId),
+      );
       if (!summary.nextRecovery) {
         return {
           ok: true,
@@ -5853,14 +5855,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           result: null,
         };
       }
-      const command = dryRun ? summary.nextRecovery.dryRunCommand : summary.nextRecovery.command;
+      const directActiveLoopCommand = !dryRun && activeLoopAdvanceId && summary.nextRecovery.surface === "branch"
+        ? summary.nextActions.find((action) => (
+            action.surface === "branch"
+            && action.action === summary.nextRecovery?.action
+          ))?.command ?? null
+        : null;
+      const command = directActiveLoopCommand ?? (dryRun ? summary.nextRecovery.dryRunCommand : summary.nextRecovery.command);
+      const selected = directActiveLoopCommand
+        ? { ...summary.nextRecovery, command }
+        : summary.nextRecovery;
       const executed = await runCliWorker(cliCommandArgs(command));
       const executedWithCommand = { command, ...executed };
       return {
         ok: executed.exitCode === 0,
         session: requiredSessionName,
         dryRun,
-        selected: summary.nextRecovery,
+        selected,
         command,
         result: parseJsonMaybe(executed.stdout),
         executed: executedWithCommand,
@@ -5898,7 +5909,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       let stoppedReason: "empty" | "dry_run" | "failed" | "max_steps" = "max_steps";
       for (let stepIndex = highestExistingStep; stepIndex < maxSteps; stepIndex += 1) {
         const stepObservedAt = new Date().toISOString();
-        const cycle = await executeNextRecovery();
+        const cycle = await executeNextRecovery(loopAdvanceId);
         cycles.push(cycle);
         const stepAfter = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
         const stepStoppedReason = !cycle.selected
@@ -14564,6 +14575,8 @@ function workerSessionBranchNativeNext(
     summary.commands.branchNativeNext,
     ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--dry-run"],
     ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--confirm"],
+    ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--dry-run"],
+    ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--confirm"],
     summary.commands.branchRecoveryExecutions,
     summary.commands.branchRecoveryCommandQueue,
     ...(summary.branches.counts.ready > 0 ? [summary.commands.branchResumeCommandQueue] : []),
@@ -14725,6 +14738,31 @@ function printWorkerSessionBranchNativeNextRecoverExecutionText(
     `  command: ${formatShellCommand(response.executed.command)}`,
     `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
   ].join("\n"));
+}
+
+function omitActiveRecoverNextLoop(
+  status: WorkerSessionControlPlaneStatusResponse,
+  activeLoopAdvanceId: string | null,
+): WorkerSessionControlPlaneStatusResponse {
+  if (!activeLoopAdvanceId) return status;
+  const incompleteLoops = status.recovery.recoverNext.incompleteLoops;
+  const recent = incompleteLoops.recent.filter((loop) => loop.loopAdvanceId !== activeLoopAdvanceId);
+  const removed = incompleteLoops.recent.length - recent.length;
+  if (removed === 0) return status;
+  return {
+    ...status,
+    recovery: {
+      ...status.recovery,
+      recoverNext: {
+        ...status.recovery.recoverNext,
+        incompleteLoops: {
+          ...incompleteLoops,
+          count: Math.max(0, incompleteLoops.count - removed),
+          recent,
+        },
+      },
+    },
+  };
 }
 
 function selectWorkerSessionControlPlaneNextActions(
