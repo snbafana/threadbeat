@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-worker-bundle-smoke-"));
 const sessionName = `worker-bundle-${Date.now().toString(36)}`;
 const topologyWorkerId = "bundle-topology-worker";
+const operatorWorkerId = "bundle-operator-worker";
 const resultReviewWorkerId = "bundle-result-review-worker";
 const recoveryWorkerId = "bundle-recovery-worker";
 
@@ -50,6 +51,13 @@ try {
     "1",
     "--topology-worker-id",
     topologyWorkerId,
+    "--operator-worker-id",
+    operatorWorkerId,
+    "--operator-reconcile-workers",
+    "--operator-max-cycles",
+    "1",
+    "--operator-cycle-interval-ms",
+    "1",
     "--include-result-review-worker",
     "--result-review-worker-id",
     resultReviewWorkerId,
@@ -84,19 +92,23 @@ try {
   assert.equal(dryRun.dryRun, true);
   assert.equal(dryRun.confirmed, false);
   assert.equal(dryRun.passed, null);
-  assert.equal(dryRun.plan.expected, 2);
-  assert.equal(dryRun.plan.actionable, 2);
+  assert.equal(dryRun.plan.expected, 3);
+  assert.equal(dryRun.plan.actionable, 3);
   assert.equal(dryRun.plan.blocked, 0);
   assert.equal(dryRun.plan.steps[0]?.kind, "control_plane_topology");
   assert.equal(dryRun.plan.steps[0]?.workerId, topologyWorkerId);
   assert.equal(dryRun.plan.steps[0]?.action, "ensure_control_plane_topology_worker");
   assert.equal(dryRun.plan.steps[0]?.reason, "no_worker_record");
   assert.equal(dryRun.plan.steps[0]?.command.join(" "), `npm run cli -- runs ensure-control-plane-topology-worker ${sessionName} --server --worker-id ${topologyWorkerId} --dry-run --max-iterations 1 --loop-interval-ms 1 --lines 1`);
-  assert.equal(dryRun.plan.steps[1]?.kind, "result_review");
-  assert.equal(dryRun.plan.steps[1]?.workerId, resultReviewWorkerId);
-  assert.equal(dryRun.plan.steps[1]?.action, "ensure_control_plane_result_review_worker");
-  assert.equal(dryRun.plan.steps[1]?.command.join(" "), `npm run cli -- runs ensure-control-plane-result-review-worker ${sessionName} --server --worker-id ${resultReviewWorkerId} --record-reviewed --dry-run --max-results 1 --interval-ms 1 --reviewed-by worker-bundle-smoke --lines 1`);
-  assert.equal(dryRun.commands.confirm.join(" "), `npm run cli -- runs ensure-control-plane-worker-bundle ${sessionName} --server --topology-worker-id ${topologyWorkerId} --worker-dry-run 1 --max-iterations 1 --loop-interval-ms 1 --include-result-review-worker --result-review-worker-id ${resultReviewWorkerId} --record-reviewed --max-results 1 --result-review-interval-ms 1 --reviewed-by worker-bundle-smoke --lines 1 --confirm`);
+  assert.equal(dryRun.plan.steps[1]?.kind, "control_plane_operator");
+  assert.equal(dryRun.plan.steps[1]?.workerId, operatorWorkerId);
+  assert.equal(dryRun.plan.steps[1]?.action, "ensure_control_plane_operator_worker");
+  assert.equal(dryRun.plan.steps[1]?.command.join(" "), `npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --worker-id ${operatorWorkerId} --dry-run --reconcile-workers --max-cycles 1 --cycle-interval-ms 1 --lines 1`);
+  assert.equal(dryRun.plan.steps[2]?.kind, "result_review");
+  assert.equal(dryRun.plan.steps[2]?.workerId, resultReviewWorkerId);
+  assert.equal(dryRun.plan.steps[2]?.action, "ensure_control_plane_result_review_worker");
+  assert.equal(dryRun.plan.steps[2]?.command.join(" "), `npm run cli -- runs ensure-control-plane-result-review-worker ${sessionName} --server --worker-id ${resultReviewWorkerId} --record-reviewed --dry-run --max-results 1 --interval-ms 1 --reviewed-by worker-bundle-smoke --lines 1`);
+  assert.equal(dryRun.commands.confirm.join(" "), `npm run cli -- runs ensure-control-plane-worker-bundle ${sessionName} --server --topology-worker-id ${topologyWorkerId} --worker-dry-run 1 --max-iterations 1 --loop-interval-ms 1 --include-operator-worker --operator-worker-id ${operatorWorkerId} --operator-reconcile-workers --operator-max-cycles 1 --operator-cycle-interval-ms 1 --include-result-review-worker --result-review-worker-id ${resultReviewWorkerId} --record-reviewed --max-results 1 --result-review-interval-ms 1 --reviewed-by worker-bundle-smoke --lines 1 --confirm`);
 
   const confirmed = await cliJson<{
     confirmed: boolean;
@@ -110,16 +122,16 @@ try {
   assert.equal(confirmed.profile?.saved, true);
   assert.equal(confirmed.profile?.reason, "saved");
   assert.match(confirmed.profile?.path ?? "", /control-plane-worker-bundles/);
-  assert.equal(confirmed.executed.length, 2);
-  assert.equal(confirmed.checks.expectedCount, 2);
-  assert.equal(confirmed.checks.executedCount, 2);
-  assert.equal(confirmed.checks.seenAfterCount, 2);
+  assert.equal(confirmed.executed.length, 3);
+  assert.equal(confirmed.checks.expectedCount, 3);
+  assert.equal(confirmed.checks.executedCount, 3);
+  assert.equal(confirmed.checks.seenAfterCount, 3);
   assert.ok(confirmed.executed.every((step) => step.actionResult === "started" || step.actionResult === "existing"));
 
   const profile = await cliJson<{
     exists: boolean;
     path: string;
-    profile: { desired: { topologyWorkerId: string; includeResultReviewWorker: boolean; resultReviewWorkerId: string; reviewAction: string } } | null;
+    profile: { desired: { topologyWorkerId: string; includeOperatorWorker: boolean; operatorWorkerId: string; operatorReconcileWorkers: boolean; includeResultReviewWorker: boolean; resultReviewWorkerId: string; reviewAction: string } } | null;
     current: { plan: { expected: number; actionable: number; blocked: number; existing: number }; commands: { confirm: string[] } } | null;
     commands: { dryRun: string[]; confirm: string[] };
   }>(baseUrl, [
@@ -133,12 +145,15 @@ try {
   assert.equal(profile.exists, true);
   assert.match(profile.path, /control-plane-worker-bundles/);
   assert.equal(profile.profile?.desired.topologyWorkerId, topologyWorkerId);
+  assert.equal(profile.profile?.desired.includeOperatorWorker, true);
+  assert.equal(profile.profile?.desired.operatorWorkerId, operatorWorkerId);
+  assert.equal(profile.profile?.desired.operatorReconcileWorkers, true);
   assert.equal(profile.profile?.desired.includeResultReviewWorker, true);
   assert.equal(profile.profile?.desired.resultReviewWorkerId, resultReviewWorkerId);
   assert.equal(profile.profile?.desired.reviewAction, "reviewed");
-  assert.equal(profile.current?.plan.expected, 2);
+  assert.equal(profile.current?.plan.expected, 3);
   assert.equal(profile.current?.plan.actionable, 0);
-  assert.ok((profile.current?.plan.blocked ?? 0) + (profile.current?.plan.existing ?? 0) === 2);
+  assert.ok((profile.current?.plan.blocked ?? 0) + (profile.current?.plan.existing ?? 0) === 3);
   assert.equal(profile.commands.confirm.join(" "), `npm run cli -- runs ensure-control-plane-worker-bundle ${sessionName} --server --from-profile --confirm --lines 1`);
 
   const profileList = await cliJson<{
@@ -157,12 +172,12 @@ try {
   ]);
   assert.equal(profileList.profileCount, 1);
   assert.equal(profileList.summary.sessions, 1);
-  assert.equal(profileList.summary.expected, 2);
+  assert.equal(profileList.summary.expected, 3);
   assert.equal(profileList.summary.actionable, 0);
-  assert.ok(profileList.summary.blocked + profileList.summary.existing === 2);
+  assert.ok(profileList.summary.blocked + profileList.summary.existing === 3);
   assert.equal(profileList.bundles[0]?.session, sessionName);
   assert.equal(profileList.bundles[0]?.exists, true);
-  assert.equal(profileList.bundles[0]?.current?.plan.expected, 2);
+  assert.equal(profileList.bundles[0]?.current?.plan.expected, 3);
   assert.equal(profileList.commands.list.join(" "), `npm run cli -- runs session-control-plane-worker-bundles --server --session ${sessionName} --lines 1`);
   assert.equal(profileList.commands.recoverDryRun.join(" "), `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --dry-run`);
   assert.equal(profileList.commands.recoverConfirm.join(" "), `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --confirm`);
@@ -170,7 +185,7 @@ try {
 
   const fromProfile = await cliJson<{
     dryRun: boolean;
-    desired: { topologyWorkerId: string; includeResultReviewWorker: boolean; resultReviewWorkerId: string; reviewAction: string };
+    desired: { topologyWorkerId: string; includeOperatorWorker: boolean; operatorWorkerId: string; includeResultReviewWorker: boolean; resultReviewWorkerId: string; reviewAction: string };
     plan: { expected: number; actionable: number; blocked: number; existing: number };
   }>(baseUrl, [
     "runs",
@@ -182,12 +197,14 @@ try {
   ]);
   assert.equal(fromProfile.dryRun, true);
   assert.equal(fromProfile.desired.topologyWorkerId, topologyWorkerId);
+  assert.equal(fromProfile.desired.includeOperatorWorker, true);
+  assert.equal(fromProfile.desired.operatorWorkerId, operatorWorkerId);
   assert.equal(fromProfile.desired.includeResultReviewWorker, true);
   assert.equal(fromProfile.desired.resultReviewWorkerId, resultReviewWorkerId);
   assert.equal(fromProfile.desired.reviewAction, "reviewed");
-  assert.equal(fromProfile.plan.expected, 2);
+  assert.equal(fromProfile.plan.expected, 3);
   assert.equal(fromProfile.plan.actionable, 0);
-  assert.ok(fromProfile.plan.blocked + fromProfile.plan.existing === 2);
+  assert.ok(fromProfile.plan.blocked + fromProfile.plan.existing === 3);
 
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
 
@@ -208,13 +225,13 @@ try {
   ]);
   assert.equal(recoveryDryRun.dryRun, true);
   assert.equal(recoveryDryRun.profileCount, 1);
-  assert.equal(recoveryDryRun.summary.planned, 2);
-  assert.equal(recoveryDryRun.summary.actionable, 2);
+  assert.equal(recoveryDryRun.summary.planned, 3);
+  assert.equal(recoveryDryRun.summary.actionable, 3);
   assert.equal(recoveryDryRun.summary.blocked, 0);
   assert.equal(recoveryDryRun.summary.executed, 0);
   assert.equal(recoveryDryRun.summary.passed, null);
   assert.equal(recoveryDryRun.results[0]?.session, sessionName);
-  assert.equal(recoveryDryRun.results[0]?.result.plan.actionable, 2);
+  assert.equal(recoveryDryRun.results[0]?.result.plan.actionable, 3);
 
   const recoveryLoop = await cliJson<{
     dryRun: boolean;
@@ -244,8 +261,8 @@ try {
   assert.deepEqual(recoveryLoop.iterations.map((iteration) => iteration.poll), [1, 2]);
   assert.equal(recoveryLoop.summary.polls, 2);
   assert.equal(recoveryLoop.summary.profileCount, 1);
-  assert.equal(recoveryLoop.summary.planned, 4);
-  assert.equal(recoveryLoop.summary.actionable, 4);
+  assert.equal(recoveryLoop.summary.planned, 6);
+  assert.equal(recoveryLoop.summary.actionable, 6);
   assert.equal(recoveryLoop.summary.executed, 0);
   assert.equal(recoveryLoop.summary.passed, null);
 
@@ -305,22 +322,23 @@ try {
   ]);
   assert.equal(recoveryConfirmed.confirmed, true);
   assert.equal(recoveryConfirmed.profileCount, 1);
-  assert.equal(recoveryConfirmed.summary.planned, 2);
-  assert.equal(recoveryConfirmed.summary.actionable, 2);
+  assert.equal(recoveryConfirmed.summary.planned, 3);
+  assert.equal(recoveryConfirmed.summary.actionable, 3);
   assert.equal(recoveryConfirmed.summary.blocked, 0);
-  assert.equal(recoveryConfirmed.summary.executed, 2);
+  assert.equal(recoveryConfirmed.summary.executed, 3);
   assert.equal(recoveryConfirmed.summary.passed, true);
   assert.equal(recoveryConfirmed.results[0]?.result.passed, true);
   assert.deepEqual(
     recoveryConfirmed.results[0]?.result.executed.map((step) => step.workerId),
-    [topologyWorkerId, resultReviewWorkerId],
+    [topologyWorkerId, operatorWorkerId, resultReviewWorkerId],
   );
 
   const text = await cliText(baseUrl, [...bundleArgs, "--dry-run", "--format", "text"]);
   assert.match(text, /control_plane_worker_bundle:/);
   assert.match(text, new RegExp(`topology=${topologyWorkerId}`));
+  assert.match(text, new RegExp(`operator=${operatorWorkerId}`));
   assert.match(text, new RegExp(`result_review=${resultReviewWorkerId}`));
-  assert.match(text, /plan: expected=2 actionable=0 blocked=\d+ existing=\d+/);
+  assert.match(text, /plan: expected=3 actionable=0 blocked=\d+ existing=\d+/);
 
   const profileText = await cliText(baseUrl, [
     "runs",
@@ -334,7 +352,7 @@ try {
   ]);
   assert.match(profileText, /control_plane_worker_bundle_profile:/);
   assert.match(profileText, /exists: true/);
-  assert.match(profileText, /plan: expected=2 actionable=0 blocked=\d+ existing=\d+/);
+  assert.match(profileText, /plan: expected=3 actionable=0 blocked=\d+ existing=\d+/);
 
   const profileListText = await cliText(baseUrl, [
     "runs",
@@ -369,6 +387,7 @@ try {
   const aggregate = await cliJson<{
     summary: {
       topology: { total: number };
+      operator: { total: number };
       resultReview: { total: number };
       bundleRecovery: { total: number; latestResults: { count: number; profileCount: number; planned: number; actionable: number; blocked: number; executed: number; polls: number } };
     };
@@ -384,16 +403,18 @@ try {
     "1",
   ]);
   assert.equal(aggregate.summary.topology.total, 1);
+  assert.equal(aggregate.summary.operator.total, 1);
   assert.equal(aggregate.summary.resultReview.total, 1);
   assert.equal(aggregate.summary.bundleRecovery.total, 1);
   assert.equal(aggregate.summary.bundleRecovery.latestResults.count, 1);
   assert.equal(aggregate.summary.bundleRecovery.latestResults.profileCount, 1);
-  assert.equal(aggregate.summary.bundleRecovery.latestResults.planned, 2);
-  assert.equal(aggregate.summary.bundleRecovery.latestResults.actionable, 2);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.planned, 3);
+  assert.equal(aggregate.summary.bundleRecovery.latestResults.actionable, 3);
   assert.equal(aggregate.summary.bundleRecovery.latestResults.blocked, 0);
   assert.equal(aggregate.summary.bundleRecovery.latestResults.executed, 0);
   assert.equal(aggregate.summary.bundleRecovery.latestResults.polls, 1);
   assert.ok(aggregate.workers.some((worker) => worker.kind === "control_plane_topology" && worker.workerId === topologyWorkerId));
+  assert.ok(aggregate.workers.some((worker) => worker.kind === "control_plane_operator" && worker.workerId === operatorWorkerId));
   assert.ok(aggregate.workers.some((worker) => worker.kind === "result_review" && worker.workerId === resultReviewWorkerId));
   const aggregateRecoveryWorker = aggregate.workers.find((worker) => worker.kind === "control_plane_bundle_recovery" && worker.workerId === recoveryWorkerId);
   assert.ok(aggregateRecoveryWorker);
@@ -438,7 +459,7 @@ try {
     "text",
   ]);
   assert.match(aggregateText, /bundle_recovery: total=1 alive=0 stopped=0 completed=1 retired=0 exited_unrecorded=0 restartable=0/);
-  assert.match(aggregateText, /profile_count=1,planned=2,actionable=2,blocked=0,executed=0,polls=1/);
+  assert.match(aggregateText, /profile_count=1,planned=3,actionable=3,blocked=0,executed=0,polls=1/);
   assert.match(aggregateText, new RegExp(`inspect_bundle_recovery: npm run cli -- runs session-control-plane-worker-bundle-recovery-workers ${sessionName} --server --include-retired --lines 1`));
 
   const bundleProgress = await cliJson<{

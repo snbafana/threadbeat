@@ -5171,6 +5171,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (options["save-profile"] === "1" && !confirm) {
       throw new Error("runs ensure-control-plane-worker-bundle --save-profile requires --confirm");
     }
+    if (options["include-operator-worker"] === "1" && options["exclude-operator-worker"] === "1") {
+      throw new Error("runs ensure-control-plane-worker-bundle accepts only one of --include-operator-worker or --exclude-operator-worker");
+    }
     const requiredSessionName = required(sessionName, "runs ensure-control-plane-worker-bundle <session> --server");
     const savedProfile = options["from-profile"] === "1"
       ? await readControlPlaneWorkerBundleProfile(requiredSessionName)
@@ -5200,6 +5203,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           : savedDesired?.workerDryRun ?? false,
         maxIterations: parsePositiveInteger(options["max-iterations"] ?? String(savedDesired?.maxIterations ?? 60), "--max-iterations"),
         loopIntervalMs: parseNonNegativeInteger(options["loop-interval-ms"] ?? String(savedDesired?.loopIntervalMs ?? 2000), "--loop-interval-ms"),
+        includeOperatorWorker: hasOption(options, "include-operator-worker")
+          ? options["include-operator-worker"] === "1"
+          : hasOption(options, "exclude-operator-worker")
+            ? options["exclude-operator-worker"] !== "1"
+            : savedDesired?.includeOperatorWorker ?? true,
+        operatorWorkerId: options["operator-worker-id"] ?? savedDesired?.operatorWorkerId ?? "threadbeat-control-plane-operator",
+        operatorReconcileWorkers: hasOption(options, "operator-reconcile-workers")
+          ? options["operator-reconcile-workers"] === "1"
+          : savedDesired?.operatorReconcileWorkers ?? true,
+        operatorMaxCycles: parsePositiveInteger(options["operator-max-cycles"] ?? String(savedDesired?.operatorMaxCycles ?? 60), "--operator-max-cycles"),
+        operatorCycleIntervalMs: parseNonNegativeInteger(options["operator-cycle-interval-ms"] ?? String(savedDesired?.operatorCycleIntervalMs ?? 2000), "--operator-cycle-interval-ms"),
         includeResultReviewWorker,
         resultReviewWorkerId: options["result-review-worker-id"] ?? savedDesired?.resultReviewWorkerId ?? "threadbeat-result-review",
         reviewAction,
@@ -8519,7 +8533,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -16940,6 +16954,11 @@ type ControlPlaneWorkerBundleOptions = {
   workerDryRun: boolean;
   maxIterations: number;
   loopIntervalMs: number;
+  includeOperatorWorker: boolean;
+  operatorWorkerId: string;
+  operatorReconcileWorkers: boolean;
+  operatorMaxCycles: number;
+  operatorCycleIntervalMs: number;
   includeResultReviewWorker: boolean;
   resultReviewWorkerId: string;
   reviewAction?: "reviewed" | "skipped";
@@ -16951,9 +16970,9 @@ type ControlPlaneWorkerBundleOptions = {
 };
 
 type ControlPlaneWorkerBundlePlanStep = {
-  kind: Extract<ControlPlaneWorkerKind, "control_plane_topology" | "result_review">;
+  kind: Extract<ControlPlaneWorkerKind, "control_plane_topology" | "control_plane_operator" | "result_review">;
   workerId: string;
-  action: "existing" | "ensure_control_plane_topology_worker" | "ensure_control_plane_result_review_worker" | "blocked";
+  action: "existing" | "ensure_control_plane_topology_worker" | "ensure_control_plane_operator_worker" | "ensure_control_plane_result_review_worker" | "blocked";
   reason: "running_worker_exists" | "restartable_worker_exists" | "no_worker_record" | "existing_worker_not_restartable";
   command: string[];
   worker: Awaited<ReturnType<typeof fetchWorkerSessionControlPlaneWorkers>>["workers"][number] | null;
@@ -17014,6 +17033,11 @@ function parseControlPlaneWorkerBundleDesired(record: Record<string, unknown>, s
     workerDryRun: record.workerDryRun === true,
     maxIterations: positiveNumberFromProfile(record.maxIterations, "maxIterations", source),
     loopIntervalMs: nonNegativeNumberFromProfile(record.loopIntervalMs, "loopIntervalMs", source),
+    includeOperatorWorker: record.includeOperatorWorker !== false,
+    operatorWorkerId: stringFromUnknown(record.operatorWorkerId) ?? "threadbeat-control-plane-operator",
+    operatorReconcileWorkers: record.operatorReconcileWorkers !== false,
+    operatorMaxCycles: positiveNumberFromProfile(record.operatorMaxCycles ?? 60, "operatorMaxCycles", source),
+    operatorCycleIntervalMs: nonNegativeNumberFromProfile(record.operatorCycleIntervalMs ?? 2000, "operatorCycleIntervalMs", source),
     includeResultReviewWorker: record.includeResultReviewWorker === true,
     resultReviewWorkerId,
     ...(reviewAction ? { reviewAction } : {}),
@@ -17359,6 +17383,17 @@ function controlPlaneWorkerBundleEnsureCommand(
       ...(options.includeMutationWorkers ? ["--include-mutation-workers"] : []),
     ];
   }
+  if (step.kind === "control_plane_operator") {
+    return [
+      "npm", "run", "cli", "--", "runs", "ensure-control-plane-operator-worker", sessionName, "--server",
+      "--worker-id", step.workerId,
+      options.workerDryRun ? "--dry-run" : "--confirm",
+      ...(options.operatorReconcileWorkers ? ["--reconcile-workers"] : []),
+      "--max-cycles", String(options.operatorMaxCycles),
+      "--cycle-interval-ms", String(options.operatorCycleIntervalMs),
+      "--lines", String(options.lines),
+    ];
+  }
   return [
     "npm", "run", "cli", "--", "runs", "ensure-control-plane-result-review-worker", sessionName, "--server",
     "--worker-id", step.workerId,
@@ -17379,6 +17414,7 @@ function controlPlaneWorkerBundlePlan(
 ): ControlPlaneWorkerBundlePlanStep[] {
   const desired: Array<Pick<ControlPlaneWorkerBundlePlanStep, "kind" | "workerId">> = [
     { kind: "control_plane_topology", workerId: options.topologyWorkerId },
+    ...(options.includeOperatorWorker ? [{ kind: "control_plane_operator" as const, workerId: options.operatorWorkerId }] : []),
     ...(options.includeResultReviewWorker ? [{ kind: "result_review" as const, workerId: options.resultReviewWorkerId }] : []),
   ];
   return desired.map((workerSpec) => {
@@ -17386,7 +17422,9 @@ function controlPlaneWorkerBundlePlan(
     const command = controlPlaneWorkerBundleEnsureCommand(sessionName, workerSpec, options);
     const ensureAction = workerSpec.kind === "control_plane_topology"
       ? "ensure_control_plane_topology_worker"
-      : "ensure_control_plane_result_review_worker";
+      : workerSpec.kind === "control_plane_operator"
+        ? "ensure_control_plane_operator_worker"
+        : "ensure_control_plane_result_review_worker";
     if (worker?.alive === true) {
       return {
         ...workerSpec,
@@ -17441,6 +17479,20 @@ async function executeControlPlaneWorkerBundleEnsureStep(
       includeMutationWorkers: options.includeMutationWorkers,
       maxIterations: options.maxIterations,
       loopIntervalMs: options.loopIntervalMs,
+    });
+  }
+  if (step.kind === "control_plane_operator") {
+    return await ensureWorkerSessionControlPlaneAdvanceWorker(sessionName, {
+      workerId: step.workerId,
+      dryRun: options.workerDryRun,
+      confirm: !options.workerDryRun,
+      maxSteps: 10,
+      intervalMs: 2000,
+      lines: options.lines,
+      operatorLoop: true,
+      maxCycles: options.operatorMaxCycles,
+      cycleIntervalMs: options.operatorCycleIntervalMs,
+      reconcileWorkers: options.operatorReconcileWorkers,
     });
   }
   return await ensureWorkerSessionControlPlaneAdvanceWorker(sessionName, {
@@ -17507,6 +17559,11 @@ async function ensureWorkerSessionControlPlaneWorkerBundle(
     workerDryRun: options.workerDryRun,
     maxIterations: options.maxIterations,
     loopIntervalMs: options.loopIntervalMs,
+    includeOperatorWorker: options.includeOperatorWorker,
+    operatorWorkerId: options.operatorWorkerId,
+    operatorReconcileWorkers: options.operatorReconcileWorkers,
+    operatorMaxCycles: options.operatorMaxCycles,
+    operatorCycleIntervalMs: options.operatorCycleIntervalMs,
     includeResultReviewWorker: options.includeResultReviewWorker,
     resultReviewWorkerId: options.resultReviewWorkerId,
     reviewAction: options.reviewAction,
@@ -17539,6 +17596,13 @@ async function ensureWorkerSessionControlPlaneWorkerBundle(
     ...(options.workerDryRun ? ["--worker-dry-run", "1"] : []),
     "--max-iterations", String(options.maxIterations),
     "--loop-interval-ms", String(options.loopIntervalMs),
+    ...(options.includeOperatorWorker ? [
+      "--include-operator-worker",
+      "--operator-worker-id", options.operatorWorkerId,
+      ...(options.operatorReconcileWorkers ? ["--operator-reconcile-workers"] : []),
+      "--operator-max-cycles", String(options.operatorMaxCycles),
+      "--operator-cycle-interval-ms", String(options.operatorCycleIntervalMs),
+    ] : ["--exclude-operator-worker"]),
     ...(options.includeResultReviewWorker ? [
       "--include-result-review-worker",
       "--result-review-worker-id", options.resultReviewWorkerId,
@@ -17633,7 +17697,7 @@ function printControlPlaneWorkerBundleText(
     `  dry_run: ${response.dryRun}`,
     `  confirmed: ${response.confirmed}`,
     `  passed: ${response.passed ?? "pending"}`,
-    `  desired: topology=${response.desired.topologyWorkerId} include_mutation=${response.desired.includeMutationWorkers} include_result_review=${response.desired.includeResultReviewWorker} result_review=${response.desired.includeResultReviewWorker ? response.desired.resultReviewWorkerId : "none"} worker_dry_run=${response.desired.workerDryRun}`,
+    `  desired: topology=${response.desired.topologyWorkerId} include_mutation=${response.desired.includeMutationWorkers} include_operator=${response.desired.includeOperatorWorker} operator=${response.desired.includeOperatorWorker ? response.desired.operatorWorkerId : "none"} include_result_review=${response.desired.includeResultReviewWorker} result_review=${response.desired.includeResultReviewWorker ? response.desired.resultReviewWorkerId : "none"} worker_dry_run=${response.desired.workerDryRun}`,
     `  plan: expected=${response.plan.expected} actionable=${response.plan.actionable} blocked=${response.plan.blocked} existing=${response.plan.existing}`,
     "  commands:",
     `    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`,
@@ -17673,7 +17737,7 @@ function printControlPlaneWorkerBundleProfileText(
     return;
   }
   lines.push(`  saved_at: ${response.profile.savedAt}`);
-  lines.push(`  desired: topology=${response.profile.desired.topologyWorkerId} include_mutation=${response.profile.desired.includeMutationWorkers} include_result_review=${response.profile.desired.includeResultReviewWorker} result_review=${response.profile.desired.includeResultReviewWorker ? response.profile.desired.resultReviewWorkerId : "none"} worker_dry_run=${response.profile.desired.workerDryRun}`);
+  lines.push(`  desired: topology=${response.profile.desired.topologyWorkerId} include_mutation=${response.profile.desired.includeMutationWorkers} include_operator=${response.profile.desired.includeOperatorWorker} operator=${response.profile.desired.includeOperatorWorker ? response.profile.desired.operatorWorkerId : "none"} include_result_review=${response.profile.desired.includeResultReviewWorker} result_review=${response.profile.desired.includeResultReviewWorker ? response.profile.desired.resultReviewWorkerId : "none"} worker_dry_run=${response.profile.desired.workerDryRun}`);
   lines.push(`  plan: expected=${response.current.plan.expected} actionable=${response.current.plan.actionable} blocked=${response.current.plan.blocked} existing=${response.current.plan.existing}`);
   lines.push("  commands:");
   lines.push(`    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`);
@@ -21497,7 +21561,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
-  runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
@@ -21512,7 +21576,7 @@ Commands:
   runs session-control-plane-worker-bundle-recovery-workers-next <name> --server [--worker-id id]
   runs restart-control-plane-worker-bundle-recovery-worker <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-worker-bundle-recovery-worker <name> --server [--worker-id id] [--retire] [--lines 20]
-  runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--from-profile] [--save-profile] [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
+  runs ensure-control-plane-worker-bundle <name> --server (--confirm|--dry-run) [--from-profile] [--save-profile] [--worker-dry-run 1] [--topology-worker-id id] [--include-mutation-workers] [--include-operator-worker|--exclude-operator-worker] [--operator-worker-id id] [--operator-reconcile-workers] [--operator-max-cycles 60] [--operator-cycle-interval-ms 2000] [--include-result-review-worker --record-reviewed|--record-skipped --result-review-worker-id id] [--max-iterations 60] [--loop-interval-ms 2000] [--max-results 10] [--result-review-interval-ms 1000] [--lines 20] [--format json|text]
   runs recover-control-plane-worker-bundles --server (--confirm|--dry-run) [--session name] [--loop --max-polls 60 --interval-ms 2000 --progress-json] [--lines 20] [--format json|text]
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
@@ -21547,9 +21611,9 @@ Commands:
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-worker-restart-queue <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--dry-run|--confirm] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--format json|text|shell]
-  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
-  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
-  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
+  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
+  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
   runs session-control-plane-worker-reconciliations <name> --server [--latest] [--reconciliation id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs ensure-control-plane-mutation-workers <name> --server (--confirm|--dry-run) [--apply-worker-id id] [--drain-worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--apply-interval-ms n] [--max-continuations n] [--lines 20]
