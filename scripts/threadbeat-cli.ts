@@ -5550,17 +5550,79 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
   if (subcommandName === "session-control-plane-recover-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const inspect = options.inspect === "1";
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-recover-next requires --server");
     }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-recover-next --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-recover-next --format shell requires --commands-only");
+    }
+    if (options["commands-only"] === "1" && !inspect) {
+      throw new Error("runs session-control-plane-recover-next --commands-only requires --inspect");
+    }
     const requiredSessionName = required(sessionName, "runs session-control-plane-recover-next <session> --server");
-    if ((options["dry-run"] === "1") === (options.confirm === "1")) {
+    if (inspect && (options["dry-run"] === "1" || options.confirm === "1")) {
+      throw new Error("runs session-control-plane-recover-next --inspect cannot be combined with --dry-run or --confirm");
+    }
+    if (!inspect && (options["dry-run"] === "1") === (options.confirm === "1")) {
       throw new Error("runs session-control-plane-recover-next requires exactly one of --dry-run or --confirm");
+    }
+    if (inspect && (options["until-empty"] === "1" || options["resume-loop"])) {
+      throw new Error("runs session-control-plane-recover-next --inspect cannot be combined with --until-empty or --resume-loop");
     }
     const dryRun = options["dry-run"] === "1";
     const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
     const observedAt = new Date().toISOString();
     const before = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines });
+    const beforeSummary = summarizeWorkerSessionControlPlaneStatus(before);
+    if (inspect) {
+      const selected = beforeSummary.nextRecovery;
+      const command = selected?.command ?? null;
+      const dryRunCommand = selected?.dryRunCommand ?? null;
+      const commands = uniqueCommandQueue([
+        ["npm", "run", "cli", "--", "runs", "session-control-plane-status", requiredSessionName, "--server", "--summary"],
+        ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", requiredSessionName, "--server", "--inspect"],
+        ...(dryRunCommand ? [dryRunCommand] : []),
+        ...(command ? [command] : []),
+        ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", requiredSessionName, "--server", "--dry-run"],
+        ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", requiredSessionName, "--server", "--confirm"],
+      ]).map((item) => ({ command: item }));
+      const response = {
+        ok: true,
+        session: requiredSessionName,
+        inspected: true,
+        observedAt,
+        selected,
+        command,
+        dryRunCommand,
+        beforeSummary,
+        commands,
+      };
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else if (outputFormat === "text") {
+        console.log([
+          "control_plane_recover_next:",
+          `  session: ${requiredSessionName}`,
+          "  inspected: true",
+          `  selected_kind: ${selected?.kind ?? ""}`,
+          `  selected_surface: ${selected?.surface ?? ""}`,
+          `  selected_action: ${selected?.action ?? ""}`,
+          `  selected_reason: ${selected?.reason ?? ""}`,
+          `  selected_count: ${selected?.count ?? ""}`,
+          `  command: ${command ? formatShellCommand(command) : ""}`,
+          `  dry_run: ${dryRunCommand ? formatShellCommand(dryRunCommand) : ""}`,
+          `  status: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-status", requiredSessionName, "--server", "--summary"])}`,
+        ].join("\n"));
+      } else {
+        await printJson(options["commands-only"] === "1" ? { ...response, beforeSummary: undefined } : response);
+      }
+      return;
+    }
     const executeNextRecovery = async (): Promise<{
       ok: boolean;
       session: string;
@@ -13240,6 +13302,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       `  action: ${summary.nextRecovery.action}`,
       `  reason: ${summary.nextRecovery.reason}`,
       `  count: ${summary.nextRecovery.count}`,
+      `  inspect: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--inspect"])}`,
       `  command: ${formatShellCommand(summary.nextRecovery.command)}`,
       `  dry_run: ${formatShellCommand(summary.nextRecovery.dryRunCommand)}`,
     );
@@ -13727,6 +13790,7 @@ function workerSessionControlPlaneStatusSummaryCommands(
 ): CommandQueueOutput["commands"] {
   const commands: CommandQueueOutput["commands"] = [];
   if (summary.nextRecovery) {
+    commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--inspect"] });
     commands.push({ command: summary.nextRecovery.dryRunCommand });
     commands.push({ command: summary.nextRecovery.command });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--dry-run"] });
@@ -22761,7 +22825,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-control-plane-recover-next <name> --server [--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
+  runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-alert-execute <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--detail-command inspect_apply|inspect_apply_action_executions|execute_apply_action|acknowledge_reset_audit|acknowledge_status_watch_execution|acknowledge_recover_next_resume_attempt|run_selected_command|inspect_failed_drain_continuations|reset_failed_drain_continuations|reset_selected_failed_drain_continuations|inspect_worker_recovery|restart_worker_recovery|retire_worker_recovery|resume_recover_next_loop] [--dry-run] [--confirm] [--lines 5]

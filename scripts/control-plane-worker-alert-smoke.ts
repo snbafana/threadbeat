@@ -601,6 +601,61 @@ try {
     /requires exactly one of --dry-run or --confirm/,
   );
 
+  const recoverNextInspect = await cliJson<{
+    ok: boolean;
+    inspected: boolean;
+    selected: { kind: string; action: string; count: number } | null;
+    command: string[] | null;
+    dryRunCommand: string[] | null;
+    beforeSummary: { recovery: { recoverNext: { attempts: { total: number } } } };
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--inspect",
+  ]);
+  assert.equal(recoverNextInspect.ok, true);
+  assert.equal(recoverNextInspect.inspected, true);
+  assert.equal(recoverNextInspect.selected?.kind, "confirmation_queue");
+  assert.equal(recoverNextInspect.selected?.action, "drain_control_plane_confirmations");
+  assert.equal(recoverNextInspect.selected?.count, 1);
+  assert.deepEqual(recoverNextInspect.command, statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmations);
+  assert.deepEqual(recoverNextInspect.dryRunCommand, statusSummary.queues.controlPlaneConfirmations.commands.drainConfirmationsDryRun);
+  assert.equal(recoverNextInspect.beforeSummary.recovery.recoverNext.attempts.total, 0);
+  assert.ok(recoverNextInspect.commands.some((item) => item.command.includes("--inspect")));
+  assert.equal(Object.hasOwn(recoverNextInspect, "advanceId"), false);
+
+  const recoverNextInspectText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--inspect",
+    "--format",
+    "text",
+  ]);
+  assert.match(recoverNextInspectText, /control_plane_recover_next:/);
+  assert.match(recoverNextInspectText, /inspected: true/);
+  assert.match(recoverNextInspectText, /selected_kind: confirmation_queue/);
+  assert.match(recoverNextInspectText, /command: npm run cli -- runs session-control-plane-advances/);
+
+  const recoverNextInspectShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--inspect",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  const recoverNextInspectShellLines = recoverNextInspectShell.trim().split("\n").filter(Boolean);
+  assert.ok(recoverNextInspectShellLines.some((line) => line.includes("session-control-plane-recover-next") && line.includes("--inspect")));
+  assert.ok(recoverNextInspectShellLines.some((line) => line.includes("session-control-plane-recover-next") && line.includes("--dry-run")));
+  assert.ok(recoverNextInspectShellLines.some((line) => line.includes("session-control-plane-recover-next") && line.includes("--confirm")));
+
   const recoverNextDryRun = await cliJson<{
     ok: boolean;
     session: string;
