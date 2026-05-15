@@ -4774,6 +4774,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs session-control-plane-continue-deferred requires exactly one of --dry-run or --confirm");
     }
     const requiredSessionName = required(sessionName, "runs session-control-plane-continue-deferred <session> --server");
+    if (options["until-empty"] === "1") {
+      const response = await continueDeferredWorkerSessionControlPlane(requiredSessionName, options, {
+        dryRun,
+        confirm,
+        lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+        maxCycles: parsePositiveInteger(options["max-cycles"] ?? "2", "--max-cycles"),
+        cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "0", "--cycle-interval-ms"),
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+        intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "0", "--interval-ms"),
+      });
+      if (outputFormat === "text") {
+        printContinueDeferredWorkerSessionControlPlaneText(response);
+      } else {
+        await printJson(response);
+      }
+      return;
+    }
     const response = await operateWorkerSessionControlPlane(requiredSessionName, options, {
       dryRun,
       confirm,
@@ -12084,6 +12101,149 @@ async function operateWorkerSessionControlPlane(
   return response;
 }
 
+async function continueDeferredWorkerSessionControlPlane(
+  sessionName: string,
+  options: Record<string, string>,
+  execution: {
+    dryRun: boolean;
+    confirm: boolean;
+    lines: number;
+    maxCycles: number;
+    cycleIntervalMs: number;
+    maxSteps: number;
+    intervalMs: number;
+  },
+): Promise<{
+  ok: boolean;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  startedAt: string;
+  completedAt: string;
+  untilEmpty: true;
+  maxSteps: number;
+  intervalMs: number;
+  stoppedReason: "idle" | "dry_run" | "operator_failed" | "max_steps";
+  steps: Array<{
+    step: number;
+    operatorRunId: string;
+    operatorRunStatus: WorkerSessionControlPlaneOperatorRunRecord["status"];
+    operatorStoppedReason: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>["stoppedReason"];
+    cycles: number;
+    needsActionAfter: boolean | null;
+  }>;
+  latestSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
+  commands: {
+    rerunDryRun: string[];
+    rerunConfirm: string[];
+    status: string[];
+    operatorRuns: string[];
+  };
+}> {
+  const startedAt = new Date().toISOString();
+  const steps: Array<{
+    step: number;
+    operatorRunId: string;
+    operatorRunStatus: WorkerSessionControlPlaneOperatorRunRecord["status"];
+    operatorStoppedReason: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>["stoppedReason"];
+    cycles: number;
+    needsActionAfter: boolean | null;
+  }> = [];
+  let stoppedReason: "idle" | "dry_run" | "operator_failed" | "max_steps" = "max_steps";
+  let latestSummary = summarizeWorkerSessionControlPlaneStatus(await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines }));
+  for (let step = 1; step <= execution.maxSteps; step += 1) {
+    const operatorRun = await operateWorkerSessionControlPlane(sessionName, options, {
+      dryRun: execution.dryRun,
+      confirm: execution.confirm,
+      lines: execution.lines,
+      maxCycles: execution.maxCycles,
+      cycleIntervalMs: execution.cycleIntervalMs,
+      reconcileWorkers: false,
+      recoverWorkerBundles: false,
+    });
+    latestSummary = summarizeWorkerSessionControlPlaneStatus(await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines }));
+    steps.push({
+      step,
+      operatorRunId: operatorRun.operatorRunRecord.operatorRunId,
+      operatorRunStatus: operatorRun.operatorRunRecord.status,
+      operatorStoppedReason: operatorRun.stoppedReason,
+      cycles: operatorRun.cycles.length,
+      needsActionAfter: operatorRun.cycles.at(-1)?.afterSummary.needsAction ?? latestSummary.needsAction,
+    });
+    if (!operatorRun.ok) {
+      stoppedReason = "operator_failed";
+      break;
+    }
+    if (execution.dryRun) {
+      stoppedReason = "dry_run";
+      break;
+    }
+    if (operatorRun.stoppedReason === "idle") {
+      stoppedReason = "idle";
+      break;
+    }
+    if (step < execution.maxSteps) {
+      await sleep(execution.intervalMs);
+    }
+  }
+  const completedAt = new Date().toISOString();
+  const commandBase = [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred", sessionName, "--server",
+    "--until-empty",
+    "--max-steps", String(execution.maxSteps),
+    "--interval-ms", String(execution.intervalMs),
+    "--max-cycles", String(execution.maxCycles),
+    "--cycle-interval-ms", String(execution.cycleIntervalMs),
+    "--lines", String(execution.lines),
+  ];
+  return {
+    ok: stoppedReason !== "operator_failed",
+    session: sessionName,
+    dryRun: execution.dryRun,
+    confirmed: execution.confirm,
+    startedAt,
+    completedAt,
+    untilEmpty: true,
+    maxSteps: execution.maxSteps,
+    intervalMs: execution.intervalMs,
+    stoppedReason,
+    steps,
+    latestSummary,
+    commands: {
+      rerunDryRun: [...commandBase, "--dry-run"],
+      rerunConfirm: [...commandBase, "--confirm"],
+      status: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
+      operatorRuns: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server"],
+    },
+  };
+}
+
+function printContinueDeferredWorkerSessionControlPlaneText(
+  response: Awaited<ReturnType<typeof continueDeferredWorkerSessionControlPlane>>,
+): void {
+  console.log([
+    "control_plane_continue_deferred:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  stopped_reason: ${response.stoppedReason}`,
+    `  steps: ${response.steps.length}`,
+    `  needs_action_after: ${response.latestSummary.needsAction}`,
+    `  status: ${formatShellCommand(response.commands.status)}`,
+    `  operator_runs: ${formatShellCommand(response.commands.operatorRuns)}`,
+    `  rerun_dry_run: ${formatShellCommand(response.commands.rerunDryRun)}`,
+    `  rerun_confirm: ${formatShellCommand(response.commands.rerunConfirm)}`,
+    ...response.steps.flatMap((step) => [
+      `  - step: ${step.step}`,
+      `    operator_run: ${step.operatorRunId}`,
+      `    operator_status: ${step.operatorRunStatus}`,
+      `    operator_stopped_reason: ${step.operatorStoppedReason}`,
+      `    cycles: ${step.cycles}`,
+      `    needs_action_after: ${step.needsActionAfter ?? "unknown"}`,
+    ]),
+  ].join("\n"));
+}
+
 function printWorkerSessionControlPlaneOperateText(
   response: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>,
 ): void {
@@ -14136,6 +14296,7 @@ function workerSessionControlPlaneContinueDeferredCommand(sessionName: string, d
   return [
     "npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred", sessionName, "--server",
     dryRun ? "--dry-run" : "--confirm",
+    "--until-empty",
   ];
 }
 
@@ -22003,7 +22164,7 @@ Commands:
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
-  runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
+  runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]

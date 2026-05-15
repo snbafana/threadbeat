@@ -376,6 +376,7 @@ try {
     sessionName,
     "--server",
     "--dry-run",
+    "--until-empty",
   ];
   const continueDeferredConfirmCommand = [
     "npm",
@@ -387,6 +388,7 @@ try {
     sessionName,
     "--server",
     "--confirm",
+    "--until-empty",
   ];
   assert.deepEqual(statusSummary.commands.continueDeferredDryRun, continueDeferredDryRunCommand);
   assert.deepEqual(statusSummary.commands.continueDeferredConfirm, continueDeferredConfirmCommand);
@@ -2674,11 +2676,17 @@ try {
     sessionName,
     "--server",
     "--dry-run",
+    "--until-empty",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "0",
     "--format",
     "text",
   ]);
-  assert.match(continueDeferredDispatchText, /control_plane_operate:/);
+  assert.match(continueDeferredDispatchText, /control_plane_continue_deferred:/);
   assert.match(continueDeferredDispatchText, /dry_run: true/);
+  assert.match(continueDeferredDispatchText, /stopped_reason: dry_run/);
   assert.match(continueDeferredDispatchText, /operator_run:/);
 } finally {
   await app.close();
