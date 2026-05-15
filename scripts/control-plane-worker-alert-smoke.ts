@@ -2688,6 +2688,8 @@ try {
   assert.match(continueDeferredDispatchText, /dry_run: true/);
   assert.match(continueDeferredDispatchText, /stopped_reason: dry_run/);
   assert.match(continueDeferredDispatchText, /operator_run:/);
+  assert.match(continueDeferredDispatchText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
+  assert.match(continueDeferredDispatchText, /inspect_operator_timeline: npm run cli -- runs session-control-plane-timeline/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

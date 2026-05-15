@@ -12131,6 +12131,10 @@ async function continueDeferredWorkerSessionControlPlane(
     operatorStoppedReason: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>["stoppedReason"];
     cycles: number;
     needsActionAfter: boolean | null;
+    commands: {
+      inspectOperatorRun: string[];
+      inspectOperatorTimeline: string[];
+    };
   }>;
   latestSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
   commands: {
@@ -12148,6 +12152,10 @@ async function continueDeferredWorkerSessionControlPlane(
     operatorStoppedReason: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>["stoppedReason"];
     cycles: number;
     needsActionAfter: boolean | null;
+    commands: {
+      inspectOperatorRun: string[];
+      inspectOperatorTimeline: string[];
+    };
   }> = [];
   let stoppedReason: "idle" | "dry_run" | "operator_failed" | "max_steps" = "max_steps";
   let latestSummary = summarizeWorkerSessionControlPlaneStatus(await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines }));
@@ -12169,6 +12177,10 @@ async function continueDeferredWorkerSessionControlPlane(
       operatorStoppedReason: operatorRun.stoppedReason,
       cycles: operatorRun.cycles.length,
       needsActionAfter: operatorRun.cycles.at(-1)?.afterSummary.needsAction ?? latestSummary.needsAction,
+      commands: {
+        inspectOperatorRun: operatorRun.commands.inspectOperatorRuns,
+        inspectOperatorTimeline: operatorRun.commands.inspectOperatorRunTimeline,
+      },
     });
     if (!operatorRun.ok) {
       stoppedReason = "operator_failed";
@@ -12240,6 +12252,8 @@ function printContinueDeferredWorkerSessionControlPlaneText(
       `    operator_stopped_reason: ${step.operatorStoppedReason}`,
       `    cycles: ${step.cycles}`,
       `    needs_action_after: ${step.needsActionAfter ?? "unknown"}`,
+      `    inspect_operator_run: ${formatShellCommand(step.commands.inspectOperatorRun)}`,
+      `    inspect_operator_timeline: ${formatShellCommand(step.commands.inspectOperatorTimeline)}`,
     ]),
   ].join("\n"));
 }
