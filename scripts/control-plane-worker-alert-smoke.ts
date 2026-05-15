@@ -2841,7 +2841,12 @@ try {
 
   const statusAfterContinueDeferredResume = await cliJson<{
     nextRecovery: { action: string; reason: string; count: number; command: string[]; dryRunCommand: string[] } | null;
-    commands: { continueDeferredNextDryRun: string[] | null; continueDeferredNextConfirm: string[] | null; continueDeferredNextResumeConfirm: string[] | null };
+    commands: {
+      continueDeferredNextInspect: string[] | null;
+      continueDeferredNextDryRun: string[] | null;
+      continueDeferredNextConfirm: string[] | null;
+      continueDeferredNextResumeConfirm: string[] | null;
+    };
     recovery: {
       continueDeferred: {
         attempts: { total: number; dryRun: number; executed: number; failed: number };
@@ -2882,6 +2887,7 @@ try {
   assert.deepEqual(resumableContinueDeferredLoop?.resumeCommand, resumedContinueDeferredLoop.after.commands.resumeLoop);
   assert.ok(resumableContinueDeferredLoop?.inspectHistoryCommand.includes("--continue-deferred-loop-history"));
   assert.deepEqual(resumableContinueDeferredLoop?.executeResumeCommand, resumedContinueDeferredLoop.after.commands.executeResume);
+  assert.ok(statusAfterContinueDeferredResume.commands.continueDeferredNextInspect?.includes("--inspect"));
 
   const statusTextAfterContinueDeferredResume = await cliText(baseUrl, [
     "runs",
@@ -2894,6 +2900,7 @@ try {
   ]);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_loops: total=2 dry_run=2 executed=0 failed=0 resumable=1/);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_loop_queue: npm run cli -- runs session-control-plane-advances/);
+  assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_inspect: npm run cli -- runs session-control-plane-continue-deferred-next/);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_dry_run: npm run cli -- runs session-control-plane-continue-deferred-next/);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_confirm: npm run cli -- runs session-control-plane-continue-deferred-next/);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_resume_confirm: npm run cli -- runs session-control-plane-continue-deferred-next/);
@@ -2916,11 +2923,68 @@ try {
   ]);
   const statusShellAfterContinueDeferredResumeLines = statusShellAfterContinueDeferredResume.trim().split("\n").filter(Boolean);
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("--detail-command continue_deferred_loop")));
+  assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--inspect")));
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--dry-run")));
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--confirm")));
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--resume-confirm")));
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes(`--resume-loop ${continueDeferredLoopId}`)));
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes(`--loop-advance-id ${continueDeferredLoopId} --continue-deferred-loop-history --execute-resume --confirm`)));
+
+  const continueDeferredNextInspect = await cliJson<{
+    ok: boolean;
+    inspected: boolean;
+    resumeOverride: "confirm" | null;
+    selected: { loopAdvanceId: string; latestAdvanceId: string } | null;
+    command: string[] | null;
+    beforeSummary: { recovery: { continueDeferred: { resumableLoops: { count: number } } } };
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-continue-deferred-next",
+    sessionName,
+    "--server",
+    "--inspect",
+  ]);
+  assert.equal(continueDeferredNextInspect.ok, true);
+  assert.equal(continueDeferredNextInspect.inspected, true);
+  assert.equal(continueDeferredNextInspect.resumeOverride, null);
+  assert.equal(continueDeferredNextInspect.selected?.loopAdvanceId, continueDeferredLoopId);
+  assert.deepEqual(continueDeferredNextInspect.command, resumableContinueDeferredLoop?.executeResumeCommand);
+  assert.equal(continueDeferredNextInspect.beforeSummary.recovery.continueDeferred.resumableLoops.count, 1);
+  assert.ok(continueDeferredNextInspect.commands.some((item) => item.command.includes("--inspect")));
+  assert.ok(continueDeferredNextInspect.commands.some((item) => item.command.includes("--dry-run")));
+  assert.ok(continueDeferredNextInspect.commands.some((item) => item.command.includes("--resume-confirm")));
+  assert.equal(Object.hasOwn(continueDeferredNextInspect, "executed"), false);
+
+  const continueDeferredNextInspectText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-continue-deferred-next",
+    sessionName,
+    "--server",
+    "--inspect",
+    "--format",
+    "text",
+  ]);
+  assert.match(continueDeferredNextInspectText, /control_plane_continue_deferred_next:/);
+  assert.match(continueDeferredNextInspectText, /inspected: true/);
+  assert.match(continueDeferredNextInspectText, new RegExp(`selected_loop: ${continueDeferredLoopId}`));
+  assert.match(continueDeferredNextInspectText, /command: npm run cli -- runs session-control-plane-advances/);
+
+  const continueDeferredNextInspectShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-continue-deferred-next",
+    sessionName,
+    "--server",
+    "--inspect",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  const continueDeferredNextInspectShellLines = continueDeferredNextInspectShell.trim().split("\n").filter(Boolean);
+  assert.ok(continueDeferredNextInspectShellLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--inspect")));
+  assert.ok(continueDeferredNextInspectShellLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--dry-run")));
+  assert.ok(continueDeferredNextInspectShellLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--confirm")));
+  assert.ok(continueDeferredNextInspectShellLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--resume-confirm")));
 
   const continueDeferredNextDryRun = await cliJson<{
     selected: { loopAdvanceId: string; latestAdvanceId: string } | null;
