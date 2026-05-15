@@ -51,6 +51,7 @@ try {
   const branchNativeRecoverDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --dry-run`;
   const branchNativeRecoverConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --confirm`;
   const controlPlaneRecoverNextDryRunCommand = `npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --dry-run`;
+  const controlPlaneRecoverNextConfirmCommand = `npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --confirm`;
   const resumeBranchCommand = `npm run cli -- runs resume-branch ${run.id}`;
 
   const summary = await cliJson<{
@@ -179,6 +180,53 @@ try {
   assert.match(branchNativeRecoverDryRunText, /surface: branch/);
   assert.match(branchNativeRecoverDryRunText, /selected: resume_branch/);
   assert.match(branchNativeRecoverDryRunText, new RegExp(`command: ${controlPlaneRecoverNextDryRunCommand} --lines 1`));
+
+  const branchNativeRecoverConfirm = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    counts: { branchReady: number };
+    recoverNext: { dryRun: boolean; selected: { surface: string; action: string; reason: string } };
+    executed: { command: string[]; exitCode: number | null };
+    after: { counts: { branchReady: number; branchActions: number } };
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--recover-next",
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(branchNativeRecoverConfirm.dryRun, false);
+  assert.equal(branchNativeRecoverConfirm.confirmed, true);
+  assert.equal(branchNativeRecoverConfirm.selectedAction, "recover_next");
+  assert.equal(branchNativeRecoverConfirm.counts.branchReady, 1);
+  assert.equal(branchNativeRecoverConfirm.recoverNext.dryRun, false);
+  assert.equal(branchNativeRecoverConfirm.recoverNext.selected.surface, "branch");
+  assert.equal(branchNativeRecoverConfirm.recoverNext.selected.action, "resume_branch");
+  assert.equal(branchNativeRecoverConfirm.executed.command.join(" "), `${controlPlaneRecoverNextConfirmCommand} --lines 1`);
+  assert.equal(branchNativeRecoverConfirm.executed.exitCode, 0);
+  assert.equal(branchNativeRecoverConfirm.after.counts.branchReady, 0);
+  assert.equal(branchNativeRecoverConfirm.after.counts.branchActions, 0);
+
+  const requeuedRun = await db.getAgentRun(run.id);
+  assert.equal(requeuedRun?.status, "planned");
+  assert.equal(requeuedRun?.worker_id, null);
+
+  const branchNativeAfterConfirm = await cliJson<{
+    counts: { branchReady: number; branchActions: number };
+    branchActions: unknown[];
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(branchNativeAfterConfirm.counts.branchReady, 0);
+  assert.equal(branchNativeAfterConfirm.counts.branchActions, 0);
+  assert.equal(branchNativeAfterConfirm.branchActions.length, 0);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
