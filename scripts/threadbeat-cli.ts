@@ -14556,6 +14556,7 @@ type ControlPlaneWorkerSummary = {
   retired: number;
   exitedUnrecorded: number;
   restartable: number;
+  commandDrift: number;
   latestResults: {
     count: number;
     recorded: number;
@@ -14576,6 +14577,15 @@ type ControlPlaneWorkerSummary = {
     executed: number;
     polls: number;
   };
+};
+
+type ControlPlaneWorkerCommandDrift = {
+  checked: boolean;
+  stale: boolean;
+  reason: "stored_command_matches_worker_bundle_profile" | "stored_command_differs_from_worker_bundle_profile";
+  desiredWorkerId: string | null;
+  desiredCommand: string[];
+  currentCommand: string[];
 };
 
 type ControlPlaneWorkerAggregateNextStep = Record<string, unknown> & {
@@ -14668,12 +14678,20 @@ async function fetchWorkerSessionControlPlaneWorkers(
     fetchWorkerSessionApplyActionWorkerNextSteps(sessionName),
     fetchWorkerSessionDrainWorkerNextSteps(sessionName),
   ]);
-  const workers = [
+  const baseWorkers = [
     ...advanceWorkers.workers.map((worker) => normalizeControlPlaneWorker(controlPlaneAdvanceWorkerKind(worker), sessionName, worker, options.includeRetired)),
     ...tickWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_tick", sessionName, worker, options.includeRetired)),
     ...applyActionWorkers.workers.map((worker) => normalizeControlPlaneWorker("apply_action", sessionName, worker, options.includeRetired)),
     ...drainWorkers.workers.map((worker) => normalizeControlPlaneWorker("drain", sessionName, worker, options.includeRetired)),
   ];
+  const bundleProfile = await readControlPlaneWorkerBundleProfile(sessionName);
+  const desiredOperatorCommand = bundleProfile?.desired.includeOperatorWorker
+    ? controlPlaneWorkerBundleDesiredOperatorCommand(sessionName, bundleProfile.desired)
+    : null;
+  const workers = baseWorkers.map((worker) => annotateControlPlaneWorkerCommandDrift(worker, {
+    desiredOperatorWorkerId: bundleProfile?.desired.operatorWorkerId ?? null,
+    desiredOperatorCommand,
+  }));
   const allNextSteps = [
     ...advanceNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep(controlPlaneAdvanceWorkerKind(step), step)),
     ...tickNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_tick", step)),
@@ -14969,6 +14987,7 @@ function formatControlPlaneWorkerSummary(summary: ControlPlaneWorkerSummary): st
     `retired=${summary.retired}`,
     `exited_unrecorded=${summary.exitedUnrecorded}`,
     `restartable=${summary.restartable}`,
+    `command_drift=${summary.commandDrift}`,
     `latest_results=${formatControlPlaneWorkerLatestResults(summary.latestResults)}`,
   ].join(" ");
 }
@@ -15054,6 +15073,58 @@ function normalizeControlPlaneWorkerNextStep(kind: ControlPlaneWorkerKind, step:
   };
 }
 
+function controlPlaneWorkerBundleDesiredOperatorCommand(
+  sessionName: string,
+  desired: ControlPlaneWorkerBundleOptions,
+): string[] {
+  return [
+    "runs",
+    "session-control-plane-operate",
+    sessionName,
+    "--server",
+    desired.workerDryRun ? "--dry-run" : "--confirm",
+    "--max-cycles",
+    String(desired.operatorMaxCycles),
+    "--cycle-interval-ms",
+    String(desired.operatorCycleIntervalMs),
+    "--lines",
+    String(desired.lines),
+    ...(desired.operatorRecoverWorkerBundles ? ["--recover-worker-bundles"] : []),
+    ...(desired.operatorReconcileWorkers ? ["--reconcile-workers"] : []),
+  ];
+}
+
+function annotateControlPlaneWorkerCommandDrift<T extends Record<string, unknown> & {
+  kind: ControlPlaneWorkerKind;
+  workerId: string | null;
+}>(
+  worker: T,
+  context: { desiredOperatorWorkerId: string | null; desiredOperatorCommand: string[] | null },
+): T & { commandDrift?: ControlPlaneWorkerCommandDrift } {
+  if (
+    worker.kind !== "control_plane_operator"
+    || !context.desiredOperatorCommand
+    || worker.workerId !== context.desiredOperatorWorkerId
+  ) {
+    return worker;
+  }
+  const currentCommand = stringListFromUnknown(worker.command);
+  const stale = JSON.stringify(currentCommand) !== JSON.stringify(context.desiredOperatorCommand);
+  return {
+    ...worker,
+    commandDrift: {
+      checked: true,
+      stale,
+      reason: stale
+        ? "stored_command_differs_from_worker_bundle_profile"
+        : "stored_command_matches_worker_bundle_profile",
+      desiredWorkerId: context.desiredOperatorWorkerId,
+      desiredCommand: context.desiredOperatorCommand,
+      currentCommand,
+    },
+  };
+}
+
 function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_bundle_recovery" | "control_plane_operator"> {
   const record = plainRecord(value) ?? {};
   if (record.mode === "result_review_loop") return "result_review";
@@ -15062,7 +15133,7 @@ function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWork
   return record.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
 }
 
-function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean; latestResult?: unknown; latestResultSource?: unknown; recentProgress?: unknown }>): ControlPlaneWorkerSummary {
+function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: string | null; restartable: boolean; latestResult?: unknown; latestResultSource?: unknown; recentProgress?: unknown; commandDrift?: unknown }>): ControlPlaneWorkerSummary {
   return {
     total: workers.length,
     alive: workers.filter((worker) => worker.alive).length,
@@ -15071,6 +15142,7 @@ function summarizeControlPlaneWorkers(workers: Array<{ alive: boolean; state: st
     retired: workers.filter((worker) => worker.state === "retired").length,
     exitedUnrecorded: workers.filter((worker) => worker.state === "exited_unrecorded").length,
     restartable: workers.filter((worker) => worker.restartable).length,
+    commandDrift: workers.filter((worker) => plainRecord(worker.commandDrift)?.stale === true).length,
     latestResults: summarizeControlPlaneWorkerLatestResults(workers),
   };
 }

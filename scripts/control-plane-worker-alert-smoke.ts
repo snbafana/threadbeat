@@ -976,6 +976,66 @@ try {
     "--worker-id",
     staleOperatorWorkerId,
   ]);
+  await writeControlPlaneWorkerBundleProfile(staleOperatorWorkerId, { recoverWorkerBundles: true });
+  const staleOperatorWorkerAggregate = await cliJson<{
+    summary: {
+      commandDrift: number;
+      operator: { total: number; stopped: number; restartable: number; commandDrift: number };
+    };
+    workers: Array<{
+      kind: string;
+      workerId: string;
+      commandDrift?: {
+        checked: boolean;
+        stale: boolean;
+        reason: string;
+        desiredWorkerId: string | null;
+        desiredCommand: string[];
+        currentCommand: string[];
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    staleOperatorWorkerId,
+    "--include-retired",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(staleOperatorWorkerAggregate.summary.commandDrift, 1);
+  assert.equal(staleOperatorWorkerAggregate.summary.operator.total, 1);
+  assert.equal(staleOperatorWorkerAggregate.summary.operator.stopped, 1);
+  assert.equal(staleOperatorWorkerAggregate.summary.operator.restartable, 1);
+  assert.equal(staleOperatorWorkerAggregate.summary.operator.commandDrift, 1);
+  assert.equal(staleOperatorWorkerAggregate.workers[0]?.kind, "control_plane_operator");
+  assert.equal(staleOperatorWorkerAggregate.workers[0]?.workerId, staleOperatorWorkerId);
+  assert.equal(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.checked, true);
+  assert.equal(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.stale, true);
+  assert.equal(
+    staleOperatorWorkerAggregate.workers[0]?.commandDrift?.reason,
+    "stored_command_differs_from_worker_bundle_profile",
+  );
+  assert.equal(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.desiredWorkerId, staleOperatorWorkerId);
+  assert.ok(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.desiredCommand.includes("--recover-worker-bundles"));
+  assert.equal(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.currentCommand.includes("--recover-worker-bundles"), false);
+  const staleOperatorWorkerAggregateText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    staleOperatorWorkerId,
+    "--include-retired",
+    "--lines",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(staleOperatorWorkerAggregateText, /operator: .*command_drift=1/);
+
   const staleOperatorWorkerEnsure = await cliJson<{
     action: string;
     reason: string;
@@ -2375,6 +2435,7 @@ try {
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-worker-bundles", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
@@ -2415,6 +2476,36 @@ async function writeAdvanceWorker(workerId: string): Promise<void> {
     stoppedAt: "2026-05-13T10:01:00.000Z",
     stopResult: { stopped: true, signalSent: false, forced: false, alive: false, aliveBefore: false },
     latestResult: null,
+  }, null, 2)}\n`);
+}
+
+async function writeControlPlaneWorkerBundleProfile(
+  operatorWorkerId: string,
+  options: { recoverWorkerBundles: boolean },
+): Promise<void> {
+  const profilePath = path.join(".threadbeat", "worker-sessions", "control-plane-worker-bundles", `${sessionName}.json`);
+  await fs.mkdir(path.dirname(profilePath), { recursive: true });
+  await fs.writeFile(profilePath, `${JSON.stringify({
+    session: sessionName,
+    savedAt: new Date().toISOString(),
+    desired: {
+      topologyWorkerId: "unused-topology",
+      includeMutationWorkers: false,
+      workerDryRun: true,
+      maxIterations: 1,
+      loopIntervalMs: 1,
+      includeOperatorWorker: true,
+      operatorWorkerId,
+      operatorReconcileWorkers: true,
+      operatorRecoverWorkerBundles: options.recoverWorkerBundles,
+      operatorMaxCycles: 1,
+      operatorCycleIntervalMs: 1,
+      includeResultReviewWorker: false,
+      resultReviewWorkerId: "unused-result-review",
+      maxResults: 1,
+      resultReviewIntervalMs: 1,
+      lines: 5,
+    },
   }, null, 2)}\n`);
 }
 
