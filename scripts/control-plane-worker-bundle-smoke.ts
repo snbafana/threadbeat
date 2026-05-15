@@ -159,8 +159,13 @@ try {
 
   const profileList = await cliJson<{
     profileCount: number;
-    summary: { sessions: number; expected: number; actionable: number; blocked: number; existing: number; passed: boolean | null };
-    bundles: Array<{ session: string; exists: boolean; current: { plan: { expected: number; actionable: number; blocked: number; existing: number } } | null }>;
+    summary: { sessions: number; expected: number; actionable: number; blocked: number; existing: number; commandDrift: number; needsRecovery: number; passed: boolean | null };
+    bundles: Array<{
+      session: string;
+      exists: boolean;
+      recovery: { commandDrift: number; needed: boolean; reason: string };
+      current: { plan: { expected: number; actionable: number; blocked: number; existing: number } } | null;
+    }>;
     commands: { recoverDryRun: string[]; recoverConfirm: string[]; recoverLoopDryRun: string[]; list: string[] };
   }>(baseUrl, [
     "runs",
@@ -176,8 +181,10 @@ try {
   assert.equal(profileList.summary.expected, 3);
   assert.equal(profileList.summary.actionable, 0);
   assert.ok(profileList.summary.blocked + profileList.summary.existing === 3);
+  assert.equal(profileList.summary.commandDrift, 0);
   assert.equal(profileList.bundles[0]?.session, sessionName);
   assert.equal(profileList.bundles[0]?.exists, true);
+  assert.equal(profileList.bundles[0]?.recovery.commandDrift, 0);
   assert.equal(profileList.bundles[0]?.current?.plan.expected, 3);
   assert.equal(profileList.commands.list.join(" "), `npm run cli -- runs session-control-plane-worker-bundles --server --session ${sessionName} --lines 1`);
   assert.equal(profileList.commands.recoverDryRun.join(" "), `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --dry-run`);
@@ -208,6 +215,39 @@ try {
   assert.ok(fromProfile.plan.blocked + fromProfile.plan.existing === 3);
 
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
+
+  const missingWorkerProfileList = await cliJson<{
+    summary: { actionable: number; commandDrift: number; needsRecovery: number };
+    bundles: Array<{ recovery: { needed: boolean; reason: string; actionable: number; commandDrift: number } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(missingWorkerProfileList.summary.actionable, 3);
+  assert.equal(missingWorkerProfileList.summary.commandDrift, 0);
+  assert.equal(missingWorkerProfileList.summary.needsRecovery, 1);
+  assert.equal(missingWorkerProfileList.bundles[0]?.recovery.needed, true);
+  assert.equal(missingWorkerProfileList.bundles[0]?.recovery.reason, "actionable_plan");
+  assert.equal(missingWorkerProfileList.bundles[0]?.recovery.actionable, 3);
+  assert.equal(missingWorkerProfileList.bundles[0]?.recovery.commandDrift, 0);
+  const missingWorkerProfileListText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--format",
+    "text",
+    "--lines",
+    "1",
+  ]);
+  assert.match(missingWorkerProfileListText, /summary: .*needs_recovery=1/);
+  assert.match(missingWorkerProfileListText, /recovery: needed=true reason=actionable_plan command_drift=0/);
 
   const recoveryDryRun = await cliJson<{
     dryRun: boolean;
@@ -412,6 +452,7 @@ try {
   assert.match(profileText, /control_plane_worker_bundle_profile:/);
   assert.match(profileText, /exists: true/);
   assert.match(profileText, /plan: expected=3 actionable=0 blocked=\d+ existing=\d+/);
+  assert.match(profileText, /recovery: needed=(true|false) reason=\w+ command_drift=0/);
 
   const operateWithBundleRecoveryText = await cliText(baseUrl, [
     "runs",
@@ -446,7 +487,9 @@ try {
   ]);
   assert.match(profileListText, /control_plane_worker_bundle_profiles:/);
   assert.match(profileListText, /profile_count: 1/);
+  assert.match(profileListText, /summary: .*command_drift=0/);
   assert.match(profileListText, new RegExp(`- ${sessionName} exists=true`));
+  assert.match(profileListText, /recovery: needed=(true|false) reason=\w+ command_drift=0/);
 
   const recoveryText = await cliText(baseUrl, [
     "runs",

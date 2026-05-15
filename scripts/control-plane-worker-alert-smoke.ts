@@ -1021,6 +1021,39 @@ try {
   assert.equal(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.desiredWorkerId, staleOperatorWorkerId);
   assert.ok(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.desiredCommand.includes("--recover-worker-bundles"));
   assert.equal(staleOperatorWorkerAggregate.workers[0]?.commandDrift?.currentCommand.includes("--recover-worker-bundles"), false);
+  const staleOperatorWorkerProfileList = await cliJson<{
+    summary: { commandDrift: number; needsRecovery: number; actionable: number; blocked: number };
+    bundles: Array<{ recovery: { needed: boolean; reason: string; commandDrift: number; actionable: number } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--lines",
+    "5",
+  ]);
+  assert.equal(staleOperatorWorkerProfileList.summary.commandDrift, 1);
+  assert.equal(staleOperatorWorkerProfileList.summary.needsRecovery, 1);
+  assert.equal(staleOperatorWorkerProfileList.summary.actionable, 2);
+  assert.equal(staleOperatorWorkerProfileList.summary.blocked, 0);
+  assert.equal(staleOperatorWorkerProfileList.bundles[0]?.recovery.needed, true);
+  assert.equal(staleOperatorWorkerProfileList.bundles[0]?.recovery.reason, "command_drift");
+  assert.equal(staleOperatorWorkerProfileList.bundles[0]?.recovery.commandDrift, 1);
+  assert.equal(staleOperatorWorkerProfileList.bundles[0]?.recovery.actionable, 2);
+  const staleOperatorWorkerProfileListText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--lines",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(staleOperatorWorkerProfileListText, /summary: .*command_drift=1 needs_recovery=1/);
+  assert.match(staleOperatorWorkerProfileListText, /recovery: needed=true reason=command_drift command_drift=1/);
   const staleOperatorWorkerAggregateText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-workers",

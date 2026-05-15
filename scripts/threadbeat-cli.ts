@@ -17109,6 +17109,16 @@ type ControlPlaneWorkerBundleStoredProfile = {
   desired: ControlPlaneWorkerBundleOptions;
 };
 
+type ControlPlaneWorkerBundleRecoveryStatus = {
+  needed: boolean;
+  reason: "profile_missing" | "current" | "actionable_plan" | "blocked_plan" | "command_drift";
+  expected: number;
+  actionable: number;
+  blocked: number;
+  existing: number;
+  commandDrift: number;
+};
+
 function controlPlaneWorkerBundleProfilePath(sessionName: string): string {
   assertSafeSessionName(sessionName);
   return path.join(workerSessionDir, "control-plane-worker-bundles", `${sessionName}.json`);
@@ -17401,6 +17411,7 @@ async function inspectControlPlaneWorkerBundleProfile(
       path: profilePath,
       profile: null,
       current: null,
+      recovery: controlPlaneWorkerBundleRecoveryStatus(null),
       commands: {
         inspectWorkers: ["npm", "run", "cli", "--", "runs", "session-control-plane-workers", sessionName, "--server", "--include-retired", "--lines", String(options.lines)],
       },
@@ -17419,6 +17430,7 @@ async function inspectControlPlaneWorkerBundleProfile(
     path: profilePath,
     profile: { ...profile, desired },
     current,
+    recovery: controlPlaneWorkerBundleRecoveryStatus(current),
     commands: {
       inspectWorkers: current.commands.inspectWorkers,
       dryRun: ["npm", "run", "cli", "--", "runs", "ensure-control-plane-worker-bundle", sessionName, "--server", "--from-profile", "--dry-run", "--lines", String(options.lines)],
@@ -17440,6 +17452,8 @@ async function inspectControlPlaneWorkerBundleProfiles(options: {
   const blocked = bundles.reduce((total, bundle) => total + (bundle.current?.plan.blocked ?? 0), 0);
   const existing = bundles.reduce((total, bundle) => total + (bundle.current?.plan.existing ?? 0), 0);
   const expected = bundles.reduce((total, bundle) => total + (bundle.current?.plan.expected ?? 0), 0);
+  const commandDrift = bundles.reduce((total, bundle) => total + bundle.recovery.commandDrift, 0);
+  const needsRecovery = bundles.filter((bundle) => bundle.recovery.needed).length;
   return {
     ok: true,
     filter: {
@@ -17453,6 +17467,8 @@ async function inspectControlPlaneWorkerBundleProfiles(options: {
       actionable,
       blocked,
       existing,
+      commandDrift,
+      needsRecovery,
       passed: bundles.length === 0 ? null : bundles.every((bundle) => bundle.current?.plan.blocked === 0),
     },
     bundles,
@@ -17482,6 +17498,39 @@ async function inspectControlPlaneWorkerBundleProfiles(options: {
         "--lines", String(options.lines),
       ],
     },
+  };
+}
+
+function controlPlaneWorkerBundleRecoveryStatus(
+  current: Awaited<ReturnType<typeof ensureWorkerSessionControlPlaneWorkerBundle>> | null,
+): ControlPlaneWorkerBundleRecoveryStatus {
+  if (!current) {
+    return {
+      needed: false,
+      reason: "profile_missing",
+      expected: 0,
+      actionable: 0,
+      blocked: 0,
+      existing: 0,
+      commandDrift: 0,
+    };
+  }
+  const commandDrift = current.before.summary.commandDrift;
+  const needed = current.plan.actionable > 0 || current.plan.blocked > 0 || commandDrift > 0;
+  return {
+    needed,
+    reason: current.plan.blocked > 0
+      ? "blocked_plan"
+      : commandDrift > 0
+        ? "command_drift"
+        : current.plan.actionable > 0
+          ? "actionable_plan"
+          : "current",
+    expected: current.plan.expected,
+    actionable: current.plan.actionable,
+    blocked: current.plan.blocked,
+    existing: current.plan.existing,
+    commandDrift,
   };
 }
 
@@ -17861,6 +17910,7 @@ function printControlPlaneWorkerBundleProfileText(
   lines.push(`  saved_at: ${response.profile.savedAt}`);
   lines.push(`  desired: topology=${response.profile.desired.topologyWorkerId} include_mutation=${response.profile.desired.includeMutationWorkers} include_operator=${response.profile.desired.includeOperatorWorker} operator=${response.profile.desired.includeOperatorWorker ? response.profile.desired.operatorWorkerId : "none"} include_result_review=${response.profile.desired.includeResultReviewWorker} result_review=${response.profile.desired.includeResultReviewWorker ? response.profile.desired.resultReviewWorkerId : "none"} worker_dry_run=${response.profile.desired.workerDryRun}`);
   lines.push(`  plan: expected=${response.current.plan.expected} actionable=${response.current.plan.actionable} blocked=${response.current.plan.blocked} existing=${response.current.plan.existing}`);
+  lines.push(`  recovery: needed=${response.recovery.needed} reason=${response.recovery.reason} command_drift=${response.recovery.commandDrift}`);
   lines.push("  commands:");
   lines.push(`    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`);
   lines.push(`    dry_run: ${formatShellCommand(response.commands.dryRun)}`);
@@ -17875,7 +17925,7 @@ function printControlPlaneWorkerBundleProfilesText(
     "control_plane_worker_bundle_profiles:",
     `  profile_count: ${response.profileCount}`,
     `  filter: session=${response.filter.session ?? "all"} lines=${response.filter.lines}`,
-    `  summary: expected=${response.summary.expected} actionable=${response.summary.actionable} blocked=${response.summary.blocked} existing=${response.summary.existing} passed=${response.summary.passed ?? "pending"}`,
+    `  summary: expected=${response.summary.expected} actionable=${response.summary.actionable} blocked=${response.summary.blocked} existing=${response.summary.existing} command_drift=${response.summary.commandDrift} needs_recovery=${response.summary.needsRecovery} passed=${response.summary.passed ?? "pending"}`,
     "  commands:",
     `    list: ${formatShellCommand(response.commands.list)}`,
     `    recover_dry_run: ${formatShellCommand(response.commands.recoverDryRun)}`,
@@ -17890,6 +17940,7 @@ function printControlPlaneWorkerBundleProfilesText(
       lines.push(`    - ${bundle.session} exists=${bundle.exists} path=${bundle.path}`);
       if (bundle.current) {
         lines.push(`      plan: expected=${bundle.current.plan.expected} actionable=${bundle.current.plan.actionable} blocked=${bundle.current.plan.blocked} existing=${bundle.current.plan.existing}`);
+        lines.push(`      recovery: needed=${bundle.recovery.needed} reason=${bundle.recovery.reason} command_drift=${bundle.recovery.commandDrift}`);
       }
       if (bundle.commands.confirm) {
         lines.push(`      confirm: ${formatShellCommand(bundle.commands.confirm)}`);
