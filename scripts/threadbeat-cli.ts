@@ -12581,6 +12581,12 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   }
   if (summary.deferredNextActions.length > 0) {
     lines.push("deferred_next_actions:");
+    if (summary.commands.continueDeferredDryRun) {
+      lines.push(`  continue_dry_run: ${formatShellCommand(summary.commands.continueDeferredDryRun)}`);
+    }
+    if (summary.commands.continueDeferredConfirm) {
+      lines.push(`  continue_confirm: ${formatShellCommand(summary.commands.continueDeferredConfirm)}`);
+    }
     for (const action of summary.deferredNextActions) {
       lines.push(
         `  - surface: ${action.surface}`,
@@ -13018,6 +13024,12 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: summary.nextRecovery.command });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--dry-run"] });
     commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next", summary.session, "--server", "--confirm"] });
+  }
+  if (summary.commands.continueDeferredDryRun) {
+    commands.push({ command: summary.commands.continueDeferredDryRun });
+  }
+  if (summary.commands.continueDeferredConfirm) {
+    commands.push({ command: summary.commands.continueDeferredConfirm });
   }
   for (const action of summary.nextActions) {
     commands.push({ command: action.command });
@@ -13904,6 +13916,8 @@ function summarizeWorkerSessionControlPlaneStatus(
     workerReconciliations: string[];
     latestWorkerReconciliation: string[] | null;
     latestWorkerReconciliationTimeline: string[] | null;
+    continueDeferredDryRun: string[] | null;
+    continueDeferredConfirm: string[] | null;
   };
 } {
   const nextActions = selectWorkerSessionControlPlaneNextActions(status);
@@ -14076,8 +14090,23 @@ function summarizeWorkerSessionControlPlaneStatus(
       workerReconciliations: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", status.session, "--server"],
       latestWorkerReconciliation: status.recovery.workerReconciliations.latest?.commands.inspectRecord ?? null,
       latestWorkerReconciliationTimeline: status.recovery.workerReconciliations.latest?.commands.timeline ?? null,
+      continueDeferredDryRun: deferredNextActions.length > 0
+        ? workerSessionControlPlaneContinueDeferredCommand(status.session, true)
+        : null,
+      continueDeferredConfirm: deferredNextActions.length > 0
+        ? workerSessionControlPlaneContinueDeferredCommand(status.session, false)
+        : null,
     },
   };
+}
+
+function workerSessionControlPlaneContinueDeferredCommand(sessionName: string, dryRun: boolean): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
+    dryRun ? "--dry-run" : "--confirm",
+    "--max-cycles", "2",
+    "--cycle-interval-ms", "0",
+  ];
 }
 
 async function executeWorkerSessionControlPlaneAdvance(

@@ -305,6 +305,10 @@ try {
         dryRunCommand: string[];
       };
     }>;
+    commands: {
+      continueDeferredDryRun: string[] | null;
+      continueDeferredConfirm: string[] | null;
+    };
     recovery: {
       attempts: {
         total: number;
@@ -362,6 +366,38 @@ try {
   assert.equal(deferredWorkerRecoveryAction?.blockedBy.action, "drain_control_plane_confirmations");
   assert.equal(deferredWorkerRecoveryAction?.blockedBy.reason, "blocked_mutating_control_plane_confirmations");
   assert.equal(deferredWorkerRecoveryAction?.blockedBy.count, 1);
+  const continueDeferredDryRunCommand = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-operate",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--max-cycles",
+    "2",
+    "--cycle-interval-ms",
+    "0",
+  ];
+  const continueDeferredConfirmCommand = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-operate",
+    sessionName,
+    "--server",
+    "--confirm",
+    "--max-cycles",
+    "2",
+    "--cycle-interval-ms",
+    "0",
+  ];
+  assert.deepEqual(statusSummary.commands.continueDeferredDryRun, continueDeferredDryRunCommand);
+  assert.deepEqual(statusSummary.commands.continueDeferredConfirm, continueDeferredConfirmCommand);
   assert.deepEqual(statusSummary.queues.controlPlaneConfirmations.commands.inspectQueue, [
     "npm",
     "run",
@@ -746,6 +782,8 @@ try {
   assert.match(statusSummaryText, /next_actions:/);
   assert.match(statusSummaryText, /deferred_next_actions:/);
   assert.match(statusSummaryText, /surface: worker_recovery/);
+  assert.match(statusSummaryText, /continue_dry_run: npm run cli -- runs session-control-plane-operate/);
+  assert.match(statusSummaryText, /continue_confirm: npm run cli -- runs session-control-plane-operate/);
   assert.match(statusSummaryText, /blocked_by: confirmation_queue:drain_control_plane_confirmations/);
   assert.match(statusSummaryText, /command_after_unblock: npm run cli -- runs restart-control-plane-advance-workers/);
   assert.match(statusSummaryText, new RegExp(`command: npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
@@ -774,6 +812,8 @@ try {
   const statusSummaryShellLines = statusSummaryShell.trim().split("\n").filter(Boolean);
   assert.ok(statusSummaryShellLines.some((line) => line.includes("session-control-plane-recover-next")));
   assert.ok(statusSummaryShellLines.some((line) => line.includes("--dry-run")));
+  assert.ok(statusSummaryShellLines.includes(continueDeferredDryRunCommand.join(" ")));
+  assert.ok(statusSummaryShellLines.includes(continueDeferredConfirmCommand.join(" ")));
   assert.ok(statusSummaryShellLines.some((line) => line === `npm run cli -- runs restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recoverNextLoopDryRun.advanceId}`)));
   assert.ok(statusSummaryShellLines.some((line) => line.includes(`--advance ${recentRecoverLoopStep?.advanceId}`)));
