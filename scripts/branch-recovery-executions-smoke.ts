@@ -31,6 +31,7 @@ try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
   const baseUrl = `http://${settings.host}:${address.port}`;
+  const branchRecoveryCommandQueueCommand = `npm run cli -- runs session-branch-recovery-executions ${sessionName} --server --limit 5 --commands-only --format shell`;
   await writeWorkerSessionRecord();
   const older = await writeBranchRecoveryExecution({
     executionId: `branch-recovery-execution-older-${Date.now().toString(36)}`,
@@ -206,7 +207,7 @@ try {
         recent: Array<{ executionId: string; status: string; selected: number; resumed: Array<{ runId: string }>; skipped: Array<{ runId: string }> }>;
       };
     };
-    commands: { branchRecoveryExecutions: string[] };
+    commands: { branchRecoveryExecutions: string[]; branchRecoveryCommandQueue: string[] };
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -230,6 +231,7 @@ try {
     sessionName,
     "--server",
   ]);
+  assert.equal(statusSummary.commands.branchRecoveryCommandQueue.join(" "), branchRecoveryCommandQueueCommand);
   assert.deepEqual(statusSummary.branches.executions.recent.map((execution) => execution.executionId), [newer.executionId, older.executionId]);
 
   const statusSummaryText = await cliText(baseUrl, [
@@ -244,6 +246,7 @@ try {
     "text",
   ]);
   assert.match(statusSummaryText, /branch_recovery_executions: recent=2 executed=1 partial=0 noop=1/);
+  assert.match(statusSummaryText, new RegExp(`command_queue: ${branchRecoveryCommandQueueCommand}`));
   assert.match(statusSummaryText, /recent_branch_recovery_executions:/);
   assert.match(statusSummaryText, new RegExp(`execution: ${newer.executionId}`));
   assert.match(statusSummaryText, /runs: run-a/);
@@ -260,6 +263,7 @@ try {
     "shell",
   ]);
   assert.match(statusSummaryShell, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server$`, "m"));
+  assert.match(statusSummaryShell, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --limit 5 --commands-only --format shell`));
   assert.match(statusSummaryShell, new RegExp(`runs session-branch-recovery-executions ${sessionName} --server --execution ${newer.executionId}`));
   assert.match(statusSummaryShell, /runs inspect run-a/);
 } finally {

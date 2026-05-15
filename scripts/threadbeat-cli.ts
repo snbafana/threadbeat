@@ -12591,6 +12591,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   lines.push(
     `branch_recovery_executions: recent=${summary.branches.executions.counts.recent} executed=${summary.branches.executions.counts.executed} partial=${summary.branches.executions.counts.partial} noop=${summary.branches.executions.counts.noop}`,
     `  inspect: ${formatShellCommand(summary.commands.branchRecoveryExecutions)}`,
+    `  command_queue: ${formatShellCommand(summary.commands.branchRecoveryCommandQueue)}`,
   );
   if (summary.branches.executions.recent.length > 0) {
     lines.push("recent_branch_recovery_executions:");
@@ -12929,6 +12930,7 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: action.command });
   }
   commands.push({ command: summary.commands.branchRecoveryExecutions });
+  commands.push({ command: summary.commands.branchRecoveryCommandQueue });
   if (summary.branches.counts.ready > 0) {
     commands.push({ command: summary.commands.branchResumeCommandQueue });
   }
@@ -13750,6 +13752,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     latestResultReviews: string[];
     failedResultReviewAttempts: string[];
     branchRecoveryExecutions: string[];
+    branchRecoveryCommandQueue: string[];
     branchResumeCommandQueue: string[];
     statusWatchExecutions: string[];
     failedRecoverNextResumeAttempts: string[];
@@ -13909,6 +13912,10 @@ function summarizeWorkerSessionControlPlaneStatus(
         "--source", "result_review", "--event", "result_review_record_failed", "--status", "failed",
       ],
       branchRecoveryExecutions: ["npm", "run", "cli", "--", "runs", "session-branch-recovery-executions", status.session, "--server"],
+      branchRecoveryCommandQueue: [
+        "npm", "run", "cli", "--", "runs", "session-branch-recovery-executions", status.session, "--server",
+        "--limit", "5", "--commands-only", "--format", "shell",
+      ],
       branchResumeCommandQueue: [
         "npm", "run", "cli", "--", "runs", "session-branches", status.session, "--server",
         "--resumable", "--branch-action", "resume_branch", "--limit", "5", "--commands-only", "--format", "shell",
