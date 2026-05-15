@@ -233,6 +233,49 @@ try {
   assert.equal(recoveryDryRun.results[0]?.session, sessionName);
   assert.equal(recoveryDryRun.results[0]?.result.plan.actionable, 3);
 
+  const operateWithBundleRecovery = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    bundleRecovery: { skipped: boolean; summary: { planned: number; actionable: number; blocked: number; executed: number; passed: boolean | null } };
+    operatorRunRecord: { operatorRunId: string; status: string };
+    commands: { recoverWorkerBundlesDryRun: string[]; recoverWorkerBundlesConfirm: string[]; inspectWorkerBundle: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-operate",
+    sessionName,
+    "--server",
+    "--recover-worker-bundles",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "1",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(operateWithBundleRecovery.dryRun, true);
+  assert.equal(operateWithBundleRecovery.confirmed, false);
+  assert.equal(operateWithBundleRecovery.bundleRecovery.skipped, false);
+  assert.equal(operateWithBundleRecovery.bundleRecovery.summary.planned, 3);
+  assert.equal(operateWithBundleRecovery.bundleRecovery.summary.actionable, 3);
+  assert.equal(operateWithBundleRecovery.bundleRecovery.summary.blocked, 0);
+  assert.equal(operateWithBundleRecovery.bundleRecovery.summary.executed, 0);
+  assert.equal(operateWithBundleRecovery.bundleRecovery.summary.passed, null);
+  assert.ok(operateWithBundleRecovery.operatorRunRecord.status === "dry_run" || operateWithBundleRecovery.operatorRunRecord.status === "idle");
+  assert.ok(operateWithBundleRecovery.operatorRunRecord.operatorRunId);
+  assert.equal(
+    operateWithBundleRecovery.commands.recoverWorkerBundlesDryRun.join(" "),
+    `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --dry-run`,
+  );
+  assert.equal(
+    operateWithBundleRecovery.commands.recoverWorkerBundlesConfirm.join(" "),
+    `npm run cli -- runs recover-control-plane-worker-bundles --server --session ${sessionName} --lines 1 --confirm`,
+  );
+  assert.equal(
+    operateWithBundleRecovery.commands.inspectWorkerBundle.join(" "),
+    `npm run cli -- runs session-control-plane-worker-bundle ${sessionName} --server --lines 1`,
+  );
+
   const recoveryLoop = await cliJson<{
     dryRun: boolean;
     loop: boolean;
@@ -353,6 +396,26 @@ try {
   assert.match(profileText, /control_plane_worker_bundle_profile:/);
   assert.match(profileText, /exists: true/);
   assert.match(profileText, /plan: expected=3 actionable=0 blocked=\d+ existing=\d+/);
+
+  const operateWithBundleRecoveryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-operate",
+    sessionName,
+    "--server",
+    "--recover-worker-bundles",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "1",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(operateWithBundleRecoveryText, /control_plane_operate:/);
+  assert.match(operateWithBundleRecoveryText, /bundle_recovery: planned=3 actionable=\d+ blocked=\d+ executed=0/);
+  assert.match(operateWithBundleRecoveryText, /recover_worker_bundles_dry_run: npm run cli -- runs recover-control-plane-worker-bundles/);
 
   const profileListText = await cliText(baseUrl, [
     "runs",

@@ -4748,6 +4748,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       maxCycles: parsePositiveInteger(options["max-cycles"] ?? "1", "--max-cycles"),
       cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "2000", "--cycle-interval-ms"),
       reconcileWorkers: options["reconcile-workers"] === "1",
+      recoverWorkerBundles: options["recover-worker-bundles"] === "1",
     });
     if (outputFormat === "text") {
       printWorkerSessionControlPlaneOperateText(response);
@@ -8533,7 +8534,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -11773,6 +11774,7 @@ async function operateWorkerSessionControlPlane(
     maxCycles: number;
     cycleIntervalMs: number;
     reconcileWorkers: boolean;
+    recoverWorkerBundles: boolean;
   },
 ): Promise<{
   ok: boolean;
@@ -11799,6 +11801,12 @@ async function operateWorkerSessionControlPlane(
     } & Awaited<ReturnType<typeof executeWorkerSessionControlPlaneStatusReconciliation>>)) | null;
     afterSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
   }>;
+  bundleRecovery: ({
+    skipped: true;
+    reason: "not_requested";
+  } | ({
+    skipped: false;
+  } & Awaited<ReturnType<typeof recoverControlPlaneWorkerBundleProfiles>>));
   operatorRunRecord: {
     path: string;
     operatorRunId: string;
@@ -11811,9 +11819,26 @@ async function operateWorkerSessionControlPlane(
     inspectOperatorRunTimeline: string[];
     inspectStatusWatchExecutions: string[];
     inspectWorkerReconciliations: string[];
+    inspectWorkerBundle: string[];
+    recoverWorkerBundlesDryRun: string[];
+    recoverWorkerBundlesConfirm: string[];
   };
 }> {
   const startedAt = new Date().toISOString();
+  const bundleRecovery = execution.recoverWorkerBundles
+    ? {
+      skipped: false as const,
+      ...(await recoverControlPlaneWorkerBundleProfiles({
+        sessionName,
+        lines: execution.lines,
+        dryRun: execution.dryRun,
+        confirm: execution.confirm,
+      })),
+    }
+    : {
+      skipped: true as const,
+      reason: "not_requested" as const,
+    };
   const cycles: Array<{
     cycle: number;
     observedAt: string;
@@ -11904,6 +11929,7 @@ async function operateWorkerSessionControlPlane(
     "--max-cycles", String(execution.maxCycles),
     "--cycle-interval-ms", String(execution.cycleIntervalMs),
     "--lines", String(execution.lines),
+    ...(execution.recoverWorkerBundles ? ["--recover-worker-bundles"] : []),
     ...(execution.reconcileWorkers ? ["--reconcile-workers"] : []),
     ...(options["include-retired"] === "1" ? ["--include-retired"] : []),
     ...(options.limit ? ["--limit", options.limit] : []),
@@ -11946,6 +11972,7 @@ async function operateWorkerSessionControlPlane(
     maxCycles: execution.maxCycles,
     cycleIntervalMs: execution.cycleIntervalMs,
     stoppedReason,
+    bundleRecovery,
     cycles,
     operatorRunRecord: {
       path: writtenOperatorRun.path,
@@ -11966,6 +11993,9 @@ async function operateWorkerSessionControlPlane(
       ],
       inspectStatusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions"],
       inspectWorkerReconciliations: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", sessionName, "--server"],
+      inspectWorkerBundle: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-bundle", sessionName, "--server", "--lines", String(execution.lines)],
+      recoverWorkerBundlesDryRun: ["npm", "run", "cli", "--", "runs", "recover-control-plane-worker-bundles", "--server", "--session", sessionName, "--lines", String(execution.lines), "--dry-run"],
+      recoverWorkerBundlesConfirm: ["npm", "run", "cli", "--", "runs", "recover-control-plane-worker-bundles", "--server", "--session", sessionName, "--lines", String(execution.lines), "--confirm"],
     },
   };
   return response;
@@ -11980,6 +12010,7 @@ function printWorkerSessionControlPlaneOperateText(
     `  dry_run: ${response.dryRun}`,
     `  confirmed: ${response.confirmed}`,
     `  stopped_reason: ${response.stoppedReason}`,
+    `  bundle_recovery: ${response.bundleRecovery.skipped ? "skipped" : `planned=${response.bundleRecovery.summary.planned} actionable=${response.bundleRecovery.summary.actionable} blocked=${response.bundleRecovery.summary.blocked} executed=${response.bundleRecovery.summary.executed}`}`,
     `  operator_run: ${response.operatorRunRecord.operatorRunId}`,
     `  operator_run_status: ${response.operatorRunRecord.status}`,
     `  cycles: ${response.cycles.length}`,
@@ -11987,6 +12018,9 @@ function printWorkerSessionControlPlaneOperateText(
     `  inspect_operator_timeline: ${formatShellCommand(response.commands.inspectOperatorRunTimeline)}`,
     `  inspect_status_watch_executions: ${formatShellCommand(response.commands.inspectStatusWatchExecutions)}`,
     `  inspect_worker_reconciliations: ${formatShellCommand(response.commands.inspectWorkerReconciliations)}`,
+    `  inspect_worker_bundle: ${formatShellCommand(response.commands.inspectWorkerBundle)}`,
+    `  recover_worker_bundles_dry_run: ${formatShellCommand(response.commands.recoverWorkerBundlesDryRun)}`,
+    `  recover_worker_bundles_confirm: ${formatShellCommand(response.commands.recoverWorkerBundlesConfirm)}`,
     ...response.cycles.flatMap((cycle) => [
       `  - cycle: ${cycle.cycle}`,
       `    status: ${cycle.status}`,
@@ -21562,7 +21596,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
-  runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
+  runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
