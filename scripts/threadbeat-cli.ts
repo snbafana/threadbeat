@@ -5614,8 +5614,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
     const outputFormat = options.format ?? "json";
+    const recordAction = options["record-reviewed"] === "1"
+      ? "reviewed"
+      : options["record-skipped"] === "1"
+        ? "skipped"
+        : null;
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
     if (options.server !== "1") {
       throw new Error("runs session-branch-native-next requires --server");
+    }
+    if (options["record-reviewed"] === "1" && options["record-skipped"] === "1") {
+      throw new Error("runs session-branch-native-next accepts only one of --record-reviewed or --record-skipped");
     }
     if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
       throw new Error("runs session-branch-native-next --format must be json, text, or shell");
@@ -5626,12 +5636,56 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "text" && options["commands-only"] === "1") {
       throw new Error("runs session-branch-native-next --commands-only supports --format json or shell");
     }
+    if (recordAction && options["commands-only"] === "1") {
+      throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped cannot be combined with --commands-only");
+    }
+    if (recordAction && options["until-empty"] !== "1") {
+      throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped requires --until-empty");
+    }
+    if (recordAction && dryRun === confirm) {
+      throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped requires exactly one of --dry-run or --confirm");
+    }
+    if (!recordAction && (dryRun || confirm || options["until-empty"] === "1")) {
+      throw new Error("runs session-branch-native-next --dry-run, --confirm, and --until-empty require --record-reviewed or --record-skipped");
+    }
+    if (recordAction && outputFormat === "shell") {
+      throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped supports --format json or text");
+    }
     const requiredSessionName = required(sessionName, "runs session-branch-native-next <session> --server");
     const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines: parsePositiveInteger(options.lines ?? "5", "--lines") });
     const summary = summarizeWorkerSessionControlPlaneStatus(status);
     const response = workerSessionBranchNativeNext(summary, {
       limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
     });
+    if (recordAction) {
+      const reviewLoop = await recordWorkerSessionResultReviewNextLoop(requiredSessionName, {
+        action: recordAction,
+        dryRun,
+        reviewedBy: options["reviewed-by"],
+        note: options.note,
+        maxResults: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
+        intervalMs: parsePositiveInteger(options["interval-ms"] ?? "1", "--interval-ms"),
+      });
+      const afterStatus = confirm
+        ? await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines: parsePositiveInteger(options.lines ?? "5", "--lines") })
+        : null;
+      const executionResponse = {
+        ...response,
+        dryRun,
+        confirmed: confirm,
+        selectedAction: `record_${recordAction}_results`,
+        resultReviewLoop: reviewLoop,
+        after: afterStatus ? workerSessionBranchNativeNext(summarizeWorkerSessionControlPlaneStatus(afterStatus), {
+          limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
+        }) : null,
+      };
+      if (outputFormat === "text") {
+        printWorkerSessionBranchNativeNextExecutionText(executionResponse);
+      } else {
+        await printJson(executionResponse);
+      }
+      return;
+    }
     if (options["commands-only"] === "1") {
       if (outputFormat === "shell") {
         printCommandQueueShell(response.commands);
@@ -14553,6 +14607,33 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
   ].join("\n"));
 }
 
+function printWorkerSessionBranchNativeNextExecutionText(
+  response: WorkerSessionBranchNativeNextResponse & {
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    resultReviewLoop: RecordWorkerSessionResultReviewNextLoopResponse;
+    after: WorkerSessionBranchNativeNextResponse | null;
+  },
+): void {
+  console.log([
+    "branch_native_next_execution:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  action: ${response.selectedAction}`,
+    `  processed: ${response.resultReviewLoop.processed}`,
+    `  remaining_pending: ${response.resultReviewLoop.remainingPending}`,
+    `  stopped_reason: ${response.resultReviewLoop.stoppedReason}`,
+    `  before_result_pending: ${response.counts.resultPending}`,
+    `  after_result_pending: ${response.after?.counts.resultPending ?? ""}`,
+    `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
+    ...response.resultReviewLoop.records.map((record) => (
+      `  - run: ${record.selected.runId} result_commit=${record.selected.resultCommit} recorded=${record.recorded} review=${record.review.reviewId}`
+    )),
+  ].join("\n"));
+}
+
 function selectWorkerSessionControlPlaneNextActions(
   status: WorkerSessionControlPlaneStatusResponse,
 ): Array<WorkerSessionControlPlaneAdvanceAction> {
@@ -23071,7 +23152,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]

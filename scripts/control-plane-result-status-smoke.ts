@@ -363,6 +363,60 @@ try {
   assert.ok(branchNativeNextShellLines.some((line) => line === pendingResultCommandQueueCommand));
   assert.ok(branchNativeNextShellLines.some((line) => line === recordScopedReviewedCommand));
 
+  const branchNativeReviewDryRun = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    counts: { resultPending: number };
+    resultReviewLoop: { dryRun: boolean; action: string; processed: number; remainingPending: number; stoppedReason: string };
+    after: null;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--record-reviewed",
+    "--until-empty",
+    "--dry-run",
+    "--max-results",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  assert.equal(branchNativeReviewDryRun.dryRun, true);
+  assert.equal(branchNativeReviewDryRun.confirmed, false);
+  assert.equal(branchNativeReviewDryRun.selectedAction, "record_reviewed_results");
+  assert.equal(branchNativeReviewDryRun.counts.resultPending, 1);
+  assert.equal(branchNativeReviewDryRun.resultReviewLoop.dryRun, true);
+  assert.equal(branchNativeReviewDryRun.resultReviewLoop.action, "reviewed");
+  assert.equal(branchNativeReviewDryRun.resultReviewLoop.processed, 1);
+  assert.equal(branchNativeReviewDryRun.resultReviewLoop.remainingPending, 1);
+  assert.equal(branchNativeReviewDryRun.resultReviewLoop.stoppedReason, "dry_run_previewed");
+  assert.equal(branchNativeReviewDryRun.after, null);
+
+  const branchNativeReviewDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--record-reviewed",
+    "--until-empty",
+    "--dry-run",
+    "--max-results",
+    "2",
+    "--interval-ms",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeReviewDryRunText, /branch_native_next_execution:/);
+  assert.match(branchNativeReviewDryRunText, /dry_run: true/);
+  assert.match(branchNativeReviewDryRunText, /action: record_reviewed_results/);
+  assert.match(branchNativeReviewDryRunText, /processed: 1/);
+  assert.match(branchNativeReviewDryRunText, /remaining_pending: 1/);
+  assert.match(branchNativeReviewDryRunText, new RegExp(`inspect_next: ${branchNativeNextCommand}`));
+  assert.match(branchNativeReviewDryRunText, /recorded=false/);
+
   const watchedUntilResultInspection = await cliJson<{
     untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
   }>(baseUrl, [
