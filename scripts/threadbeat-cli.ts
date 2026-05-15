@@ -4814,6 +4814,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const outputFormat = options.format ?? "json";
     const dryRun = options["dry-run"] === "1";
     const confirm = options.confirm === "1";
+    const resumeConfirm = options["resume-confirm"] === "1";
     if (options.server !== "1") {
       throw new Error("runs session-control-plane-continue-deferred-next requires --server");
     }
@@ -4827,6 +4828,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const response = await resumeNextContinueDeferredLoop(requiredSessionName, {
       dryRun,
       confirm,
+      resumeConfirm,
       lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
     });
     if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
@@ -6175,7 +6177,10 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (continueDeferredLoopHistory) {
       const history = summarizeContinueDeferredLoopHistory(requiredSessionName, advances, options["loop-advance-id"]);
       if (executeResume) {
-        const response = await executeContinueDeferredLoopHistoryResume(requiredSessionName, history, { limit });
+        const response = await executeContinueDeferredLoopHistoryResume(requiredSessionName, history, {
+          limit,
+          resumeConfirm: options["resume-confirm"] === "1",
+        });
         if (response.executed.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
           process.exitCode = 1;
         }
@@ -8648,7 +8653,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -10709,6 +10714,7 @@ type ContinueDeferredLoopHistoryResumeResponse = {
   ok: boolean;
   session: string;
   loopAdvanceId: string;
+  resumeOverride: "confirm" | null;
   command: string[];
   before: ContinueDeferredLoopHistoryResponse;
   executed: {
@@ -11894,12 +11900,12 @@ function summarizeContinueDeferredLoopHistory(
 async function executeContinueDeferredLoopHistoryResume(
   sessionName: string,
   history: ContinueDeferredLoopHistoryResponse,
-  options: { limit: number },
+  options: { limit: number; resumeConfirm: boolean },
 ): Promise<ContinueDeferredLoopHistoryResumeResponse> {
   if (!history.commands.resumeLoop) {
     throw new Error(`continue-deferred loop ${history.loopAdvanceId} has no resume command`);
   }
-  const command = history.commands.resumeLoop;
+  const command = overrideContinueDeferredResumeCommand(history.commands.resumeLoop, options.resumeConfirm ? "confirm" : null);
   const executed = await runCliWorker(cliCommandArgs(command));
   const afterAdvances = await fetchWorkerSessionControlPlaneAdvances(sessionName, {
     limit: options.limit,
@@ -11910,6 +11916,7 @@ async function executeContinueDeferredLoopHistoryResume(
     ok: executed.exitCode === 0,
     session: sessionName,
     loopAdvanceId: history.loopAdvanceId,
+    resumeOverride: options.resumeConfirm ? "confirm" : null,
     command,
     before: history,
     executed: {
@@ -12629,12 +12636,13 @@ function printContinueDeferredWorkerSessionControlPlaneText(
 
 async function resumeNextContinueDeferredLoop(
   sessionName: string,
-  execution: { dryRun: boolean; confirm: boolean; lines: number },
+  execution: { dryRun: boolean; confirm: boolean; resumeConfirm: boolean; lines: number },
 ): Promise<{
   ok: boolean;
   session: string;
   dryRun: boolean;
   confirmed: boolean;
+  resumeOverride: "confirm" | null;
   selected: WorkerSessionControlPlaneStatusResponse["recovery"]["continueDeferred"]["resumableLoops"]["recent"][number] | null;
   command: string[] | null;
   beforeSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
@@ -12654,7 +12662,9 @@ async function resumeNextContinueDeferredLoop(
   const beforeStatus = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines });
   const beforeSummary = summarizeWorkerSessionControlPlaneStatus(beforeStatus);
   const selected = beforeSummary.recovery.continueDeferred.resumableLoops.recent[0] ?? null;
-  const command = selected?.executeResumeCommand ?? null;
+  const command = selected?.executeResumeCommand
+    ? appendContinueDeferredResumeConfirmFlag(selected.executeResumeCommand, execution.resumeConfirm)
+    : null;
   const executed = execution.confirm && command
     ? await runCliWorker(cliCommandArgs(command))
     : null;
@@ -12666,6 +12676,7 @@ async function resumeNextContinueDeferredLoop(
     session: sessionName,
     dryRun: execution.dryRun,
     confirmed: execution.confirm,
+    resumeOverride: execution.resumeConfirm ? "confirm" : null,
     selected,
     command,
     beforeSummary,
@@ -12686,6 +12697,11 @@ async function resumeNextContinueDeferredLoop(
   };
 }
 
+function appendContinueDeferredResumeConfirmFlag(command: string[], resumeConfirm: boolean): string[] {
+  if (!resumeConfirm || command.includes("--resume-confirm")) return command;
+  return [...command, "--resume-confirm"];
+}
+
 function printResumeNextContinueDeferredLoopText(
   response: Awaited<ReturnType<typeof resumeNextContinueDeferredLoop>>,
 ): void {
@@ -12694,6 +12710,7 @@ function printResumeNextContinueDeferredLoopText(
     `  session: ${response.session}`,
     `  dry_run: ${response.dryRun}`,
     `  confirmed: ${response.confirmed}`,
+    `  resume_override: ${response.resumeOverride ?? ""}`,
     `  selected_loop: ${response.selected?.loopAdvanceId ?? ""}`,
     `  selected_latest_advance: ${response.selected?.latestAdvanceId ?? ""}`,
     `  selected_attempts: ${response.selected?.attempts ?? ""}`,
@@ -13186,6 +13203,9 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     }
     if (summary.commands.continueDeferredNextConfirm) {
       lines.push(`continue_deferred_next_confirm: ${formatShellCommand(summary.commands.continueDeferredNextConfirm)}`);
+    }
+    if (summary.commands.continueDeferredNextResumeConfirm) {
+      lines.push(`continue_deferred_next_resume_confirm: ${formatShellCommand(summary.commands.continueDeferredNextResumeConfirm)}`);
     }
   }
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
@@ -13845,6 +13865,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
     if (summary.commands.continueDeferredNextConfirm) {
       commands.push({ command: summary.commands.continueDeferredNextConfirm });
     }
+    if (summary.commands.continueDeferredNextResumeConfirm) {
+      commands.push({ command: summary.commands.continueDeferredNextResumeConfirm });
+    }
   }
   for (const loop of summary.recovery.continueDeferred.resumableLoops.recent) {
     commands.push({ command: loop.resumeCommand });
@@ -14386,8 +14409,8 @@ function selectWorkerSessionControlPlaneNextRecovery(
       action: "resume_continue_deferred_loop",
       reason: "resumable_continue_deferred_loop",
       count: status.recovery.continueDeferred.resumableLoops.count,
-      command: workerSessionControlPlaneContinueDeferredNextCommand(status.session, false),
-      dryRunCommand: workerSessionControlPlaneContinueDeferredNextCommand(status.session, true),
+      command: workerSessionControlPlaneContinueDeferredNextCommand(status.session, false, false),
+      dryRunCommand: workerSessionControlPlaneContinueDeferredNextCommand(status.session, true, false),
     };
   }
   return {
@@ -14447,11 +14470,17 @@ function workerSessionRecoverNextIncompleteLoopExecuteCommand(
   ];
 }
 
-function workerSessionControlPlaneContinueDeferredNextCommand(sessionName: string, dryRun: boolean): string[] {
+function workerSessionControlPlaneContinueDeferredNextCommand(sessionName: string, dryRun: boolean, resumeConfirm = false): string[] {
   return [
     "npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred-next", sessionName, "--server",
     dryRun ? "--dry-run" : "--confirm",
+    ...(resumeConfirm ? ["--resume-confirm"] : []),
   ];
+}
+
+function overrideContinueDeferredResumeCommand(command: string[], resumeOverride: "confirm" | null): string[] {
+  if (resumeOverride !== "confirm") return command;
+  return command.filter((arg) => arg !== "--dry-run" && arg !== "--confirm").concat("--confirm");
 }
 
 type FailedRecoverNextResumeLoopSummary = {
@@ -14635,6 +14664,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     continueDeferredLoops: string[];
     continueDeferredNextDryRun: string[] | null;
     continueDeferredNextConfirm: string[] | null;
+    continueDeferredNextResumeConfirm: string[] | null;
     recoverNextIncompleteLoopQueue: string[];
     failedRecoverNextResumeAttempts: string[];
     workerReconciliations: string[];
@@ -14812,7 +14842,10 @@ function summarizeWorkerSessionControlPlaneStatus(
         ? workerSessionControlPlaneContinueDeferredNextCommand(status.session, true)
         : null,
       continueDeferredNextConfirm: status.recovery.continueDeferred.resumableLoops.count > 0
-        ? workerSessionControlPlaneContinueDeferredNextCommand(status.session, false)
+        ? workerSessionControlPlaneContinueDeferredNextCommand(status.session, false, false)
+        : null,
+      continueDeferredNextResumeConfirm: status.recovery.continueDeferred.resumableLoops.count > 0
+        ? workerSessionControlPlaneContinueDeferredNextCommand(status.session, false, true)
         : null,
       recoverNextIncompleteLoopQueue: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-alert", status.session, "--server",
@@ -22709,7 +22742,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
-  runs session-control-plane-continue-deferred-next <name> --server (--dry-run|--confirm) [--lines 5] [--format json|text]
+  runs session-control-plane-continue-deferred-next <name> --server (--dry-run|--confirm) [--resume-confirm] [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
