@@ -101,39 +101,41 @@ export type ControlPlaneAdvanceWorkerNextStep = {
   };
 };
 
+export type ControlPlaneAdvanceWorkerStartOptions = {
+  workerId?: string;
+  dryRun: boolean;
+  maxSteps: number;
+  intervalMs: number;
+  lines: number;
+  drainConfirmations?: boolean;
+  confirm?: boolean;
+  maxConfirmations?: number;
+  untilEmpty?: boolean;
+  topologyLoop?: boolean;
+  includeMutationWorkers?: boolean;
+  resultReview?: boolean;
+  bundleRecovery?: boolean;
+  reviewAction?: "reviewed" | "skipped";
+  maxResults?: number;
+  maxPolls?: number;
+  reviewedBy?: string;
+  note?: string;
+  maxIterations?: number;
+  loopIntervalMs?: number;
+  operatorLoop?: boolean;
+  maxCycles?: number;
+  cycleIntervalMs?: number;
+  reconcileWorkers?: boolean;
+  recoverWorkerBundles?: boolean;
+  includeRetired?: boolean;
+  limit?: number | null;
+};
+
 export async function startWorkerSessionControlPlaneAdvanceWorker(
   projectRoot: string,
   baseUrl: string,
   sessionName: string,
-  options: {
-    workerId?: string;
-    dryRun: boolean;
-    maxSteps: number;
-    intervalMs: number;
-    lines: number;
-    drainConfirmations?: boolean;
-    confirm?: boolean;
-    maxConfirmations?: number;
-    untilEmpty?: boolean;
-    topologyLoop?: boolean;
-    includeMutationWorkers?: boolean;
-    resultReview?: boolean;
-    bundleRecovery?: boolean;
-    reviewAction?: "reviewed" | "skipped";
-    maxResults?: number;
-    maxPolls?: number;
-    reviewedBy?: string;
-    note?: string;
-    maxIterations?: number;
-    loopIntervalMs?: number;
-    operatorLoop?: boolean;
-    maxCycles?: number;
-    cycleIntervalMs?: number;
-    reconcileWorkers?: boolean;
-    recoverWorkerBundles?: boolean;
-    includeRetired?: boolean;
-    limit?: number | null;
-  },
+  options: ControlPlaneAdvanceWorkerStartOptions,
 ): Promise<ControlPlaneAdvanceWorker & { alive: boolean; lifecycle: ControlPlaneAdvanceWorkerLifecycle }> {
   assertSafeWorkerSessionName(sessionName);
   const workerId = options.workerId ?? createControlPlaneAdvanceWorkerId();
@@ -419,7 +421,7 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
   projectRoot: string,
   baseUrl: string,
   sessionName: string,
-  options: { workerId: string; includeRetired: boolean; lines: number; mode?: ControlPlaneAdvanceWorkerMode },
+  options: { workerId: string; includeRetired: boolean; lines: number; mode?: ControlPlaneAdvanceWorkerMode; commandOverride?: string[] },
 ): Promise<{
   session: string;
   count: number;
@@ -461,10 +463,12 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
   const stderr = await fs.open(worker.stderrPath, "a");
   try {
     const restartedAt = new Date().toISOString();
+    const command = options.commandOverride ?? worker.command;
     const pendingRestart: ControlPlaneAdvanceWorker = {
       ...worker,
       baseUrl,
       startedAt: restartedAt,
+      command,
       pid: null,
       stoppedAt: undefined,
       stopResult: undefined,
@@ -478,7 +482,7 @@ export async function restartWorkerSessionControlPlaneAdvanceWorker(
       previousPid: worker.pid,
     };
     await writeControlPlaneAdvanceWorker(projectRoot, pendingRestart);
-    const child = spawn("npm", ["run", "--silent", "cli", "--", ...worker.command], {
+    const child = spawn("npm", ["run", "--silent", "cli", "--", ...command], {
       cwd: projectRoot,
       detached: true,
       env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
@@ -827,34 +831,10 @@ function createControlPlaneAdvanceWorkerId(): string {
   return `control-plane-advance-worker-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 17)}`;
 }
 
-function buildControlPlaneAdvanceWorkerCommand(
+export function buildControlPlaneAdvanceWorkerCommand(
   sessionName: string,
   mode: ControlPlaneAdvanceWorkerMode,
-  options: {
-    dryRun: boolean;
-    maxSteps: number;
-    intervalMs: number;
-    lines: number;
-    maxConfirmations?: number;
-    untilEmpty?: boolean;
-    confirm?: boolean;
-    includeMutationWorkers?: boolean;
-    resultReview?: boolean;
-    bundleRecovery?: boolean;
-    reviewAction?: "reviewed" | "skipped";
-    maxResults?: number;
-    maxPolls?: number;
-    reviewedBy?: string;
-    note?: string;
-    maxIterations?: number;
-    loopIntervalMs?: number;
-    maxCycles?: number;
-    cycleIntervalMs?: number;
-    reconcileWorkers?: boolean;
-    recoverWorkerBundles?: boolean;
-    includeRetired?: boolean;
-    limit?: number | null;
-  },
+  options: ControlPlaneAdvanceWorkerStartOptions,
 ): string[] {
   if (mode === "operator_loop") {
     return [

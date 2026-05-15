@@ -75,6 +75,8 @@ import {
   type ControlPlaneAdvanceWorkerLatestResultSource,
   type ControlPlaneAdvanceWorkerLifecycle,
   type ControlPlaneAdvanceWorkerMode,
+  type ControlPlaneAdvanceWorkerStartOptions,
+  buildControlPlaneAdvanceWorkerCommand,
   listWorkerSessionControlPlaneAdvanceWorkerNextSteps,
   listWorkerSessionControlPlaneAdvanceWorkers,
   restartWorkerSessionControlPlaneAdvanceWorker,
@@ -1116,6 +1118,35 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       const bundleRecovery = parseBoolean(body.bundleRecovery, false);
       const operatorLoop = parseBoolean(body.operatorLoop, false);
       const requestedMode = operatorLoop ? "operator_loop" : bundleRecovery ? "bundle_recovery_loop" : resultReview ? "result_review_loop" : topologyLoop ? "topology_loop" : drainConfirmations ? "confirmation_drain" : "advance_loop";
+      const workerOptions: ControlPlaneAdvanceWorkerStartOptions = {
+        ...(workerId ? { workerId } : {}),
+        dryRun: parseBoolean(body.dryRun, false),
+        maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
+        intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
+        lines,
+        drainConfirmations,
+        confirm: parseBoolean(body.confirm, false),
+        maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
+        untilEmpty: parseBoolean(body.untilEmpty, false),
+        topologyLoop,
+        includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
+        resultReview,
+        bundleRecovery,
+        ...(body.reviewAction ? { reviewAction: parseRequiredResultReviewAction(body.reviewAction) } : {}),
+        maxResults: parseOptionalInteger(body.maxResults) ?? 10,
+        maxPolls: parseOptionalInteger(body.maxPolls) ?? 60,
+        ...(parseOptionalString(body.reviewedBy) ? { reviewedBy: parseOptionalString(body.reviewedBy) } : {}),
+        ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
+        maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
+        loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
+        operatorLoop,
+        maxCycles: parseOptionalInteger(body.maxCycles) ?? 60,
+        cycleIntervalMs: parseOptionalNonNegativeInteger(body.cycleIntervalMs) ?? 2000,
+        reconcileWorkers: parseBoolean(body.reconcileWorkers, false),
+        recoverWorkerBundles: parseBoolean(body.recoverWorkerBundles, false),
+        includeRetired: parseBoolean(body.includeRetired, false),
+        limit: parseOptionalInteger(body.limit) ?? null,
+      };
       const existingWorkers = await listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, {
         sessionName: name,
         ...(workerId ? { workerId } : {}),
@@ -1135,15 +1166,18 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
       }
       const restartableWorker = matchingWorkers.find((worker) => worker.lifecycle.restartable);
       if (restartableWorker) {
+        const desiredCommand = buildControlPlaneAdvanceWorkerCommand(name, requestedMode, workerOptions);
+        const commandChanged = JSON.stringify(restartableWorker.command) !== JSON.stringify(desiredCommand);
         const restarted = await restartWorkerSessionControlPlaneAdvanceWorker(settings.projectRoot, baseUrl, name, {
           workerId: restartableWorker.workerId,
           includeRetired: false,
           lines,
+          ...(commandChanged ? { commandOverride: desiredCommand } : {}),
         });
         return {
           ok: true,
           action: "restarted",
-          reason: "restartable_worker_exists",
+          reason: commandChanged ? "restartable_worker_command_changed" : "restartable_worker_exists",
           ...restarted,
           worker: restarted.workers[0] ?? null,
         };
@@ -1162,35 +1196,7 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         settings.projectRoot,
         baseUrl,
         name,
-        {
-          ...(workerId ? { workerId } : {}),
-          dryRun: parseBoolean(body.dryRun, false),
-          maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
-          intervalMs: parseOptionalNonNegativeInteger(body.intervalMs) ?? 2000,
-          lines,
-          drainConfirmations,
-          confirm: parseBoolean(body.confirm, false),
-          maxConfirmations: parseOptionalInteger(body.maxConfirmations) ?? 3,
-          untilEmpty: parseBoolean(body.untilEmpty, false),
-          topologyLoop,
-          includeMutationWorkers: parseBoolean(body.includeMutationWorkers, false),
-          resultReview,
-          bundleRecovery,
-          ...(body.reviewAction ? { reviewAction: parseRequiredResultReviewAction(body.reviewAction) } : {}),
-          maxResults: parseOptionalInteger(body.maxResults) ?? 10,
-          maxPolls: parseOptionalInteger(body.maxPolls) ?? 60,
-          ...(parseOptionalString(body.reviewedBy) ? { reviewedBy: parseOptionalString(body.reviewedBy) } : {}),
-          ...(parseOptionalString(body.note) ? { note: parseOptionalString(body.note) } : {}),
-          maxIterations: parseOptionalInteger(body.maxIterations) ?? 60,
-          loopIntervalMs: parseOptionalNonNegativeInteger(body.loopIntervalMs) ?? 2000,
-          operatorLoop,
-          maxCycles: parseOptionalInteger(body.maxCycles) ?? 60,
-          cycleIntervalMs: parseOptionalNonNegativeInteger(body.cycleIntervalMs) ?? 2000,
-          reconcileWorkers: parseBoolean(body.reconcileWorkers, false),
-          recoverWorkerBundles: parseBoolean(body.recoverWorkerBundles, false),
-          includeRetired: parseBoolean(body.includeRetired, false),
-          limit: parseOptionalInteger(body.limit) ?? null,
-        },
+        workerOptions,
       );
       return {
         ok: true,

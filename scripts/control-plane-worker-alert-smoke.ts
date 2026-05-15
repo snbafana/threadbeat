@@ -951,6 +951,68 @@ try {
     operatorWorkerId,
   ]);
 
+  const staleOperatorWorkerId = "operator-worker-stale-smoke";
+  await cliJson(baseUrl, [
+    "runs",
+    "start-control-plane-operator-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    staleOperatorWorkerId,
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "1",
+    "--reconcile-workers",
+    "--lines",
+    "5",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-operator-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    staleOperatorWorkerId,
+  ]);
+  const staleOperatorWorkerEnsure = await cliJson<{
+    action: string;
+    reason: string;
+    restarted: Array<{ workerId: string; command: string[] }>;
+    worker: { workerId: string; mode: string; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "ensure-control-plane-operator-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    staleOperatorWorkerId,
+    "--dry-run",
+    "--recover-worker-bundles",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "1",
+    "--reconcile-workers",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(staleOperatorWorkerEnsure.action, "restarted");
+  assert.equal(staleOperatorWorkerEnsure.reason, "restartable_worker_command_changed");
+  assert.equal(staleOperatorWorkerEnsure.worker.workerId, staleOperatorWorkerId);
+  assert.equal(staleOperatorWorkerEnsure.worker.mode, "operator_loop");
+  assert.ok(staleOperatorWorkerEnsure.restarted[0]?.command.includes("--recover-worker-bundles"));
+  assert.ok(staleOperatorWorkerEnsure.worker.command.includes("--recover-worker-bundles"));
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-operator-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    staleOperatorWorkerId,
+  ]);
+
   const operatorWorkerNext = await cliJson<{
     count: number;
     nextSteps: Array<{
