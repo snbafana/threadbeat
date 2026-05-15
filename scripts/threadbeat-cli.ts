@@ -12567,6 +12567,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     lines.push(
       "branch_inspection:",
       `  count: ${summary.branches.inspection.count}`,
+      `  resume_queue: ${formatShellCommand(summary.commands.branchResumeCommandQueue)}`,
     );
     for (const step of summary.branches.inspection.nextSteps) {
       lines.push(
@@ -12928,6 +12929,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: action.command });
   }
   commands.push({ command: summary.commands.branchRecoveryExecutions });
+  if (summary.branches.counts.ready > 0) {
+    commands.push({ command: summary.commands.branchResumeCommandQueue });
+  }
   commands.push(...workerSessionBranchRecoveryExecutionCommands(
     summary.session,
     summary.branches.executions.recent,
@@ -13746,6 +13750,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     latestResultReviews: string[];
     failedResultReviewAttempts: string[];
     branchRecoveryExecutions: string[];
+    branchResumeCommandQueue: string[];
     statusWatchExecutions: string[];
     failedRecoverNextResumeAttempts: string[];
     workerReconciliations: string[];
@@ -13904,6 +13909,10 @@ function summarizeWorkerSessionControlPlaneStatus(
         "--source", "result_review", "--event", "result_review_record_failed", "--status", "failed",
       ],
       branchRecoveryExecutions: ["npm", "run", "cli", "--", "runs", "session-branch-recovery-executions", status.session, "--server"],
+      branchResumeCommandQueue: [
+        "npm", "run", "cli", "--", "runs", "session-branches", status.session, "--server",
+        "--resumable", "--branch-action", "resume_branch", "--limit", "5", "--commands-only", "--format", "shell",
+      ],
       statusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--status-watch-executions"],
       failedRecoverNextResumeAttempts: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--failed-recover-next-resumes"],
       workerReconciliations: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", status.session, "--server"],
