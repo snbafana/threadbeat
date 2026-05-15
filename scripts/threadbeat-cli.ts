@@ -12843,7 +12843,9 @@ function workerSessionControlPlaneLatestResultProgressCommand(
       ? "result_review"
       : result.mode === "bundle_recovery_loop"
         ? "control_plane_bundle_recovery"
-        : "control_plane_advance";
+        : result.mode === "operator_loop"
+          ? "control_plane_operator"
+          : "control_plane_advance";
   return [
     "npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", sessionName, "--server",
     "--worker-id", result.workerId,
@@ -14485,7 +14487,7 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   };
 }
 
-type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_bundle_recovery" | "control_plane_tick" | "apply_action" | "drain";
+type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_bundle_recovery" | "control_plane_operator" | "control_plane_tick" | "apply_action" | "drain";
 type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop" | "bundle_recovery_loop" | "operator_loop";
 
 type ControlPlaneWorkerSummary = {
@@ -14562,6 +14564,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     topology: ControlPlaneWorkerSummary;
     resultReview: ControlPlaneWorkerSummary;
     bundleRecovery: ControlPlaneWorkerSummary;
+    operator: ControlPlaneWorkerSummary;
     tick: ControlPlaneWorkerSummary;
     applyAction: ControlPlaneWorkerSummary;
     drain: ControlPlaneWorkerSummary;
@@ -14586,6 +14589,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     inspectTopologyWorkers: string[];
     inspectResultReviewWorkers: string[];
     inspectBundleRecoveryWorkers: string[];
+    inspectOperatorWorkers: string[];
     inspectTickWorkers: string[];
     inspectApplyActionWorkers: string[];
     inspectDrainWorkers: string[];
@@ -14625,6 +14629,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
   const topologySummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_topology"));
   const resultReviewSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "result_review"));
   const bundleRecoverySummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_bundle_recovery"));
+  const operatorSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_operator"));
   const tickSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_tick"));
   const applyActionSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "apply_action"));
   const drainSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "drain"));
@@ -14643,6 +14648,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
       topology: topologySummary,
       resultReview: resultReviewSummary,
       bundleRecovery: bundleRecoverySummary,
+      operator: operatorSummary,
       tick: tickSummary,
       applyAction: applyActionSummary,
       drain: drainSummary,
@@ -14670,6 +14676,12 @@ async function fetchWorkerSessionControlPlaneWorkers(
       ],
       inspectBundleRecoveryWorkers: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-worker-bundle-recovery-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      inspectOperatorWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", sessionName, "--server",
         ...(options.workerId ? ["--worker-id", options.workerId] : []),
         ...(options.includeRetired ? ["--include-retired"] : []),
         "--lines", String(options.lines),
@@ -14768,6 +14780,7 @@ function emptyControlPlaneWorkerKindCounts(): Record<ControlPlaneWorkerKind, num
     control_plane_topology: 0,
     result_review: 0,
     control_plane_bundle_recovery: 0,
+    control_plane_operator: 0,
     control_plane_tick: 0,
     apply_action: 0,
     drain: 0,
@@ -14853,6 +14866,7 @@ function formatWorkerSessionControlPlaneWorkersText(
     `  topology: ${formatControlPlaneWorkerSummary(response.summary.topology)}`,
     `  result_review: ${formatControlPlaneWorkerSummary(response.summary.resultReview)}`,
     `  bundle_recovery: ${formatControlPlaneWorkerSummary(response.summary.bundleRecovery)}`,
+    `  operator: ${formatControlPlaneWorkerSummary(response.summary.operator)}`,
     `  tick: ${formatControlPlaneWorkerSummary(response.summary.tick)}`,
     `  apply_action: ${formatControlPlaneWorkerSummary(response.summary.applyAction)}`,
     `  drain: ${formatControlPlaneWorkerSummary(response.summary.drain)}`,
@@ -14861,6 +14875,7 @@ function formatWorkerSessionControlPlaneWorkersText(
     `    inspect_topology: ${formatShellCommand(response.commands.inspectTopologyWorkers)}`,
     `    inspect_result_review: ${formatShellCommand(response.commands.inspectResultReviewWorkers)}`,
     `    inspect_bundle_recovery: ${formatShellCommand(response.commands.inspectBundleRecoveryWorkers)}`,
+    `    inspect_operator: ${formatShellCommand(response.commands.inspectOperatorWorkers)}`,
     `    inspect_tick: ${formatShellCommand(response.commands.inspectTickWorkers)}`,
     `    inspect_apply_action: ${formatShellCommand(response.commands.inspectApplyActionWorkers)}`,
     `    inspect_drain: ${formatShellCommand(response.commands.inspectDrainWorkers)}`,
@@ -14981,10 +14996,11 @@ function normalizeControlPlaneWorkerNextStep(kind: ControlPlaneWorkerKind, step:
   };
 }
 
-function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_bundle_recovery"> {
+function controlPlaneAdvanceWorkerKind(value: unknown): Extract<ControlPlaneWorkerKind, "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_bundle_recovery" | "control_plane_operator"> {
   const record = plainRecord(value) ?? {};
   if (record.mode === "result_review_loop") return "result_review";
   if (record.mode === "bundle_recovery_loop") return "control_plane_bundle_recovery";
+  if (record.mode === "operator_loop") return "control_plane_operator";
   return record.mode === "topology_loop" ? "control_plane_topology" : "control_plane_advance";
 }
 
@@ -15285,6 +15301,53 @@ function controlPlaneWorkerCommands(
       ],
     };
   }
+  if (kind === "control_plane_operator") {
+    return {
+      inspect: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      restart: [
+        "npm", "run", "cli", "--", "runs", "restart-control-plane-operator-worker", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      stop: [
+        "npm", "run", "cli", "--", "runs", "stop-control-plane-operator-worker", sessionName, "--server",
+        "--worker-id", workerId,
+      ],
+      retire: [
+        "npm", "run", "cli", "--", "runs", "stop-control-plane-operator-worker", sessionName, "--server",
+        "--worker-id", workerId,
+        "--retire",
+      ],
+      reconcileDryRun: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--dry-run",
+      ],
+      reconcileConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--confirm",
+      ],
+      reconcileUntilEmptyConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--until-empty",
+        "--max-steps", "10",
+        "--interval-ms", "2000",
+        "--confirm",
+      ],
+    };
+  }
   const nouns = controlPlaneWorkerCommandNouns(kind);
   return {
     inspect: [
@@ -15345,6 +15408,7 @@ function parseControlPlaneWorkerKind(value: string): ControlPlaneWorkerKind {
   if (value === "control-plane-topology" || value === "control_plane_topology" || value === "topology") return "control_plane_topology";
   if (value === "result-review" || value === "result_review" || value === "result") return "result_review";
   if (value === "control-plane-bundle-recovery" || value === "control_plane_bundle_recovery" || value === "bundle-recovery" || value === "bundle_recovery") return "control_plane_bundle_recovery";
+  if (value === "control-plane-operator" || value === "control_plane_operator" || value === "operator") return "control_plane_operator";
   if (value === "control-plane-tick" || value === "control_plane_tick" || value === "tick") return "control_plane_tick";
   if (value === "apply-action" || value === "apply_action") return "apply_action";
   if (value === "drain") return "drain";
@@ -15381,6 +15445,7 @@ function controlPlaneWorkerKindFlag(kind: ControlPlaneWorkerKind): string {
   if (kind === "control_plane_topology") return "control-plane-topology";
   if (kind === "result_review") return "result-review";
   if (kind === "control_plane_bundle_recovery") return "control-plane-bundle-recovery";
+  if (kind === "control_plane_operator") return "control-plane-operator";
   if (kind === "control_plane_tick") return "control-plane-tick";
   if (kind === "apply_action") return "apply-action";
   return "drain";
@@ -17904,6 +17969,9 @@ async function stopControlPlaneWorkerForDrill(
   if (options.kind === "control_plane_bundle_recovery") {
     return await stopWorkerSessionControlPlaneAdvanceWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines, mode: "bundle_recovery_loop" });
   }
+  if (options.kind === "control_plane_operator") {
+    return await stopWorkerSessionControlPlaneAdvanceWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines, mode: "operator_loop" });
+  }
   if (options.kind === "control_plane_tick") {
     return await stopWorkerSessionControlPlaneTickWorkers(sessionName, { workerId: options.workerId, retire: false, lines: options.lines });
   }
@@ -17946,6 +18014,14 @@ async function restartControlPlaneWorkerForDrill(
       includeRetired: options.includeRetired,
       lines: options.lines,
       mode: "bundle_recovery_loop",
+    });
+  }
+  if (options.kind === "control_plane_operator") {
+    return await restartWorkerSessionControlPlaneAdvanceWorker(sessionName, {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+      mode: "operator_loop",
     });
   }
   if (options.kind === "control_plane_tick") {

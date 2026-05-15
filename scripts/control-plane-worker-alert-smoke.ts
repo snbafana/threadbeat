@@ -975,6 +975,78 @@ try {
   assert.ok(operatorWorkerNext.nextSteps[0]?.commands.inspectControlPlaneAdvanceWorkers.includes("session-control-plane-operator-workers"));
   assert.ok(operatorWorkerNext.nextSteps[0]?.commands.retireControlPlaneAdvanceWorker.includes("stop-control-plane-operator-worker"));
 
+  const operatorWorkerAggregate = await cliJson<{
+    summary: {
+      operator: { total: number; stopped: number; restartable: number };
+    };
+    workers: Array<{
+      kind: string;
+      workerId: string;
+      commands: { inspect: string[]; restart: string[]; stop: string[]; retire: string[] };
+    }>;
+    nextSteps: Array<{ kind: string; workerId: string; command: string[] }>;
+    commands: { inspectOperatorWorkers: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    operatorWorkerId,
+    "--include-retired",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(operatorWorkerAggregate.summary.operator.total, 1);
+  assert.equal(operatorWorkerAggregate.summary.operator.stopped, 1);
+  assert.equal(operatorWorkerAggregate.summary.operator.restartable, 1);
+  assert.equal(operatorWorkerAggregate.workers[0]?.kind, "control_plane_operator");
+  assert.equal(operatorWorkerAggregate.workers[0]?.workerId, operatorWorkerId);
+  assert.ok(operatorWorkerAggregate.workers[0]?.commands.inspect.includes("session-control-plane-operator-workers"));
+  assert.ok(operatorWorkerAggregate.workers[0]?.commands.restart.includes("restart-control-plane-operator-worker"));
+  assert.ok(operatorWorkerAggregate.workers[0]?.commands.stop.includes("stop-control-plane-operator-worker"));
+  assert.ok(operatorWorkerAggregate.nextSteps[0]?.command.includes("restart-control-plane-operator-worker"));
+  assert.ok(operatorWorkerAggregate.commands.inspectOperatorWorkers.includes("session-control-plane-operator-workers"));
+
+  const operatorWorkerRestartQueue = await cliJson<{
+    count: number;
+    groups: { control_plane_operator: number };
+    workers: Array<{ kind: string; workerId: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-restart-queue",
+    sessionName,
+    "--server",
+    "--worker-id",
+    operatorWorkerId,
+    "--include-retired",
+  ]);
+  assert.equal(operatorWorkerRestartQueue.count, 1);
+  assert.equal(operatorWorkerRestartQueue.groups.control_plane_operator, 1);
+  assert.equal(operatorWorkerRestartQueue.workers[0]?.kind, "control_plane_operator");
+  assert.ok(operatorWorkerRestartQueue.workers[0]?.command.includes("restart-control-plane-operator-worker"));
+
+  const operatorWorkerReconcile = await cliJson<{
+    filter: { kind: string };
+    plan: { count: number; steps: Array<{ kind: string; workerId: string; command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    operatorWorkerId,
+    "--kind",
+    "operator",
+    "--include-retired",
+    "--dry-run",
+  ]);
+  assert.equal(operatorWorkerReconcile.filter.kind, "control_plane_operator");
+  assert.equal(operatorWorkerReconcile.plan.count, 1);
+  assert.equal(operatorWorkerReconcile.plan.steps[0]?.kind, "control_plane_operator");
+  assert.equal(operatorWorkerReconcile.plan.steps[0]?.workerId, operatorWorkerId);
+  assert.ok(operatorWorkerReconcile.plan.steps[0]?.command.includes("restart-control-plane-operator-worker"));
+
   const operatorRuns = await cliJson<{
     counts: { total: number; dryRun: number; withReconciliation: number };
     records: Array<{
