@@ -1435,6 +1435,9 @@ try {
         };
       };
     };
+    commands: {
+      recoverNextIncompleteLoopQueue: string[];
+    };
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -1497,6 +1500,24 @@ try {
     "--execute-resume",
     "--confirm",
   ]);
+  const recoverNextIncompleteLoopQueueCommand = [
+    "npm",
+    "run",
+    "cli",
+    "--",
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--reason",
+    "incomplete_recover_next_loop",
+    "--commands-only",
+    "--format",
+    "shell",
+  ];
+  assert.deepEqual(statusAfterRecoverNextInterruption.commands.recoverNextIncompleteLoopQueue, recoverNextIncompleteLoopQueueCommand);
 
   const recoverNextAlerts = await cliJson<{
     summary: { total: number; errors: number; warnings: number };
@@ -1854,6 +1875,7 @@ try {
   assert.match(interruptedSummaryText, new RegExp(`advance: ${recoverNextResumeDryRun.advanceId}`));
   assert.match(interruptedSummaryText, /detail_command: resume_recover_next_loop/);
   assert.match(interruptedSummaryText, /recover_next_incomplete_loops: 1/);
+  assert.match(interruptedSummaryText, new RegExp(`recover_next_incomplete_loop_queue: npm run cli -- runs session-control-plane-alert ${sessionName} --server --surface recover_next --reason incomplete_recover_next_loop --commands-only --format shell`));
   assert.match(interruptedSummaryText, /incomplete_recover_next_loops:/);
   assert.match(interruptedSummaryText, new RegExp(`resume: npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --until-empty --resume-loop ${recoverNextLoopDryRun.advanceId}`));
   assert.match(interruptedSummaryText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${recoverNextLoopDryRun.advanceId} --recover-next-loop-history`));
@@ -1869,6 +1891,7 @@ try {
     "shell",
   ]);
   const interruptedSummaryShellLines = interruptedSummaryShell.trim().split("\n").filter(Boolean);
+  assert.ok(interruptedSummaryShellLines.includes(recoverNextIncompleteLoopQueueCommand.join(" ")));
   assert.ok(interruptedSummaryShellLines.some((line) => line.includes(`--resume-loop ${recoverNextLoopDryRun.advanceId}`)));
   assert.ok(interruptedSummaryShellLines.some((line) => line.includes(`--advance ${recoverNextResumeDryRun.advanceId}`)));
   assert.ok(interruptedSummaryShellLines.some((line) => line.includes(`--loop-advance-id ${recoverNextLoopDryRun.advanceId} --recover-next-loop-history --execute-resume --confirm`)));

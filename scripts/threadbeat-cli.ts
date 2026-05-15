@@ -12446,6 +12446,9 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
   ];
+  if (summary.recovery.recoverNext.incompleteLoops.count > 0) {
+    lines.push(`recover_next_incomplete_loop_queue: ${formatShellCommand(summary.commands.recoverNextIncompleteLoopQueue)}`);
+  }
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
     lines.push(`failed_recover_next_resumes: ${formatShellCommand(summary.commands.failedRecoverNextResumeAttempts)}`);
   }
@@ -13035,6 +13038,9 @@ function workerSessionControlPlaneStatusSummaryCommands(
     if (loop.commands.executeResumeHistory) {
       commands.push({ command: loop.commands.executeResumeHistory });
     }
+  }
+  if (summary.recovery.recoverNext.incompleteLoops.count > 0) {
+    commands.push({ command: summary.commands.recoverNextIncompleteLoopQueue });
   }
   for (const loop of summary.recovery.recoverNext.incompleteLoops.recent) {
     commands.push({ command: loop.resumeCommand });
@@ -13755,6 +13761,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     branchRecoveryCommandQueue: string[];
     branchResumeCommandQueue: string[];
     statusWatchExecutions: string[];
+    recoverNextIncompleteLoopQueue: string[];
     failedRecoverNextResumeAttempts: string[];
     workerReconciliations: string[];
     latestWorkerReconciliation: string[] | null;
@@ -13921,6 +13928,10 @@ function summarizeWorkerSessionControlPlaneStatus(
         "--resumable", "--branch-action", "resume_branch", "--limit", "5", "--commands-only", "--format", "shell",
       ],
       statusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--status-watch-executions"],
+      recoverNextIncompleteLoopQueue: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-alert", status.session, "--server",
+        "--surface", "recover_next", "--reason", "incomplete_recover_next_loop", "--commands-only", "--format", "shell",
+      ],
       failedRecoverNextResumeAttempts: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--failed-recover-next-resumes"],
       workerReconciliations: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-reconciliations", status.session, "--server"],
       latestWorkerReconciliation: status.recovery.workerReconciliations.latest?.commands.inspectRecord ?? null,
