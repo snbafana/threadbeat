@@ -2835,6 +2835,8 @@ try {
   ]);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_loops: total=2 dry_run=2 executed=0 failed=0 resumable=1/);
   assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_loop_queue: npm run cli -- runs session-control-plane-advances/);
+  assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_dry_run: npm run cli -- runs session-control-plane-continue-deferred-next/);
+  assert.match(statusTextAfterContinueDeferredResume, /continue_deferred_next_confirm: npm run cli -- runs session-control-plane-continue-deferred-next/);
   assert.match(statusTextAfterContinueDeferredResume, /resumable_continue_deferred_loops:/);
   assert.match(statusTextAfterContinueDeferredResume, new RegExp(`loop: ${continueDeferredLoopId}`));
   assert.match(statusTextAfterContinueDeferredResume, /resume: npm run cli -- runs session-control-plane-continue-deferred/);
@@ -2853,8 +2855,55 @@ try {
   ]);
   const statusShellAfterContinueDeferredResumeLines = statusShellAfterContinueDeferredResume.trim().split("\n").filter(Boolean);
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("--detail-command continue_deferred_loop")));
+  assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--dry-run")));
+  assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes("session-control-plane-continue-deferred-next") && line.includes("--confirm")));
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes(`--resume-loop ${continueDeferredLoopId}`)));
   assert.ok(statusShellAfterContinueDeferredResumeLines.some((line) => line.includes(`--loop-advance-id ${continueDeferredLoopId} --continue-deferred-loop-history --execute-resume --confirm`)));
+
+  const continueDeferredNextDryRun = await cliJson<{
+    selected: { loopAdvanceId: string; latestAdvanceId: string } | null;
+    command: string[] | null;
+    executed: null;
+    beforeSummary: { recovery: { continueDeferred: { resumableLoops: { count: number } } } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-continue-deferred-next",
+    sessionName,
+    "--server",
+    "--dry-run",
+  ]);
+  assert.equal(continueDeferredNextDryRun.selected?.loopAdvanceId, continueDeferredLoopId);
+  assert.deepEqual(continueDeferredNextDryRun.command, resumableContinueDeferredLoop?.executeResumeCommand);
+  assert.equal(continueDeferredNextDryRun.executed, null);
+  assert.equal(continueDeferredNextDryRun.beforeSummary.recovery.continueDeferred.resumableLoops.count, 1);
+
+  const continueDeferredNextConfirm = await cliJson<{
+    ok: boolean;
+    selected: { loopAdvanceId: string; latestAdvanceId: string } | null;
+    command: string[] | null;
+    executed: { exitCode: number | null; output: { ok: boolean; loopAdvanceId: string; after: { count: number; summary: { resumeAttempts: number; totalSteps: number } } } };
+    afterSummary: { recovery: { continueDeferred: { attempts: { total: number; dryRun: number }; resumableLoops: { count: number; recent: Array<{ loopAdvanceId: string; attempts: number; totalSteps: number }> } } } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-continue-deferred-next",
+    sessionName,
+    "--server",
+    "--confirm",
+  ]);
+  assert.equal(continueDeferredNextConfirm.ok, true);
+  assert.equal(continueDeferredNextConfirm.selected?.loopAdvanceId, continueDeferredLoopId);
+  assert.deepEqual(continueDeferredNextConfirm.command, resumableContinueDeferredLoop?.executeResumeCommand);
+  assert.equal(continueDeferredNextConfirm.executed.exitCode, 0);
+  assert.equal(continueDeferredNextConfirm.executed.output.ok, true);
+  assert.equal(continueDeferredNextConfirm.executed.output.loopAdvanceId, continueDeferredLoopId);
+  assert.equal(continueDeferredNextConfirm.executed.output.after.count, 3);
+  assert.equal(continueDeferredNextConfirm.executed.output.after.summary.resumeAttempts, 2);
+  assert.equal(continueDeferredNextConfirm.executed.output.after.summary.totalSteps, 3);
+  assert.equal(continueDeferredNextConfirm.afterSummary.recovery.continueDeferred.attempts.total, 3);
+  assert.equal(continueDeferredNextConfirm.afterSummary.recovery.continueDeferred.attempts.dryRun, 3);
+  assert.equal(continueDeferredNextConfirm.afterSummary.recovery.continueDeferred.resumableLoops.count, 1);
+  assert.equal(continueDeferredNextConfirm.afterSummary.recovery.continueDeferred.resumableLoops.recent[0]?.loopAdvanceId, continueDeferredLoopId);
+  assert.equal(continueDeferredNextConfirm.afterSummary.recovery.continueDeferred.resumableLoops.recent[0]?.attempts, 3);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });

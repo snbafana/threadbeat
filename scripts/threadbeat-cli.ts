@@ -4808,6 +4808,37 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-continue-deferred-next") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-continue-deferred-next requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-continue-deferred-next --format must be json or text");
+    }
+    if (dryRun === confirm) {
+      throw new Error("runs session-control-plane-continue-deferred-next requires exactly one of --dry-run or --confirm");
+    }
+    const requiredSessionName = required(sessionName, "runs session-control-plane-continue-deferred-next <session> --server");
+    const response = await resumeNextContinueDeferredLoop(requiredSessionName, {
+      dryRun,
+      confirm,
+      lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+    });
+    if (response.executed?.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+      process.exitCode = 1;
+    }
+    if (outputFormat === "text") {
+      printResumeNextContinueDeferredLoopText(response);
+    } else {
+      await printJson(response);
+    }
+    return;
+  }
   if (subcommandName === "session-control-plane-operator-runs") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -12596,6 +12627,86 @@ function printContinueDeferredWorkerSessionControlPlaneText(
   ].join("\n"));
 }
 
+async function resumeNextContinueDeferredLoop(
+  sessionName: string,
+  execution: { dryRun: boolean; confirm: boolean; lines: number },
+): Promise<{
+  ok: boolean;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  selected: WorkerSessionControlPlaneStatusResponse["recovery"]["continueDeferred"]["resumableLoops"]["recent"][number] | null;
+  command: string[] | null;
+  beforeSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>;
+  executed: {
+    command: string[];
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    output: unknown;
+  } | null;
+  afterSummary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus> | null;
+  commands: {
+    status: string[];
+    resumeSelected: string[] | null;
+  };
+}> {
+  const beforeStatus = await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines });
+  const beforeSummary = summarizeWorkerSessionControlPlaneStatus(beforeStatus);
+  const selected = beforeSummary.recovery.continueDeferred.resumableLoops.recent[0] ?? null;
+  const command = selected?.executeResumeCommand ?? null;
+  const executed = execution.confirm && command
+    ? await runCliWorker(cliCommandArgs(command))
+    : null;
+  const afterSummary = executed
+    ? summarizeWorkerSessionControlPlaneStatus(await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines }))
+    : null;
+  return {
+    ok: executed ? executed.exitCode === 0 : true,
+    session: sessionName,
+    dryRun: execution.dryRun,
+    confirmed: execution.confirm,
+    selected,
+    command,
+    beforeSummary,
+    executed: executed && command
+      ? {
+        command,
+        exitCode: executed.exitCode,
+        stdout: executed.stdout,
+        stderr: executed.stderr,
+        output: parseJsonMaybe(executed.stdout),
+      }
+      : null,
+    afterSummary,
+    commands: {
+      status: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
+      resumeSelected: command,
+    },
+  };
+}
+
+function printResumeNextContinueDeferredLoopText(
+  response: Awaited<ReturnType<typeof resumeNextContinueDeferredLoop>>,
+): void {
+  console.log([
+    "control_plane_continue_deferred_next:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  selected_loop: ${response.selected?.loopAdvanceId ?? ""}`,
+    `  selected_latest_advance: ${response.selected?.latestAdvanceId ?? ""}`,
+    `  selected_attempts: ${response.selected?.attempts ?? ""}`,
+    `  selected_total_steps: ${response.selected?.totalSteps ?? ""}`,
+    `  selected_stopped_reason: ${response.selected?.stoppedReason ?? ""}`,
+    `  command: ${response.command ? formatShellCommand(response.command) : ""}`,
+    `  executed_exit_code: ${response.executed?.exitCode ?? ""}`,
+    `  before_resumable: ${response.beforeSummary.recovery.continueDeferred.resumableLoops.count}`,
+    `  after_resumable: ${response.afterSummary?.recovery.continueDeferred.resumableLoops.count ?? ""}`,
+    `  status: ${formatShellCommand(response.commands.status)}`,
+  ].join("\n"));
+}
+
 function printWorkerSessionControlPlaneOperateText(
   response: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>,
 ): void {
@@ -13070,6 +13181,12 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
   }
   if (summary.recovery.continueDeferred.resumableLoops.count > 0) {
     lines.push(`continue_deferred_loop_queue: ${formatShellCommand(summary.commands.continueDeferredLoops)}`);
+    if (summary.commands.continueDeferredNextDryRun) {
+      lines.push(`continue_deferred_next_dry_run: ${formatShellCommand(summary.commands.continueDeferredNextDryRun)}`);
+    }
+    if (summary.commands.continueDeferredNextConfirm) {
+      lines.push(`continue_deferred_next_confirm: ${formatShellCommand(summary.commands.continueDeferredNextConfirm)}`);
+    }
   }
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
     lines.push(`failed_recover_next_resumes: ${formatShellCommand(summary.commands.failedRecoverNextResumeAttempts)}`);
@@ -13722,6 +13839,12 @@ function workerSessionControlPlaneStatusSummaryCommands(
   }
   if (summary.recovery.continueDeferred.resumableLoops.count > 0) {
     commands.push({ command: summary.commands.continueDeferredLoops });
+    if (summary.commands.continueDeferredNextDryRun) {
+      commands.push({ command: summary.commands.continueDeferredNextDryRun });
+    }
+    if (summary.commands.continueDeferredNextConfirm) {
+      commands.push({ command: summary.commands.continueDeferredNextConfirm });
+    }
   }
   for (const loop of summary.recovery.continueDeferred.resumableLoops.recent) {
     commands.push({ command: loop.resumeCommand });
@@ -14492,6 +14615,8 @@ function summarizeWorkerSessionControlPlaneStatus(
     branchResumeCommandQueue: string[];
     statusWatchExecutions: string[];
     continueDeferredLoops: string[];
+    continueDeferredNextDryRun: string[] | null;
+    continueDeferredNextConfirm: string[] | null;
     recoverNextIncompleteLoopQueue: string[];
     failedRecoverNextResumeAttempts: string[];
     workerReconciliations: string[];
@@ -14665,6 +14790,12 @@ function summarizeWorkerSessionControlPlaneStatus(
       ],
       statusWatchExecutions: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--status-watch-executions"],
       continueDeferredLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--detail-command", "continue_deferred_loop"],
+      continueDeferredNextDryRun: status.recovery.continueDeferred.resumableLoops.count > 0
+        ? ["npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred-next", status.session, "--server", "--dry-run"]
+        : null,
+      continueDeferredNextConfirm: status.recovery.continueDeferred.resumableLoops.count > 0
+        ? ["npm", "run", "cli", "--", "runs", "session-control-plane-continue-deferred-next", status.session, "--server", "--confirm"]
+        : null,
       recoverNextIncompleteLoopQueue: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-alert", status.session, "--server",
         "--surface", "recover_next", "--reason", "incomplete_recover_next_loop", "--commands-only", "--format", "shell",
@@ -22560,6 +22691,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
+  runs session-control-plane-continue-deferred-next <name> --server (--dry-run|--confirm) [--lines 5] [--format json|text]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
