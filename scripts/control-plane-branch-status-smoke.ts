@@ -356,11 +356,109 @@ try {
     record.kind === "loop"
     && record.stoppedReason === "empty"
   )));
+
+  const interruptedLoopRun = await db.createAgentRun({
+    agentId: agent.id,
+    objective: "control-plane branch native interrupted recover loop",
+    inputRef: "main",
+    runBranch: `threadbeat/runs/${sessionName}-interrupted-loop`,
+  });
+  await db.updateAgentRunCompleted({ id: interruptedLoopRun.id, status: "stopped" });
+
+  const branchNativeRecoverLoopDryRun = await cliJson<{
+    recoverNext: {
+      dryRun: boolean;
+      untilEmpty: boolean;
+      loopAdvanceId: string;
+      advanceId: string;
+      advancePath: string;
+      executedSteps: number;
+      stoppedReason: string;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--recover-next",
+    "--until-empty",
+    "--dry-run",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(branchNativeRecoverLoopDryRun.recoverNext.dryRun, true);
+  assert.equal(branchNativeRecoverLoopDryRun.recoverNext.untilEmpty, true);
+  assert.equal(branchNativeRecoverLoopDryRun.recoverNext.loopAdvanceId, branchNativeRecoverLoopDryRun.recoverNext.advanceId);
+  assert.equal(branchNativeRecoverLoopDryRun.recoverNext.executedSteps, 1);
+  assert.equal(branchNativeRecoverLoopDryRun.recoverNext.stoppedReason, "dry_run");
+
+  await fs.rm(branchNativeRecoverLoopDryRun.recoverNext.advancePath, { force: true });
+  const interruptedLoopId = branchNativeRecoverLoopDryRun.recoverNext.loopAdvanceId;
+  const recoverNextIncompleteLoopQueueCommand = `npm run cli -- runs session-control-plane-alert ${sessionName} --server --surface recover_next --reason incomplete_recover_next_loop --commands-only --format shell`;
+  const interruptedLoopResumeCommand = `npm run cli -- runs session-control-plane-recover-next ${sessionName} --server --until-empty --resume-loop ${interruptedLoopId} --max-steps 3 --interval-ms 0 --dry-run`;
+  const interruptedLoopHistoryCommand = `npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${interruptedLoopId} --recover-next-loop-history`;
+  const interruptedLoopExecuteResumeCommand = `${interruptedLoopHistoryCommand} --execute-resume --confirm`;
+
+  const branchNativeWithInterruptedLoop = await cliJson<{
+    counts: { recoverNextIncompleteLoops: number; failedRecoverNextResumeLoops: number };
+    recoverNextLoops: Array<{
+      loopAdvanceId: string;
+      steps: number;
+      dryRun: boolean;
+      lastStepIndex: number | null;
+      stoppedReason: string | null;
+      resumeCommand: string[];
+      inspectHistoryCommand: string[];
+      executeResumeCommand: string[];
+    }>;
+    failedRecoverNextResumeLoops: unknown[];
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(branchNativeWithInterruptedLoop.counts.recoverNextIncompleteLoops, 1);
+  assert.equal(branchNativeWithInterruptedLoop.counts.failedRecoverNextResumeLoops, 0);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops.length, 1);
+  assert.equal(branchNativeWithInterruptedLoop.failedRecoverNextResumeLoops.length, 0);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.loopAdvanceId, interruptedLoopId);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.steps, 1);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.dryRun, true);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.lastStepIndex, 1);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.stoppedReason, "dry_run");
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.resumeCommand.join(" "), interruptedLoopResumeCommand);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.inspectHistoryCommand.join(" "), interruptedLoopHistoryCommand);
+  assert.equal(branchNativeWithInterruptedLoop.recoverNextLoops[0]?.executeResumeCommand.join(" "), interruptedLoopExecuteResumeCommand);
+  assert.ok(branchNativeWithInterruptedLoop.commands.some((command) => command.command.join(" ") === recoverNextIncompleteLoopQueueCommand));
+  assert.ok(branchNativeWithInterruptedLoop.commands.some((command) => command.command.join(" ") === interruptedLoopResumeCommand));
+  assert.ok(branchNativeWithInterruptedLoop.commands.some((command) => command.command.join(" ") === interruptedLoopHistoryCommand));
+  assert.ok(branchNativeWithInterruptedLoop.commands.some((command) => command.command.join(" ") === interruptedLoopExecuteResumeCommand));
+
+  const branchNativeInterruptedLoopText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeInterruptedLoopText, /recover_next_incomplete_loops: 1/);
+  assert.match(branchNativeInterruptedLoopText, new RegExp(`loop: ${interruptedLoopId}`));
+  assert.match(branchNativeInterruptedLoopText, /resume: npm run cli -- runs session-control-plane-recover-next/);
+  assert.match(branchNativeInterruptedLoopText, /inspect_history: npm run cli -- runs session-control-plane-advances/);
+  assert.match(branchNativeInterruptedLoopText, /execute_resume: npm run cli -- runs session-control-plane-advances/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.out.log`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.err.log`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 

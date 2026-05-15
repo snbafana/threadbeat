@@ -14554,12 +14554,16 @@ type WorkerSessionBranchNativeNextResponse = {
     branchReady: number;
     branchActions: number;
     branchRecoveryExecutions: number;
+    recoverNextIncompleteLoops: number;
+    failedRecoverNextResumeLoops: number;
     resultCommits: number;
     resultPending: number;
     resultReviewed: number;
     resultSkipped: number;
   };
   branchActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["branches"]["inspection"]["nextSteps"];
+  recoverNextLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["recoverNext"]["incompleteLoops"]["recent"];
+  failedRecoverNextResumeLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["failedRecoverNextResumeLoops"]["recent"];
   resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
   commands: CommandQueueOutput["commands"];
 };
@@ -14570,6 +14574,8 @@ function workerSessionBranchNativeNext(
 ): WorkerSessionBranchNativeNextResponse {
   const branchActions = summary.branches.inspection.nextSteps.slice(0, options.limit);
   const resultActions = summary.results.inspection.nextSteps.slice(0, options.limit);
+  const recoverNextLoops = summary.recovery.recoverNext.incompleteLoops.recent.slice(0, options.limit);
+  const failedRecoverNextResumeLoops = summary.recovery.failedRecoverNextResumeLoops.recent.slice(0, options.limit);
   const commands = uniqueCommandQueue([
     ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"],
     summary.commands.branchNativeNext,
@@ -14577,6 +14583,20 @@ function workerSessionBranchNativeNext(
     ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--confirm"],
     ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--dry-run"],
     ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--confirm"],
+    ...(summary.recovery.recoverNext.incompleteLoops.count > 0 ? [summary.commands.recoverNextIncompleteLoopQueue] : []),
+    ...recoverNextLoops.flatMap((loop) => [
+      loop.resumeCommand,
+      loop.inspectLastStepCommand,
+      loop.inspectHistoryCommand,
+      loop.executeResumeCommand,
+    ]),
+    ...(summary.recovery.failedRecoverNextResumeLoops.count > 0 ? [summary.commands.failedRecoverNextResumeAttempts] : []),
+    ...failedRecoverNextResumeLoops.flatMap((loop) => [
+      loop.commands.inspectFailedResumes,
+      ...(loop.commands.inspectHistory ? [loop.commands.inspectHistory] : []),
+      ...(loop.commands.resumeLoop ? [loop.commands.resumeLoop] : []),
+      ...(loop.commands.executeResumeHistory ? [loop.commands.executeResumeHistory] : []),
+    ]),
     summary.commands.branchRecoveryExecutions,
     summary.commands.branchRecoveryCommandQueue,
     ...(summary.branches.counts.ready > 0 ? [summary.commands.branchResumeCommandQueue] : []),
@@ -14616,12 +14636,16 @@ function workerSessionBranchNativeNext(
       branchReady: summary.branches.counts.ready,
       branchActions: summary.branches.inspection.count,
       branchRecoveryExecutions: summary.branches.executions.counts.recent,
+      recoverNextIncompleteLoops: summary.recovery.recoverNext.incompleteLoops.count,
+      failedRecoverNextResumeLoops: summary.recovery.failedRecoverNextResumeLoops.count,
       resultCommits: summary.results.counts.resultCommits,
       resultPending: summary.results.counts.pending,
       resultReviewed: summary.results.counts.reviewed,
       resultSkipped: summary.results.counts.skipped,
     },
     branchActions,
+    recoverNextLoops,
+    failedRecoverNextResumeLoops,
     resultActions,
     commands,
   };
@@ -14634,6 +14658,8 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `  branch_ready: ${response.counts.branchReady}`,
     `  branch_actions: ${response.counts.branchActions}`,
     `  branch_recovery_executions: ${response.counts.branchRecoveryExecutions}`,
+    `  recover_next_incomplete_loops: ${response.counts.recoverNextIncompleteLoops}`,
+    `  failed_recover_next_resume_loops: ${response.counts.failedRecoverNextResumeLoops}`,
     `  result_commits: ${response.counts.resultCommits}`,
     `  result_pending: ${response.counts.resultPending}`,
     `  result_reviewed: ${response.counts.resultReviewed}`,
@@ -14655,6 +14681,35 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
         ]),
       ]
       : ["  branch_actions: none"]),
+    ...(response.recoverNextLoops.length > 0
+      ? [
+        "  recover_next_incomplete_loops:",
+        ...response.recoverNextLoops.flatMap((loop) => [
+          `    - loop: ${loop.loopAdvanceId}`,
+          `      steps: ${loop.steps}`,
+          `      last_step: ${loop.lastStepIndex ?? ""}`,
+          `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+          `      resume: ${formatShellCommand(loop.resumeCommand)}`,
+          `      inspect_last_step: ${formatShellCommand(loop.inspectLastStepCommand)}`,
+          `      inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+          `      execute_resume: ${formatShellCommand(loop.executeResumeCommand)}`,
+        ]),
+      ]
+      : ["  recover_next_incomplete_loops: none"]),
+    ...(response.failedRecoverNextResumeLoops.length > 0
+      ? [
+        "  failed_recover_next_resume_loops:",
+        ...response.failedRecoverNextResumeLoops.flatMap((loop) => [
+          `    - loop: ${loop.loopAdvanceId ?? ""}`,
+          `      failed_attempts: ${loop.failedAttempts}`,
+          `      latest_failed_advance: ${loop.latestFailedAdvanceId}`,
+          `      inspect_failed_resumes: ${formatShellCommand(loop.commands.inspectFailedResumes)}`,
+          ...(loop.commands.inspectHistory ? [`      inspect_history: ${formatShellCommand(loop.commands.inspectHistory)}`] : []),
+          ...(loop.commands.resumeLoop ? [`      resume: ${formatShellCommand(loop.commands.resumeLoop)}`] : []),
+          ...(loop.commands.executeResumeHistory ? [`      execute_resume: ${formatShellCommand(loop.commands.executeResumeHistory)}`] : []),
+        ]),
+      ]
+      : ["  failed_recover_next_resume_loops: none"]),
     ...(response.resultActions.length > 0
       ? [
         "  result_actions:",
