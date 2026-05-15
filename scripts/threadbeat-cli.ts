@@ -4613,6 +4613,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
               maxPolls,
               command: action?.command ?? null,
               dryRunCommand: action?.dryRunCommand ?? null,
+              deferredActions: action?.deferredActions ?? [],
             }
           : null;
         const executedAction = untilAction?.done && executeAction && action
@@ -10332,6 +10333,24 @@ type WorkerSessionControlPlaneDeferredNextAction = WorkerSessionControlPlaneAdva
   };
 };
 
+type WorkerSessionControlPlaneDeferredActionPreview = {
+  surface: WorkerSessionControlPlaneAdvanceAction["surface"];
+  action: string;
+  reason: string;
+  count: number;
+  command: string[];
+  detailCommand?: string;
+  loopAdvanceId?: string;
+  runId?: string;
+  resultCommit?: string;
+  workerId?: string;
+  advanceId?: string;
+  applyId?: string;
+  executionId?: string;
+  continuationIds?: string[];
+  blockedBy: WorkerSessionControlPlaneDeferredNextAction["blockedBy"];
+};
+
 type WorkerSessionControlPlaneAdvanceResponse = {
   ok: true;
   session: string;
@@ -12057,6 +12076,7 @@ function printWorkerSessionControlPlaneOperateText(
       `  - cycle: ${cycle.cycle}`,
       `    status: ${cycle.status}`,
       `    action: ${cycle.action?.reason ?? "none"}`,
+      `    deferred_actions: ${cycle.action?.deferredActions.map((action) => `${action.surface}:${action.action}`).join(",") || "none"}`,
       `    advance: ${cycle.executedAction?.advanceId ?? ""}`,
       `    reconciliation: ${cycle.executedReconciliation?.skipped === false ? cycle.executedReconciliation.record.reconciliationId : ""}`,
       `    needs_action_after: ${cycle.afterSummary.needsAction}`,
@@ -12082,12 +12102,15 @@ function summarizeWorkerSessionControlPlaneOperatorRunCycles(
   const reconciliationIds = cycles
     .map((cycle) => cycle.executedReconciliation?.skipped === false ? cycle.executedReconciliation.record.reconciliationId : null)
     .filter((reconciliationId): reconciliationId is string => Boolean(reconciliationId));
+  const deferredActions = cycles.flatMap((cycle) => cycle.action?.deferredActions ?? []);
   return {
     cycles: cycles.length,
     executedCycles: cycles.filter((cycle) => cycle.status === "executed").length,
     failedCycles: cycles.filter((cycle) => cycle.status === "failed").length,
     idleCycles: cycles.filter((cycle) => cycle.status === "idle").length,
     actionReasons: [...new Set(cycles.map((cycle) => cycle.action?.reason).filter((reason): reason is string => Boolean(reason)))],
+    deferredActionReasons: [...new Set(deferredActions.map((action) => `${action.surface}:${action.action}:${action.reason}`))],
+    deferredActionSurfaces: [...new Set(deferredActions.map((action) => action.surface))],
     advanceIds,
     reconciliationIds,
     needsActionAfter: cycles.at(-1)?.afterSummary.needsAction ?? null,
@@ -12152,6 +12175,8 @@ function formatWorkerSessionControlPlaneOperatorRunsText(
       `      bounds: max_cycles=${record.bounds.maxCycles} interval_ms=${record.bounds.cycleIntervalMs} lines=${record.bounds.lines} reconcile_workers=${record.bounds.reconcileWorkers} recover_worker_bundles=${record.bounds.recoverWorkerBundles === true}`,
       `      summary: cycles=${record.summary.cycles} executed=${record.summary.executedCycles} failed=${record.summary.failedCycles} idle=${record.summary.idleCycles} needs_action_after=${record.summary.needsActionAfter ?? "unknown"}`,
       `      actions: ${record.summary.actionReasons.join(",") || "none"}`,
+      `      deferred_actions: ${(record.summary.deferredActionReasons ?? []).join(",") || "none"}`,
+      `      deferred_surfaces: ${(record.summary.deferredActionSurfaces ?? []).join(",") || "none"}`,
       `      advances: ${record.summary.advanceIds.join(",") || "none"}`,
       `      reconciliations: ${record.summary.reconciliationIds.join(",") || "none"}`,
       `      inspect_record: ${formatShellCommand(record.commands.inspectRecord)}`,
@@ -12353,7 +12378,9 @@ function workerSessionControlPlaneWatchAction(
   reason: string;
   command: string[];
   dryRunCommand: string[] | null;
+  deferredActions: WorkerSessionControlPlaneDeferredActionPreview[];
 } | null {
+  const deferredActions = workerSessionControlPlaneDeferredActionPreviews(summary);
   if (summary.nextRecovery) {
     const surface = summary.nextRecovery.surface ?? "status_watch";
     return {
@@ -12362,6 +12389,7 @@ function workerSessionControlPlaneWatchAction(
       reason: `${summary.nextRecovery.kind}:${summary.nextRecovery.action}`,
       command: summary.nextRecovery.command,
       dryRunCommand: summary.nextRecovery.dryRunCommand,
+      deferredActions,
     };
   }
   const resultInspection = summary.results.inspection.nextSteps[0];
@@ -12372,9 +12400,32 @@ function workerSessionControlPlaneWatchAction(
       reason: "result_inspection:pending_result_commit",
       command: resultInspection.commands.inspectResult,
       dryRunCommand: null,
+      deferredActions,
     };
   }
   return null;
+}
+
+function workerSessionControlPlaneDeferredActionPreviews(
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+): WorkerSessionControlPlaneDeferredActionPreview[] {
+  return summary.deferredNextActions.map((action) => ({
+    surface: action.surface,
+    action: action.action,
+    reason: action.reason,
+    count: action.count,
+    command: action.command,
+    ...(action.detailCommand ? { detailCommand: action.detailCommand } : {}),
+    ...(action.loopAdvanceId ? { loopAdvanceId: action.loopAdvanceId } : {}),
+    ...(action.runId ? { runId: action.runId } : {}),
+    ...(action.resultCommit ? { resultCommit: action.resultCommit } : {}),
+    ...(action.workerId ? { workerId: action.workerId } : {}),
+    ...(action.advanceId ? { advanceId: action.advanceId } : {}),
+    ...(action.applyId ? { applyId: action.applyId } : {}),
+    ...(action.executionId ? { executionId: action.executionId } : {}),
+    ...(action.continuationIds ? { continuationIds: action.continuationIds } : {}),
+    blockedBy: action.blockedBy,
+  }));
 }
 
 async function executeWorkerSessionControlPlaneWatchAction(
@@ -12417,11 +12468,13 @@ async function executeWorkerSessionControlPlaneWatchAction(
       count: 1,
       command,
       dryRunCommand: action.dryRunCommand,
+      deferredActions: action.deferredActions,
     },
     detailCommand: "status_watch_execute_action",
     details: {
       kind: "status_watch_action",
       reason: action.reason,
+      deferredActions: action.deferredActions,
     },
     executed: {
       command,

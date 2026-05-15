@@ -800,7 +800,17 @@ try {
     "1",
   ]);
   const watchedActionWithReconciliationLines = watchedActionWithReconciliation.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
-    untilAction: { done: boolean; reason: string | null };
+    untilAction: {
+      done: boolean;
+      reason: string | null;
+      deferredActions: Array<{
+        surface: string;
+        action: string;
+        reason: string;
+        workerId?: string;
+        blockedBy: { action: string; count: number };
+      }>;
+    };
     executedAction?: { dryRun: boolean; reason: string; executed: { exitCode: number | null } };
     executedReconciliation?: {
       skipped: boolean;
@@ -812,6 +822,12 @@ try {
   assert.equal(watchedActionWithReconciliationLines.length, 1);
   assert.equal(watchedActionWithReconciliationLines[0]?.untilAction.done, true);
   assert.equal(watchedActionWithReconciliationLines[0]?.untilAction.reason, "confirmation_queue:drain_control_plane_confirmations");
+  const watchedDeferredWorkerRecovery = watchedActionWithReconciliationLines[0]?.untilAction.deferredActions.find((action) => action.surface === "worker_recovery");
+  assert.equal(watchedDeferredWorkerRecovery?.action, "restart_control_plane_advance_worker");
+  assert.equal(watchedDeferredWorkerRecovery?.reason, "stopped_control_plane_advance_worker");
+  assert.equal(watchedDeferredWorkerRecovery?.workerId, workerId);
+  assert.equal(watchedDeferredWorkerRecovery?.blockedBy.action, "drain_control_plane_confirmations");
+  assert.equal(watchedDeferredWorkerRecovery?.blockedBy.count, 1);
   assert.equal(watchedActionWithReconciliationLines[0]?.executedAction?.dryRun, true);
   assert.equal(watchedActionWithReconciliationLines[0]?.executedAction?.executed.exitCode, 0);
   assert.equal(watchedActionWithReconciliationLines[0]?.executedReconciliation?.skipped, false);
@@ -829,7 +845,16 @@ try {
     stoppedReason: string;
     cycles: Array<{
       status: string;
-      action: { reason: string } | null;
+      action: {
+        reason: string;
+        deferredActions: Array<{
+          surface: string;
+          action: string;
+          reason: string;
+          workerId?: string;
+          blockedBy: { action: string; count: number };
+        }>;
+      } | null;
       executedAction: { dryRun: boolean; executed: { exitCode: number | null }; advanceId: string } | null;
       executedReconciliation: {
         skipped: boolean;
@@ -867,6 +892,12 @@ try {
   assert.equal(operatedDryRun.cycles.length, 1);
   assert.equal(operatedDryRun.cycles[0]?.status, "executed");
   assert.equal(operatedDryRun.cycles[0]?.action?.reason, "confirmation_queue:drain_control_plane_confirmations");
+  const operatedDeferredWorkerRecovery = operatedDryRun.cycles[0]?.action?.deferredActions.find((action) => action.surface === "worker_recovery");
+  assert.equal(operatedDeferredWorkerRecovery?.action, "restart_control_plane_advance_worker");
+  assert.equal(operatedDeferredWorkerRecovery?.reason, "stopped_control_plane_advance_worker");
+  assert.equal(operatedDeferredWorkerRecovery?.workerId, workerId);
+  assert.equal(operatedDeferredWorkerRecovery?.blockedBy.action, "drain_control_plane_confirmations");
+  assert.equal(operatedDeferredWorkerRecovery?.blockedBy.count, 1);
   assert.equal(operatedDryRun.cycles[0]?.executedAction?.dryRun, true);
   assert.equal(operatedDryRun.cycles[0]?.executedAction?.executed.exitCode, 0);
   assert.equal(operatedDryRun.cycles[0]?.executedReconciliation?.skipped, false);
@@ -1239,7 +1270,14 @@ try {
       status: string;
       stoppedReason: string;
       bounds: { reconcileWorkers: boolean };
-      summary: { cycles: number; actionReasons: string[]; advanceIds: string[]; reconciliationIds: string[] };
+      summary: {
+        cycles: number;
+        actionReasons: string[];
+        deferredActionReasons?: string[];
+        deferredActionSurfaces?: string[];
+        advanceIds: string[];
+        reconciliationIds: string[];
+      };
       commands: { timeline: string[]; dryRun: string[]; confirm: string[] };
     }>;
   }>(baseUrl, [
@@ -1257,6 +1295,8 @@ try {
   assert.equal(operatorRuns.records[0]?.bounds.reconcileWorkers, true);
   assert.equal(operatorRuns.records[0]?.summary.cycles, 1);
   assert.deepEqual(operatorRuns.records[0]?.summary.actionReasons, ["confirmation_queue:drain_control_plane_confirmations"]);
+  assert.deepEqual(operatorRuns.records[0]?.summary.deferredActionReasons, ["worker_recovery:restart_control_plane_advance_worker:stopped_control_plane_advance_worker"]);
+  assert.deepEqual(operatorRuns.records[0]?.summary.deferredActionSurfaces, ["worker_recovery"]);
   assert.deepEqual(operatorRuns.records[0]?.summary.advanceIds, [operatedDryRun.cycles[0]?.executedAction?.advanceId]);
   assert.deepEqual(operatorRuns.records[0]?.summary.reconciliationIds, [operatedDryRun.cycles[0]?.executedReconciliation?.record?.reconciliationId]);
   assert.deepEqual(operatorRuns.records[0]?.commands.timeline, operatedDryRun.commands.inspectOperatorRunTimeline);
@@ -1295,6 +1335,7 @@ try {
   assert.match(operatedDryRunText, /stopped_reason: max_cycles/);
   assert.match(operatedDryRunText, /operator_run: \d{8}T\d{9}Z-[a-f0-9]+/);
   assert.match(operatedDryRunText, /action: confirmation_queue:drain_control_plane_confirmations/);
+  assert.match(operatedDryRunText, /deferred_actions: worker_recovery:restart_control_plane_advance_worker/);
   assert.match(operatedDryRunText, /reconciliation: \d{8}T\d{9}Z-[a-f0-9]+/);
   assert.match(operatedDryRunText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
   assert.match(operatedDryRunText, /inspect_status_watch_executions: npm run cli -- runs session-control-plane-advances/);
@@ -1312,6 +1353,8 @@ try {
   assert.match(operatorRunsText, /control_plane_operator_runs:/);
   assert.match(operatorRunsText, new RegExp(`operator_run: ${operatedDryRun.operatorRunRecord.operatorRunId}`));
   assert.match(operatorRunsText, /status: dry_run/);
+  assert.match(operatorRunsText, /deferred_actions: worker_recovery:restart_control_plane_advance_worker:stopped_control_plane_advance_worker/);
+  assert.match(operatorRunsText, /deferred_surfaces: worker_recovery/);
   assert.match(operatorRunsText, /timeline: npm run cli -- runs session-control-plane-timeline/);
 
   const operatorRunTimeline = await cliJson<{

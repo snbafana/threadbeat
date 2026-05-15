@@ -24,6 +24,8 @@ export type WorkerSessionControlPlaneOperatorRunRecord = {
     failedCycles: number;
     idleCycles: number;
     actionReasons: string[];
+    deferredActionReasons?: string[];
+    deferredActionSurfaces?: string[];
     advanceIds: string[];
     reconciliationIds: string[];
     needsActionAfter: boolean | null;
