@@ -54,6 +54,7 @@ try {
 
   const checkoutCommand = `npm run cli -- runs checkout ${run.id} --dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
   const reviewCommand = `npm run cli -- runs review ${run.id} --checkout-dir ./checkouts/${sessionName}-control-plane-results/${run.id}`;
+  const inspectResultCommand = `npm run cli -- runs inspect-result ${run.id} --server`;
   const nextResultInspectionCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --next`;
   const nextResultReviewCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server`;
   const resultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --result-commits`;
@@ -536,7 +537,13 @@ try {
   const resultCommitView = await cliJson<{
     count: number;
     summary: { resultCommits: number; pending: number; reviewed: number; skipped: number };
-    commands: { inspectAll: string[]; inspectPending: string[]; reviewNext: string[] };
+    commands: {
+      inspectAll: string[];
+      inspectPending: string[];
+      inspectNextResult: string[] | null;
+      checkoutNextBranch: string[] | null;
+      reviewNext: string[];
+    };
     resultCommits: Array<{
       runId: string;
       branchName: string;
@@ -562,6 +569,8 @@ try {
   assert.equal(resultCommitView.summary.resultCommits, 1);
   assert.equal(resultCommitView.summary.pending, 1);
   assert.equal(resultCommitView.commands.inspectPending.join(" "), `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`);
+  assert.equal(resultCommitView.commands.inspectNextResult?.join(" "), inspectResultCommand);
+  assert.equal(resultCommitView.commands.checkoutNextBranch?.join(" "), checkoutCommand);
   assert.equal(resultCommitView.commands.reviewNext.join(" "), nextResultReviewCommand);
   assert.equal(resultCommitView.resultCommits[0]?.runId, run.id);
   assert.equal(resultCommitView.resultCommits[0]?.branchName, run.run_branch);
@@ -585,6 +594,8 @@ try {
   ]);
   assert.match(resultCommitViewText, /result_commit_view:/);
   assert.match(resultCommitViewText, new RegExp(`inspect_pending: npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`));
+  assert.match(resultCommitViewText, new RegExp(`inspect_next_result: ${inspectResultCommand}`));
+  assert.match(resultCommitViewText, new RegExp(`checkout_next_branch: ${checkoutCommand}`));
   assert.match(resultCommitViewText, new RegExp(`review_next: ${nextResultReviewCommand}`));
   assert.match(resultCommitViewText, new RegExp(`run: ${run.id}`));
   assert.match(resultCommitViewText, new RegExp(`branch: ${run.run_branch}`));

@@ -9463,6 +9463,8 @@ type WorkerSessionResultCommitViewResponse = {
   commands: {
     inspectAll: string[];
     inspectPending: string[];
+    inspectNextResult: string[] | null;
+    checkoutNextBranch: string[] | null;
     reviewNext: string[];
   };
   resultCommits: WorkerSessionResultCommitViewRecord[];
@@ -13276,6 +13278,7 @@ function formatWorkerSessionResultInspectionsText(response: WorkerSessionResultI
 function workerSessionResultCommitView(
   response: WorkerSessionResultInspectionsResponse,
 ): WorkerSessionResultCommitViewResponse {
+  const nextResult = response.resultCommits[0] ?? null;
   return {
     ok: true,
     session: response.session,
@@ -13285,6 +13288,8 @@ function workerSessionResultCommitView(
     commands: {
       inspectAll: ["npm", "run", "cli", "--", "runs", "session-result-inspections", response.session, "--server", "--result-commits"],
       inspectPending: ["npm", "run", "cli", "--", "runs", "session-result-inspections", response.session, "--server", "--review-state", "pending", "--result-commits"],
+      inspectNextResult: nextResult?.commands.inspectResult ?? null,
+      checkoutNextBranch: nextResult?.commands.checkoutBranch ?? null,
       reviewNext: ["npm", "run", "cli", "--", "runs", "session-result-review-next", response.session, "--server"],
     },
     resultCommits: response.resultCommits.map((result) => ({
@@ -13324,6 +13329,8 @@ function formatWorkerSessionResultCommitViewText(response: WorkerSessionResultCo
     "  commands:",
     `    inspect_all: ${formatShellCommand(response.commands.inspectAll)}`,
     `    inspect_pending: ${formatShellCommand(response.commands.inspectPending)}`,
+    `    inspect_next_result: ${response.commands.inspectNextResult ? formatShellCommand(response.commands.inspectNextResult) : "none"}`,
+    `    checkout_next_branch: ${response.commands.checkoutNextBranch ? formatShellCommand(response.commands.checkoutNextBranch) : "none"}`,
     `    review_next: ${formatShellCommand(response.commands.reviewNext)}`,
   ];
   if (response.resultCommits.length === 0) {
