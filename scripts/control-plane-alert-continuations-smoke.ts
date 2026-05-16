@@ -93,6 +93,82 @@ try {
     `npm run cli -- runs session-drain-continuations ${sessionName} --reset-failed --continuation ${selectedContinuationId}`,
   );
 
+  const drainTerminals = await cliJson<{
+    count: number;
+    summary: { failed: number; terminal: number };
+    continuations: Array<{
+      continuationId: string;
+      status: string | null;
+      failed: number;
+      commands: { inspectContinuation: string[]; resetSelectedFailed: string[] | null };
+    }>;
+    commands: { queue: Array<{ command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-drain-terminals",
+    sessionName,
+    "--server",
+    "--continuation",
+    selectedContinuationId,
+  ]);
+  assert.equal(drainTerminals.count, 1);
+  assert.equal(drainTerminals.summary.failed, 2);
+  assert.equal(drainTerminals.summary.terminal, 1);
+  assert.equal(drainTerminals.continuations[0]?.continuationId, selectedContinuationId);
+  assert.equal(drainTerminals.continuations[0]?.status, "failed");
+  assert.equal(drainTerminals.continuations[0]?.failed, 1);
+  assert.deepEqual(drainTerminals.continuations[0]?.commands.inspectContinuation, [
+    "npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName, "--status", "failed", "--continuation", selectedContinuationId,
+  ]);
+  assert.deepEqual(drainTerminals.continuations[0]?.commands.resetSelectedFailed, [
+    "npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName, "--reset-failed", "--continuation", selectedContinuationId,
+  ]);
+  assert.ok(drainTerminals.commands.queue.some((item) => item.command.join(" ") === `npm run cli -- runs session-drain-continuations ${sessionName} --status failed --continuation ${selectedContinuationId}`));
+  assert.ok(drainTerminals.commands.queue.some((item) => item.command.join(" ") === `npm run cli -- runs session-drain-continuations ${sessionName} --reset-failed --continuation ${selectedContinuationId}`));
+
+  const drainTerminalText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-drain-terminals",
+    sessionName,
+    "--server",
+    "--continuation",
+    selectedContinuationId,
+    "--format",
+    "text",
+  ]);
+  assert.match(drainTerminalText, /drain_terminals:/);
+  assert.match(drainTerminalText, /summary: queued=0 running=0 failed=2 terminal=1/);
+  assert.match(drainTerminalText, new RegExp(`continuation: ${selectedContinuationId}`));
+  assert.match(drainTerminalText, /reset_failed: npm run cli -- runs session-drain-continuations/);
+
+  const drainTerminalShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-drain-terminals",
+    sessionName,
+    "--server",
+    "--continuation",
+    selectedContinuationId,
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(drainTerminalShell, new RegExp(`--status failed --continuation ${selectedContinuationId}`));
+  assert.match(drainTerminalShell, new RegExp(`--reset-failed --continuation ${selectedContinuationId}`));
+
+  const branchNativeDrainShell = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "drain_continuation",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(branchNativeDrainShell, /session-control-plane-drain-terminals/);
+  assert.match(branchNativeDrainShell, /session-drain-continuations .* --reset-failed/);
+
   const execute = await cliJson<{
     dryRun: boolean;
     detailCommand: string;
@@ -188,4 +264,13 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     maxBuffer: 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
+}
+
+async function cliText(baseUrl: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout;
 }

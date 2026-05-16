@@ -30,6 +30,7 @@ const workerSessionBranchNativeCommandSurfaces = [
   "branch",
   "result_inspection",
   "apply_action",
+  "drain_continuation",
 ] as const;
 
 const [command, subcommand, ...rest] = process.argv.slice(2);
@@ -4856,6 +4857,60 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (outputFormat === "text") {
       printApplyActionTerminalsText(terminal);
+    } else {
+      await printJson(terminal);
+    }
+    return;
+  }
+  if (subcommandName === "session-control-plane-drain-terminals") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-drain-terminals <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-drain-terminals requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-drain-terminals --format must be json, shell, or text");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-drain-terminals --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-drain-terminals --format text cannot be combined with --commands-only");
+    }
+    const status = options.status ?? "failed";
+    if (status !== "failed" && status !== "running" && status !== "queued" && status !== "all") {
+      throw new Error("runs session-control-plane-drain-terminals --status must be failed, running, queued, or all");
+    }
+    const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    const limit = parsePositiveInteger(options.limit ?? "20", "--limit");
+    const olderThanMs = parsePositiveInteger(options["older-than-ms"] ?? String(STALE_RUNNING_DRAIN_CONTINUATION_MS), "--older-than-ms");
+    const terminal = summarizeDrainTerminals(
+      await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines }),
+      await fetchWorkerSessionDrainContinuations(
+        requiredSessionName,
+        String(limit),
+        status === "all" ? undefined : [status],
+      ),
+      {
+        status,
+        continuationIds: options.continuation ? parseList(options.continuation) : [],
+        olderThanMs,
+        lines,
+        limit,
+      },
+    );
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(terminal.commands.queue);
+      } else {
+        await printJson({ ...terminal, commands: terminal.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printDrainTerminalsText(terminal);
     } else {
       await printJson(terminal);
     }
@@ -16052,6 +16107,9 @@ type WorkerSessionBranchNativeNextResponse = {
     resultSkipped: number;
     applyActionable: number;
     applyActionFailedExecutions: number;
+    drainQueued: number;
+    drainRunning: number;
+    drainFailed: number;
   };
   workers: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["workers"];
   workerActions: WorkerSessionControlPlaneAdvanceAction[];
@@ -16064,6 +16122,7 @@ type WorkerSessionBranchNativeNextResponse = {
   unacknowledgedCompletedResultReviewLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["resultReviewLoops"]["unacknowledgedCompletedLoops"]["recent"];
   resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
   applyActionActions: WorkerSessionControlPlaneAdvanceAction[];
+  drainContinuationActions: WorkerSessionControlPlaneAdvanceAction[];
   resultReviewCommands: {
     previewReviewed: string[];
     previewSkipped: string[];
@@ -16083,6 +16142,8 @@ type WorkerSessionBranchNativeCommandQueueItem = {
 type RecoverNextTerminalStatus = "failed" | "all";
 
 type ApplyActionTerminalStatus = "actionable" | "failed" | "all";
+
+type DrainTerminalStatus = "failed" | "running" | "queued" | "all";
 
 type RecoverNextTerminalsResponse = {
   ok: true;
@@ -16174,6 +16235,59 @@ type ApplyActionTerminalsResponse = {
   }>;
 };
 
+type DrainTerminalsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    status: DrainTerminalStatus;
+    continuationIds: string[];
+    olderThanMs: number;
+    lines: number;
+    limit: number;
+  };
+  count: number;
+  summary: {
+    queued: number;
+    running: number;
+    failed: number;
+    terminal: number;
+  };
+  commands: {
+    inspectStatus: string[];
+    inspectFailed: string[];
+    inspectRunning: string[];
+    inspectQueued: string[];
+    executeNext: string[];
+    resetFailed: string[];
+    resetRunning: string[];
+    queue: Array<{ command: string[] }>;
+  };
+  continuations: Array<{
+    continuationId: string;
+    status: WorkerSessionDrainContinuationRecord["status"] | null;
+    observedAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    error: string | null;
+    dryRun: boolean;
+    selected: number;
+    succeeded: number;
+    failed: number;
+    drains: Array<{
+      prefix: string;
+      nextApplyId: string;
+      exitCode: number | null;
+      command: string[];
+    }>;
+    commands: {
+      inspectContinuation: string[];
+      executeContinuation: string[] | null;
+      resetSelectedFailed: string[] | null;
+      resetRunning: string[] | null;
+    };
+  }>;
+};
+
 type WorkerSessionBranchNativePostOperatorNext = {
   surface: WorkerSessionBranchNativeCommandSurface;
   action: string;
@@ -16230,6 +16344,7 @@ function workerSessionBranchNativeNext(
   const resultActions = summary.results.inspection.nextSteps.slice(0, options.limit);
   const workerActions = summary.nextActions.filter((action) => action.surface === "worker_recovery").slice(0, options.limit);
   const applyActionActions = summary.nextActions.filter((action) => action.surface === "apply_action").slice(0, options.limit);
+  const drainContinuationActions = summary.nextActions.filter((action) => action.surface === "drain_continuation").slice(0, options.limit);
   const latestWorkerResults = summary.workers.controlPlaneAdvance.latestResults.slice(0, options.limit);
   const recoverNextLoops = summary.recovery.recoverNext.incompleteLoops.recent.slice(0, options.limit);
   const failedRecoverNextResumeLoops = summary.recovery.failedRecoverNextResumeLoops.recent.slice(0, options.limit);
@@ -16249,6 +16364,18 @@ function workerSessionBranchNativeNext(
       ? [{ surfaces: ["apply_action"] as const, command: ["npm", "run", "cli", "--", "runs", "session-applies", summary.session, "--server", "--action-executions", "--status", "failed"] }]
       : []),
     ...applyActionActions.map((action): WorkerSessionBranchNativeCommandQueueItem => ({ surfaces: ["apply_action"], command: action.command })),
+    { surfaces: ["drain_continuation"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-drain-terminals", summary.session, "--server"] },
+    { surfaces: ["drain_continuation"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-drain-terminals", summary.session, "--server", "--status", "running"] },
+    { surfaces: ["drain_continuation"], command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", summary.session, "--status", "failed"] },
+    { surfaces: ["drain_continuation"], command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", summary.session, "--status", "running"] },
+    { surfaces: ["drain_continuation"], command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", summary.session, "--execute-next"] },
+    ...(summary.queues.drainContinuations.failed > 0
+      ? [{ surfaces: ["drain_continuation"] as const, command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", summary.session, "--reset-failed"] }]
+      : []),
+    ...(summary.queues.drainContinuations.running > 0
+      ? [{ surfaces: ["drain_continuation"] as const, command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", summary.session, "--reset-running", "--older-than-ms", String(STALE_RUNNING_DRAIN_CONTINUATION_MS)] }]
+      : []),
+    ...drainContinuationActions.map((action): WorkerSessionBranchNativeCommandQueueItem => ({ surfaces: ["drain_continuation"], command: action.command })),
     { surfaces: ["recover_next"], command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--dry-run"] },
     { surfaces: ["recover_next"], command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--confirm"] },
     { surfaces: ["recover_next"], command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--dry-run"] },
@@ -16386,10 +16513,14 @@ function workerSessionBranchNativeNext(
       resultSkipped: summary.results.counts.skipped,
       applyActionable: summary.queues.applyActions.actionable,
       applyActionFailedExecutions: summary.queues.applyActionExecutions.failed,
+      drainQueued: summary.queues.drainContinuations.queued,
+      drainRunning: summary.queues.drainContinuations.running,
+      drainFailed: summary.queues.drainContinuations.failed,
     },
     workers: summary.workers,
     workerActions,
     applyActionActions,
+    drainContinuationActions,
     branchActions,
     recoverNextLoops,
     failedRecoverNextResumeLoops,
@@ -16576,6 +16707,99 @@ function workerSessionApplyActionExecuteCommand(
   ];
 }
 
+function summarizeDrainTerminals(
+  status: WorkerSessionControlPlaneStatusResponse,
+  response: WorkerSessionDrainContinuationsResponse,
+  options: {
+    status: DrainTerminalStatus;
+    continuationIds: string[];
+    olderThanMs: number;
+    lines: number;
+    limit: number;
+  },
+): DrainTerminalsResponse {
+  const selectedIds = new Set(options.continuationIds);
+  const continuations = response.continuations
+    .filter((continuation) => selectedIds.size === 0 || selectedIds.has(continuation.continuationId))
+    .slice(0, options.limit)
+    .map((continuation) => ({
+      continuationId: continuation.continuationId,
+      status: continuation.status ?? null,
+      observedAt: continuation.observedAt,
+      startedAt: continuation.startedAt ?? null,
+      completedAt: continuation.completedAt ?? null,
+      error: continuation.error ?? null,
+      dryRun: continuation.dryRun,
+      selected: continuation.continueDrains.selected,
+      succeeded: continuation.continueDrains.succeeded,
+      failed: continuation.continueDrains.failed,
+      drains: continuation.drains.map((drain) => ({
+        prefix: drain.prefix,
+        nextApplyId: drain.nextApplyId,
+        exitCode: drain.exitCode,
+        command: drain.command,
+      })),
+      commands: {
+        inspectContinuation: workerSessionDrainContinuationInspectCommand(status.session, continuation),
+        executeContinuation: continuation.status === "queued"
+          ? ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--execute", continuation.continuationId]
+          : null,
+        resetSelectedFailed: continuation.status === "failed"
+          ? ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--reset-failed", "--continuation", continuation.continuationId]
+          : null,
+        resetRunning: continuation.status === "running"
+          ? ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--reset-running", "--older-than-ms", String(options.olderThanMs)]
+          : null,
+      },
+    }));
+  const queue = uniqueCommandQueue(continuations.flatMap((continuation) => [
+    continuation.commands.inspectContinuation,
+    ...(continuation.commands.executeContinuation ? [continuation.commands.executeContinuation] : []),
+    ...(continuation.commands.resetSelectedFailed ? [continuation.commands.resetSelectedFailed] : []),
+    ...(continuation.commands.resetRunning ? [continuation.commands.resetRunning] : []),
+  ])).map((command) => ({ command }));
+  return {
+    ok: true,
+    session: status.session,
+    filter: {
+      status: options.status,
+      continuationIds: options.continuationIds,
+      olderThanMs: options.olderThanMs,
+      lines: options.lines,
+      limit: options.limit,
+    },
+    count: continuations.length,
+    summary: {
+      queued: status.queues.drainContinuations.queued,
+      running: status.queues.drainContinuations.running,
+      failed: status.queues.drainContinuations.failed,
+      terminal: continuations.filter((continuation) => continuation.status === "executed" || continuation.status === "failed").length,
+    },
+    commands: {
+      inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server", "--summary"],
+      inspectFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--status", "failed"],
+      inspectRunning: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--status", "running"],
+      inspectQueued: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--status", "queued"],
+      executeNext: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--execute-next"],
+      resetFailed: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--reset-failed"],
+      resetRunning: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--reset-running", "--older-than-ms", String(options.olderThanMs)],
+      queue,
+    },
+    continuations,
+  };
+}
+
+function workerSessionDrainContinuationInspectCommand(
+  sessionName: string,
+  continuation: Pick<WorkerSessionDrainContinuationRecord, "continuationId" | "status">,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-drain-continuations", sessionName,
+    ...(continuation.status ? ["--status", continuation.status] : []),
+    "--continuation", continuation.continuationId,
+  ];
+}
+
 function parseWorkerSessionBranchNativeCommandSurfaces(value: string): WorkerSessionBranchNativeCommandSurface[] {
   const allowed = new Set<string>(workerSessionBranchNativeCommandSurfaces);
   return parseList(value).map((surface) => {
@@ -16731,6 +16955,15 @@ function workerSessionBranchNativePostOperatorNext(
       action: applyAction.action,
       reason: applyAction.reason,
       command: applyAction.command,
+    };
+  }
+  const drainContinuationAction = response.drainContinuationActions[0];
+  if (drainContinuationAction) {
+    return {
+      surface: "drain_continuation",
+      action: drainContinuationAction.action,
+      reason: drainContinuationAction.reason,
+      command: drainContinuationAction.command,
     };
   }
   const branchAction = response.branchActions[0];
@@ -16945,6 +17178,9 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `  result_skipped: ${response.counts.resultSkipped}`,
     `  apply_actionable: ${response.counts.applyActionable}`,
     `  apply_action_failed_executions: ${response.counts.applyActionFailedExecutions}`,
+    `  drain_queued: ${response.counts.drainQueued}`,
+    `  drain_running: ${response.counts.drainRunning}`,
+    `  drain_failed: ${response.counts.drainFailed}`,
     `  commands: ${response.commands.length}`,
     "  control_plane_workers:",
     `    inspect_all: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-workers", response.session, "--server", "--include-retired", "--lines", "5"])}`,
@@ -17222,6 +17458,46 @@ function formatApplyActionTerminalsText(response: ApplyActionTerminalsResponse):
         `      execute_action: ${formatShellCommand(execution.commands.executeAction)}`,
       );
     }
+  }
+  return lines;
+}
+
+function printDrainTerminalsText(response: DrainTerminalsResponse): void {
+  console.log(formatDrainTerminalsText(response).join("\n"));
+}
+
+function formatDrainTerminalsText(response: DrainTerminalsResponse): string[] {
+  const lines = [
+    "drain_terminals:",
+    `  session: ${response.session}`,
+    `  filter: status=${response.filter.status} continuations=${response.filter.continuationIds.join(",") || "*"} older_than_ms=${response.filter.olderThanMs} lines=${response.filter.lines} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  summary: queued=${response.summary.queued} running=${response.summary.running} failed=${response.summary.failed} terminal=${response.summary.terminal}`,
+    `  inspect_status: ${formatShellCommand(response.commands.inspectStatus)}`,
+    `  inspect_failed: ${formatShellCommand(response.commands.inspectFailed)}`,
+    `  inspect_running: ${formatShellCommand(response.commands.inspectRunning)}`,
+    `  execute_next: ${formatShellCommand(response.commands.executeNext)}`,
+    `  reset_failed: ${formatShellCommand(response.commands.resetFailed)}`,
+    `  reset_running: ${formatShellCommand(response.commands.resetRunning)}`,
+    "  continuations:",
+  ];
+  if (response.continuations.length === 0) {
+    lines.push("    <empty>");
+    return lines;
+  }
+  for (const continuation of response.continuations) {
+    lines.push(
+      `    - continuation: ${continuation.continuationId}`,
+      `      status: ${continuation.status ?? ""}`,
+      `      selected: ${continuation.selected}`,
+      `      succeeded: ${continuation.succeeded}`,
+      `      failed: ${continuation.failed}`,
+      `      error: ${continuation.error ?? ""}`,
+      `      inspect: ${formatShellCommand(continuation.commands.inspectContinuation)}`,
+      ...(continuation.commands.executeContinuation ? [`      execute: ${formatShellCommand(continuation.commands.executeContinuation)}`] : []),
+      ...(continuation.commands.resetSelectedFailed ? [`      reset_failed: ${formatShellCommand(continuation.commands.resetSelectedFailed)}`] : []),
+      ...(continuation.commands.resetRunning ? [`      reset_running: ${formatShellCommand(continuation.commands.resetRunning)}`] : []),
+    );
   }
   return lines;
 }
@@ -26047,6 +26323,7 @@ Commands:
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
@@ -26068,7 +26345,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000] --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty [--resume-loop loop_advance_id] --dry-run|--confirm --max-results 10 --interval-ms 1]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000] --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty [--resume-loop loop_advance_id] --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
