@@ -1222,6 +1222,7 @@ try {
     selectedAction: string;
     operator: { dryRun: boolean; confirmed: boolean; stoppedReason: string; cycles: Array<{ status: string; action: { surface: string; action: string } | null }>; operatorRunRecord: { status: string } };
     after: null;
+    afterNext: null;
   }>(baseUrl, [
     "runs",
     "session-branch-native-next",
@@ -1243,6 +1244,7 @@ try {
   assert.equal(branchNativeOperatorDryRun.operator.cycles[0]?.action?.surface, "worker_recovery");
   assert.equal(branchNativeOperatorDryRun.operator.cycles[0]?.action?.action, "reconcile_control_plane_workers");
   assert.equal(branchNativeOperatorDryRun.after, null);
+  assert.equal(branchNativeOperatorDryRun.afterNext, null);
   const branchNativeOperatorDryRunText = await cliText(baseUrl, [
     "runs",
     "session-branch-native-next",
@@ -1276,6 +1278,53 @@ try {
   assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5$`, "m"));
   assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}$`, "m"));
   assert.doesNotMatch(branchNativeWorkerCommands, /session-branch-native-next .*--recover-next/);
+
+  const branchNativeOperatorConfirm = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    operator: { dryRun: boolean; confirmed: boolean; operatorRunRecord: { status: string } };
+    after: { counts: { workerRecovery: number; resultPending: number } } | null;
+    afterNext: { surface: string; action: string; reason: string; command: string[] } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--confirm",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+  ]);
+  assert.equal(branchNativeOperatorConfirm.dryRun, false);
+  assert.equal(branchNativeOperatorConfirm.confirmed, true);
+  assert.equal(branchNativeOperatorConfirm.selectedAction, "operate");
+  assert.equal(branchNativeOperatorConfirm.operator.dryRun, false);
+  assert.equal(branchNativeOperatorConfirm.operator.confirmed, true);
+  assert.equal(branchNativeOperatorConfirm.operator.operatorRunRecord.status, "executed");
+  assert.ok(branchNativeOperatorConfirm.after);
+  assert.ok(branchNativeOperatorConfirm.afterNext);
+  assert.ok(branchNativeOperatorConfirm.afterNext.command.length > 0);
+  const branchNativeOperatorConfirmText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--confirm",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeOperatorConfirmText, /branch_native_next_operator_execution:/);
+  assert.match(branchNativeOperatorConfirmText, /confirmed: true/);
+  assert.match(branchNativeOperatorConfirmText, /after_next_surface: /);
+  assert.match(branchNativeOperatorConfirmText, /after_next_command: npm run cli -- runs/);
 
   await cliJson(baseUrl, [
     "runs",

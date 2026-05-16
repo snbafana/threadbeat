@@ -5724,7 +5724,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         after: afterStatus ? workerSessionBranchNativeNext(summarizeWorkerSessionControlPlaneStatus(afterStatus), {
           limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
         }) : null,
+        afterNext: null as WorkerSessionBranchNativePostOperatorNext | null,
       };
+      executionResponse.afterNext = workerSessionBranchNativePostOperatorNext(executionResponse.after);
       if (outputFormat === "text") {
         printWorkerSessionBranchNativeNextOperatorExecutionText(executionResponse);
       } else {
@@ -14668,6 +14670,13 @@ type WorkerSessionBranchNativeCommandQueueItem = {
   command: string[];
 };
 
+type WorkerSessionBranchNativePostOperatorNext = {
+  surface: WorkerSessionBranchNativeCommandSurface;
+  action: string;
+  reason: string;
+  command: string[];
+};
+
 function workerSessionBranchNativeNext(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
   options: { limit: number; commandSurfaces?: WorkerSessionBranchNativeCommandSurface[] },
@@ -14865,6 +14874,63 @@ function filterWorkerSessionBranchNativeCommandQueue(
   return commands.filter((item) => item.surfaces.some((surface) => requested.has(surface)));
 }
 
+function workerSessionBranchNativePostOperatorNext(
+  response: WorkerSessionBranchNativeNextResponse | null,
+): WorkerSessionBranchNativePostOperatorNext | null {
+  if (!response) return null;
+  const workerAction = response.workerActions[0];
+  if (workerAction) {
+    return {
+      surface: "worker_recovery",
+      action: workerAction.action,
+      reason: workerAction.reason,
+      command: workerAction.command,
+    };
+  }
+  const recoverLoop = response.recoverNextLoops[0];
+  if (recoverLoop) {
+    return {
+      surface: "recover_next",
+      action: "resume_recover_next_loop",
+      reason: recoverLoop.stoppedReason ?? "recover_next_loop_incomplete",
+      command: workerSessionBranchNativeRecoverLoopCommand(response.session, recoverLoop, false),
+    };
+  }
+  const failedRecoverLoop = response.failedRecoverNextResumeLoops[0];
+  if (failedRecoverLoop?.commands.resumeLoop) {
+    return {
+      surface: "recover_next",
+      action: "resume_failed_recover_next_loop",
+      reason: failedRecoverLoop.stoppedReason ?? "failed_recover_next_resume_attempt",
+      command: failedRecoverLoop.commands.resumeLoop,
+    };
+  }
+  const branchAction = response.branchActions[0];
+  if (branchAction) {
+    return {
+      surface: "branch",
+      action: branchAction.action,
+      reason: branchAction.reason,
+      command: branchAction.commands.resumeBranch ?? branchAction.commands.reviewRun,
+    };
+  }
+  const resultAction = response.resultActions[0];
+  if (resultAction) {
+    return {
+      surface: "result_inspection",
+      action: resultAction.action,
+      reason: resultAction.reason,
+      command: resultAction.commands.reviewRun,
+    };
+  }
+  return {
+    surface: "control",
+    action: "inspect_next",
+    reason: "no_action_needed",
+    command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"],
+  };
+}
+
 function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNativeNextResponse): void {
   console.log([
     "branch_native_next:",
@@ -15049,6 +15115,7 @@ function printWorkerSessionBranchNativeNextOperatorExecutionText(
     selectedAction: string;
     operator: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>;
     after: WorkerSessionBranchNativeNextResponse | null;
+    afterNext: WorkerSessionBranchNativePostOperatorNext | null;
   },
 ): void {
   console.log([
@@ -15063,6 +15130,10 @@ function printWorkerSessionBranchNativeNextOperatorExecutionText(
     `  cycles: ${response.operator.cycles.length}`,
     `  after_worker_recovery: ${response.after?.counts.workerRecovery ?? ""}`,
     `  after_result_pending: ${response.after?.counts.resultPending ?? ""}`,
+    `  after_next_surface: ${response.afterNext?.surface ?? ""}`,
+    `  after_next_action: ${response.afterNext?.action ?? ""}`,
+    `  after_next_reason: ${response.afterNext?.reason ?? ""}`,
+    `  after_next_command: ${formatShellCommand(response.afterNext?.command ?? [])}`,
     `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
     `  inspect_operator_run: ${formatShellCommand(response.operator.commands.inspectOperatorRuns)}`,
     `  inspect_operator_timeline: ${formatShellCommand(response.operator.commands.inspectOperatorRunTimeline)}`,
