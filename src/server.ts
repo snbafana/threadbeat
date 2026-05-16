@@ -64,6 +64,10 @@ import {
   type WorkerSessionControlPlaneOperatorRunRecord,
 } from "./workerSessionControlPlaneOperatorRuns.js";
 import {
+  listControlPlaneTerminalOverviewReplayLoopRecords,
+  summarizeControlPlaneTerminalOverviewReplayLoopRecords,
+} from "./workerSessionTerminalOverviewReplayLoops.js";
+import {
   listWorkerSessionControlPlaneTickWorkerNextSteps,
   listWorkerSessionControlPlaneTickWorkers,
   restartWorkerSessionControlPlaneTickWorker,
@@ -1096,6 +1100,66 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         count: advances.length,
         summary: summarizeWorkerSessionControlPlaneAdvanceRecords(advances),
         advances,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/terminal-overview-replay-loops", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const filter = {
+        loopIds: [
+          ...parseOptionalList(query.loop),
+          ...parseOptionalList(query.loopId),
+          ...parseOptionalList(query.loopIds),
+        ],
+        commandSurfaces: [
+          ...parseOptionalList(query.surface),
+          ...parseOptionalList(query.surfaces),
+          ...parseOptionalList(query.commandSurface),
+          ...parseOptionalList(query.commandSurfaces),
+        ],
+        actions: [
+          ...parseOptionalList(query.action),
+          ...parseOptionalList(query.actions),
+        ],
+      };
+      const limit = parseOptionalInteger(query.limit) ?? 20;
+      const loops = await listControlPlaneTerminalOverviewReplayLoopRecords(
+        settings.projectRoot,
+        name,
+        {
+          limit,
+          loopIds: filter.loopIds,
+          commandSurfaces: filter.commandSurfaces,
+          actions: filter.actions,
+        },
+      );
+      const commandFilterArgs = [
+        ...(filter.commandSurfaces.length > 0 ? ["--surface", filter.commandSurfaces.join(",")] : []),
+        ...(filter.actions.length > 0 ? ["--action", filter.actions.join(",")] : []),
+      ];
+      return {
+        ok: true,
+        session: name,
+        filter: {
+          limit,
+          loopIds: filter.loopIds,
+          commandSurfaces: filter.commandSurfaces,
+          actions: filter.actions,
+        },
+        count: loops.length,
+        summary: summarizeControlPlaneTerminalOverviewReplayLoopRecords(loops),
+        latest: loops[0] ?? null,
+        loops,
+        commands: {
+          inspectSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-loop-summary", ...commandFilterArgs],
+          replayLoopDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-unreplayed-needs-action-loop", ...commandFilterArgs, "--dry-run"],
+          replayLoopConfirm: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-unreplayed-needs-action-loop", ...commandFilterArgs, "--confirm"],
+        },
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

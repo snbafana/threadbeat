@@ -18,6 +18,11 @@ import {
   type WorkerSessionControlPlaneWorkerReconciliationRecord,
   writeWorkerSessionControlPlaneWorkerReconciliationRecord,
 } from "../src/workerSessionControlPlaneWorkerReconciliations.js";
+import {
+  type ControlPlaneTerminalOverviewReplayLoopRecord,
+  listControlPlaneTerminalOverviewReplayLoopRecords,
+  writeControlPlaneTerminalOverviewReplayLoopRecord,
+} from "../src/workerSessionTerminalOverviewReplayLoops.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
@@ -6007,7 +6012,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         actions: executionHistoryActions,
         replayState: "all",
       });
-      const loopRecords = await listControlPlaneTerminalOverviewReplayLoopRecords(requiredSessionName, {
+      const loopRecords = await listControlPlaneTerminalOverviewReplayLoopRecords(process.cwd(), requiredSessionName, {
         limit: parsePositiveInteger(options.limit ?? "100", "--limit"),
         commandSurfaces,
         actions: executionHistoryActions,
@@ -17355,28 +17360,6 @@ type ControlPlaneTerminalOverviewReplayLoopSummaryResponse = {
   };
 };
 
-type ControlPlaneTerminalOverviewReplayLoopRecord = {
-  loopId: string;
-  session: string;
-  startedAt: string;
-  completedAt: string;
-  dryRun: boolean;
-  confirmed: boolean;
-  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
-  actions: string[];
-  maxSteps: number;
-  stoppedReason: ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse["stoppedReason"];
-  summary: ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse["summary"];
-  steps: Array<{
-    sourceExecutionId: string;
-    replayExecutionId: string;
-    supported: boolean;
-    unsupportedReason: string | null;
-    command: string[] | null;
-    exitCode: number | null;
-  }>;
-};
-
 type ControlPlaneTerminalOverviewExecutionRecord = {
   executionId: string;
   replayOf?: string;
@@ -18444,7 +18427,7 @@ async function replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(
     executed: steps.filter((step) => Boolean(step.replayExecution.executed)).length,
     failed: steps.filter((step) => step.replayExecution.executed?.exitCode !== undefined && step.replayExecution.executed?.exitCode !== 0).length,
   };
-  const writtenLoop = await writeControlPlaneTerminalOverviewReplayLoopRecord({
+  const writtenLoop = await writeControlPlaneTerminalOverviewReplayLoopRecord(process.cwd(), {
     loopId: createControlPlaneTerminalOverviewReplayLoopId(completedAt),
     session: sessionName,
     startedAt,
@@ -25649,37 +25632,6 @@ async function listControlPlaneTerminalOverviewExecutionRecords(
   }
 }
 
-async function listControlPlaneTerminalOverviewReplayLoopRecords(
-  sessionName: string,
-  options: {
-    limit: number;
-    commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
-    actions: string[];
-  },
-): Promise<ControlPlaneTerminalOverviewReplayLoopRecord[]> {
-  assertSafeSessionName(sessionName);
-  const loopDir = controlPlaneTerminalOverviewReplayLoopDir(sessionName);
-  try {
-    const entries = await fs.readdir(loopDir, { withFileTypes: true });
-    const records = await Promise.all(entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-      .map(async (entry) => {
-        const text = await fs.readFile(path.join(loopDir, entry.name), "utf8");
-        return JSON.parse(text) as ControlPlaneTerminalOverviewReplayLoopRecord;
-      }));
-    const requested = new Set(options.commandSurfaces);
-    const requestedActions = new Set(options.actions);
-    return records
-      .filter((record) => requested.size === 0 || record.commandSurfaces.some((surface) => requested.has(surface)))
-      .filter((record) => requestedActions.size === 0 || record.actions.some((action) => requestedActions.has(action)))
-      .sort((left, right) => right.completedAt.localeCompare(left.completedAt))
-      .slice(0, options.limit);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-}
-
 async function readControlPlaneTerminalOverviewExecutionRecord(
   sessionName: string,
   executionId: string,
@@ -25733,15 +25685,6 @@ async function writeControlPlaneTerminalOverviewExecutionRecord(
   await fs.mkdir(path.dirname(executionPath), { recursive: true });
   await fs.writeFile(executionPath, `${JSON.stringify(record, null, 2)}\n`);
   return { path: executionPath, record };
-}
-
-async function writeControlPlaneTerminalOverviewReplayLoopRecord(
-  record: ControlPlaneTerminalOverviewReplayLoopRecord,
-): Promise<{ path: string; record: ControlPlaneTerminalOverviewReplayLoopRecord }> {
-  const loopPath = controlPlaneTerminalOverviewReplayLoopPath(record.session, record.loopId);
-  await fs.mkdir(path.dirname(loopPath), { recursive: true });
-  await fs.writeFile(loopPath, `${JSON.stringify(record, null, 2)}\n`);
-  return { path: loopPath, record };
 }
 
 function createDrainContinuationId(observedAt: string): string {
@@ -28290,17 +28233,6 @@ function controlPlaneTerminalOverviewExecutionPath(sessionName: string, executio
   assertSafeSessionName(sessionName);
   assertSafeSessionName(executionId);
   return path.join(controlPlaneTerminalOverviewExecutionDir(sessionName), `${executionId}.json`);
-}
-
-function controlPlaneTerminalOverviewReplayLoopDir(sessionName: string): string {
-  assertSafeSessionName(sessionName);
-  return path.join(workerSessionDir, "terminal-overview-replay-loops", sessionName);
-}
-
-function controlPlaneTerminalOverviewReplayLoopPath(sessionName: string, loopId: string): string {
-  assertSafeSessionName(sessionName);
-  assertSafeSessionName(loopId);
-  return path.join(controlPlaneTerminalOverviewReplayLoopDir(sessionName), `${loopId}.json`);
 }
 
 function workerSessionControlPlaneTickDir(sessionName: string): string {

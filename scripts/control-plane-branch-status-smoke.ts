@@ -876,6 +876,32 @@ try {
   assert.equal(terminalOverviewReplayLoopSummary.commands.replayLoopConfirm.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --confirm`);
   assert.equal(terminalOverviewReplayLoopSummary.commands.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
 
+  const terminalOverviewReplayLoopsApi = await apiJson<{
+    count: number;
+    summary: { attempts: number; dryRun: number; confirmed: number; steps: number; supported: number; unsupported: number; executed: number; failed: number };
+    latest: { loopId: string; stoppedReason: string; summary: { steps: number } } | null;
+    loops: Array<{ loopId: string; stoppedReason: string; steps: Array<{ sourceExecutionId: string; replayExecutionId: string }> }>;
+    commands: { inspectSummary: string[]; replayLoopDryRun: string[]; replayLoopConfirm: string[] };
+  }>(baseUrl, `/api/worker-sessions/${encodeURIComponent(sessionName)}/terminal-overview-replay-loops?surface=control&limit=5`);
+  assert.equal(terminalOverviewReplayLoopsApi.count, 1);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.attempts, 1);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.dryRun, 1);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.confirmed, 0);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.steps, 1);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.supported, 0);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.unsupported, 1);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.executed, 0);
+  assert.equal(terminalOverviewReplayLoopsApi.summary.failed, 0);
+  assert.equal(terminalOverviewReplayLoopsApi.latest?.loopId, replayLoopId);
+  assert.equal(terminalOverviewReplayLoopsApi.latest?.stoppedReason, "queue_empty");
+  assert.equal(terminalOverviewReplayLoopsApi.latest?.summary.steps, 1);
+  assert.equal(terminalOverviewReplayLoopsApi.loops[0]?.loopId, replayLoopId);
+  assert.equal(terminalOverviewReplayLoopsApi.loops[0]?.steps[0]?.sourceExecutionId, loopSourceExecutionId);
+  assert.equal(terminalOverviewReplayLoopsApi.loops[0]?.steps[0]?.replayExecutionId, loopReplayExecutionId);
+  assert.equal(terminalOverviewReplayLoopsApi.commands.inspectSummary.join(" "), `${terminalOverviewCommand} --replay-loop-summary --surface control`);
+  assert.equal(terminalOverviewReplayLoopsApi.commands.replayLoopDryRun.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`);
+  assert.equal(terminalOverviewReplayLoopsApi.commands.replayLoopConfirm.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --confirm`);
+
   const terminalOverviewReplayLoopSummaryText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
@@ -1599,6 +1625,14 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     maxBuffer: 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
+}
+
+async function apiJson<T>(baseUrl: string, pathAndQuery: string): Promise<T> {
+  const response = await fetch(new URL(pathAndQuery, baseUrl));
+  if (!response.ok) {
+    assert.fail(await response.text());
+  }
+  return await response.json() as T;
 }
 
 async function cliJsonWithExit<T>(baseUrl: string, args: string[]): Promise<{ exitCode: number; json: T; stdout: string; stderr: string }> {
