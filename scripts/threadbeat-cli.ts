@@ -14762,10 +14762,16 @@ function workerSessionBranchNativeNext(
     ]),
     { surfaces: ["operator"], command: workerSessionBranchNativeOperatorCommand(summary.session, true) },
     { surfaces: ["operator"], command: workerSessionBranchNativeOperatorCommand(summary.session, false) },
+    { surfaces: ["operator"], command: workerSessionBranchNativeOperatorCommand(summary.session, true, true) },
+    { surfaces: ["operator"], command: workerSessionBranchNativeOperatorCommand(summary.session, false, true) },
     { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, true) },
     { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, false) },
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, true, true) },
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, false, true) },
     { surfaces: ["operator"], command: workerSessionControlPlaneOperatorWorkerCommand(summary.session, true) },
     { surfaces: ["operator"], command: workerSessionControlPlaneOperatorWorkerCommand(summary.session, false) },
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorWorkerCommand(summary.session, true, true) },
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorWorkerCommand(summary.session, false, true) },
     { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", summary.session, "--server"] },
     { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", summary.session, "--server"] },
     { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers-next", summary.session, "--server"] },
@@ -14848,23 +14854,25 @@ function parseWorkerSessionBranchNativeCommandSurfaces(value: string): WorkerSes
   });
 }
 
-function workerSessionControlPlaneOperatorCommand(sessionName: string, dryRun: boolean): string[] {
+function workerSessionControlPlaneOperatorCommand(sessionName: string, dryRun: boolean, untilEmpty = false): string[] {
   return [
     "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
     dryRun ? "--dry-run" : "--confirm",
     "--max-cycles", "1",
     "--cycle-interval-ms", "2000",
     "--reconcile-workers",
+    ...(untilEmpty ? ["--until-empty", "--max-steps", "10", "--interval-ms", "2000"] : []),
   ];
 }
 
-function workerSessionBranchNativeOperatorCommand(sessionName: string, dryRun: boolean): string[] {
+function workerSessionBranchNativeOperatorCommand(sessionName: string, dryRun: boolean, untilEmpty = false): string[] {
   return [
     "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
     "--operate",
     dryRun ? "--dry-run" : "--confirm",
     "--max-cycles", "1",
     "--cycle-interval-ms", "2000",
+    ...(untilEmpty ? ["--until-empty", "--max-steps", "10", "--interval-ms", "2000"] : []),
   ];
 }
 
@@ -14884,7 +14892,7 @@ function workerSessionBranchNativeOperatorRunCommand(
   ];
 }
 
-function workerSessionControlPlaneOperatorWorkerCommand(sessionName: string, dryRun: boolean): string[] {
+function workerSessionControlPlaneOperatorWorkerCommand(sessionName: string, dryRun: boolean, untilEmpty = false): string[] {
   return [
     "npm", "run", "cli", "--", "runs", "ensure-control-plane-operator-worker", sessionName, "--server",
     dryRun ? "--dry-run" : "--confirm",
@@ -14892,6 +14900,7 @@ function workerSessionControlPlaneOperatorWorkerCommand(sessionName: string, dry
     "--max-cycles", "60",
     "--cycle-interval-ms", "2000",
     "--reconcile-workers",
+    ...(untilEmpty ? ["--until-empty", "--max-steps", "10", "--interval-ms", "2000"] : []),
   ];
 }
 
@@ -15087,10 +15096,16 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     "  operator_control:",
     `    branch_native_operate_dry_run: ${formatShellCommand(workerSessionBranchNativeOperatorCommand(response.session, true))}`,
     `    branch_native_operate_confirm: ${formatShellCommand(workerSessionBranchNativeOperatorCommand(response.session, false))}`,
+    `    branch_native_operate_until_empty_dry_run: ${formatShellCommand(workerSessionBranchNativeOperatorCommand(response.session, true, true))}`,
+    `    branch_native_operate_until_empty_confirm: ${formatShellCommand(workerSessionBranchNativeOperatorCommand(response.session, false, true))}`,
     `    operate_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, true))}`,
     `    operate_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, false))}`,
+    `    operate_until_empty_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, true, true))}`,
+    `    operate_until_empty_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, false, true))}`,
     `    ensure_worker_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, true))}`,
     `    ensure_worker_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, false))}`,
+    `    ensure_worker_until_empty_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, true, true))}`,
+    `    ensure_worker_until_empty_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, false, true))}`,
     `    operator_runs: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", response.session, "--server"])}`,
     `    operator_workers: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", response.session, "--server"])}`,
     "  worker_health:",
