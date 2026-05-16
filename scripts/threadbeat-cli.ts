@@ -5899,6 +5899,49 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-terminal-overview") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-terminal-overview <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-terminal-overview requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-terminal-overview --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-terminal-overview --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-terminal-overview --format text cannot be combined with --commands-only");
+    }
+    const commandSurfaces = options.surface
+      ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
+      : [];
+    const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, {
+      lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+    });
+    const branchNativeNext = workerSessionBranchNativeNext(summarizeWorkerSessionControlPlaneStatus(status), {
+      limit: parsePositiveInteger(options.limit ?? "5", "--limit"),
+      commandSurfaces,
+    });
+    const overview = summarizeControlPlaneTerminalOverview(branchNativeNext);
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(overview.commands.queue);
+      } else {
+        await printJson({ ...overview, commands: overview.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printControlPlaneTerminalOverviewText(overview);
+    } else {
+      await printJson(overview);
+    }
+    return;
+  }
   if (subcommandName === "session-branch-native-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -15981,6 +16024,7 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: action.command });
   }
   commands.push({ command: summary.commands.branchNativeNext });
+  commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", summary.session, "--server"] });
   commands.push({ command: summary.commands.branchRecoveryExecutions });
   commands.push({ command: summary.commands.branchRecoveryCommandQueue });
   commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-branch-terminals", summary.session, "--server"] });
@@ -16925,6 +16969,31 @@ type WorkerSessionBranchNativeCommandQueueItem = {
   command: string[];
 };
 
+type ControlPlaneTerminalOverviewResponse = {
+  ok: true;
+  session: string;
+  observedAt: string;
+  limit: number;
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+  counts: WorkerSessionBranchNativeNextResponse["counts"];
+  summary: {
+    commands: number;
+    surfaces: number;
+    nonEmptySurfaces: number;
+  };
+  commands: {
+    inspectStatus: string[];
+    inspectBranchNativeNext: string[];
+    inspectTerminalOverview: string[];
+    queue: WorkerSessionBranchNativeCommandQueueItem[];
+  };
+  groups: Array<{
+    surface: WorkerSessionBranchNativeCommandSurface;
+    commandCount: number;
+    commands: WorkerSessionBranchNativeCommandQueueItem[];
+  }>;
+};
+
 type RecoverNextTerminalStatus = "failed" | "all";
 
 type ApplyActionTerminalStatus = "actionable" | "failed" | "all";
@@ -17195,6 +17264,7 @@ function workerSessionBranchNativeNext(
   const commands = filterWorkerSessionBranchNativeCommandQueue(uniqueWorkerSessionBranchNativeCommandQueue([
     { surfaces: ["control"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"] },
     { surfaces: ["control"], command: summary.commands.branchNativeNext },
+    { surfaces: ["control"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", summary.session, "--server"] },
     { surfaces: ["apply_action"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-apply-action-terminals", summary.session, "--server"] },
     { surfaces: ["apply_action"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-apply-action-terminals", summary.session, "--server", "--status", "actionable"] },
     { surfaces: ["apply_action"], command: ["npm", "run", "cli", "--", "runs", "session-applies", summary.session, "--server", "--action-queue"] },
@@ -17761,6 +17831,81 @@ function filterWorkerSessionBranchNativeCommandQueue(
   if (surfaces.length === 0) return commands;
   const requested = new Set(surfaces);
   return commands.filter((item) => item.surfaces.some((surface) => requested.has(surface)));
+}
+
+function summarizeControlPlaneTerminalOverview(
+  branchNativeNext: WorkerSessionBranchNativeNextResponse,
+): ControlPlaneTerminalOverviewResponse {
+  const selectedSurfaces = branchNativeNext.commandSurfaces.length > 0
+    ? branchNativeNext.commandSurfaces
+    : [...workerSessionBranchNativeCommandSurfaces];
+  const queue = branchNativeNext.commands;
+  const groups = selectedSurfaces.map((surface) => ({
+    surface,
+    commandCount: queue.filter((item) => item.surfaces.includes(surface)).length,
+    commands: queue.filter((item) => item.surfaces.includes(surface)),
+  }));
+  return {
+    ok: true,
+    session: branchNativeNext.session,
+    observedAt: branchNativeNext.observedAt,
+    limit: branchNativeNext.limit,
+    commandSurfaces: branchNativeNext.commandSurfaces,
+    counts: branchNativeNext.counts,
+    summary: {
+      commands: queue.length,
+      surfaces: groups.length,
+      nonEmptySurfaces: groups.filter((group) => group.commandCount > 0).length,
+    },
+    commands: {
+      inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", branchNativeNext.session, "--server", "--summary"],
+      inspectBranchNativeNext: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", branchNativeNext.session, "--server"],
+      inspectTerminalOverview: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", branchNativeNext.session, "--server",
+        ...(branchNativeNext.commandSurfaces.length > 0 ? ["--surface", branchNativeNext.commandSurfaces.join(",")] : []),
+      ],
+      queue,
+    },
+    groups,
+  };
+}
+
+function printControlPlaneTerminalOverviewText(response: ControlPlaneTerminalOverviewResponse): void {
+  console.log(formatControlPlaneTerminalOverviewText(response).join("\n"));
+}
+
+function formatControlPlaneTerminalOverviewText(response: ControlPlaneTerminalOverviewResponse): string[] {
+  const lines = [
+    "control_plane_terminal_overview:",
+    `  session: ${response.session}`,
+    `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
+    `  limit: ${response.limit}`,
+    `  summary: commands=${response.summary.commands} surfaces=${response.summary.surfaces} non_empty_surfaces=${response.summary.nonEmptySurfaces}`,
+    `  branch_ready: ${response.counts.branchReady}`,
+    `  branch_actions: ${response.counts.branchActions}`,
+    `  result_pending: ${response.counts.resultPending}`,
+    `  worker_recovery: ${response.counts.workerRecovery}`,
+    `  operator_loops: ${response.counts.operatorLoops}`,
+    `  recover_next_incomplete_loops: ${response.counts.recoverNextIncompleteLoops}`,
+    `  apply_actionable: ${response.counts.applyActionable}`,
+    `  drain_running: ${response.counts.drainRunning}`,
+    `  drain_failed: ${response.counts.drainFailed}`,
+    "  commands:",
+    `    status: ${formatShellCommand(response.commands.inspectStatus)}`,
+    `    branch_native_next: ${formatShellCommand(response.commands.inspectBranchNativeNext)}`,
+    `    terminal_overview: ${formatShellCommand(response.commands.inspectTerminalOverview)}`,
+    "  surfaces:",
+  ];
+  for (const group of response.groups) {
+    lines.push(
+      `    - surface: ${group.surface}`,
+      `      commands: ${group.commandCount}`,
+    );
+    for (const item of group.commands.slice(0, response.limit)) {
+      lines.push(`      - ${formatShellCommand(item.command)}`);
+    }
+  }
+  return lines;
 }
 
 function workerSessionBranchNativePostOperatorNext(
@@ -27399,6 +27544,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
