@@ -18,6 +18,7 @@ const exitedAdvanceWorkerId = "advance-worker-exited";
 const selectedTickWorkerId = "tick-worker-selected";
 const otherTickWorkerId = "tick-worker-other";
 const exitedTickWorkerId = "tick-worker-exited";
+const replayLoopWorkerId = "replay-loop-worker-selected";
 
 const settings: Settings = {
   projectRoot: path.resolve("."),
@@ -441,11 +442,108 @@ try {
   assert.match(aggregateText, new RegExp(`reconcile_dry_run: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --dry-run`));
   assert.match(aggregateText, new RegExp(`reconcile_confirm: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --confirm`));
   assert.match(aggregateText, new RegExp(`reconcile_until_empty_confirm: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`));
+
+  await cliJson(baseUrl, [
+    "runs",
+    "start-terminal-overview-replay-loop-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--dry-run",
+    "--max-steps",
+    "1",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--lines",
+    "1",
+  ]);
+  const replayLoopAggregate = await cliJson<WorkerAggregateResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(replayLoopAggregate.summary.terminalOverviewReplayLoop.total, 1);
+  assert.equal(replayLoopAggregate.summary.terminalOverviewReplayLoop.stopped, 1);
+  assert.equal(replayLoopAggregate.summary.terminalOverviewReplayLoop.restartable, 1);
+  assert.equal(replayLoopAggregate.nextSteps.length, 1);
+  assert.equal(replayLoopAggregate.nextSteps[0]?.kind, "terminal_overview_replay_loop");
+  assert.equal(replayLoopAggregate.nextSteps[0]?.action, "restart_terminal_overview_replay_loop_worker");
+  assert.equal(replayLoopAggregate.nextSteps[0]?.workerId, replayLoopWorkerId);
+  assert.equal(
+    replayLoopAggregate.nextSteps[0]?.command.join(" "),
+    `npm run cli -- runs restart-terminal-overview-replay-loop-worker ${sessionName} --server --worker-id ${replayLoopWorkerId} --include-retired`,
+  );
+  const replayLoopReconcilePreview = await cliJson<WorkerReconcileResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--kind",
+    "terminal-overview-replay-loop",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--include-retired",
+    "--dry-run",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(replayLoopReconcilePreview.dryRun, true);
+  assert.equal(replayLoopReconcilePreview.confirmed, false);
+  assert.equal(replayLoopReconcilePreview.plan.count, 1);
+  assert.equal(replayLoopReconcilePreview.plan.steps[0]?.kind, "terminal_overview_replay_loop");
+  assert.deepEqual(replayLoopReconcilePreview.plan.commands[0], replayLoopAggregate.nextSteps[0]?.command);
+  const replayLoopReconcileConfirm = await cliJson<WorkerReconcileResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-reconcile-workers",
+    sessionName,
+    "--server",
+    "--kind",
+    "terminal-overview-replay-loop",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--include-retired",
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(replayLoopReconcileConfirm.dryRun, false);
+  assert.equal(replayLoopReconcileConfirm.confirmed, true);
+  assert.equal(replayLoopReconcileConfirm.passed, true);
+  assert.equal(replayLoopReconcileConfirm.plan.count, 1);
+  assert.equal(replayLoopReconcileConfirm.executed.length, 1);
+  assert.equal(replayLoopReconcileConfirm.executed[0]?.kind, "terminal_overview_replay_loop");
+  assert.equal(replayLoopReconcileConfirm.executed[0]?.restartCount, 1);
+  assert.equal(replayLoopReconcileConfirm.remaining?.length, 0);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-tick-workers", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loop-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-worker-reconciliations", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
@@ -480,12 +578,27 @@ type WorkerAggregateResponse = {
     exitedUnrecorded: number;
     advance: { exitedUnrecorded: number };
     tick: { exitedUnrecorded: number };
+    terminalOverviewReplayLoop: { total: number; stopped: number; restartable: number };
   };
+  nextSteps: Array<{ kind: string; action: string | null; workerId: string | null; command: string[] }>;
   commands: {
     reconcileDryRun: string[];
     reconcileConfirm: string[];
     reconcileUntilEmptyConfirm: string[];
   };
+};
+
+type WorkerReconcileResponse = {
+  dryRun: boolean;
+  confirmed: boolean;
+  passed: boolean | null;
+  plan: {
+    count: number;
+    steps: Array<{ kind: string; workerId: string; command: string[] }>;
+    commands: string[][];
+  };
+  executed: Array<{ kind: string; workerId: string; restartCount: number | null }>;
+  remaining: Array<{ kind: string; workerId: string }> | null;
 };
 
 type WorkerStatusSummaryResponse = {
