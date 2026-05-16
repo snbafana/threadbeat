@@ -472,6 +472,65 @@ try {
   assert.equal(terminalOverviewBranchActionCommandQueue.commands[0]?.reason, "retry_terminal_overview_execution");
   assert.equal(terminalOverviewBranchActionCommandQueue.commands[0]?.command.join(" "), resumeBranchDryRunCommand);
 
+  const terminalOverviewReplayDryRun = await cliJson<{
+    replayExecution: {
+      sourceExecutionId: string;
+      dryRun: boolean;
+      confirmed: boolean;
+      selectedAction: { surfaces: string[]; command: string[]; action?: string } | null;
+      supported: boolean;
+      command: string[] | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    };
+    executionRecord: { executionId: string; inspectHistory: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--replay-execution",
+    terminalOverviewExecuteDryRun.executionRecord.executionId,
+    "--dry-run",
+  ]);
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.sourceExecutionId, terminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.dryRun, true);
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.confirmed, false);
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.selectedAction?.surfaces[0], "branch");
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.selectedAction?.action, "resume_branch");
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.supported, true);
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.command?.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.executed?.command.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewReplayDryRun.replayExecution.executed?.exitCode, 0);
+  assert.equal(terminalOverviewReplayDryRun.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+
+  const terminalOverviewReplayHistory = await cliJson<{
+    records: Array<{
+      executionId: string;
+      replayOf?: string;
+      selectedAction: { action?: string } | null;
+      command: string[] | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "branch",
+    "--status",
+    "executed",
+    "--action",
+    "resume_branch",
+  ]);
+  const terminalOverviewReplayRecord = terminalOverviewReplayHistory.records.find((record) => record.executionId === terminalOverviewReplayDryRun.executionRecord.executionId);
+  assert.equal(terminalOverviewReplayRecord?.replayOf, terminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.equal(terminalOverviewReplayRecord?.selectedAction?.action, "resume_branch");
+  assert.equal(terminalOverviewReplayRecord?.command?.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewReplayRecord?.executed?.command.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewReplayRecord?.executed?.exitCode, 0);
+
   const terminalOverviewNeedsActionShell = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
