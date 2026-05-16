@@ -1192,6 +1192,21 @@ try {
   assert.match(branchNativeTextAfterStop, /control_plane_worker_progress:/);
   assert.match(branchNativeTextAfterStop, new RegExp(`worker: ${workerId}`));
   assert.match(branchNativeTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
+  const branchNativeWorkerCommands = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs session-control-plane-workers ${sessionName} --server --include-retired --lines 5$`, "m"));
+  assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5$`, "m"));
+  assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}$`, "m"));
+  assert.doesNotMatch(branchNativeWorkerCommands, /session-branch-native-next .*--recover-next/);
 
   await cliJson(baseUrl, [
     "runs",

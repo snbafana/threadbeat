@@ -137,6 +137,37 @@ try {
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecoverLoopDryRunCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecoverLoopConfirmCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchResumeQueueCommand));
+  const branchNativeBranchCommands = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "branch",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(branchNativeBranchCommands, new RegExp(`^${branchResumeQueueCommand}$`, "m"));
+  assert.match(branchNativeBranchCommands, new RegExp(`^${resumeBranchCommand}$`, "m"));
+  assert.doesNotMatch(branchNativeBranchCommands, new RegExp(`^${branchNativeRecoverDryRunCommand}$`, "m"));
+  const branchNativeRecoverNextCommands = await cliJson<{
+    commandSurfaces: string[];
+    commands: Array<{ surfaces: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--commands-only",
+  ]);
+  assert.deepEqual(branchNativeRecoverNextCommands.commandSurfaces, ["recover_next"]);
+  assert.ok(branchNativeRecoverNextCommands.commands.length > 0);
+  assert.ok(branchNativeRecoverNextCommands.commands.every((command) => command.surfaces.includes("recover_next")));
+  assert.ok(branchNativeRecoverNextCommands.commands.some((command) => command.command.join(" ") === branchNativeRecoverDryRunCommand));
+  assert.ok(!branchNativeRecoverNextCommands.commands.some((command) => command.command.join(" ") === branchResumeQueueCommand));
 
   const branchNativeRecoverDryRun = await cliJson<{
     dryRun: boolean;

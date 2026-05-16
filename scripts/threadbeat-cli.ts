@@ -22,6 +22,13 @@ import {
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
 const STALE_RUNNING_DRAIN_CONTINUATION_MS = 10 * 60 * 1000;
+const workerSessionBranchNativeCommandSurfaces = [
+  "control",
+  "recover_next",
+  "worker_recovery",
+  "branch",
+  "result_inspection",
+] as const;
 
 const [command, subcommand, ...rest] = process.argv.slice(2);
 
@@ -5667,11 +5674,18 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recoverNext && outputFormat === "shell") {
       throw new Error("runs session-branch-native-next --recover-next supports --format json or text");
     }
+    const commandSurfaces = options.surface
+      ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
+      : [];
+    if (commandSurfaces.length > 0 && (recordAction || recoverNext)) {
+      throw new Error("runs session-branch-native-next --surface cannot be combined with mutating actions");
+    }
     const requiredSessionName = required(sessionName, "runs session-branch-native-next <session> --server");
     const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines: parsePositiveInteger(options.lines ?? "5", "--lines") });
     const summary = summarizeWorkerSessionControlPlaneStatus(status);
     const response = workerSessionBranchNativeNext(summary, {
       limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
+      commandSurfaces,
     });
     if (recordAction) {
       const reviewLoop = await recordWorkerSessionResultReviewNextLoop(requiredSessionName, {
@@ -14554,6 +14568,7 @@ type WorkerSessionBranchNativeNextResponse = {
   session: string;
   observedAt: string;
   limit: number;
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
   counts: {
     branchReady: number;
     branchActions: number;
@@ -14573,12 +14588,19 @@ type WorkerSessionBranchNativeNextResponse = {
   recoverNextLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["recoverNext"]["incompleteLoops"]["recent"];
   failedRecoverNextResumeLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["failedRecoverNextResumeLoops"]["recent"];
   resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
-  commands: CommandQueueOutput["commands"];
+  commands: WorkerSessionBranchNativeCommandQueueItem[];
+};
+
+type WorkerSessionBranchNativeCommandSurface = typeof workerSessionBranchNativeCommandSurfaces[number];
+
+type WorkerSessionBranchNativeCommandQueueItem = {
+  surfaces: readonly WorkerSessionBranchNativeCommandSurface[];
+  command: string[];
 };
 
 function workerSessionBranchNativeNext(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
-  options: { limit: number },
+  options: { limit: number; commandSurfaces?: WorkerSessionBranchNativeCommandSurface[] },
 ): WorkerSessionBranchNativeNextResponse {
   const branchActions = summary.branches.inspection.nextSteps.slice(0, options.limit);
   const resultActions = summary.results.inspection.nextSteps.slice(0, options.limit);
@@ -14586,70 +14608,75 @@ function workerSessionBranchNativeNext(
   const latestWorkerResults = summary.workers.controlPlaneAdvance.latestResults.slice(0, options.limit);
   const recoverNextLoops = summary.recovery.recoverNext.incompleteLoops.recent.slice(0, options.limit);
   const failedRecoverNextResumeLoops = summary.recovery.failedRecoverNextResumeLoops.recent.slice(0, options.limit);
-  const commands = uniqueCommandQueue([
-    ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"],
-    summary.commands.branchNativeNext,
-    ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--dry-run"],
-    ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--confirm"],
-    ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--dry-run"],
-    ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--confirm"],
-    ...(summary.recovery.recoverNext.incompleteLoops.count > 0 ? [summary.commands.recoverNextIncompleteLoopQueue] : []),
-    ...recoverNextLoops.flatMap((loop) => [
-      workerSessionBranchNativeRecoverLoopCommand(summary.session, loop, true),
-      workerSessionBranchNativeRecoverLoopCommand(summary.session, loop, false),
-      loop.resumeCommand,
-      loop.inspectLastStepCommand,
-      loop.inspectHistoryCommand,
-      loop.executeResumeCommand,
+  const requestedCommandSurfaces = options.commandSurfaces ?? [];
+  const commands = filterWorkerSessionBranchNativeCommandQueue(uniqueWorkerSessionBranchNativeCommandQueue([
+    { surfaces: ["control"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"] },
+    { surfaces: ["control"], command: summary.commands.branchNativeNext },
+    { surfaces: ["recover_next"], command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--dry-run"] },
+    { surfaces: ["recover_next"], command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--confirm"] },
+    { surfaces: ["recover_next"], command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--dry-run"] },
+    { surfaces: ["recover_next"], command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--confirm"] },
+    ...(summary.recovery.recoverNext.incompleteLoops.count > 0 ? [{ surfaces: ["recover_next"] as const, command: summary.commands.recoverNextIncompleteLoopQueue }] : []),
+    ...recoverNextLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
+      { surfaces: ["recover_next"], command: workerSessionBranchNativeRecoverLoopCommand(summary.session, loop, true) },
+      { surfaces: ["recover_next"], command: workerSessionBranchNativeRecoverLoopCommand(summary.session, loop, false) },
+      { surfaces: ["recover_next"], command: loop.resumeCommand },
+      { surfaces: ["recover_next"], command: loop.inspectLastStepCommand },
+      { surfaces: ["recover_next"], command: loop.inspectHistoryCommand },
+      { surfaces: ["recover_next"], command: loop.executeResumeCommand },
     ]),
-    ...(summary.recovery.failedRecoverNextResumeLoops.count > 0 ? [summary.commands.failedRecoverNextResumeAttempts] : []),
-    ...failedRecoverNextResumeLoops.flatMap((loop) => [
-      loop.commands.inspectFailedResumes,
-      ...(loop.commands.inspectHistory ? [loop.commands.inspectHistory] : []),
-      ...(loop.commands.resumeLoop ? [loop.commands.resumeLoop] : []),
-      ...(loop.commands.executeResumeHistory ? [loop.commands.executeResumeHistory] : []),
+    ...(summary.recovery.failedRecoverNextResumeLoops.count > 0 ? [{ surfaces: ["recover_next"] as const, command: summary.commands.failedRecoverNextResumeAttempts }] : []),
+    ...failedRecoverNextResumeLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
+      { surfaces: ["recover_next"], command: loop.commands.inspectFailedResumes },
+      ...(loop.commands.inspectHistory ? [{ surfaces: ["recover_next"] as const, command: loop.commands.inspectHistory }] : []),
+      ...(loop.commands.resumeLoop ? [{ surfaces: ["recover_next"] as const, command: loop.commands.resumeLoop }] : []),
+      ...(loop.commands.executeResumeHistory ? [{ surfaces: ["recover_next"] as const, command: loop.commands.executeResumeHistory }] : []),
     ]),
-    summary.commands.inspectControlPlaneWorkers,
-    summary.commands.inspectControlPlaneWorkerProgress,
-    summary.commands.workerReconciliations,
-    ...(summary.recovery.count > 0 ? [summary.commands.workerRestartQueue] : []),
-    ...workerActions.map((action) => action.command),
-    ...latestWorkerResults.map((result) => workerSessionControlPlaneLatestResultProgressCommand(summary.session, result)),
-    summary.commands.branchRecoveryExecutions,
-    summary.commands.branchRecoveryCommandQueue,
-    ...(summary.branches.counts.ready > 0 ? [summary.commands.branchResumeCommandQueue] : []),
-    ...branchActions.flatMap((action) => [
-      action.commands.inspectResult,
-      action.commands.checkoutBranch,
-      action.commands.reviewRun,
-      ...(action.commands.resumeBranch ? [action.commands.resumeBranch] : []),
+    { surfaces: ["worker_recovery"], command: summary.commands.inspectControlPlaneWorkers },
+    { surfaces: ["worker_recovery"], command: summary.commands.inspectControlPlaneWorkerProgress },
+    { surfaces: ["worker_recovery"], command: summary.commands.workerReconciliations },
+    ...(summary.recovery.count > 0 ? [{ surfaces: ["worker_recovery"] as const, command: summary.commands.workerRestartQueue }] : []),
+    ...workerActions.map((action): WorkerSessionBranchNativeCommandQueueItem => ({ surfaces: ["worker_recovery"], command: action.command })),
+    ...latestWorkerResults.map((result): WorkerSessionBranchNativeCommandQueueItem => ({
+      surfaces: ["worker_recovery"],
+      command: workerSessionControlPlaneLatestResultProgressCommand(summary.session, result),
+    })),
+    { surfaces: ["branch"], command: summary.commands.branchRecoveryExecutions },
+    { surfaces: ["branch"], command: summary.commands.branchRecoveryCommandQueue },
+    ...(summary.branches.counts.ready > 0 ? [{ surfaces: ["branch"] as const, command: summary.commands.branchResumeCommandQueue }] : []),
+    ...branchActions.flatMap((action): WorkerSessionBranchNativeCommandQueueItem[] => [
+      { surfaces: ["branch"], command: action.commands.inspectResult },
+      { surfaces: ["branch"], command: action.commands.checkoutBranch },
+      { surfaces: ["branch"], command: action.commands.reviewRun },
+      ...(action.commands.resumeBranch ? [{ surfaces: ["branch"] as const, command: action.commands.resumeBranch }] : []),
     ]),
-    summary.commands.resultCommitView,
-    summary.commands.pendingResultCommitView,
+    { surfaces: ["result_inspection"], command: summary.commands.resultCommitView },
+    { surfaces: ["result_inspection"], command: summary.commands.pendingResultCommitView },
     ...(summary.results.counts.pending > 0
       ? [
-        summary.commands.nextResultInspection,
-        summary.commands.nextResultReview,
-        summary.commands.pendingResultCommandQueue,
-        summary.commands.previewPendingReviewed,
-        summary.commands.previewPendingSkipped,
-        summary.commands.recordPendingReviewed,
-        summary.commands.recordPendingSkipped,
+        { surfaces: ["result_inspection"] as const, command: summary.commands.nextResultInspection },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.nextResultReview },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.pendingResultCommandQueue },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.previewPendingReviewed },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.previewPendingSkipped },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.recordPendingReviewed },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.recordPendingSkipped },
       ]
       : []),
-    ...resultActions.flatMap((action) => [
-      action.commands.inspectResult,
-      action.commands.checkoutBranch,
-      action.commands.reviewRun,
-      action.commands.recordReviewed,
-      action.commands.recordSkipped,
+    ...resultActions.flatMap((action): WorkerSessionBranchNativeCommandQueueItem[] => [
+      { surfaces: ["result_inspection"], command: action.commands.inspectResult },
+      { surfaces: ["result_inspection"], command: action.commands.checkoutBranch },
+      { surfaces: ["result_inspection"], command: action.commands.reviewRun },
+      { surfaces: ["result_inspection"], command: action.commands.recordReviewed },
+      { surfaces: ["result_inspection"], command: action.commands.recordSkipped },
     ]),
-  ]).map((command) => ({ command }));
+  ]), requestedCommandSurfaces);
   return {
     ok: true,
     session: summary.session,
     observedAt: new Date().toISOString(),
     limit: options.limit,
+    commandSurfaces: requestedCommandSurfaces,
     counts: {
       branchReady: summary.branches.counts.ready,
       branchActions: summary.branches.inspection.count,
@@ -14673,10 +14700,50 @@ function workerSessionBranchNativeNext(
   };
 }
 
+function parseWorkerSessionBranchNativeCommandSurfaces(value: string): WorkerSessionBranchNativeCommandSurface[] {
+  const allowed = new Set<string>(workerSessionBranchNativeCommandSurfaces);
+  return parseList(value).map((surface) => {
+    const normalized = surface === "result" ? "result_inspection" : surface;
+    if (!allowed.has(normalized)) {
+      throw new Error(`runs session-branch-native-next --surface must be one of ${workerSessionBranchNativeCommandSurfaces.join(",")}`);
+    }
+    return normalized as WorkerSessionBranchNativeCommandSurface;
+  });
+}
+
+function uniqueWorkerSessionBranchNativeCommandQueue(
+  commands: WorkerSessionBranchNativeCommandQueueItem[],
+): WorkerSessionBranchNativeCommandQueueItem[] {
+  const merged = new Map<string, WorkerSessionBranchNativeCommandQueueItem>();
+  for (const item of commands) {
+    const key = item.command.join("\0");
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { surfaces: [...new Set(item.surfaces)], command: item.command });
+      continue;
+    }
+    merged.set(key, {
+      command: existing.command,
+      surfaces: [...new Set([...existing.surfaces, ...item.surfaces])],
+    });
+  }
+  return [...merged.values()];
+}
+
+function filterWorkerSessionBranchNativeCommandQueue(
+  commands: WorkerSessionBranchNativeCommandQueueItem[],
+  surfaces: WorkerSessionBranchNativeCommandSurface[],
+): WorkerSessionBranchNativeCommandQueueItem[] {
+  if (surfaces.length === 0) return commands;
+  const requested = new Set(surfaces);
+  return commands.filter((item) => item.surfaces.some((surface) => requested.has(surface)));
+}
+
 function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNativeNextResponse): void {
   console.log([
     "branch_native_next:",
     `  session: ${response.session}`,
+    `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
     `  branch_ready: ${response.counts.branchReady}`,
     `  branch_actions: ${response.counts.branchActions}`,
     `  branch_recovery_executions: ${response.counts.branchRecoveryExecutions}`,
@@ -23419,7 +23486,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,branch,result_inspection] [--commands-only] [--format json|text|shell] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
