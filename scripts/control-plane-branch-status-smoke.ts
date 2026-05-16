@@ -504,6 +504,47 @@ try {
   assert.equal(terminalOverviewReplayDryRun.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
 
   const terminalOverviewReplayHistory = await cliJson<{
+    filter: { replayState: string };
+    summary: { replays: number; replayedSources: number; unreplayedNeedsAction: number };
+    records: Array<{
+      executionId: string;
+      replayOf?: string;
+      replayedBy?: string[];
+      selectedAction: { action?: string } | null;
+      command: string[] | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "branch",
+    "--status",
+    "executed",
+    "--action",
+    "resume_branch",
+    "--replay-state",
+    "replayed",
+  ]);
+  assert.equal(terminalOverviewReplayHistory.filter.replayState, "replayed");
+  assert.equal(terminalOverviewReplayHistory.summary.replayedSources, 1);
+  assert.equal(terminalOverviewReplayHistory.summary.replays, 0);
+  const terminalOverviewReplayFilteredRecord = terminalOverviewReplayHistory.records.find((record) => record.executionId === terminalOverviewReplayDryRun.executionRecord.executionId);
+  assert.equal(terminalOverviewReplayFilteredRecord, undefined);
+  const terminalOverviewReplaySourceRecord = terminalOverviewReplayHistory.records.find((record) => record.executionId === terminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.deepEqual(terminalOverviewReplaySourceRecord?.replayedBy, [terminalOverviewReplayDryRun.executionRecord.executionId]);
+  assert.equal(terminalOverviewReplaySourceRecord?.replayOf, undefined);
+  assert.equal(terminalOverviewReplaySourceRecord?.selectedAction?.action, "resume_branch");
+  assert.equal(terminalOverviewReplaySourceRecord?.command?.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewReplaySourceRecord?.executed?.command.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewReplaySourceRecord?.executed?.exitCode, 0);
+
+  const terminalOverviewReplayRecordHistory = await cliJson<{
+    filter: { replayState: string };
+    summary: { replays: number; replayedSources: number };
     records: Array<{
       executionId: string;
       replayOf?: string;
@@ -524,12 +565,39 @@ try {
     "--action",
     "resume_branch",
   ]);
-  const terminalOverviewReplayRecord = terminalOverviewReplayHistory.records.find((record) => record.executionId === terminalOverviewReplayDryRun.executionRecord.executionId);
+  assert.equal(terminalOverviewReplayRecordHistory.filter.replayState, "all");
+  assert.equal(terminalOverviewReplayRecordHistory.summary.replays, 1);
+  assert.equal(terminalOverviewReplayRecordHistory.summary.replayedSources, 1);
+  const terminalOverviewReplayRecord = terminalOverviewReplayRecordHistory.records.find((record) => record.executionId === terminalOverviewReplayDryRun.executionRecord.executionId);
   assert.equal(terminalOverviewReplayRecord?.replayOf, terminalOverviewExecuteDryRun.executionRecord.executionId);
   assert.equal(terminalOverviewReplayRecord?.selectedAction?.action, "resume_branch");
   assert.equal(terminalOverviewReplayRecord?.command?.join(" "), resumeBranchDryRunCommand);
   assert.equal(terminalOverviewReplayRecord?.executed?.command.join(" "), resumeBranchDryRunCommand);
   assert.equal(terminalOverviewReplayRecord?.executed?.exitCode, 0);
+
+  const terminalOverviewUnreplayedNeedsAction = await cliJson<{
+    filter: { replayState: string; statuses: string[] };
+    summary: { total: number; unreplayedNeedsAction: number };
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "control",
+    "--status",
+    "needs-action",
+    "--replay-state",
+    "unreplayed",
+    "--commands-only",
+  ]);
+  assert.equal(terminalOverviewUnreplayedNeedsAction.filter.replayState, "unreplayed");
+  assert.deepEqual(terminalOverviewUnreplayedNeedsAction.filter.statuses, ["needs-action"]);
+  assert.equal(terminalOverviewUnreplayedNeedsAction.summary.total, 1);
+  assert.equal(terminalOverviewUnreplayedNeedsAction.summary.unreplayedNeedsAction, 1);
+  assert.equal(terminalOverviewUnreplayedNeedsAction.commands[0]?.command.join(" "), controlStatusSummaryCommand);
 
   const terminalOverviewNeedsActionShell = await cliText(baseUrl, [
     "runs",

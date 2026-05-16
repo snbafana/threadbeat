@@ -5958,17 +5958,20 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const executionHistoryActions = options.action
       ? parseList(options.action)
       : [];
+    const executionHistoryReplayState = parseControlPlaneTerminalOverviewExecutionHistoryReplayState(options["replay-state"] ?? "all");
     if (executionHistory) {
       const history = await listControlPlaneTerminalOverviewExecutionRecords(requiredSessionName, {
         limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
         commandSurfaces,
         statuses: executionHistoryStatuses,
         actions: executionHistoryActions,
+        replayState: executionHistoryReplayState,
       });
       const response = summarizeControlPlaneTerminalOverviewExecutionHistory(requiredSessionName, history, {
         commandSurfaces,
         statuses: executionHistoryStatuses,
         actions: executionHistoryActions,
+        replayState: executionHistoryReplayState,
       });
       if (options["commands-only"] === "1") {
         const commands = controlPlaneTerminalOverviewExecutionHistoryCommandQueue(history);
@@ -17249,6 +17252,7 @@ type ControlPlaneTerminalOverviewReplayExecutionResponse = {
 type ControlPlaneTerminalOverviewExecutionRecord = {
   executionId: string;
   replayOf?: string;
+  replayedBy?: string[];
   session: string;
   observedAt: string;
   completedAt: string;
@@ -17269,6 +17273,7 @@ type ControlPlaneTerminalOverviewExecutionRecord = {
 };
 
 type ControlPlaneTerminalOverviewExecutionHistoryStatus = "executed" | "failed" | "blocked" | "needs-action";
+type ControlPlaneTerminalOverviewExecutionHistoryReplayState = "all" | "replayed" | "unreplayed";
 
 type ControlPlaneTerminalOverviewExecutionHistoryResponse = {
   ok: true;
@@ -17277,6 +17282,7 @@ type ControlPlaneTerminalOverviewExecutionHistoryResponse = {
   filter: {
     statuses: ControlPlaneTerminalOverviewExecutionHistoryStatus[];
     actions: string[];
+    replayState: ControlPlaneTerminalOverviewExecutionHistoryReplayState;
   };
   summary: {
     total: number;
@@ -17286,6 +17292,9 @@ type ControlPlaneTerminalOverviewExecutionHistoryResponse = {
     blocked: number;
     executed: number;
     failed: number;
+    replays: number;
+    replayedSources: number;
+    unreplayedNeedsAction: number;
   };
   records: ControlPlaneTerminalOverviewExecutionRecord[];
 };
@@ -18222,6 +18231,13 @@ function parseControlPlaneTerminalOverviewExecutionHistoryStatuses(
   });
 }
 
+function parseControlPlaneTerminalOverviewExecutionHistoryReplayState(
+  value: string,
+): ControlPlaneTerminalOverviewExecutionHistoryReplayState {
+  if (value === "all" || value === "replayed" || value === "unreplayed") return value;
+  throw new Error("runs session-control-plane-terminal-overview --execution-history --replay-state must be all, replayed, or unreplayed");
+}
+
 function isCliCommand(command: string[], argsPrefix: string[]): boolean {
   const cliPrefix = ["npm", "run", "cli", "--"];
   return [...cliPrefix, ...argsPrefix].every((part, index) => command[index] === part);
@@ -18279,6 +18295,7 @@ function summarizeControlPlaneTerminalOverviewExecutionHistory(
     commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
     statuses: ControlPlaneTerminalOverviewExecutionHistoryStatus[];
     actions: string[];
+    replayState: ControlPlaneTerminalOverviewExecutionHistoryReplayState;
   },
 ): ControlPlaneTerminalOverviewExecutionHistoryResponse {
   return {
@@ -18288,6 +18305,7 @@ function summarizeControlPlaneTerminalOverviewExecutionHistory(
     filter: {
       statuses: filter.statuses,
       actions: filter.actions,
+      replayState: filter.replayState,
     },
     summary: {
       total: records.length,
@@ -18297,6 +18315,13 @@ function summarizeControlPlaneTerminalOverviewExecutionHistory(
       blocked: records.filter((record) => !record.supported).length,
       executed: records.filter((record) => Boolean(record.executed)).length,
       failed: records.filter((record) => record.executed?.exitCode !== undefined && record.executed?.exitCode !== 0).length,
+      replays: records.filter((record) => Boolean(record.replayOf)).length,
+      replayedSources: records.filter((record) => (record.replayedBy?.length ?? 0) > 0).length,
+      unreplayedNeedsAction: records.filter((record) => (
+        !record.replayOf
+        && (record.replayedBy?.length ?? 0) === 0
+        && controlPlaneTerminalOverviewExecutionRecordStatuses(record).includes("needs-action")
+      )).length,
     },
     records,
   };
@@ -18309,12 +18334,14 @@ function printControlPlaneTerminalOverviewExecutionHistoryText(response: Control
     `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
     `  statuses: ${response.filter.statuses.join(",") || "all"}`,
     `  actions: ${response.filter.actions.join(",") || "all"}`,
-    `  summary: total=${response.summary.total} dry_run=${response.summary.dryRun} confirmed=${response.summary.confirmed} supported=${response.summary.supported} blocked=${response.summary.blocked} executed=${response.summary.executed} failed=${response.summary.failed}`,
+    `  replay_state: ${response.filter.replayState}`,
+    `  summary: total=${response.summary.total} dry_run=${response.summary.dryRun} confirmed=${response.summary.confirmed} supported=${response.summary.supported} blocked=${response.summary.blocked} executed=${response.summary.executed} failed=${response.summary.failed} replays=${response.summary.replays} replayed_sources=${response.summary.replayedSources} unreplayed_needs_action=${response.summary.unreplayedNeedsAction}`,
     "  records:",
     ...(response.records.length > 0
       ? response.records.flatMap((record) => [
         `    - execution: ${record.executionId}`,
         ...(record.replayOf ? [`      replay_of: ${record.replayOf}`] : []),
+        `      replayed_by: ${record.replayedBy?.join(",") || ""}`,
         `      completed_at: ${record.completedAt}`,
         `      surface: ${record.selectedAction?.surfaces[0] ?? "none"}`,
         `      action: ${record.selectedAction?.action ?? "none"}`,
@@ -25176,6 +25203,7 @@ async function listControlPlaneTerminalOverviewExecutionRecords(
     commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
     statuses: ControlPlaneTerminalOverviewExecutionHistoryStatus[];
     actions: string[];
+    replayState: ControlPlaneTerminalOverviewExecutionHistoryReplayState;
   },
 ): Promise<ControlPlaneTerminalOverviewExecutionRecord[]> {
   assertSafeSessionName(sessionName);
@@ -25188,13 +25216,30 @@ async function listControlPlaneTerminalOverviewExecutionRecords(
         const text = await fs.readFile(path.join(executionDir, entry.name), "utf8");
         return JSON.parse(text) as ControlPlaneTerminalOverviewExecutionRecord;
       }));
+    const replayedBy = new Map<string, string[]>();
+    for (const record of records) {
+      if (!record.replayOf) continue;
+      const replays = replayedBy.get(record.replayOf) ?? [];
+      replays.push(record.executionId);
+      replayedBy.set(record.replayOf, replays);
+    }
+    const enrichedRecords = records.map((record) => ({
+      ...record,
+      replayedBy: replayedBy.get(record.executionId) ?? [],
+    }));
     const requested = new Set(options.commandSurfaces);
     const requestedStatuses = new Set(options.statuses);
     const requestedActions = new Set(options.actions);
-    return records
+    return enrichedRecords
       .filter((record) => requested.size === 0 || record.selectedAction?.surfaces.some((surface) => requested.has(surface)))
       .filter((record) => requestedStatuses.size === 0 || controlPlaneTerminalOverviewExecutionRecordStatuses(record).some((status) => requestedStatuses.has(status)))
       .filter((record) => requestedActions.size === 0 || (record.selectedAction?.action ? requestedActions.has(record.selectedAction.action) : false))
+      .filter((record) => {
+        if (options.replayState === "all") return true;
+        const replayCount = record.replayedBy?.length ?? 0;
+        if (options.replayState === "replayed") return replayCount > 0;
+        return !record.replayOf && replayCount === 0;
+      })
       .sort((left, right) => right.completedAt.localeCompare(left.completedAt))
       .slice(0, options.limit);
   } catch (error) {
@@ -28124,7 +28169,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action]|--replay-execution execution_id --dry-run|--confirm] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--replay-execution execution_id --dry-run|--confirm] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
