@@ -17417,12 +17417,19 @@ type ControlPlaneTerminalOverviewReplayLoopsResponse = {
     executed: number;
     failed: number;
   };
-  latest: ControlPlaneTerminalOverviewReplayLoopRecord | null;
-  loops: ControlPlaneTerminalOverviewReplayLoopRecord[];
+  latest: (ControlPlaneTerminalOverviewReplayLoopRecord & ControlPlaneTerminalOverviewReplayLoopCommandLinks) | null;
+  loops: Array<ControlPlaneTerminalOverviewReplayLoopRecord & ControlPlaneTerminalOverviewReplayLoopCommandLinks>;
   commands: {
     inspectSummary: string[];
+    inspectLatest: string[] | null;
     replayLoopDryRun: string[];
     replayLoopConfirm: string[];
+  };
+};
+
+type ControlPlaneTerminalOverviewReplayLoopCommandLinks = {
+  commands: {
+    inspectLoop: string[];
   };
 };
 
@@ -18755,6 +18762,7 @@ function printControlPlaneTerminalOverviewReplayLoopsText(
     `    steps: ${response.latest?.summary.steps ?? ""}`,
     "  commands:",
     `    inspect_summary: ${formatShellCommand(response.commands.inspectSummary)}`,
+    `    inspect_latest: ${response.commands.inspectLatest ? formatShellCommand(response.commands.inspectLatest) : ""}`,
     `    replay_loop_dry_run: ${formatShellCommand(response.commands.replayLoopDryRun)}`,
     `    replay_loop_confirm: ${formatShellCommand(response.commands.replayLoopConfirm)}`,
     "  loops:",
@@ -18768,6 +18776,7 @@ function printControlPlaneTerminalOverviewReplayLoopsText(
         `      command_surfaces: ${loop.commandSurfaces.join(",") || "all"}`,
         `      actions: ${loop.actions.join(",") || "all"}`,
         `      summary: steps=${loop.summary.steps} supported=${loop.summary.supported} unsupported=${loop.summary.unsupported} executed=${loop.summary.executed} failed=${loop.summary.failed}`,
+        `      inspect_loop: ${formatShellCommand(loop.commands.inspectLoop)}`,
       ])
       : ["    none"]),
   ].join("\n"));
@@ -18778,8 +18787,10 @@ function controlPlaneTerminalOverviewReplayLoopCommands(
 ): CommandQueueOutput["commands"] {
   return [
     { command: response.commands.inspectSummary },
+    ...(response.commands.inspectLatest ? [{ command: response.commands.inspectLatest }] : []),
     { command: response.commands.replayLoopDryRun },
     { command: response.commands.replayLoopConfirm },
+    ...response.loops.map((loop) => ({ command: loop.commands.inspectLoop })),
   ];
 }
 

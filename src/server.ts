@@ -1142,6 +1142,12 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         ...(filter.commandSurfaces.length > 0 ? ["--surface", filter.commandSurfaces.join(",")] : []),
         ...(filter.actions.length > 0 ? ["--action", filter.actions.join(",")] : []),
       ];
+      const loopsWithCommands = loops.map((loop) => ({
+        ...loop,
+        commands: {
+          inspectLoop: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview-replay-loops", name, "--server", "--loop", loop.loopId],
+        },
+      }));
       return {
         ok: true,
         session: name,
@@ -1153,10 +1159,11 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
         },
         count: loops.length,
         summary: summarizeControlPlaneTerminalOverviewReplayLoopRecords(loops),
-        latest: loops[0] ?? null,
-        loops,
+        latest: loopsWithCommands[0] ?? null,
+        loops: loopsWithCommands,
         commands: {
           inspectSummary: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-loop-summary", ...commandFilterArgs],
+          inspectLatest: loopsWithCommands[0]?.commands.inspectLoop ?? null,
           replayLoopDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-unreplayed-needs-action-loop", ...commandFilterArgs, "--dry-run"],
           replayLoopConfirm: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-unreplayed-needs-action-loop", ...commandFilterArgs, "--confirm"],
         },

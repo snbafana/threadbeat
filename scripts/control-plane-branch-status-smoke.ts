@@ -879,9 +879,9 @@ try {
   const terminalOverviewReplayLoopsApi = await apiJson<{
     count: number;
     summary: { attempts: number; dryRun: number; confirmed: number; steps: number; supported: number; unsupported: number; executed: number; failed: number };
-    latest: { loopId: string; stoppedReason: string; summary: { steps: number } } | null;
-    loops: Array<{ loopId: string; stoppedReason: string; steps: Array<{ sourceExecutionId: string; replayExecutionId: string }> }>;
-    commands: { inspectSummary: string[]; replayLoopDryRun: string[]; replayLoopConfirm: string[] };
+    latest: { loopId: string; stoppedReason: string; summary: { steps: number }; commands: { inspectLoop: string[] } } | null;
+    loops: Array<{ loopId: string; stoppedReason: string; steps: Array<{ sourceExecutionId: string; replayExecutionId: string }>; commands: { inspectLoop: string[] } }>;
+    commands: { inspectSummary: string[]; inspectLatest: string[] | null; replayLoopDryRun: string[]; replayLoopConfirm: string[] };
   }>(baseUrl, `/api/worker-sessions/${encodeURIComponent(sessionName)}/terminal-overview-replay-loops?surface=control&limit=5`);
   assert.equal(terminalOverviewReplayLoopsApi.count, 1);
   assert.equal(terminalOverviewReplayLoopsApi.summary.attempts, 1);
@@ -895,10 +895,13 @@ try {
   assert.equal(terminalOverviewReplayLoopsApi.latest?.loopId, replayLoopId);
   assert.equal(terminalOverviewReplayLoopsApi.latest?.stoppedReason, "queue_empty");
   assert.equal(terminalOverviewReplayLoopsApi.latest?.summary.steps, 1);
+  assert.equal(terminalOverviewReplayLoopsApi.latest?.commands.inspectLoop.join(" "), `npm run cli -- runs session-control-plane-terminal-overview-replay-loops ${sessionName} --server --loop ${replayLoopId}`);
   assert.equal(terminalOverviewReplayLoopsApi.loops[0]?.loopId, replayLoopId);
   assert.equal(terminalOverviewReplayLoopsApi.loops[0]?.steps[0]?.sourceExecutionId, loopSourceExecutionId);
   assert.equal(terminalOverviewReplayLoopsApi.loops[0]?.steps[0]?.replayExecutionId, loopReplayExecutionId);
+  assert.equal(terminalOverviewReplayLoopsApi.loops[0]?.commands.inspectLoop.join(" "), `npm run cli -- runs session-control-plane-terminal-overview-replay-loops ${sessionName} --server --loop ${replayLoopId}`);
   assert.equal(terminalOverviewReplayLoopsApi.commands.inspectSummary.join(" "), `${terminalOverviewCommand} --replay-loop-summary --surface control`);
+  assert.equal(terminalOverviewReplayLoopsApi.commands.inspectLatest?.join(" "), `npm run cli -- runs session-control-plane-terminal-overview-replay-loops ${sessionName} --server --loop ${replayLoopId}`);
   assert.equal(terminalOverviewReplayLoopsApi.commands.replayLoopDryRun.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`);
   assert.equal(terminalOverviewReplayLoopsApi.commands.replayLoopConfirm.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --confirm`);
 
@@ -933,6 +936,7 @@ try {
   assert.match(terminalOverviewReplayLoopsCliText, /control_plane_terminal_overview_replay_loops:/);
   assert.match(terminalOverviewReplayLoopsCliText, /attempts=1/);
   assert.match(terminalOverviewReplayLoopsCliText, new RegExp(`loop_id: ${replayLoopId}`));
+  assert.match(terminalOverviewReplayLoopsCliText, new RegExp(`inspect_loop: npm run cli -- runs session-control-plane-terminal-overview-replay-loops ${sessionName} --server --loop ${replayLoopId}`));
 
   const terminalOverviewReplayLoopsCliCommands = await cliText(baseUrl, [
     "runs",
@@ -946,6 +950,7 @@ try {
     "shell",
   ]);
   assert.match(terminalOverviewReplayLoopsCliCommands, new RegExp(`${terminalOverviewCommand} --replay-loop-summary --surface control`));
+  assert.match(terminalOverviewReplayLoopsCliCommands, new RegExp(`npm run cli -- runs session-control-plane-terminal-overview-replay-loops ${sessionName} --server --loop ${replayLoopId}`));
   assert.match(terminalOverviewReplayLoopsCliCommands, new RegExp(`${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`));
 
   const terminalOverviewReplayLoopSummaryText = await cliText(baseUrl, [
