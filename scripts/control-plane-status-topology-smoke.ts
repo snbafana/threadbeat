@@ -1176,6 +1176,21 @@ try {
   assert.ok(branchNativeAfterStop.commands.some((command) => (
     command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${workerId} --kind control-plane-topology --limit 5`
   )));
+  const controlPlaneStatusAfterStop = await cliJson<{
+    branchNativeNext: { surface: string; action: string; reason: string; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(controlPlaneStatusAfterStop.branchNativeNext.surface, "worker_recovery");
+  assert.equal(controlPlaneStatusAfterStop.branchNativeNext.action, "restart_control_plane_advance_worker");
+  assert.equal(controlPlaneStatusAfterStop.branchNativeNext.reason, "stopped_control_plane_advance_worker");
+  assert.equal(
+    controlPlaneStatusAfterStop.branchNativeNext.command.join(" "),
+    `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`,
+  );
   const branchNativeTextAfterStop = await cliText(baseUrl, [
     "runs",
     "session-branch-native-next",

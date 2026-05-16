@@ -260,6 +260,13 @@ type WorkerSessionControlPlaneRecoverNextHistoryStatus = {
   };
 };
 
+type WorkerSessionBranchNativeStatusNextAction = {
+  surface: "worker_recovery" | "recover_next" | "branch" | "result_inspection" | "control";
+  action: string;
+  reason: string;
+  command: string[];
+};
+
 type WorkerSessionControlPlaneContinueDeferredHistoryStatus = {
   attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
   resumableLoops: {
@@ -4077,6 +4084,7 @@ const readWorkerSessionControlPlaneStatus = async (
 ): Promise<{
   ok: true;
   session: string;
+  branchNativeNext: WorkerSessionBranchNativeStatusNextAction;
   workers: {
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
@@ -4251,9 +4259,36 @@ const readWorkerSessionControlPlaneStatus = async (
   const resultInspection = await summarizeWorkerSessionResultInspection(db, session, lines, resultReviews);
   const acknowledgedStatusWatchAdvanceIds = controlPlaneAcknowledgedAdvanceIds(statusWatchAcknowledgementAttempts);
   const acknowledgedRecoverNextResumeAdvanceIds = controlPlaneAcknowledgedAdvanceIds(recoverNextResumeAcknowledgementAttempts);
+  const recoverNext = summarizeWorkerSessionControlPlaneRecoverNextHistory(
+    name,
+    recoverNextAttempts,
+    recoverNextLoopStepAttempts,
+    recoverNextResumeAttempts,
+    recoverNextResumeAcknowledgementAttempts,
+    acknowledgedRecoverNextResumeAdvanceIds,
+    lines,
+  );
+  const continueDeferred = summarizeWorkerSessionControlPlaneContinueDeferredHistory(
+    name,
+    continueDeferredAttempts,
+    lines,
+  );
   return {
     ok: true,
     session: name,
+    branchNativeNext: selectWorkerSessionBranchNativeStatusNext({
+      session: name,
+      workerRecoverySteps: [
+        ...watchWorkerNextSteps.nextSteps,
+        ...drainWorkerNextSteps.nextSteps,
+        ...applyActionWorkerNextSteps.nextSteps,
+        ...controlPlaneAdvanceWorkerNextSteps.nextSteps,
+        ...controlPlaneTickWorkerNextSteps.nextSteps,
+      ],
+      recoverNext,
+      branchNextSteps: branchRecovery.nextSteps,
+      resultNextSteps: resultInspection.nextSteps,
+    }),
     workers: {
       watch: summarizeControlPlaneWorkers(watchWorkers),
       drain: summarizeControlPlaneWorkers(drainWorkers),
@@ -4308,20 +4343,8 @@ const readWorkerSessionControlPlaneStatus = async (
       recentAttempts: controlPlaneRecoveryAttempts
         .slice(0, lines)
         .map((record) => summarizeWorkerSessionControlPlaneRecoveryAttempt(name, record)),
-      recoverNext: summarizeWorkerSessionControlPlaneRecoverNextHistory(
-        name,
-        recoverNextAttempts,
-        recoverNextLoopStepAttempts,
-        recoverNextResumeAttempts,
-        recoverNextResumeAcknowledgementAttempts,
-        acknowledgedRecoverNextResumeAdvanceIds,
-        lines,
-      ),
-      continueDeferred: summarizeWorkerSessionControlPlaneContinueDeferredHistory(
-        name,
-        continueDeferredAttempts,
-        lines,
-      ),
+      recoverNext,
+      continueDeferred,
       statusWatchExecutions: {
         attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(statusWatchExecutionAttempts),
         recent: statusWatchExecutionAttempts
@@ -5882,6 +5905,79 @@ const isWorkerSessionControlPlaneWorkerRecoveryStep = (
         Array.isArray(command) && command.every((part) => typeof part === "string")
       ))
     ));
+};
+
+const selectWorkerSessionBranchNativeStatusNext = (
+  input: {
+    session: string;
+    workerRecoverySteps: unknown[];
+    recoverNext: WorkerSessionControlPlaneRecoverNextHistoryStatus;
+    branchNextSteps: Array<{
+      action: string;
+      reason: string;
+      commands: { resumeBranch: string[] | null; reviewRun: string[] };
+    }>;
+    resultNextSteps: Array<{
+      action: string;
+      reason: string;
+      commands: { reviewRun: string[] };
+    }>;
+  },
+): WorkerSessionBranchNativeStatusNextAction => {
+  const workerAction = input.workerRecoverySteps.find(isWorkerSessionControlPlaneWorkerRecoveryStep);
+  if (workerAction) {
+    return {
+      surface: "worker_recovery",
+      action: workerAction.action,
+      reason: workerAction.reason,
+      command: workerAction.command,
+    };
+  }
+  const recoverLoop = input.recoverNext.incompleteLoops.recent[0];
+  if (recoverLoop) {
+    return {
+      surface: "recover_next",
+      action: "resume_recover_next_loop",
+      reason: recoverLoop.stoppedReason ?? "recover_next_loop_incomplete",
+      command: recoverLoop.resumeCommand,
+    };
+  }
+  const failedRecoverResume = input.recoverNext.resumeAttempts.failedRecent[0];
+  const failedRecoverLoop = failedRecoverResume?.loopAdvanceId
+    ? input.recoverNext.incompleteLoops.recent.find((loop) => loop.loopAdvanceId === failedRecoverResume.loopAdvanceId)
+    : null;
+  if (failedRecoverLoop) {
+    return {
+      surface: "recover_next",
+      action: "resume_failed_recover_next_loop",
+      reason: failedRecoverLoop.stoppedReason ?? "failed_recover_next_resume_attempt",
+      command: failedRecoverLoop.resumeCommand,
+    };
+  }
+  const branchAction = input.branchNextSteps[0];
+  if (branchAction) {
+    return {
+      surface: "branch",
+      action: branchAction.action,
+      reason: branchAction.reason,
+      command: branchAction.commands.resumeBranch ?? branchAction.commands.reviewRun,
+    };
+  }
+  const resultAction = input.resultNextSteps[0];
+  if (resultAction) {
+    return {
+      surface: "result_inspection",
+      action: resultAction.action,
+      reason: resultAction.reason,
+      command: resultAction.commands.reviewRun,
+    };
+  }
+  return {
+    surface: "control",
+    action: "inspect_next",
+    reason: "no_action_needed",
+    command: ["npm", "run", "cli", "--", "runs", "session-branch-native-next", input.session, "--server"],
+  };
 };
 
 const readWorkerSessionControlPlaneWorkerRecoveryTarget = async (
