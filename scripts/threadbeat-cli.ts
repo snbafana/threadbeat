@@ -5921,11 +5921,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const executionHistory = options["execution-history"] === "1";
     const dryRun = options["dry-run"] === "1";
     const confirm = options.confirm === "1";
-    if (executionHistory && (executeNext || nextActionOnly || options["commands-only"] === "1")) {
-      throw new Error("runs session-control-plane-terminal-overview --execution-history cannot be combined with --execute-next, --next-action, or --commands-only");
+    if (executionHistory && (executeNext || nextActionOnly)) {
+      throw new Error("runs session-control-plane-terminal-overview --execution-history cannot be combined with --execute-next or --next-action");
     }
-    if (executionHistory && outputFormat === "shell") {
-      throw new Error("runs session-control-plane-terminal-overview --execution-history supports json or text output");
+    if (executionHistory && outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-terminal-overview --execution-history --format shell requires --commands-only");
     }
     if (executeNext && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-terminal-overview --execute-next cannot be combined with --commands-only");
@@ -5960,7 +5960,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         statuses: executionHistoryStatuses,
         actions: executionHistoryActions,
       });
-      if (outputFormat === "text") {
+      if (options["commands-only"] === "1") {
+        const commands = controlPlaneTerminalOverviewExecutionHistoryCommandQueue(history);
+        if (outputFormat === "shell") {
+          printCommandQueueShell(commands);
+        } else {
+          await printJson({ ...response, commands });
+        }
+      } else if (outputFormat === "text") {
         printControlPlaneTerminalOverviewExecutionHistoryText(response);
       } else {
         await printJson(response);
@@ -25083,6 +25090,23 @@ function controlPlaneTerminalOverviewExecutionRecordStatuses(
     statuses.push("failed", "needs-action");
   }
   return statuses;
+}
+
+function controlPlaneTerminalOverviewExecutionHistoryCommandQueue(
+  records: ControlPlaneTerminalOverviewExecutionRecord[],
+): WorkerSessionBranchNativeCommandQueueItem[] {
+  return records.flatMap((record) => {
+    const command = record.command ?? record.selectedAction?.command;
+    if (!command) return [];
+    return [{
+      surfaces: record.selectedAction?.surfaces ?? record.commandSurfaces,
+      command,
+      action: record.selectedAction?.action,
+      reason: record.supported
+        ? "retry_terminal_overview_execution"
+        : record.unsupportedReason ?? "inspect_blocked_terminal_overview_action",
+    }];
+  });
 }
 
 async function writeControlPlaneTerminalOverviewExecutionRecord(

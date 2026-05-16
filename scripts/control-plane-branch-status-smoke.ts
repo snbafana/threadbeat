@@ -447,6 +447,47 @@ try {
   assert.match(terminalOverviewNeedsActionText, /status: blocked,needs-action/);
   assert.match(terminalOverviewNeedsActionText, new RegExp(`selected_command: ${controlStatusSummaryCommand}`));
 
+  const terminalOverviewBranchActionCommandQueue = await cliJson<{
+    filter: { statuses: string[]; actions: string[] };
+    commands: Array<{ surfaces: string[]; command: string[]; action?: string; reason?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "branch",
+    "--status",
+    "executed",
+    "--action",
+    "resume_branch",
+    "--commands-only",
+  ]);
+  assert.deepEqual(terminalOverviewBranchActionCommandQueue.filter.statuses, ["executed"]);
+  assert.deepEqual(terminalOverviewBranchActionCommandQueue.filter.actions, ["resume_branch"]);
+  assert.equal(terminalOverviewBranchActionCommandQueue.commands.length, 1);
+  assert.equal(terminalOverviewBranchActionCommandQueue.commands[0]?.surfaces[0], "branch");
+  assert.equal(terminalOverviewBranchActionCommandQueue.commands[0]?.action, "resume_branch");
+  assert.equal(terminalOverviewBranchActionCommandQueue.commands[0]?.reason, "retry_terminal_overview_execution");
+  assert.equal(terminalOverviewBranchActionCommandQueue.commands[0]?.command.join(" "), resumeBranchDryRunCommand);
+
+  const terminalOverviewNeedsActionShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "control",
+    "--status",
+    "needs-action",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.equal(terminalOverviewNeedsActionShell.trim(), controlStatusSummaryCommand);
+
   const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
