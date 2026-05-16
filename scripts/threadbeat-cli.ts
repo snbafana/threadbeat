@@ -26,6 +26,7 @@ const workerSessionBranchNativeCommandSurfaces = [
   "control",
   "recover_next",
   "worker_recovery",
+  "operator",
   "branch",
   "result_inspection",
 ] as const;
@@ -14632,6 +14633,13 @@ function workerSessionBranchNativeNext(
       ...(loop.commands.resumeLoop ? [{ surfaces: ["recover_next"] as const, command: loop.commands.resumeLoop }] : []),
       ...(loop.commands.executeResumeHistory ? [{ surfaces: ["recover_next"] as const, command: loop.commands.executeResumeHistory }] : []),
     ]),
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, true) },
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, false) },
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorWorkerCommand(summary.session, true) },
+    { surfaces: ["operator"], command: workerSessionControlPlaneOperatorWorkerCommand(summary.session, false) },
+    { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", summary.session, "--server"] },
+    { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", summary.session, "--server"] },
+    { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers-next", summary.session, "--server"] },
     { surfaces: ["worker_recovery"], command: summary.commands.inspectControlPlaneWorkers },
     { surfaces: ["worker_recovery"], command: summary.commands.inspectControlPlaneWorkerProgress },
     { surfaces: ["worker_recovery"], command: summary.commands.workerReconciliations },
@@ -14711,6 +14719,27 @@ function parseWorkerSessionBranchNativeCommandSurfaces(value: string): WorkerSes
   });
 }
 
+function workerSessionControlPlaneOperatorCommand(sessionName: string, dryRun: boolean): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
+    dryRun ? "--dry-run" : "--confirm",
+    "--max-cycles", "1",
+    "--cycle-interval-ms", "2000",
+    "--reconcile-workers",
+  ];
+}
+
+function workerSessionControlPlaneOperatorWorkerCommand(sessionName: string, dryRun: boolean): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "ensure-control-plane-operator-worker", sessionName, "--server",
+    dryRun ? "--dry-run" : "--confirm",
+    "--worker-id", "threadbeat-control-plane-operator",
+    "--max-cycles", "60",
+    "--cycle-interval-ms", "2000",
+    "--reconcile-workers",
+  ];
+}
+
 function uniqueWorkerSessionBranchNativeCommandQueue(
   commands: WorkerSessionBranchNativeCommandQueueItem[],
 ): WorkerSessionBranchNativeCommandQueueItem[] {
@@ -14760,6 +14789,13 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `    inspect_all: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-workers", response.session, "--server", "--include-retired", "--lines", "5"])}`,
     `    inspect_progress: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", response.session, "--server", "--include-retired", "--limit", "5"])}`,
     `    restart_queue: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-worker-restart-queue", response.session, "--server", "--include-retired", "--lines", "5"])}`,
+    "  operator_control:",
+    `    operate_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, true))}`,
+    `    operate_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, false))}`,
+    `    ensure_worker_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, true))}`,
+    `    ensure_worker_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, false))}`,
+    `    operator_runs: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", response.session, "--server"])}`,
+    `    operator_workers: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", response.session, "--server"])}`,
     "  worker_health:",
     `    watch: ${formatBasicControlPlaneWorkerHealth(response.workers.watch)}`,
     `    drain: ${formatBasicControlPlaneWorkerHealth(response.workers.drain)}`,
@@ -23486,7 +23522,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,branch,result_inspection] [--commands-only] [--format json|text|shell] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection] [--commands-only] [--format json|text|shell] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
