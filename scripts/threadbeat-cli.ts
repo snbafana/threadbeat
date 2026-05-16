@@ -5920,6 +5920,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const executeNext = options["execute-next"] === "1";
     const unreplayedNeedsAction = options["unreplayed-needs-action"] === "1";
     const replayFirstUnreplayedNeedsAction = options["replay-first-unreplayed-needs-action"] === "1";
+    const replayUnreplayedNeedsActionLoop = options["replay-unreplayed-needs-action-loop"] === "1";
     const executionHistory = options["execution-history"] === "1" || unreplayedNeedsAction;
     const replayExecution = options["replay-execution"];
     const dryRun = options["dry-run"] === "1";
@@ -5932,6 +5933,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (replayFirstUnreplayedNeedsAction && outputFormat === "shell") {
       throw new Error("runs session-control-plane-terminal-overview --replay-first-unreplayed-needs-action supports json or text output");
+    }
+    if (replayUnreplayedNeedsActionLoop && (executionHistory || replayExecution || replayFirstUnreplayedNeedsAction || executeNext || nextActionOnly || options["commands-only"] === "1" || options.status || options["replay-state"])) {
+      throw new Error("runs session-control-plane-terminal-overview --replay-unreplayed-needs-action-loop cannot be combined with --execution-history, --replay-execution, --replay-first-unreplayed-needs-action, --execute-next, --next-action, --commands-only, --status, or --replay-state");
+    }
+    if (replayUnreplayedNeedsActionLoop && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-terminal-overview --replay-unreplayed-needs-action-loop supports json or text output");
     }
     if (replayExecution && (executionHistory || executeNext || nextActionOnly || options["commands-only"] === "1")) {
       throw new Error("runs session-control-plane-terminal-overview --replay-execution cannot be combined with --execution-history, --execute-next, --next-action, or --commands-only");
@@ -5951,8 +5958,8 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (executeNext && outputFormat === "shell") {
       throw new Error("runs session-control-plane-terminal-overview --execute-next cannot use --format shell");
     }
-    if ((dryRun || confirm) && !executeNext && !replayExecution && !replayFirstUnreplayedNeedsAction) {
-      throw new Error("runs session-control-plane-terminal-overview --dry-run/--confirm require --execute-next, --replay-execution, or --replay-first-unreplayed-needs-action");
+    if ((dryRun || confirm) && !executeNext && !replayExecution && !replayFirstUnreplayedNeedsAction && !replayUnreplayedNeedsActionLoop) {
+      throw new Error("runs session-control-plane-terminal-overview --dry-run/--confirm require --execute-next, --replay-execution, --replay-first-unreplayed-needs-action, or --replay-unreplayed-needs-action-loop");
     }
     if (executeNext && [dryRun, confirm].filter(Boolean).length !== 1) {
       throw new Error("runs session-control-plane-terminal-overview --execute-next requires exactly one of --dry-run or --confirm");
@@ -5962,6 +5969,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (replayFirstUnreplayedNeedsAction && [dryRun, confirm].filter(Boolean).length !== 1) {
       throw new Error("runs session-control-plane-terminal-overview --replay-first-unreplayed-needs-action requires exactly one of --dry-run or --confirm");
+    }
+    if (replayUnreplayedNeedsActionLoop && [dryRun, confirm].filter(Boolean).length !== 1) {
+      throw new Error("runs session-control-plane-terminal-overview --replay-unreplayed-needs-action-loop requires exactly one of --dry-run or --confirm");
     }
     const commandSurfaces = options.surface
       ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
@@ -6033,6 +6043,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (!response.replayExecution.supported || response.replayExecution.executed?.exitCode !== 0) process.exitCode = 1;
       if (outputFormat === "text") {
         printControlPlaneTerminalOverviewReplayExecutionText(response);
+      } else {
+        await printJson(response);
+      }
+      return;
+    }
+    if (replayUnreplayedNeedsActionLoop) {
+      const response = await replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(requiredSessionName, {
+        dryRun,
+        confirm,
+        commandSurfaces,
+        actions: executionHistoryActions,
+        maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+      });
+      if (response.summary.unsupported > 0 || response.summary.failed > 0 || response.stoppedReason === "max_steps") {
+        process.exitCode = 1;
+      }
+      if (outputFormat === "text") {
+        printControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopText(response);
       } else {
         await printJson(response);
       }
@@ -9901,7 +9929,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "execution-history" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "replay-first-unreplayed-needs-action" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "unreplayed-needs-action" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "execution-history" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "replay-first-unreplayed-needs-action" || key === "replay-unreplayed-needs-action-loop" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "unreplayed-needs-action" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -17236,6 +17264,29 @@ type ControlPlaneTerminalOverviewReplayExecutionResponse = {
   };
 };
 
+type ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse = {
+  ok: true;
+  session: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+  actions: string[];
+  maxSteps: number;
+  stoppedReason: "queue_empty" | "max_steps";
+  summary: {
+    steps: number;
+    supported: number;
+    unsupported: number;
+    executed: number;
+    failed: number;
+  };
+  steps: ControlPlaneTerminalOverviewReplayExecutionResponse[];
+  commands: {
+    inspectUnreplayedNeedsAction: string[];
+    inspectHistory: string[];
+  };
+};
+
 type ControlPlaneTerminalOverviewExecutionRecord = {
   executionId: string;
   replayOf?: string;
@@ -18265,6 +18316,67 @@ async function replayControlPlaneTerminalOverviewExecution(
   };
 }
 
+async function replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(
+  sessionName: string,
+  options: {
+    dryRun: boolean;
+    confirm: boolean;
+    commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+    actions: string[];
+    maxSteps: number;
+  },
+): Promise<ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse> {
+  const steps: ControlPlaneTerminalOverviewReplayExecutionResponse[] = [];
+  let stoppedReason: ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse["stoppedReason"] = "queue_empty";
+  for (let step = 0; step < options.maxSteps; step += 1) {
+    const [sourceRecord] = await listControlPlaneTerminalOverviewExecutionRecords(sessionName, {
+      limit: 1,
+      commandSurfaces: options.commandSurfaces,
+      statuses: ["needs-action"],
+      actions: options.actions,
+      replayState: "unreplayed",
+    });
+    if (!sourceRecord) {
+      stoppedReason = "queue_empty";
+      break;
+    }
+    steps.push(await replayControlPlaneTerminalOverviewExecution(sessionName, sourceRecord, options));
+    if (step === options.maxSteps - 1) {
+      stoppedReason = "max_steps";
+    }
+  }
+  return {
+    ok: true,
+    session: sessionName,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    commandSurfaces: options.commandSurfaces,
+    actions: options.actions,
+    maxSteps: options.maxSteps,
+    stoppedReason,
+    summary: {
+      steps: steps.length,
+      supported: steps.filter((step) => step.replayExecution.supported).length,
+      unsupported: steps.filter((step) => !step.replayExecution.supported).length,
+      executed: steps.filter((step) => Boolean(step.replayExecution.executed)).length,
+      failed: steps.filter((step) => step.replayExecution.executed?.exitCode !== undefined && step.replayExecution.executed?.exitCode !== 0).length,
+    },
+    steps,
+    commands: {
+      inspectUnreplayedNeedsAction: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", sessionName, "--server",
+        "--unreplayed-needs-action",
+        ...(options.commandSurfaces.length > 0 ? ["--surface", options.commandSurfaces.join(",")] : []),
+        ...(options.actions.length > 0 ? ["--action", options.actions.join(",")] : []),
+      ],
+      inspectHistory: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", sessionName, "--server",
+        "--execution-history",
+      ],
+    },
+  };
+}
+
 function parseControlPlaneTerminalOverviewExecutionHistoryStatuses(
   value: string,
 ): ControlPlaneTerminalOverviewExecutionHistoryStatus[] {
@@ -18331,6 +18443,38 @@ function printControlPlaneTerminalOverviewReplayExecutionText(response: ControlP
     `    execution_id: ${response.executionRecord.executionId}`,
     `    execution_path: ${response.executionRecord.executionPath}`,
     `    inspect_history: ${formatShellCommand(response.executionRecord.inspectHistory)}`,
+  ].join("\n"));
+}
+
+function printControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopText(
+  response: ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse,
+): void {
+  console.log([
+    "control_plane_terminal_overview_replay_unreplayed_needs_action_loop:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
+    `  actions: ${response.actions.join(",") || "all"}`,
+    `  max_steps: ${response.maxSteps}`,
+    `  stopped_reason: ${response.stoppedReason}`,
+    `  summary: steps=${response.summary.steps} supported=${response.summary.supported} unsupported=${response.summary.unsupported} executed=${response.summary.executed} failed=${response.summary.failed}`,
+    `  inspect_unreplayed_needs_action: ${formatShellCommand(response.commands.inspectUnreplayedNeedsAction)}`,
+    `  inspect_history: ${formatShellCommand(response.commands.inspectHistory)}`,
+    "  steps:",
+    ...(response.steps.length > 0
+      ? response.steps.flatMap((step, index) => [
+        `    - step: ${index + 1}`,
+        `      source_execution_id: ${step.replayExecution.sourceExecutionId}`,
+        `      replay_execution_id: ${step.executionRecord.executionId}`,
+        `      supported: ${step.replayExecution.supported}`,
+        `      unsupported_reason: ${step.replayExecution.unsupportedReason ?? ""}`,
+        `      selected_surface: ${step.replayExecution.selectedAction?.surfaces[0] ?? "none"}`,
+        `      selected_command: ${step.replayExecution.selectedAction ? formatShellCommand(step.replayExecution.selectedAction.command) : "none"}`,
+        `      command: ${step.replayExecution.command ? formatShellCommand(step.replayExecution.command) : "none"}`,
+        `      exit_code: ${step.replayExecution.executed?.exitCode ?? ""}`,
+      ])
+      : ["    none"]),
   ].join("\n"));
 }
 
@@ -28215,7 +28359,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-execution execution_id --dry-run|--confirm|--replay-first-unreplayed-needs-action --dry-run|--confirm [--action selected_action]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-execution execution_id --dry-run|--confirm|--replay-first-unreplayed-needs-action --dry-run|--confirm [--action selected_action]|--replay-unreplayed-needs-action-loop --dry-run|--confirm [--action selected_action] [--max-steps 10]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]

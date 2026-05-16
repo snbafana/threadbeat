@@ -725,6 +725,98 @@ try {
   assert.equal(terminalOverviewUnreplayedAfterReplayFirst.summary.unreplayedNeedsAction, 0);
   assert.deepEqual(terminalOverviewUnreplayedAfterReplayFirst.commands, []);
 
+  const terminalOverviewUnsupportedControlExecuteForLoop = await cliJsonWithExit<{
+    executeNext: {
+      supported: boolean;
+      unsupportedReason: string | null;
+      command: string[] | null;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: null;
+    };
+    executionRecord: { executionId: string; inspectHistory: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "control",
+    "--execute-next",
+    "--dry-run",
+  ]);
+  assert.equal(terminalOverviewUnsupportedControlExecuteForLoop.exitCode, 1);
+  assert.equal(terminalOverviewUnsupportedControlExecuteForLoop.json.executeNext.supported, false);
+  assert.equal(terminalOverviewUnsupportedControlExecuteForLoop.json.executeNext.command, null);
+  assert.equal(terminalOverviewUnsupportedControlExecuteForLoop.json.executeNext.selectedAction?.surfaces[0], "control");
+  assert.equal(terminalOverviewUnsupportedControlExecuteForLoop.json.executeNext.selectedAction?.command.join(" "), controlStatusSummaryCommand);
+
+  const terminalOverviewReplayUnreplayedNeedsActionLoop = await cliJsonWithExit<{
+    stoppedReason: string;
+    summary: { steps: number; supported: number; unsupported: number; executed: number; failed: number };
+    steps: Array<{
+      replayExecution: {
+        sourceExecutionId: string;
+        dryRun: boolean;
+        confirmed: boolean;
+        selectedAction: { surfaces: string[]; command: string[] } | null;
+        supported: boolean;
+        unsupportedReason: string | null;
+        command: string[] | null;
+        executed: null;
+      };
+      executionRecord: { executionId: string; inspectHistory: string[] };
+    }>;
+    commands: { inspectUnreplayedNeedsAction: string[]; inspectHistory: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--replay-unreplayed-needs-action-loop",
+    "--surface",
+    "control",
+    "--dry-run",
+    "--max-steps",
+    "3",
+  ]);
+  const loopSourceExecutionId = terminalOverviewUnsupportedControlExecuteForLoop.json.executionRecord.executionId;
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.exitCode, 1);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.stoppedReason, "queue_empty");
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.summary.steps, 1);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.summary.supported, 0);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.summary.unsupported, 1);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.summary.executed, 0);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.summary.failed, 0);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.sourceExecutionId, loopSourceExecutionId);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.dryRun, true);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.confirmed, false);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.selectedAction?.surfaces[0], "control");
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.selectedAction?.command.join(" "), controlStatusSummaryCommand);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.supported, false);
+  assert.match(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.unsupportedReason ?? "", /does not accept --dry-run\/--confirm/);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.command, null);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.replayExecution.executed, null);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.commands.inspectUnreplayedNeedsAction.join(" "), `${terminalOverviewCommand} --unreplayed-needs-action --surface control`);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.commands.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+
+  const terminalOverviewUnreplayedAfterLoop = await cliJson<{
+    summary: { total: number; unreplayedNeedsAction: number };
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--unreplayed-needs-action",
+    "--surface",
+    "control",
+    "--commands-only",
+  ]);
+  assert.equal(terminalOverviewUnreplayedAfterLoop.summary.total, 0);
+  assert.equal(terminalOverviewUnreplayedAfterLoop.summary.unreplayedNeedsAction, 0);
+  assert.deepEqual(terminalOverviewUnreplayedAfterLoop.commands, []);
+
   const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
