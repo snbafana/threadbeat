@@ -5857,6 +5857,48 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-branch-terminals") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-branch-terminals <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-branch-terminals requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-branch-terminals --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-branch-terminals --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-branch-terminals --format text cannot be combined with --commands-only");
+    }
+    const status = parseBranchResumeTerminalStatus(options.status ?? "resumable");
+    const limit = parsePositiveInteger(options.limit ?? "20", "--limit");
+    const controlPlaneStatus = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, {
+      lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
+    });
+    const terminals = summarizeBranchResumeTerminals(controlPlaneStatus, {
+      status,
+      runId: options.run,
+      limit,
+    });
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(terminals.commands.queue);
+      } else {
+        await printJson({ ...terminals, commands: terminals.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printBranchResumeTerminalsText(terminals);
+    } else {
+      await printJson(terminals);
+    }
+    return;
+  }
   if (subcommandName === "session-branch-native-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -10559,6 +10601,8 @@ type WorkerSessionResultCommitViewResponse = {
 
 type ResultCommitTerminalStatus = "pending" | "reviewed" | "skipped" | "all";
 
+type BranchResumeTerminalStatus = "resumable" | "all";
+
 type ResultCommitTerminalsResponse = {
   ok: true;
   session: string;
@@ -10607,6 +10651,58 @@ type ResultCommitTerminalsResponse = {
       inspectReviews: string[];
       recordReviewed: string[] | null;
       recordSkipped: string[] | null;
+      nextStep: string[];
+    };
+  }>;
+};
+
+type BranchResumeTerminalsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    status: BranchResumeTerminalStatus;
+    runId: string | null;
+    limit: number;
+  };
+  count: number;
+  summary: {
+    resumable: number;
+    stoppedWithoutResultCommit: number;
+    runningSandboxPresent: number;
+    dryRunnable: number;
+  };
+  commands: {
+    inspectStatus: string[];
+    inspectBranches: string[];
+    inspectResumable: string[];
+    resumeQueue: string[];
+    queue: Array<{
+      scope: "branch_resume_terminal";
+      action: "inspect_run" | "inspect_result" | "checkout_branch" | "review_run" | "resume_branch" | "resume_branch_dry_run";
+      runId: string;
+      reason: WorkerSessionControlPlaneStatusResponse["branches"]["nextSteps"][number]["reason"];
+      branchName: string;
+      workerId: string | null;
+      command: string[];
+    }>;
+  };
+  terminalBranches: Array<{
+    runId: string;
+    objective: string;
+    status: string;
+    reason: WorkerSessionControlPlaneStatusResponse["branches"]["nextSteps"][number]["reason"];
+    branchName: string;
+    resultCommit: string | null;
+    workerId: string | null;
+    runningSandboxes: Array<{ id: string; providerSandboxId: string | null }>;
+    commands: {
+      inspectRun: string[];
+      inspectResult: string[];
+      checkoutBranch: string[];
+      reviewRun: string[];
+      watchRun: string[];
+      resumeBranch: string[] | null;
+      resumeBranchDryRun: string[];
       nextStep: string[];
     };
   }>;
@@ -15887,8 +15983,10 @@ function workerSessionControlPlaneStatusSummaryCommands(
   commands.push({ command: summary.commands.branchNativeNext });
   commands.push({ command: summary.commands.branchRecoveryExecutions });
   commands.push({ command: summary.commands.branchRecoveryCommandQueue });
+  commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-branch-terminals", summary.session, "--server"] });
   if (summary.branches.counts.ready > 0) {
     commands.push({ command: summary.commands.branchResumeCommandQueue });
+    commands.push({ command: ["npm", "run", "cli", "--", "runs", "session-control-plane-branch-terminals", summary.session, "--server", "--status", "resumable"] });
   }
   commands.push(...workerSessionBranchRecoveryExecutionCommands(
     summary.session,
@@ -16596,6 +16694,180 @@ function workerSessionResultInspectionCommands(
   });
 }
 
+function summarizeBranchResumeTerminals(
+  status: WorkerSessionControlPlaneStatusResponse,
+  options: { status: BranchResumeTerminalStatus; runId?: string; limit: number },
+): BranchResumeTerminalsResponse {
+  const terminalBranches = status.branches.nextSteps
+    .filter((step) => step.action === "resume_branch")
+    .filter((step) => options.status === "all" || step.reason === "stopped_branch_without_result_commit")
+    .filter((step) => !options.runId || step.runId === options.runId)
+    .slice(0, options.limit)
+    .map((step) => ({
+      runId: step.runId,
+      objective: step.objective,
+      status: step.status,
+      reason: step.reason,
+      branchName: step.branchName,
+      resultCommit: step.resultCommit,
+      workerId: step.workerId,
+      runningSandboxes: step.runningSandboxes,
+      commands: {
+        inspectRun: step.commands.inspectRun,
+        inspectResult: step.commands.inspectResult,
+        checkoutBranch: step.commands.checkoutBranch,
+        reviewRun: step.commands.reviewRun,
+        watchRun: step.commands.watchRun,
+        resumeBranch: step.commands.resumeBranch,
+        resumeBranchDryRun: step.commands.resumeBranchDryRun,
+        nextStep: step.command,
+      },
+    }));
+  const queue = uniqueBranchResumeTerminalCommandQueue(terminalBranches.flatMap((branch) => [
+    {
+      scope: "branch_resume_terminal" as const,
+      action: "inspect_run" as const,
+      runId: branch.runId,
+      reason: branch.reason,
+      branchName: branch.branchName,
+      workerId: branch.workerId,
+      command: branch.commands.inspectRun,
+    },
+    {
+      scope: "branch_resume_terminal" as const,
+      action: "inspect_result" as const,
+      runId: branch.runId,
+      reason: branch.reason,
+      branchName: branch.branchName,
+      workerId: branch.workerId,
+      command: branch.commands.inspectResult,
+    },
+    {
+      scope: "branch_resume_terminal" as const,
+      action: "checkout_branch" as const,
+      runId: branch.runId,
+      reason: branch.reason,
+      branchName: branch.branchName,
+      workerId: branch.workerId,
+      command: branch.commands.checkoutBranch,
+    },
+    {
+      scope: "branch_resume_terminal" as const,
+      action: "review_run" as const,
+      runId: branch.runId,
+      reason: branch.reason,
+      branchName: branch.branchName,
+      workerId: branch.workerId,
+      command: branch.commands.reviewRun,
+    },
+    ...(branch.commands.resumeBranch
+      ? [{
+          scope: "branch_resume_terminal" as const,
+          action: "resume_branch" as const,
+          runId: branch.runId,
+          reason: branch.reason,
+          branchName: branch.branchName,
+          workerId: branch.workerId,
+          command: branch.commands.resumeBranch,
+        }]
+      : []),
+    {
+      scope: "branch_resume_terminal" as const,
+      action: "resume_branch_dry_run" as const,
+      runId: branch.runId,
+      reason: branch.reason,
+      branchName: branch.branchName,
+      workerId: branch.workerId,
+      command: branch.commands.resumeBranchDryRun,
+    },
+  ]));
+  return {
+    ok: true,
+    session: status.session,
+    filter: {
+      status: options.status,
+      runId: options.runId ?? null,
+      limit: options.limit,
+    },
+    count: terminalBranches.length,
+    summary: {
+      resumable: terminalBranches.length,
+      stoppedWithoutResultCommit: terminalBranches.filter((branch) => branch.reason === "stopped_branch_without_result_commit").length,
+      runningSandboxPresent: terminalBranches.filter((branch) => branch.reason === "running_sandbox_present").length,
+      dryRunnable: terminalBranches.filter((branch) => branch.commands.resumeBranchDryRun.length > 0).length,
+    },
+    commands: {
+      inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", status.session, "--server", "--summary"],
+      inspectBranches: ["npm", "run", "cli", "--", "runs", "session-branches", status.session, "--server"],
+      inspectResumable: ["npm", "run", "cli", "--", "runs", "session-branches", status.session, "--server", "--resumable"],
+      resumeQueue: [
+        "npm", "run", "cli", "--", "runs", "session-branches", status.session, "--server",
+        "--resumable", "--branch-action", "resume_branch", "--limit", "5", "--commands-only", "--format", "shell",
+      ],
+      queue,
+    },
+    terminalBranches,
+  };
+}
+
+function uniqueBranchResumeTerminalCommandQueue(
+  commands: BranchResumeTerminalsResponse["commands"]["queue"],
+): BranchResumeTerminalsResponse["commands"]["queue"] {
+  const seen = new Set<string>();
+  const unique: BranchResumeTerminalsResponse["commands"]["queue"] = [];
+  for (const command of commands) {
+    const key = command.command.join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(command);
+  }
+  return unique;
+}
+
+function printBranchResumeTerminalsText(response: BranchResumeTerminalsResponse): void {
+  console.log(formatBranchResumeTerminalsText(response).join("\n"));
+}
+
+function formatBranchResumeTerminalsText(response: BranchResumeTerminalsResponse): string[] {
+  const lines = [
+    "branch_resume_terminals:",
+    `  session: ${response.session}`,
+    `  filter: status=${response.filter.status} run=${response.filter.runId ?? "all"} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  summary: resumable=${response.summary.resumable} stopped_without_result_commit=${response.summary.stoppedWithoutResultCommit} running_sandbox_present=${response.summary.runningSandboxPresent} dry_runnable=${response.summary.dryRunnable}`,
+    "  commands:",
+    `    status: ${formatShellCommand(response.commands.inspectStatus)}`,
+    `    branches: ${formatShellCommand(response.commands.inspectBranches)}`,
+    `    resumable: ${formatShellCommand(response.commands.inspectResumable)}`,
+    `    resume_queue: ${formatShellCommand(response.commands.resumeQueue)}`,
+  ];
+  if (response.terminalBranches.length === 0) {
+    lines.push("  branches: none");
+    return lines;
+  }
+  lines.push("  branches:");
+  for (const branch of response.terminalBranches) {
+    lines.push(
+      `    - run: ${branch.runId}`,
+      `      objective: ${branch.objective}`,
+      `      status: ${branch.status}`,
+      `      reason: ${branch.reason}`,
+      `      branch: ${branch.branchName}`,
+      `      result_commit: ${branch.resultCommit ?? ""}`,
+      `      worker: ${branch.workerId ?? ""}`,
+      `      running_sandboxes: ${branch.runningSandboxes.length}`,
+      `      inspect: ${formatShellCommand(branch.commands.inspectRun)}`,
+      `      inspect_result: ${formatShellCommand(branch.commands.inspectResult)}`,
+      `      checkout: ${formatShellCommand(branch.commands.checkoutBranch)}`,
+      `      review: ${formatShellCommand(branch.commands.reviewRun)}`,
+      `      watch: ${formatShellCommand(branch.commands.watchRun)}`,
+      `      resume: ${branch.commands.resumeBranch ? formatShellCommand(branch.commands.resumeBranch) : "none"}`,
+      `      resume_dry_run: ${formatShellCommand(branch.commands.resumeBranchDryRun)}`,
+    );
+  }
+  return lines;
+}
+
 type WorkerSessionBranchNativeNextResponse = {
   ok: true;
   session: string;
@@ -17003,7 +17275,11 @@ function workerSessionBranchNativeNext(
     })),
     { surfaces: ["branch"], command: summary.commands.branchRecoveryExecutions },
     { surfaces: ["branch"], command: summary.commands.branchRecoveryCommandQueue },
+    { surfaces: ["branch"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-branch-terminals", summary.session, "--server"] },
     ...(summary.branches.counts.ready > 0 ? [{ surfaces: ["branch"] as const, command: summary.commands.branchResumeCommandQueue }] : []),
+    ...(summary.branches.counts.ready > 0
+      ? [{ surfaces: ["branch"] as const, command: ["npm", "run", "cli", "--", "runs", "session-control-plane-branch-terminals", summary.session, "--server", "--status", "resumable"] }]
+      : []),
     ...branchActions.flatMap((action): WorkerSessionBranchNativeCommandQueueItem[] => [
       { surfaces: ["branch"], command: action.commands.inspectResult },
       { surfaces: ["branch"], command: action.commands.checkoutBranch },
@@ -20907,6 +21183,11 @@ function parseOperatorLoopTerminalStatus(value: string): OperatorLoopTerminalSta
 function parseResultCommitTerminalStatus(value: string): ResultCommitTerminalStatus {
   if (value === "pending" || value === "reviewed" || value === "skipped" || value === "all") return value;
   throw new Error(`Unsupported result commit terminal status: ${value}`);
+}
+
+function parseBranchResumeTerminalStatus(value: string): BranchResumeTerminalStatus {
+  if (value === "resumable" || value === "all") return value;
+  throw new Error(`Unsupported branch resume terminal status: ${value}`);
 }
 
 function parseResultReviewWorkerAction(options: Record<string, string>, commandName: string): "reviewed" | "skipped" {
@@ -27195,6 +27476,7 @@ Commands:
   runs restart-control-plane-tick-workers <name> --server --worker-id id [--include-retired] [--lines 20]
   runs stop-control-plane-tick-workers <name> --server [--worker-id id] [--retire] [--lines 20]
   runs session-branch-recovery-executions <name> --server [--execution execution_id[,execution_id]] [--run run_id[,run_id]] [--status executed,partial,noop] [--limit 20] [--commands-only] [--checkout-dir ./checkouts/name-branch-recovery] [--format json|shell]
+  runs session-control-plane-branch-terminals <name> --server [--status resumable|all] [--run run_id] [--limit 20] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-branches <name> --server [--status completed,stopped] [--resumable] [--worker-id worker-a] [--branch-action resume_branch|review_branch] [--run run_id[,run_id]] [--limit 20] [--offset 20] [--checkout-dir ./checkouts/name-branches] [--commands-only] [--format json|shell]
   runs stop-apply-action-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
   runs restart-apply-action-workers <name> [--server] --worker-id id [--include-retired] [--lines 20]
