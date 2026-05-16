@@ -10604,6 +10604,30 @@ type WorkerSessionControlPlaneStatusResponse = {
         }>;
       };
     };
+    resultReviewLoops: {
+      attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
+      resumableLoops: {
+        count: number;
+        recent: Array<{
+          loopAdvanceId: string;
+          latestAdvanceId: string;
+          attempts: number;
+          totalProcessed: number;
+          dryRun: boolean;
+          action: "reviewed" | "skipped";
+          lastObservedAt: string;
+          lastCompletedAt: string;
+          stoppedReason: string | null;
+          maxResults: number | null;
+          intervalMs: number | null;
+          remainingPending: number | null;
+          resumeCommand: string[];
+          inspectLatestCommand: string[];
+          inspectHistoryCommand: string[];
+          executeResumeCommand: string[];
+        }>;
+      };
+    };
     statusWatchExecutions: {
       attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
       recent: Array<{
@@ -13754,6 +13778,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `recover_next_incomplete_loops: ${summary.recovery.recoverNext.incompleteLoops.count}`,
     `continue_deferred_loops: total=${summary.recovery.continueDeferred.attempts.total} dry_run=${summary.recovery.continueDeferred.attempts.dryRun} executed=${summary.recovery.continueDeferred.attempts.executed} failed=${summary.recovery.continueDeferred.attempts.failed} resumable=${summary.recovery.continueDeferred.resumableLoops.count}`,
     `operator_loops: total=${summary.recovery.operatorLoops.attempts.total} dry_run=${summary.recovery.operatorLoops.attempts.dryRun} executed=${summary.recovery.operatorLoops.attempts.executed} failed=${summary.recovery.operatorLoops.attempts.failed} resumable=${summary.recovery.operatorLoops.resumableLoops.count}`,
+    `result_review_loops: total=${summary.recovery.resultReviewLoops.attempts.total} dry_run=${summary.recovery.resultReviewLoops.attempts.dryRun} executed=${summary.recovery.resultReviewLoops.attempts.executed} failed=${summary.recovery.resultReviewLoops.attempts.failed} resumable=${summary.recovery.resultReviewLoops.resumableLoops.count}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
@@ -13783,6 +13808,15 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     }
     if (summary.commands.operatorLoopNextResume) {
       lines.push(`operator_loop_next_resume: ${formatShellCommand(summary.commands.operatorLoopNextResume)}`);
+    }
+  }
+  if (summary.recovery.resultReviewLoops.resumableLoops.count > 0) {
+    lines.push(`result_review_loop_queue: ${formatShellCommand(summary.commands.resultReviewLoops)}`);
+    if (summary.commands.resultReviewLoopNextInspect) {
+      lines.push(`result_review_loop_next_inspect: ${formatShellCommand(summary.commands.resultReviewLoopNextInspect)}`);
+    }
+    if (summary.commands.resultReviewLoopNextResume) {
+      lines.push(`result_review_loop_next_resume: ${formatShellCommand(summary.commands.resultReviewLoopNextResume)}`);
     }
   }
   if (summary.recovery.recoverNext.resumeAttempts.failedRecent.length > 0) {
@@ -14209,6 +14243,27 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    max_cycles: ${loop.maxCycles ?? ""}`,
         `    cycle_interval_ms: ${loop.cycleIntervalMs ?? ""}`,
         `    lines: ${loop.lines ?? ""}`,
+        `    stopped_reason: ${loop.stoppedReason ?? ""}`,
+        `    resume: ${formatShellCommand(loop.resumeCommand)}`,
+        `    inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
+        `    inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+        `    execute_resume: ${formatShellCommand(loop.executeResumeCommand)}`,
+      );
+    }
+  }
+  if (summary.recovery.resultReviewLoops.resumableLoops.recent.length > 0) {
+    lines.push("resumable_result_review_loops:");
+    for (const loop of summary.recovery.resultReviewLoops.resumableLoops.recent) {
+      lines.push(
+        `  - loop: ${loop.loopAdvanceId}`,
+        `    latest_advance: ${loop.latestAdvanceId}`,
+        `    attempts: ${loop.attempts}`,
+        `    action: ${loop.action}`,
+        `    total_processed: ${loop.totalProcessed}`,
+        `    remaining_pending: ${loop.remainingPending ?? ""}`,
+        `    dry_run: ${loop.dryRun}`,
+        `    max_results: ${loop.maxResults ?? ""}`,
+        `    interval_ms: ${loop.intervalMs ?? ""}`,
         `    stopped_reason: ${loop.stoppedReason ?? ""}`,
         `    resume: ${formatShellCommand(loop.resumeCommand)}`,
         `    inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
@@ -14897,6 +14952,7 @@ type WorkerSessionBranchNativeNextResponse = {
     recoverNextIncompleteLoops: number;
     failedRecoverNextResumeLoops: number;
     operatorLoops: number;
+    resultReviewLoops: number;
     resultCommits: number;
     resultPending: number;
     resultReviewed: number;
@@ -14908,6 +14964,7 @@ type WorkerSessionBranchNativeNextResponse = {
   recoverNextLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["recoverNext"]["incompleteLoops"]["recent"];
   failedRecoverNextResumeLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["failedRecoverNextResumeLoops"]["recent"];
   operatorLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["operatorLoops"]["resumableLoops"]["recent"];
+  resultReviewLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["resultReviewLoops"]["resumableLoops"]["recent"];
   resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
   resultReviewCommands: {
     previewReviewed: string[];
@@ -14984,6 +15041,7 @@ function workerSessionBranchNativeNext(
   const recoverNextLoops = summary.recovery.recoverNext.incompleteLoops.recent.slice(0, options.limit);
   const failedRecoverNextResumeLoops = summary.recovery.failedRecoverNextResumeLoops.recent.slice(0, options.limit);
   const operatorLoops = summary.recovery.operatorLoops.resumableLoops.recent.slice(0, options.limit);
+  const resultReviewLoops = summary.recovery.resultReviewLoops.resumableLoops.recent.slice(0, options.limit);
   const requestedCommandSurfaces = options.commandSurfaces ?? [];
   const commands = filterWorkerSessionBranchNativeCommandQueue(uniqueWorkerSessionBranchNativeCommandQueue([
     { surfaces: ["control"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"] },
@@ -15050,6 +15108,13 @@ function workerSessionBranchNativeNext(
     ]),
     { surfaces: ["result_inspection"], command: summary.commands.resultCommitView },
     { surfaces: ["result_inspection"], command: summary.commands.pendingResultCommitView },
+    ...(summary.recovery.resultReviewLoops.resumableLoops.count > 0 ? [{ surfaces: ["result_inspection"] as const, command: summary.commands.resultReviewLoops }] : []),
+    ...resultReviewLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
+      { surfaces: ["result_inspection"], command: loop.resumeCommand },
+      { surfaces: ["result_inspection"], command: loop.inspectLatestCommand },
+      { surfaces: ["result_inspection"], command: loop.inspectHistoryCommand },
+      { surfaces: ["result_inspection"], command: loop.executeResumeCommand },
+    ]),
     ...(summary.results.counts.pending > 0
       ? [
         { surfaces: ["result_inspection"] as const, command: summary.commands.nextResultInspection },
@@ -15088,6 +15153,7 @@ function workerSessionBranchNativeNext(
       recoverNextIncompleteLoops: summary.recovery.recoverNext.incompleteLoops.count,
       failedRecoverNextResumeLoops: summary.recovery.failedRecoverNextResumeLoops.count,
       operatorLoops: summary.recovery.operatorLoops.resumableLoops.count,
+      resultReviewLoops: summary.recovery.resultReviewLoops.resumableLoops.count,
       resultCommits: summary.results.counts.resultCommits,
       resultPending: summary.results.counts.pending,
       resultReviewed: summary.results.counts.reviewed,
@@ -15099,6 +15165,7 @@ function workerSessionBranchNativeNext(
     recoverNextLoops,
     failedRecoverNextResumeLoops,
     operatorLoops,
+    resultReviewLoops,
     resultActions,
     resultReviewCommands: {
       previewReviewed: summary.commands.branchNativePreviewPendingReviewed,
@@ -15460,6 +15527,7 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `  recover_next_incomplete_loops: ${response.counts.recoverNextIncompleteLoops}`,
     `  failed_recover_next_resume_loops: ${response.counts.failedRecoverNextResumeLoops}`,
     `  operator_loops: ${response.counts.operatorLoops}`,
+    `  result_review_loops: ${response.counts.resultReviewLoops}`,
     `  result_commits: ${response.counts.resultCommits}`,
     `  result_pending: ${response.counts.resultPending}`,
     `  result_reviewed: ${response.counts.resultReviewed}`,
@@ -15588,6 +15656,23 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
         ]),
       ]
       : ["  operator_loops: none"]),
+    ...(response.resultReviewLoops.length > 0
+      ? [
+        "  result_review_loops:",
+        ...response.resultReviewLoops.flatMap((loop) => [
+          `    - loop: ${loop.loopAdvanceId}`,
+          `      attempts: ${loop.attempts}`,
+          `      action: ${loop.action}`,
+          `      total_processed: ${loop.totalProcessed}`,
+          `      remaining_pending: ${loop.remainingPending ?? ""}`,
+          `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+          `      resume: ${formatShellCommand(loop.resumeCommand)}`,
+          `      inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
+          `      inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+          `      execute_resume: ${formatShellCommand(loop.executeResumeCommand)}`,
+        ]),
+      ]
+      : ["  result_review_loops: none"]),
     ...(response.resultActions.length > 0
       ? [
         "  result_actions:",
@@ -15887,6 +15972,19 @@ function selectWorkerSessionControlPlaneNextActions(
       detailCommand: "branch_native_operator_loop",
       loopAdvanceId: operatorLoop.loopAdvanceId,
       advanceId: operatorLoop.latestAdvanceId,
+    });
+  }
+  const resultReviewLoop = status.recovery.resultReviewLoops.resumableLoops.recent[0];
+  if (resultReviewLoop) {
+    nextActions.push({
+      surface: "result_inspection",
+      action: "resume_branch_native_result_review_loop",
+      reason: resultReviewLoop.stoppedReason ?? "branch_native_result_review_loop_resumable",
+      count: status.recovery.resultReviewLoops.resumableLoops.count,
+      command: resultReviewLoop.resumeCommand,
+      detailCommand: "branch_native_result_review_loop",
+      loopAdvanceId: resultReviewLoop.loopAdvanceId,
+      advanceId: resultReviewLoop.latestAdvanceId,
     });
   }
   const staleRun = status.staleRuns.nextSteps.find((step) => step.action === "recover_session_run");
@@ -16242,6 +16340,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     recoverNext: WorkerSessionControlPlaneStatusResponse["recovery"]["recoverNext"];
     continueDeferred: WorkerSessionControlPlaneStatusResponse["recovery"]["continueDeferred"];
     operatorLoops: WorkerSessionControlPlaneStatusResponse["recovery"]["operatorLoops"];
+    resultReviewLoops: WorkerSessionControlPlaneStatusResponse["recovery"]["resultReviewLoops"];
     failedRecoverNextResumeLoops: { count: number; recent: FailedRecoverNextResumeLoopSummary[] };
     statusWatchExecutions: WorkerSessionControlPlaneStatusResponse["recovery"]["statusWatchExecutions"];
     workerReconciliations: WorkerSessionControlPlaneStatusResponse["recovery"]["workerReconciliations"];
@@ -16306,6 +16405,9 @@ function summarizeWorkerSessionControlPlaneStatus(
     operatorLoops: string[];
     operatorLoopNextInspect: string[] | null;
     operatorLoopNextResume: string[] | null;
+    resultReviewLoops: string[];
+    resultReviewLoopNextInspect: string[] | null;
+    resultReviewLoopNextResume: string[] | null;
     recoverNextIncompleteLoopQueue: string[];
     failedRecoverNextResumeAttempts: string[];
     workerReconciliations: string[];
@@ -16404,6 +16506,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       recoverNext: status.recovery.recoverNext,
       continueDeferred: status.recovery.continueDeferred,
       operatorLoops: status.recovery.operatorLoops,
+      resultReviewLoops: status.recovery.resultReviewLoops,
       failedRecoverNextResumeLoops,
       statusWatchExecutions: status.recovery.statusWatchExecutions,
       workerReconciliations: status.recovery.workerReconciliations,
@@ -16500,6 +16603,9 @@ function summarizeWorkerSessionControlPlaneStatus(
       operatorLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--detail-command", "branch_native_operator_loop"],
       operatorLoopNextInspect: status.recovery.operatorLoops.resumableLoops.recent[0]?.inspectLatestCommand ?? null,
       operatorLoopNextResume: status.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand ?? null,
+      resultReviewLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--detail-command", "branch_native_result_review_loop"],
+      resultReviewLoopNextInspect: status.recovery.resultReviewLoops.resumableLoops.recent[0]?.inspectLatestCommand ?? null,
+      resultReviewLoopNextResume: status.recovery.resultReviewLoops.resumableLoops.recent[0]?.resumeCommand ?? null,
       recoverNextIncompleteLoopQueue: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-alert", status.session, "--server",
         "--surface", "recover_next", "--reason", "incomplete_recover_next_loop", "--commands-only", "--format", "shell",

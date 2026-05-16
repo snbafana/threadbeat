@@ -295,6 +295,31 @@ type WorkerSessionControlPlaneContinueDeferredHistoryStatus = {
 
 type WorkerSessionControlPlaneOperatorLoopHistoryStatus = WorkerSessionControlPlaneContinueDeferredHistoryStatus;
 
+type WorkerSessionControlPlaneResultReviewLoopHistoryStatus = {
+  attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
+  resumableLoops: {
+    count: number;
+    recent: Array<{
+      loopAdvanceId: string;
+      latestAdvanceId: string;
+      attempts: number;
+      totalProcessed: number;
+      dryRun: boolean;
+      action: "reviewed" | "skipped";
+      lastObservedAt: string;
+      lastCompletedAt: string;
+      stoppedReason: string | null;
+      maxResults: number | null;
+      intervalMs: number | null;
+      remainingPending: number | null;
+      resumeCommand: string[];
+      inspectLatestCommand: string[];
+      inspectHistoryCommand: string[];
+      executeResumeCommand: string[];
+    }>;
+  };
+};
+
 export const buildServer = async (settings: Settings): Promise<AppParts> => {
   const db = new Database(settings.dbUrl, path.join(settings.projectRoot, "schema", "bootstrap.sql"));
   await db.initSchema();
@@ -4153,6 +4178,7 @@ const readWorkerSessionControlPlaneStatus = async (
     recoverNext: WorkerSessionControlPlaneRecoverNextHistoryStatus;
     continueDeferred: WorkerSessionControlPlaneContinueDeferredHistoryStatus;
     operatorLoops: WorkerSessionControlPlaneOperatorLoopHistoryStatus;
+    resultReviewLoops: WorkerSessionControlPlaneResultReviewLoopHistoryStatus;
     statusWatchExecutions: {
       attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
       recent: WorkerSessionControlPlaneRecoveryAttemptStatus[];
@@ -4198,6 +4224,7 @@ const readWorkerSessionControlPlaneStatus = async (
     recoverNextResumeAcknowledgementAttempts,
     continueDeferredAttempts,
     branchNativeOperatorLoopAttempts,
+    branchNativeResultReviewLoopAttempts,
     statusWatchExecutionAttempts,
     statusWatchAcknowledgementAttempts,
     workerReconciliations,
@@ -4255,6 +4282,10 @@ const readWorkerSessionControlPlaneStatus = async (
     }),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
       limit: Number.MAX_SAFE_INTEGER,
+      detailCommands: ["branch_native_result_review_loop"],
+    }),
+    listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
+      limit: Number.MAX_SAFE_INTEGER,
       detailCommands: ["status_watch_execute_action"],
     }),
     listWorkerSessionControlPlaneAdvanceRecords(settings.projectRoot, name, {
@@ -4286,6 +4317,11 @@ const readWorkerSessionControlPlaneStatus = async (
     branchNativeOperatorLoopAttempts,
     lines,
   );
+  const resultReviewLoops = summarizeWorkerSessionControlPlaneResultReviewLoopHistory(
+    name,
+    branchNativeResultReviewLoopAttempts,
+    lines,
+  );
   return {
     ok: true,
     session: name,
@@ -4300,6 +4336,7 @@ const readWorkerSessionControlPlaneStatus = async (
       ],
       recoverNext,
       operatorLoops,
+      resultReviewLoops,
       branchNextSteps: branchRecovery.nextSteps,
       resultNextSteps: resultInspection.nextSteps,
     }),
@@ -4360,6 +4397,7 @@ const readWorkerSessionControlPlaneStatus = async (
       recoverNext,
       continueDeferred,
       operatorLoops,
+      resultReviewLoops,
       statusWatchExecutions: {
         attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(statusWatchExecutionAttempts),
         recent: statusWatchExecutionAttempts
@@ -5056,6 +5094,80 @@ const summarizeWorkerSessionControlPlaneOperatorLoopHistory = (
         "--lines", String(loopLines ?? 5),
         "--confirm",
       ],
+    }];
+  }).sort((left, right) => right.lastObservedAt.localeCompare(left.lastObservedAt));
+  return {
+    attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(records),
+    resumableLoops: {
+      count: resumableLoops.length,
+      recent: resumableLoops.slice(0, lines),
+    },
+  };
+};
+
+const summarizeWorkerSessionControlPlaneResultReviewLoopHistory = (
+  sessionName: string,
+  records: Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>,
+  lines: number,
+): WorkerSessionControlPlaneResultReviewLoopHistoryStatus => {
+  const grouped = new Map<string, Awaited<ReturnType<typeof listWorkerSessionControlPlaneAdvanceRecords>>>();
+  for (const record of records) {
+    const recovery = objectRecord(record.recovery);
+    const selected = objectRecord(record.selected);
+    const loopAdvanceId = stringRecordField(recovery, "loopAdvanceId") ?? stringRecordField(selected, "loopAdvanceId") ?? record.advanceId;
+    const group = grouped.get(loopAdvanceId) ?? [];
+    group.push(record);
+    grouped.set(loopAdvanceId, group);
+  }
+  const resumableLoops = [...grouped.entries()].flatMap(([loopAdvanceId, loopRecords]) => {
+    const sorted = [...loopRecords].sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+    const latest = sorted[0];
+    if (!latest) return [];
+    const recovery = objectRecord(latest.recovery);
+    const stoppedReason = stringRecordField(recovery, "stoppedReason");
+    if (stoppedReason === "no_pending_result_commits") return [];
+    const action: "reviewed" | "skipped" = stringRecordField(recovery, "action") === "skipped" ? "skipped" : "reviewed";
+    const maxResults = numberRecordField(recovery, "maxResults");
+    const intervalMs = numberRecordField(recovery, "intervalMs");
+    const remainingPending = numberRecordField(recovery, "remainingPending");
+    const totalProcessed = loopRecords.reduce((total, record) => {
+      const recordRecovery = objectRecord(record.recovery);
+      return total + (numberRecordField(recordRecovery, "processed") ?? 0);
+    }, 0);
+    const dryRun = sorted.every((record) => record.dryRun);
+    const resumeCommand = [
+      "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+      action === "reviewed" ? "--record-reviewed" : "--record-skipped",
+      "--until-empty", "--resume-loop", loopAdvanceId,
+      dryRun ? "--dry-run" : "--confirm",
+      "--max-results", String(maxResults ?? 10),
+      "--interval-ms", String(intervalMs ?? 1),
+    ];
+    const executeResumeCommand = [
+      "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+      action === "reviewed" ? "--record-reviewed" : "--record-skipped",
+      "--until-empty", "--resume-loop", loopAdvanceId,
+      "--confirm",
+      "--max-results", String(maxResults ?? 10),
+      "--interval-ms", String(intervalMs ?? 1),
+    ];
+    return [{
+      loopAdvanceId,
+      latestAdvanceId: latest.advanceId,
+      attempts: loopRecords.length,
+      totalProcessed,
+      dryRun,
+      action,
+      lastObservedAt: latest.observedAt,
+      lastCompletedAt: latest.completedAt,
+      stoppedReason,
+      maxResults,
+      intervalMs,
+      remainingPending,
+      resumeCommand,
+      inspectLatestCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", latest.advanceId],
+      inspectHistoryCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "branch_native_result_review_loop"],
+      executeResumeCommand,
     }];
   }).sort((left, right) => right.lastObservedAt.localeCompare(left.lastObservedAt));
   return {
@@ -6008,6 +6120,7 @@ const selectWorkerSessionBranchNativeStatusNext = (
     workerRecoverySteps: unknown[];
     recoverNext: WorkerSessionControlPlaneRecoverNextHistoryStatus;
     operatorLoops: WorkerSessionControlPlaneOperatorLoopHistoryStatus;
+    resultReviewLoops: WorkerSessionControlPlaneResultReviewLoopHistoryStatus;
     branchNextSteps: Array<{
       action: string;
       reason: string;
@@ -6045,6 +6158,15 @@ const selectWorkerSessionBranchNativeStatusNext = (
       action: "resume_branch_native_operator_loop",
       reason: operatorLoop.stoppedReason ?? "branch_native_operator_loop_resumable",
       command: operatorLoop.resumeCommand,
+    };
+  }
+  const resultReviewLoop = input.resultReviewLoops.resumableLoops.recent[0];
+  if (resultReviewLoop) {
+    return {
+      surface: "result_inspection",
+      action: "resume_branch_native_result_review_loop",
+      reason: resultReviewLoop.stoppedReason ?? "branch_native_result_review_loop_resumable",
+      command: resultReviewLoop.resumeCommand,
     };
   }
   const failedRecoverResume = input.recoverNext.resumeAttempts.failedRecent[0];

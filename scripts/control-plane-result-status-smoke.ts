@@ -330,8 +330,9 @@ try {
 
   const branchNativeNext = await cliJson<{
     ok: boolean;
-    counts: { branchActions: number; resultPending: number; resultCommits: number };
+    counts: { branchActions: number; resultPending: number; resultCommits: number; resultReviewLoops: number };
     branchActions: unknown[];
+    resultReviewLoops: unknown[];
     resultActions: Array<{ runId: string; resultCommit: string; commands: { inspectResult: string[]; recordReviewed: string[]; recordSkipped: string[] } }>;
     resultReviewCommands: { previewReviewed: string[]; previewSkipped: string[]; recordReviewed: string[]; recordSkipped: string[] };
     commands: Array<{ command: string[] }>;
@@ -345,7 +346,9 @@ try {
   assert.equal(branchNativeNext.counts.branchActions, 0);
   assert.equal(branchNativeNext.counts.resultPending, 1);
   assert.equal(branchNativeNext.counts.resultCommits, 1);
+  assert.equal(branchNativeNext.counts.resultReviewLoops, 0);
   assert.equal(branchNativeNext.branchActions.length, 0);
+  assert.equal(branchNativeNext.resultReviewLoops.length, 0);
   assert.equal(branchNativeNext.resultActions[0]?.runId, run.id);
   assert.equal(branchNativeNext.resultActions[0]?.resultCommit, resultCommit);
   assert.deepEqual(branchNativeNext.resultActions[0]?.commands.inspectResult, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
@@ -372,6 +375,8 @@ try {
   ]);
   assert.match(branchNativeNextText, /branch_native_next:/);
   assert.match(branchNativeNextText, /branch_actions: none/);
+  assert.match(branchNativeNextText, /result_review_loops: 0/);
+  assert.match(branchNativeNextText, /result_review_loops: none/);
   assert.match(branchNativeNextText, /result_pending: 1/);
   assert.match(branchNativeNextText, new RegExp(`result_commit: ${resultCommit}`));
   assert.match(branchNativeNextText, new RegExp(`branch_native_preview_reviewed: ${branchNativePreviewPendingReviewedCommand}`));
@@ -561,6 +566,117 @@ try {
   assert.equal(branchNativeResultReviewResumeHistory.advances[0]?.recovery.previousProcessed, 1);
   assert.equal(branchNativeResultReviewResumeHistory.advances[0]?.recovery.totalProcessed, 2);
 
+  const resumableResultReviewLoopStatus = await cliJson<{
+    nextRecovery: { surface: string; action: string; reason: string; command: string[] };
+    nextActions: Array<{ surface: string; action: string; reason: string; command: string[]; loopAdvanceId?: string; advanceId?: string }>;
+    recovery: {
+      resultReviewLoops: {
+        attempts: { total: number; dryRun: number };
+        resumableLoops: {
+          count: number;
+          recent: Array<{
+            loopAdvanceId: string;
+            latestAdvanceId: string;
+            attempts: number;
+            action: string;
+            totalProcessed: number;
+            remainingPending: number;
+            stoppedReason: string;
+            resumeCommand: string[];
+            inspectLatestCommand: string[];
+            inspectHistoryCommand: string[];
+            executeResumeCommand: string[];
+          }>;
+        };
+      };
+    };
+    commands: { resultReviewLoops: string[]; resultReviewLoopNextInspect: string[]; resultReviewLoopNextResume: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.attempts.total, 2);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.attempts.dryRun, 2);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.count, 1);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.latestAdvanceId, branchNativeReviewResumeDryRun.advanceRecord.advanceId);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.attempts, 2);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.action, "reviewed");
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.totalProcessed, 2);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.remainingPending, 1);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.stoppedReason, "dry_run_previewed");
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.resumeCommand.join(" "), `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 3 --interval-ms 1`);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.inspectLatestCommand.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --advance ${branchNativeReviewResumeDryRun.advanceRecord.advanceId}`);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.inspectHistoryCommand.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${branchNativeReviewDryRun.loopAdvanceId} --detail-command branch_native_result_review_loop`);
+  assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.executeResumeCommand.join(" "), `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`);
+  assert.equal(resumableResultReviewLoopStatus.commands.resultReviewLoops.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --detail-command branch_native_result_review_loop`);
+  assert.deepEqual(resumableResultReviewLoopStatus.commands.resultReviewLoopNextInspect, resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.inspectLatestCommand);
+  assert.deepEqual(resumableResultReviewLoopStatus.commands.resultReviewLoopNextResume, resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.resumeCommand);
+  assert.equal(resumableResultReviewLoopStatus.nextRecovery.surface, "result_inspection");
+  assert.equal(resumableResultReviewLoopStatus.nextRecovery.action, "resume_branch_native_result_review_loop");
+  assert.equal(resumableResultReviewLoopStatus.nextRecovery.reason, "dry_run_previewed");
+  assert.deepEqual(resumableResultReviewLoopStatus.nextRecovery.command, resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.resumeCommand);
+  assert.ok(resumableResultReviewLoopStatus.nextActions.some((action) => (
+    action.surface === "result_inspection"
+    && action.action === "resume_branch_native_result_review_loop"
+    && action.loopAdvanceId === branchNativeReviewDryRun.loopAdvanceId
+    && action.advanceId === branchNativeReviewResumeDryRun.advanceRecord.advanceId
+    && action.command.join(" ") === resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.resumeCommand.join(" ")
+  )));
+
+  const branchNativeNextWithReviewLoop = await cliJson<{
+    counts: { resultReviewLoops: number };
+    resultReviewLoops: Array<{
+      loopAdvanceId: string;
+      latestAdvanceId: string;
+      attempts: number;
+      action: string;
+      totalProcessed: number;
+      resumeCommand: string[];
+      inspectLatestCommand: string[];
+      inspectHistoryCommand: string[];
+      executeResumeCommand: string[];
+    }>;
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(branchNativeNextWithReviewLoop.counts.resultReviewLoops, 1);
+  assert.equal(branchNativeNextWithReviewLoop.resultReviewLoops[0]?.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.equal(branchNativeNextWithReviewLoop.resultReviewLoops[0]?.latestAdvanceId, branchNativeReviewResumeDryRun.advanceRecord.advanceId);
+  assert.equal(branchNativeNextWithReviewLoop.resultReviewLoops[0]?.attempts, 2);
+  assert.equal(branchNativeNextWithReviewLoop.resultReviewLoops[0]?.action, "reviewed");
+  assert.equal(branchNativeNextWithReviewLoop.resultReviewLoops[0]?.totalProcessed, 2);
+  assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === resumableResultReviewLoopStatus.commands.resultReviewLoops.join(" ")));
+  assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.resumeCommand.join(" ")));
+  assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.inspectLatestCommand.join(" ")));
+  assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.inspectHistoryCommand.join(" ")));
+  assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.executeResumeCommand.join(" ")));
+
+  const branchNativeNextWithReviewLoopText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeNextWithReviewLoopText, /result_review_loops: 1/);
+  assert.match(branchNativeNextWithReviewLoopText, /result_review_loops:\n    - loop: branch-native-result-review-loop-/);
+  assert.match(branchNativeNextWithReviewLoopText, /action: reviewed/);
+  assert.match(branchNativeNextWithReviewLoopText, /total_processed: 2/);
+  assert.match(branchNativeNextWithReviewLoopText, /remaining_pending: 1/);
+  assert.match(branchNativeNextWithReviewLoopText, /stopped_reason: dry_run_previewed/);
+  assert.match(branchNativeNextWithReviewLoopText, new RegExp(`resume: npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 3 --interval-ms 1`));
+  assert.match(branchNativeNextWithReviewLoopText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${branchNativeReviewDryRun.loopAdvanceId} --detail-command branch_native_result_review_loop`));
+  assert.match(branchNativeNextWithReviewLoopText, new RegExp(`execute_resume: npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`));
+
   const branchNativeReviewDryRunText = await cliText(baseUrl, [
     "runs",
     "session-branch-native-next",
@@ -594,6 +710,11 @@ try {
   assert.match(branchNativeReviewDryRunText, new RegExp(`resume_loop: npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 2 --interval-ms 1`));
   assert.match(branchNativeReviewDryRunText, new RegExp(`inspect_next: ${branchNativeNextCommand}`));
   assert.match(branchNativeReviewDryRunText, /recorded=false/);
+  const latestResultReviewLoopResumeCommand = [
+    "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+    "--record-reviewed", "--until-empty", "--resume-loop", branchNativeReviewDryRun.loopAdvanceId,
+    "--dry-run", "--max-results", "2", "--interval-ms", "1",
+  ];
 
   const watchedUntilResultInspection = await cliJson<{
     untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
@@ -611,9 +732,9 @@ try {
     "1",
   ]);
   assert.equal(watchedUntilResultInspection.untilAction.done, true);
-  assert.equal(watchedUntilResultInspection.untilAction.reason, "control_plane_action:review_result");
-  assert.deepEqual(watchedUntilResultInspection.untilAction.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
-  assert.deepEqual(watchedUntilResultInspection.untilAction.dryRunCommand, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.equal(watchedUntilResultInspection.untilAction.reason, "control_plane_action:resume_branch_native_result_review_loop");
+  assert.deepEqual(watchedUntilResultInspection.untilAction.command, latestResultReviewLoopResumeCommand);
+  assert.deepEqual(watchedUntilResultInspection.untilAction.dryRunCommand, latestResultReviewLoopResumeCommand);
 
   const watchedResultInspectionDryRun = await cliJson<{
     executedAction: {
@@ -639,9 +760,9 @@ try {
     "1",
   ]);
   assert.equal(watchedResultInspectionDryRun.executedAction.dryRun, true);
-  assert.equal(watchedResultInspectionDryRun.executedAction.reason, "control_plane_action:review_result");
-  assert.deepEqual(watchedResultInspectionDryRun.executedAction.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
-  assert.deepEqual(watchedResultInspectionDryRun.executedAction.executed.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.equal(watchedResultInspectionDryRun.executedAction.reason, "control_plane_action:resume_branch_native_result_review_loop");
+  assert.deepEqual(watchedResultInspectionDryRun.executedAction.command, latestResultReviewLoopResumeCommand);
+  assert.deepEqual(watchedResultInspectionDryRun.executedAction.executed.command, latestResultReviewLoopResumeCommand);
   assert.equal(watchedResultInspectionDryRun.executedAction.executed.exitCode, 0);
 
   const resultInspectionWatchExecutions = await cliJson<{
@@ -665,9 +786,9 @@ try {
   assert.equal(resultInspectionWatchExecutions.advances[0]?.dryRun, true);
   assert.equal(resultInspectionWatchExecutions.advances[0]?.detailCommand, "status_watch_execute_action");
   assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.surface, "result_inspection");
-  assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.action, "review_result");
-  assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.reason, "control_plane_action:review_result");
-  assert.deepEqual(resultInspectionWatchExecutions.advances[0]?.selected.command, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.action, "resume_branch_native_result_review_loop");
+  assert.equal(resultInspectionWatchExecutions.advances[0]?.selected.reason, "control_plane_action:resume_branch_native_result_review_loop");
+  assert.deepEqual(resultInspectionWatchExecutions.advances[0]?.selected.command, latestResultReviewLoopResumeCommand);
   assert.equal(resultInspectionWatchExecutions.advances[0]?.executed.exitCode, 0);
 
   const reviewNext = await cliJson<{
