@@ -495,7 +495,7 @@ try {
   ]);
   assert.match(aggregateTextBeforeStop, /^control_plane_workers:$/m);
   assert.match(aggregateTextBeforeStop, new RegExp(`session: ${sessionName}`));
-  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 exited_unrecorded=0 restartable=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 exited_unrecorded=0 restartable=0 command_drift=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_topology: npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`));
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_progress: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
 
@@ -1129,9 +1129,69 @@ try {
     "--format",
     "text",
   ]);
-  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 exited_unrecorded=0 restartable=1 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 exited_unrecorded=0 restartable=1 command_drift=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextAfterStop, new RegExp(`restart_next: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
   assert.match(aggregateTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
+  const branchNativeAfterStop = await cliJson<{
+    counts: { workerRecovery: number; latestWorkerResults: number };
+    workers: {
+      controlPlaneAdvance: {
+        latestResults: Array<{ workerId: string; mode: string; latestResultSource: string; lifecycle: { state: string } }>;
+        modes: { topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number } };
+      };
+    };
+    workerActions: Array<{ surface: string; action: string; workerId: string | null; command: string[] }>;
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(branchNativeAfterStop.counts.workerRecovery, 1);
+  assert.ok(branchNativeAfterStop.counts.latestWorkerResults >= 1);
+  assert.equal(branchNativeAfterStop.workers.controlPlaneAdvance.modes.topology_loop.total, 1);
+  assert.equal(branchNativeAfterStop.workers.controlPlaneAdvance.modes.topology_loop.stopped, 1);
+  assert.equal(branchNativeAfterStop.workers.controlPlaneAdvance.modes.topology_loop.completed, 0);
+  assert.ok(branchNativeAfterStop.workers.controlPlaneAdvance.latestResults.some((result) => (
+    result.workerId === workerId
+    && result.mode === "topology_loop"
+    && result.latestResultSource === "recorded"
+    && result.lifecycle.state === "stopped"
+  )));
+  assert.ok(branchNativeAfterStop.workerActions.some((action) => (
+    action.surface === "worker_recovery"
+    && action.workerId === workerId
+    && action.command.join(" ") === `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-workers ${sessionName} --server --include-retired --lines 5`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${workerId} --kind control-plane-topology --limit 5`
+  )));
+  const branchNativeTextAfterStop = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeTextAfterStop, /worker_recovery: 1/);
+  assert.match(branchNativeTextAfterStop, /control_plane_workers:/);
+  assert.match(branchNativeTextAfterStop, new RegExp(`restart_queue: npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5`));
+  assert.match(branchNativeTextAfterStop, /worker_health:/);
+  assert.match(branchNativeTextAfterStop, /topology_loop: total=1 alive=0 stopped=1 retired=0 completed=0/);
+  assert.match(branchNativeTextAfterStop, /control_plane_worker_progress:/);
+  assert.match(branchNativeTextAfterStop, new RegExp(`worker: ${workerId}`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
 
   await cliJson(baseUrl, [
     "runs",
@@ -1249,7 +1309,7 @@ try {
     "--format",
     "text",
   ]);
-  assert.match(liveAggregateText, /topology: total=1 alive=\d+ stopped=0 completed=\d+ retired=0 exited_unrecorded=0 restartable=0 latest_results=count=\d+,recorded=\d+,progress=\d+,recent_progress=\d+,iterations=\d+,core=0,mutation=0/);
+  assert.match(liveAggregateText, /topology: total=1 alive=\d+ stopped=0 completed=\d+ retired=0 exited_unrecorded=0 restartable=0 command_drift=0 latest_results=count=\d+,recorded=\d+,progress=\d+,recent_progress=\d+,iterations=\d+,core=0,mutation=0/);
   await cliJson(baseUrl, [
     "runs",
     "stop-control-plane-topology-worker",

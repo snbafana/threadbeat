@@ -14558,6 +14558,8 @@ type WorkerSessionBranchNativeNextResponse = {
     branchReady: number;
     branchActions: number;
     branchRecoveryExecutions: number;
+    workerRecovery: number;
+    latestWorkerResults: number;
     recoverNextIncompleteLoops: number;
     failedRecoverNextResumeLoops: number;
     resultCommits: number;
@@ -14565,6 +14567,8 @@ type WorkerSessionBranchNativeNextResponse = {
     resultReviewed: number;
     resultSkipped: number;
   };
+  workers: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["workers"];
+  workerActions: WorkerSessionControlPlaneAdvanceAction[];
   branchActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["branches"]["inspection"]["nextSteps"];
   recoverNextLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["recoverNext"]["incompleteLoops"]["recent"];
   failedRecoverNextResumeLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["failedRecoverNextResumeLoops"]["recent"];
@@ -14578,6 +14582,8 @@ function workerSessionBranchNativeNext(
 ): WorkerSessionBranchNativeNextResponse {
   const branchActions = summary.branches.inspection.nextSteps.slice(0, options.limit);
   const resultActions = summary.results.inspection.nextSteps.slice(0, options.limit);
+  const workerActions = summary.nextActions.filter((action) => action.surface === "worker_recovery").slice(0, options.limit);
+  const latestWorkerResults = summary.workers.controlPlaneAdvance.latestResults.slice(0, options.limit);
   const recoverNextLoops = summary.recovery.recoverNext.incompleteLoops.recent.slice(0, options.limit);
   const failedRecoverNextResumeLoops = summary.recovery.failedRecoverNextResumeLoops.recent.slice(0, options.limit);
   const commands = uniqueCommandQueue([
@@ -14603,6 +14609,12 @@ function workerSessionBranchNativeNext(
       ...(loop.commands.resumeLoop ? [loop.commands.resumeLoop] : []),
       ...(loop.commands.executeResumeHistory ? [loop.commands.executeResumeHistory] : []),
     ]),
+    summary.commands.inspectControlPlaneWorkers,
+    summary.commands.inspectControlPlaneWorkerProgress,
+    summary.commands.workerReconciliations,
+    ...(summary.recovery.count > 0 ? [summary.commands.workerRestartQueue] : []),
+    ...workerActions.map((action) => action.command),
+    ...latestWorkerResults.map((result) => workerSessionControlPlaneLatestResultProgressCommand(summary.session, result)),
     summary.commands.branchRecoveryExecutions,
     summary.commands.branchRecoveryCommandQueue,
     ...(summary.branches.counts.ready > 0 ? [summary.commands.branchResumeCommandQueue] : []),
@@ -14642,6 +14654,8 @@ function workerSessionBranchNativeNext(
       branchReady: summary.branches.counts.ready,
       branchActions: summary.branches.inspection.count,
       branchRecoveryExecutions: summary.branches.executions.counts.recent,
+      workerRecovery: summary.recovery.count,
+      latestWorkerResults: summary.workers.controlPlaneAdvance.latestResults.length,
       recoverNextIncompleteLoops: summary.recovery.recoverNext.incompleteLoops.count,
       failedRecoverNextResumeLoops: summary.recovery.failedRecoverNextResumeLoops.count,
       resultCommits: summary.results.counts.resultCommits,
@@ -14649,6 +14663,8 @@ function workerSessionBranchNativeNext(
       resultReviewed: summary.results.counts.reviewed,
       resultSkipped: summary.results.counts.skipped,
     },
+    workers: summary.workers,
+    workerActions,
     branchActions,
     recoverNextLoops,
     failedRecoverNextResumeLoops,
@@ -14664,6 +14680,8 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `  branch_ready: ${response.counts.branchReady}`,
     `  branch_actions: ${response.counts.branchActions}`,
     `  branch_recovery_executions: ${response.counts.branchRecoveryExecutions}`,
+    `  worker_recovery: ${response.counts.workerRecovery}`,
+    `  latest_worker_results: ${response.counts.latestWorkerResults}`,
     `  recover_next_incomplete_loops: ${response.counts.recoverNextIncompleteLoops}`,
     `  failed_recover_next_resume_loops: ${response.counts.failedRecoverNextResumeLoops}`,
     `  result_commits: ${response.counts.resultCommits}`,
@@ -14671,6 +14689,47 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `  result_reviewed: ${response.counts.resultReviewed}`,
     `  result_skipped: ${response.counts.resultSkipped}`,
     `  commands: ${response.commands.length}`,
+    "  control_plane_workers:",
+    `    inspect_all: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-workers", response.session, "--server", "--include-retired", "--lines", "5"])}`,
+    `    inspect_progress: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", response.session, "--server", "--include-retired", "--limit", "5"])}`,
+    `    restart_queue: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-worker-restart-queue", response.session, "--server", "--include-retired", "--lines", "5"])}`,
+    "  worker_health:",
+    `    watch: ${formatBasicControlPlaneWorkerHealth(response.workers.watch)}`,
+    `    drain: ${formatBasicControlPlaneWorkerHealth(response.workers.drain)}`,
+    `    apply_action: ${formatBasicControlPlaneWorkerHealth(response.workers.applyAction)}`,
+    `    control_plane_advance: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneAdvance)}`,
+    `    advance_loop: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneAdvance.modes.advance_loop)}`,
+    `    confirmation_drain: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneAdvance.modes.confirmation_drain)}`,
+    `    topology_loop: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneAdvance.modes.topology_loop)}`,
+    `    result_review_loop: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneAdvance.modes.result_review_loop)}`,
+    `    bundle_recovery_loop: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneAdvance.modes.bundle_recovery_loop)}`,
+    `    operator_loop: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneAdvance.modes.operator_loop)}`,
+    `    control_plane_tick: ${formatCompletedControlPlaneWorkerHealth(response.workers.controlPlaneTick)}`,
+    ...(response.workers.controlPlaneAdvance.latestResults.length > 0
+      ? [
+        "  control_plane_worker_progress:",
+        ...response.workers.controlPlaneAdvance.latestResults.slice(0, response.limit).flatMap((result) => [
+          `    - worker: ${result.workerId}`,
+          `      mode: ${result.mode}`,
+          `      state: ${result.lifecycle.state}`,
+          `      source: ${result.latestResultSource}`,
+          `      iterations: ${result.latestResult.iterations ?? ""}`,
+          `      stopped_reason: ${result.latestResult.stoppedReason ?? ""}`,
+          `      inspect: ${formatShellCommand(workerSessionControlPlaneLatestResultProgressCommand(response.session, result))}`,
+        ]),
+      ]
+      : ["  control_plane_worker_progress: none"]),
+    ...(response.workerActions.length > 0
+      ? [
+        "  worker_actions:",
+        ...response.workerActions.flatMap((action) => [
+          `    - worker: ${action.workerId ?? ""}`,
+          `      action: ${action.action}`,
+          `      reason: ${action.reason}`,
+          `      command: ${formatShellCommand(action.command)}`,
+        ]),
+      ]
+      : ["  worker_actions: none"]),
     ...(response.branchActions.length > 0
       ? [
         "  branch_actions:",
