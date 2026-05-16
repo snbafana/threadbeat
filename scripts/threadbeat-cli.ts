@@ -6740,20 +6740,36 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (executeResume && options.confirm !== "1" && options["dry-run"] !== "1") {
       throw new Error("runs session-control-plane-result-review-loops --execute-resume requires --confirm or --dry-run");
     }
+    const acknowledgeCompleted = options["acknowledge-completed"] === "1";
+    if (acknowledgeCompleted && outputFormat !== "json") {
+      throw new Error("runs session-control-plane-result-review-loops --acknowledge-completed requires json output");
+    }
+    if (acknowledgeCompleted && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-result-review-loops --acknowledge-completed cannot be combined with --commands-only");
+    }
+    if (acknowledgeCompleted && executeResume) {
+      throw new Error("runs session-control-plane-result-review-loops --acknowledge-completed cannot be combined with --execute-resume");
+    }
+    if (acknowledgeCompleted && !options["loop-advance-id"]) {
+      throw new Error("runs session-control-plane-result-review-loops --acknowledge-completed requires --loop-advance-id");
+    }
+    if (acknowledgeCompleted && options.confirm !== "1" && options["dry-run"] !== "1") {
+      throw new Error("runs session-control-plane-result-review-loops --acknowledge-completed requires --confirm or --dry-run");
+    }
     const action = options.action;
     if (action !== undefined && action !== "reviewed" && action !== "skipped") {
       throw new Error("runs session-control-plane-result-review-loops --action must be reviewed or skipped");
     }
     const actionFilter = action === "reviewed" || action === "skipped" ? action : undefined;
     const status = options.status ?? "all";
-    if (status !== "resumable" && status !== "completed" && status !== "all") {
-      throw new Error("runs session-control-plane-result-review-loops --status must be resumable, completed, or all");
+    if (status !== "resumable" && status !== "completed" && status !== "unacknowledged-completed" && status !== "acknowledged-completed" && status !== "all") {
+      throw new Error("runs session-control-plane-result-review-loops --status must be resumable, completed, unacknowledged-completed, acknowledged-completed, or all");
     }
-    const statusFilter = status === "resumable" || status === "completed" ? status : "all";
+    const statusFilter = status === "resumable" || status === "completed" || status === "unacknowledged-completed" || status === "acknowledged-completed" ? status : "all";
     const limit = parsePositiveInteger(options.limit ?? "100", "--limit");
     const advances = await fetchWorkerSessionControlPlaneAdvances(requiredSessionName, {
       limit,
-      detailCommand: "branch_native_result_review_loop",
+      detailCommands: ["branch_native_result_review_loop", "acknowledge_branch_native_result_review_loop"],
       loopAdvanceId: options["loop-advance-id"],
     });
     const history = summarizeResultReviewLoopHistory(requiredSessionName, advances, {
@@ -6770,6 +6786,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (response.executed.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
         process.exitCode = 1;
       }
+      await printJson(response);
+      return;
+    }
+    if (acknowledgeCompleted) {
+      const response = await acknowledgeResultReviewLoopHistoryCompleted(requiredSessionName, history, {
+        dryRun: options["dry-run"] === "1",
+        limit,
+      });
       await printJson(response);
       return;
     }
@@ -9233,7 +9257,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -11395,7 +11419,7 @@ type ResultReviewLoopHistoryResponse = {
   filter: {
     loopAdvanceId: string | null;
     action: "reviewed" | "skipped" | null;
-    status: "resumable" | "completed" | "all";
+    status: "resumable" | "completed" | "unacknowledged-completed" | "acknowledged-completed" | "all";
     limit: number;
   };
   count: number;
@@ -11405,6 +11429,8 @@ type ResultReviewLoopHistoryResponse = {
     executed: number;
     resumable: number;
     completed: number;
+    acknowledgedCompleted: number;
+    unacknowledgedCompleted: number;
     processed: number;
   };
   commands: {
@@ -11423,6 +11449,9 @@ type ResultReviewLoopHistoryResponse = {
     totalProcessed: number;
     remainingPending: number;
     stoppedReason: string | null;
+    acknowledged: boolean;
+    acknowledgementAdvanceId: string | null;
+    acknowledgedAt: string | null;
     reviewIds: string[];
     runIds: string[];
     resultCommits: string[];
@@ -11432,9 +11461,23 @@ type ResultReviewLoopHistoryResponse = {
       inspectRawHistory: string[];
       resumeLoop: string[] | null;
       executeResume: string[] | null;
+      acknowledgeCompleted: string[] | null;
     };
     attemptsHistory: ResultReviewLoopHistoryRecord[];
   }>;
+};
+
+type ResultReviewLoopAcknowledgementRecord = {
+  advanceId: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  loopAdvanceId: string | null;
+  acknowledgedAdvanceId: string | null;
+  acknowledgedStatus: string | null;
+  stoppedReason: string | null;
+  executedExitCode: number | null;
+  inspectCommand: string[];
 };
 
 type ResultReviewLoopHistoryResumeResponse = {
@@ -11451,6 +11494,23 @@ type ResultReviewLoopHistoryResumeResponse = {
     stderr: string;
     output: unknown;
   };
+  after: ResultReviewLoopHistoryResponse;
+};
+
+type ResultReviewLoopAcknowledgementResponse = {
+  ok: true;
+  session: string;
+  loopAdvanceId: string;
+  dryRun: boolean;
+  alreadyAcknowledged: boolean;
+  command: string[];
+  before: ResultReviewLoopHistoryResponse;
+  acknowledgement: {
+    advanceId: string;
+    advancePath: string;
+    acknowledgedAdvanceId: string;
+    acknowledgedAt: string;
+  } | null;
   after: ResultReviewLoopHistoryResponse;
 };
 
@@ -12510,16 +12570,49 @@ function resultReviewLoopHistoryRecord(
   };
 }
 
+function resultReviewLoopAcknowledgementRecord(
+  sessionName: string,
+  advance: WorkerSessionControlPlaneAdvancesResponse["advances"][number],
+): ResultReviewLoopAcknowledgementRecord {
+  const recovery = unknownRecord((advance as { recovery?: unknown }).recovery);
+  const selected = unknownRecord(advance.selected);
+  const executed = unknownRecord(advance.executed);
+  return {
+    advanceId: advance.advanceId,
+    observedAt: advance.observedAt,
+    completedAt: advance.completedAt,
+    dryRun: advance.dryRun,
+    loopAdvanceId: stringRecordField(recovery, "loopAdvanceId") ?? stringRecordField(selected, "loopAdvanceId"),
+    acknowledgedAdvanceId: stringRecordField(recovery, "acknowledgedAdvanceId") ?? stringRecordField(selected, "advanceId"),
+    acknowledgedStatus: stringRecordField(recovery, "acknowledgedStatus"),
+    stoppedReason: stringRecordField(recovery, "stoppedReason"),
+    executedExitCode: numberRecordField(executed, "exitCode"),
+    inspectCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", advance.advanceId],
+  };
+}
+
 function summarizeResultReviewLoopHistory(
   sessionName: string,
   response: WorkerSessionControlPlaneAdvancesResponse,
   options: {
     action?: "reviewed" | "skipped";
-    status: "resumable" | "completed" | "all";
+    status: "resumable" | "completed" | "unacknowledged-completed" | "acknowledged-completed" | "all";
     loopAdvanceId?: string;
     limit: number;
   },
 ): ResultReviewLoopHistoryResponse {
+  const acknowledgements = response.advances
+    .filter((advance) => advance.detailCommand === "acknowledge_branch_native_result_review_loop")
+    .map((advance) => resultReviewLoopAcknowledgementRecord(sessionName, advance))
+    .filter((record) => !record.dryRun && record.executedExitCode === 0 && record.loopAdvanceId);
+  const acknowledgementsByLoop = new Map<string, ResultReviewLoopAcknowledgementRecord>();
+  for (const acknowledgement of acknowledgements) {
+    if (!acknowledgement.loopAdvanceId) continue;
+    const existing = acknowledgementsByLoop.get(acknowledgement.loopAdvanceId);
+    if (!existing || acknowledgement.observedAt > existing.observedAt) {
+      acknowledgementsByLoop.set(acknowledgement.loopAdvanceId, acknowledgement);
+    }
+  }
   const records = response.advances
     .filter((advance) => advance.detailCommand === "branch_native_result_review_loop")
     .map((advance) => resultReviewLoopHistoryRecord(sessionName, advance))
@@ -12534,7 +12627,12 @@ function summarizeResultReviewLoopHistory(
       const latest = attemptsHistory[0];
       if (!latest) return null;
       const status = latest.stoppedReason === "no_pending_result_commits" ? "completed" as const : "resumable" as const;
-      if (options.status !== "all" && status !== options.status) return null;
+      const acknowledgement = acknowledgementsByLoop.get(loopAdvanceId) ?? null;
+      const acknowledged = Boolean(acknowledgement);
+      if (options.status === "resumable" && status !== "resumable") return null;
+      if (options.status === "completed" && status !== "completed") return null;
+      if (options.status === "unacknowledged-completed" && (status !== "completed" || acknowledged)) return null;
+      if (options.status === "acknowledged-completed" && (status !== "completed" || !acknowledged)) return null;
       const reviewIds = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.reviewId)));
       const runIds = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.runId)));
       const resultCommits = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.resultCommit)));
@@ -12543,6 +12641,9 @@ function summarizeResultReviewLoopHistory(
         : null;
       const executeResume = status === "resumable"
         ? resultReviewLoopHistoryResumeCommand(sessionName, loopAdvanceId, latest, false)
+        : null;
+      const acknowledgeCompleted = status === "completed" && !acknowledged
+        ? resultReviewLoopHistoryAcknowledgementCommand(sessionName, loopAdvanceId, false)
         : null;
       return {
         loopAdvanceId,
@@ -12556,6 +12657,9 @@ function summarizeResultReviewLoopHistory(
         totalProcessed: latest.totalProcessed,
         remainingPending: latest.remainingPending,
         stoppedReason: latest.stoppedReason,
+        acknowledged,
+        acknowledgementAdvanceId: acknowledgement?.advanceId ?? null,
+        acknowledgedAt: acknowledgement?.observedAt ?? null,
         reviewIds,
         runIds,
         resultCommits,
@@ -12565,6 +12669,7 @@ function summarizeResultReviewLoopHistory(
           inspectRawHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "branch_native_result_review_loop"],
           resumeLoop,
           executeResume,
+          acknowledgeCompleted,
         },
         attemptsHistory,
       };
@@ -12587,6 +12692,8 @@ function summarizeResultReviewLoopHistory(
       executed: loops.reduce((total, loop) => total + loop.executedAttempts, 0),
       resumable: loops.filter((loop) => loop.status === "resumable").length,
       completed: loops.filter((loop) => loop.status === "completed").length,
+      acknowledgedCompleted: loops.filter((loop) => loop.status === "completed" && loop.acknowledged).length,
+      unacknowledgedCompleted: loops.filter((loop) => loop.status === "completed" && !loop.acknowledged).length,
       processed: loops.reduce((total, loop) => total + loop.totalProcessed, 0),
     },
     commands: {
@@ -12610,6 +12717,7 @@ function resultReviewLoopHistoryCommandQueue(
     loop.commands.inspectRawHistory,
     ...(loop.commands.resumeLoop ? [loop.commands.resumeLoop] : []),
     ...(loop.commands.executeResume ? [loop.commands.executeResume] : []),
+    ...(loop.commands.acknowledgeCompleted ? [loop.commands.acknowledgeCompleted] : []),
   ])).map((command) => ({ command }));
 }
 
@@ -12631,6 +12739,119 @@ function resultReviewLoopHistoryResumeCommand(
     "--interval-ms",
     String(latest.intervalMs ?? 1),
   ];
+}
+
+function resultReviewLoopHistoryAcknowledgementCommand(
+  sessionName: string,
+  loopAdvanceId: string,
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", sessionName, "--server",
+    "--loop-advance-id", loopAdvanceId,
+    "--status", "completed",
+    "--acknowledge-completed",
+    dryRun ? "--dry-run" : "--confirm",
+  ];
+}
+
+async function acknowledgeResultReviewLoopHistoryCompleted(
+  sessionName: string,
+  history: ResultReviewLoopHistoryResponse,
+  options: { dryRun: boolean; limit: number },
+): Promise<ResultReviewLoopAcknowledgementResponse> {
+  const loop = history.loops[0];
+  if (!loop) {
+    throw new Error("result-review loop history has no selected loop to acknowledge");
+  }
+  if (loop.status !== "completed") {
+    throw new Error(`result-review loop ${loop.loopAdvanceId} is not completed`);
+  }
+  const command = resultReviewLoopHistoryAcknowledgementCommand(sessionName, loop.loopAdvanceId, options.dryRun);
+  if (loop.acknowledged && !options.dryRun) {
+    return {
+      ok: true,
+      session: sessionName,
+      loopAdvanceId: loop.loopAdvanceId,
+      dryRun: options.dryRun,
+      alreadyAcknowledged: true,
+      command,
+      before: history,
+      acknowledgement: null,
+      after: history,
+    };
+  }
+  const observedAt = new Date().toISOString();
+  const executed = options.dryRun
+    ? null
+    : {
+        command,
+        exitCode: 0,
+        stdout: JSON.stringify({
+          ok: true,
+          executed: true,
+          action: "acknowledge_branch_native_result_review_loop",
+          acknowledgedAdvanceId: loop.latestAdvanceId,
+        }),
+        stderr: "",
+        output: {
+          ok: true,
+          executed: true,
+          action: "acknowledge_branch_native_result_review_loop",
+          acknowledgedAdvanceId: loop.latestAdvanceId,
+        },
+      };
+  const written = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+    session: sessionName,
+    observedAt,
+    completedAt: new Date().toISOString(),
+    dryRun: options.dryRun,
+    selected: {
+      surface: "result_inspection",
+      action: "acknowledge_completed_result_review_loop",
+      reason: "completed_result_review_loop",
+      loopAdvanceId: loop.loopAdvanceId,
+      advanceId: loop.latestAdvanceId,
+      command,
+    },
+    detailCommand: "acknowledge_branch_native_result_review_loop",
+    recovery: {
+      loopAdvanceId: loop.loopAdvanceId,
+      acknowledgedAdvanceId: loop.latestAdvanceId,
+      acknowledgedStatus: loop.status,
+      stoppedReason: loop.stoppedReason,
+    },
+    executed,
+    before: history,
+    after: null,
+  });
+  const afterAdvances = await fetchWorkerSessionControlPlaneAdvances(sessionName, {
+    limit: options.limit,
+    detailCommands: ["branch_native_result_review_loop", "acknowledge_branch_native_result_review_loop"],
+    loopAdvanceId: loop.loopAdvanceId,
+  });
+  const after = summarizeResultReviewLoopHistory(sessionName, afterAdvances, {
+    action: loop.action,
+    status: "all",
+    loopAdvanceId: loop.loopAdvanceId,
+    limit: options.limit,
+  });
+  return {
+    ok: true,
+    session: sessionName,
+    loopAdvanceId: loop.loopAdvanceId,
+    dryRun: options.dryRun,
+    alreadyAcknowledged: false,
+    command,
+    before: history,
+    acknowledgement: {
+      advanceId: written.record.advanceId,
+      advancePath: written.path,
+      acknowledgedAdvanceId: loop.latestAdvanceId,
+      acknowledgedAt: written.record.observedAt,
+    },
+    after,
+  };
 }
 
 async function executeResultReviewLoopHistoryResume(
@@ -12975,7 +13196,7 @@ function formatResultReviewLoopHistoryText(history: ResultReviewLoopHistoryRespo
     `  session: ${history.session}`,
     `  filter: loop=${history.filter.loopAdvanceId ?? "*"} action=${history.filter.action ?? "*"} status=${history.filter.status} limit=${history.filter.limit}`,
     `  count: ${history.count}`,
-    `  summary: attempts=${history.summary.attempts} dry_run=${history.summary.dryRun} executed=${history.summary.executed} resumable=${history.summary.resumable} completed=${history.summary.completed} processed=${history.summary.processed}`,
+    `  summary: attempts=${history.summary.attempts} dry_run=${history.summary.dryRun} executed=${history.summary.executed} resumable=${history.summary.resumable} completed=${history.summary.completed} acknowledged_completed=${history.summary.acknowledgedCompleted} unacknowledged_completed=${history.summary.unacknowledgedCompleted} processed=${history.summary.processed}`,
     `  inspect_all: ${formatShellCommand(history.commands.inspectAll)}`,
     `  inspect_raw: ${formatShellCommand(history.commands.inspectRaw)}`,
     "  loops:",
@@ -12993,6 +13214,9 @@ function formatResultReviewLoopHistoryText(history: ResultReviewLoopHistoryRespo
       `      total_processed: ${loop.totalProcessed}`,
       `      remaining_pending: ${loop.remainingPending}`,
       `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+      `      acknowledged: ${loop.acknowledged}`,
+      `      acknowledgement: ${loop.acknowledgementAdvanceId ?? ""}`,
+      `      acknowledged_at: ${loop.acknowledgedAt ?? ""}`,
       `      latest_advance: ${loop.latestAdvanceId}`,
       `      review_ids: ${loop.reviewIds.join(",") || "*"}`,
       `      run_ids: ${loop.runIds.join(",") || "*"}`,
@@ -13002,6 +13226,7 @@ function formatResultReviewLoopHistoryText(history: ResultReviewLoopHistoryRespo
       `      inspect_raw_history: ${formatShellCommand(loop.commands.inspectRawHistory)}`,
       ...(loop.commands.resumeLoop ? [`      resume: ${formatShellCommand(loop.commands.resumeLoop)}`] : []),
       ...(loop.commands.executeResume ? [`      execute_resume: ${formatShellCommand(loop.commands.executeResume)}`] : []),
+      ...(loop.commands.acknowledgeCompleted ? [`      acknowledge_completed: ${formatShellCommand(loop.commands.acknowledgeCompleted)}`] : []),
     );
   }
   return lines;
@@ -17147,7 +17372,7 @@ async function executeWorkerSessionControlPlaneAdvanceLoop(
 
 async function fetchWorkerSessionControlPlaneAdvances(
   sessionName: string,
-  options: { limit: number; advanceId?: string; blocked?: boolean; mutating?: boolean; alertSurface?: string; selectedSurface?: string; selectedAction?: string; detailCommand?: string; loopAdvanceId?: string },
+  options: { limit: number; advanceId?: string; blocked?: boolean; mutating?: boolean; alertSurface?: string; selectedSurface?: string; selectedAction?: string; detailCommand?: string; detailCommands?: string[]; loopAdvanceId?: string },
 ): Promise<WorkerSessionControlPlaneAdvancesResponse> {
   const params = new URLSearchParams({ limit: String(options.limit) });
   if (options.advanceId) params.set("advanceId", options.advanceId);
@@ -17157,6 +17382,7 @@ async function fetchWorkerSessionControlPlaneAdvances(
   if (options.selectedSurface) params.set("selectedSurface", options.selectedSurface);
   if (options.selectedAction) params.set("selectedAction", options.selectedAction);
   if (options.detailCommand) params.set("detailCommand", options.detailCommand);
+  if (options.detailCommands && options.detailCommands.length > 0) params.set("detailCommands", options.detailCommands.join(","));
   if (options.loopAdvanceId) params.set("loopAdvanceId", options.loopAdvanceId);
   return await requestJson(
     "GET",
@@ -25026,7 +25252,7 @@ Commands:
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history|--continue-deferred-loop-history [--execute-resume --confirm]] [--acknowledged-recover-next-resume-history [--advance acknowledgement_or_attempt_or_loop_id]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery] [--status-watch-executions] [--failed-recover-next-resumes] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-result-review-loops <name> --server [--loop-advance-id loop_advance_id] [--action reviewed|skipped] [--status resumable|completed|all] [--execute-resume --confirm|--dry-run] [--limit 100] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-result-review-loops <name> --server [--loop-advance-id loop_advance_id] [--action reviewed|skipped] [--status resumable|completed|unacknowledged-completed|acknowledged-completed|all] [--execute-resume --confirm|--dry-run] [--acknowledge-completed --confirm|--dry-run] [--limit 100] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]
