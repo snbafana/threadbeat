@@ -71,6 +71,7 @@ try {
   const branchNativePreviewPendingSkippedCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-skipped --until-empty --dry-run --max-results 10 --interval-ms 1`;
   const branchNativeRecordPendingReviewedCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --confirm --max-results 10 --interval-ms 1`;
   const branchNativeRecordPendingSkippedCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-skipped --until-empty --confirm --max-results 10 --interval-ms 1`;
+  const branchNativePreviewPendingReviewedTwoCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --dry-run --max-results 2 --interval-ms 1`;
   const latestResultReviewsCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --latest`;
   const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id} --result-commit ${resultCommit}`;
   const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id} --result-commit ${resultCommit}`;
@@ -400,6 +401,8 @@ try {
     selectedAction: string;
     counts: { resultPending: number };
     resultReviewLoop: { dryRun: boolean; action: string; processed: number; remainingPending: number; stoppedReason: string };
+    advanceRecord: { advanceId: string; detailCommand: string; advancePath: string };
+    loopCommands: { inspectLoopRecord: string[]; listResultReviewLoops: string[] };
     after: null;
   }>(baseUrl, [
     "runs",
@@ -423,7 +426,48 @@ try {
   assert.equal(branchNativeReviewDryRun.resultReviewLoop.processed, 1);
   assert.equal(branchNativeReviewDryRun.resultReviewLoop.remainingPending, 1);
   assert.equal(branchNativeReviewDryRun.resultReviewLoop.stoppedReason, "dry_run_previewed");
+  assert.match(branchNativeReviewDryRun.advanceRecord.advanceId, /^branch-native-result-review-loop-/);
+  assert.equal(branchNativeReviewDryRun.advanceRecord.detailCommand, "branch_native_result_review_loop");
+  assert.ok(branchNativeReviewDryRun.advanceRecord.advancePath.includes(sessionName));
+  assert.ok(branchNativeReviewDryRun.advanceRecord.advancePath.includes(branchNativeReviewDryRun.advanceRecord.advanceId));
+  assert.equal(branchNativeReviewDryRun.loopCommands.inspectLoopRecord.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --advance ${branchNativeReviewDryRun.advanceRecord.advanceId}`);
+  assert.equal(branchNativeReviewDryRun.loopCommands.listResultReviewLoops.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --detail-command branch_native_result_review_loop`);
   assert.equal(branchNativeReviewDryRun.after, null);
+
+  const branchNativeResultReviewLoopHistory = await cliJson<{
+    count: number;
+    advances: Array<{
+      advanceId: string;
+      dryRun: boolean;
+      detailCommand: string;
+      selected: { surface: string; action: string; count: number; command: string[] };
+      recovery: { action: string; processed: number; remainingPending: number; stoppedReason: string; records: Array<{ runId: string; resultCommit: string; reviewId: string; recorded: boolean }> };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--detail-command",
+    "branch_native_result_review_loop",
+    "--limit",
+    "1",
+  ]);
+  assert.equal(branchNativeResultReviewLoopHistory.count, 1);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.advanceId, branchNativeReviewDryRun.advanceRecord.advanceId);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.dryRun, true);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.detailCommand, "branch_native_result_review_loop");
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.selected.surface, "result_inspection");
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.selected.action, "branch_native_record_reviewed_results");
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.selected.count, 1);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.selected.command.join(" "), branchNativePreviewPendingReviewedTwoCommand);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.recovery.action, "reviewed");
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.recovery.processed, 1);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.recovery.remainingPending, 1);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.recovery.stoppedReason, "dry_run_previewed");
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.recovery.records[0]?.runId, run.id);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.recovery.records[0]?.resultCommit, resultCommit);
+  assert.equal(branchNativeResultReviewLoopHistory.advances[0]?.recovery.records[0]?.recorded, false);
 
   const branchNativeReviewDryRunText = await cliText(baseUrl, [
     "runs",
@@ -445,6 +489,9 @@ try {
   assert.match(branchNativeReviewDryRunText, /action: record_reviewed_results/);
   assert.match(branchNativeReviewDryRunText, /processed: 1/);
   assert.match(branchNativeReviewDryRunText, /remaining_pending: 1/);
+  assert.match(branchNativeReviewDryRunText, /detail_command: branch_native_result_review_loop/);
+  assert.match(branchNativeReviewDryRunText, new RegExp(`inspect_record: npm run cli -- runs session-control-plane-advances ${sessionName} --server --advance branch-native-result-review-loop-`));
+  assert.match(branchNativeReviewDryRunText, new RegExp(`list_result_review_loops: npm run cli -- runs session-control-plane-advances ${sessionName} --server --detail-command branch_native_result_review_loop`));
   assert.match(branchNativeReviewDryRunText, new RegExp(`inspect_next: ${branchNativeNextCommand}`));
   assert.match(branchNativeReviewDryRunText, /recorded=false/);
 

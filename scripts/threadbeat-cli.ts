@@ -5783,23 +5783,73 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       return;
     }
     if (recordAction) {
+      const observedAt = new Date().toISOString();
+      const maxResults = parsePositiveInteger(options["max-results"] ?? "10", "--max-results");
+      const intervalMs = parsePositiveInteger(options["interval-ms"] ?? "1", "--interval-ms");
       const reviewLoop = await recordWorkerSessionResultReviewNextLoop(requiredSessionName, {
         action: recordAction,
         dryRun,
         reviewedBy: options["reviewed-by"],
         note: options.note,
-        maxResults: parsePositiveInteger(options["max-results"] ?? "10", "--max-results"),
-        intervalMs: parsePositiveInteger(options["interval-ms"] ?? "1", "--interval-ms"),
+        maxResults,
+        intervalMs,
       });
       const afterStatus = confirm
         ? await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines: parsePositiveInteger(options.lines ?? "5", "--lines") })
         : null;
+      const completedAt = new Date().toISOString();
+      const command = workerSessionBranchNativeResultReviewCommand(requiredSessionName, recordAction, dryRun, maxResults, intervalMs);
+      const written = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+        advanceId: createBranchNativeResultReviewLoopAdvanceId(observedAt),
+        session: requiredSessionName,
+        observedAt,
+        completedAt,
+        dryRun,
+        selected: {
+          surface: "result_inspection",
+          action: `branch_native_record_${recordAction}_results`,
+          reason: reviewLoop.stoppedReason,
+          count: reviewLoop.processed,
+          command,
+          resultReviewIds: reviewLoop.records.map((record) => record.review.reviewId),
+          runIds: reviewLoop.records.map((record) => record.selected.runId),
+          resultCommits: reviewLoop.records.map((record) => record.selected.resultCommit),
+        },
+        detailCommand: "branch_native_result_review_loop",
+        recovery: {
+          untilEmpty: true,
+          action: recordAction,
+          maxResults,
+          intervalMs,
+          processed: reviewLoop.processed,
+          remainingPending: reviewLoop.remainingPending,
+          stoppedReason: reviewLoop.stoppedReason,
+          records: reviewLoop.records.map((record) => ({
+            runId: record.selected.runId,
+            resultCommit: record.selected.resultCommit,
+            reviewId: record.review.reviewId,
+            recorded: record.recorded,
+          })),
+        },
+        executed: null,
+        before: response,
+        after: afterStatus,
+      });
       const executionResponse = {
         ...response,
         dryRun,
         confirmed: confirm,
         selectedAction: `record_${recordAction}_results`,
         resultReviewLoop: reviewLoop,
+        advanceRecord: {
+          advanceId: written.record.advanceId,
+          advancePath: written.path,
+          detailCommand: written.record.detailCommand ?? null,
+        },
+        loopCommands: {
+          inspectLoopRecord: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", requiredSessionName, "--server", "--advance", written.record.advanceId],
+          listResultReviewLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", requiredSessionName, "--server", "--detail-command", "branch_native_result_review_loop"],
+        },
         after: afterStatus ? workerSessionBranchNativeNext(summarizeWorkerSessionControlPlaneStatus(afterStatus), {
           limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
         }) : null,
@@ -15041,14 +15091,16 @@ function workerSessionBranchNativeResultReviewCommand(
   sessionName: string,
   action: "reviewed" | "skipped",
   dryRun: boolean,
+  maxResults = 10,
+  intervalMs = 1,
 ): string[] {
   return [
     "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
     action === "reviewed" ? "--record-reviewed" : "--record-skipped",
     "--until-empty",
     dryRun ? "--dry-run" : "--confirm",
-    "--max-results", "10",
-    "--interval-ms", "1",
+    "--max-results", String(maxResults),
+    "--interval-ms", String(intervalMs),
   ];
 }
 
@@ -15520,6 +15572,8 @@ function printWorkerSessionBranchNativeNextExecutionText(
     confirmed: boolean;
     selectedAction: string;
     resultReviewLoop: RecordWorkerSessionResultReviewNextLoopResponse;
+    advanceRecord: { advanceId: string; advancePath: string; detailCommand: string | null };
+    loopCommands: { inspectLoopRecord: string[]; listResultReviewLoops: string[] };
     after: WorkerSessionBranchNativeNextResponse | null;
   },
 ): void {
@@ -15532,6 +15586,10 @@ function printWorkerSessionBranchNativeNextExecutionText(
     `  processed: ${response.resultReviewLoop.processed}`,
     `  remaining_pending: ${response.resultReviewLoop.remainingPending}`,
     `  stopped_reason: ${response.resultReviewLoop.stoppedReason}`,
+    `  advance: ${response.advanceRecord.advanceId}`,
+    `  detail_command: ${response.advanceRecord.detailCommand ?? ""}`,
+    `  inspect_record: ${formatShellCommand(response.loopCommands.inspectLoopRecord)}`,
+    `  list_result_review_loops: ${formatShellCommand(response.loopCommands.listResultReviewLoops)}`,
     `  before_result_pending: ${response.counts.resultPending}`,
     `  after_result_pending: ${response.after?.counts.resultPending ?? ""}`,
     `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
@@ -21446,6 +21504,10 @@ function createBranchNativeOperatorLoopAdvanceId(observedAt: string): string {
 
 function createBranchNativeOperatorLoopResumeAdvanceId(observedAt: string): string {
   return `branch-native-operator-loop-resume-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createBranchNativeResultReviewLoopAdvanceId(observedAt: string): string {
+  return `branch-native-result-review-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function recoverNextLoopStepLoopId(record: { recovery?: unknown }): string | null {
