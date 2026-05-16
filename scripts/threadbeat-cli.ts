@@ -4766,6 +4766,53 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-recover-next-terminals") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-recover-next-terminals <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-recover-next-terminals requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-recover-next-terminals --format must be json, shell, or text");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-recover-next-terminals --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-recover-next-terminals --format text cannot be combined with --commands-only");
+    }
+    const status = options.status ?? "failed";
+    if (status !== "failed" && status !== "all") {
+      throw new Error("runs session-control-plane-recover-next-terminals --status must be failed or all");
+    }
+    const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    const limit = parsePositiveInteger(options.limit ?? "20", "--limit");
+    const summary = summarizeWorkerSessionControlPlaneStatus(
+      await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines }),
+    );
+    const terminals = summarizeRecoverNextTerminals(requiredSessionName, summary, {
+      status,
+      loopAdvanceId: options["loop-advance-id"],
+      lines,
+      limit,
+    });
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(terminals.commands.queue);
+      } else {
+        await printJson({ ...terminals, commands: terminals.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printRecoverNextTerminalsText(terminals);
+    } else {
+      await printJson(terminals);
+    }
+    return;
+  }
   if (subcommandName === "session-control-plane-continue-deferred") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -15982,6 +16029,43 @@ type WorkerSessionBranchNativeCommandQueueItem = {
   command: string[];
 };
 
+type RecoverNextTerminalStatus = "failed" | "all";
+
+type RecoverNextTerminalsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    status: RecoverNextTerminalStatus;
+    loopAdvanceId: string | null;
+    lines: number;
+    limit: number;
+  };
+  count: number;
+  summary: {
+    failed: number;
+    incomplete: number;
+    retryable: number;
+  };
+  commands: {
+    inspectStatus: string[];
+    inspectFailedResumes: string[];
+    queue: Array<{ command: string[] }>;
+  };
+  terminalLoops: Array<{
+    loopAdvanceId: string | null;
+    failedAttempts: number;
+    latestFailedAdvanceId: string;
+    latestFailedExitCode: number | null;
+    incomplete: boolean;
+    commands: {
+      inspectFailedResumes: string[];
+      inspectHistory: string[] | null;
+      resumeLoop: string[] | null;
+      executeResumeHistory: string[] | null;
+    };
+  }>;
+};
+
 type WorkerSessionBranchNativePostOperatorNext = {
   surface: WorkerSessionBranchNativeCommandSurface;
   action: string;
@@ -16062,6 +16146,9 @@ function workerSessionBranchNativeNext(
       { surfaces: ["recover_next"], command: loop.executeResumeCommand },
     ]),
     ...(summary.recovery.failedRecoverNextResumeLoops.count > 0 ? [{ surfaces: ["recover_next"] as const, command: summary.commands.failedRecoverNextResumeAttempts }] : []),
+    ...(summary.recovery.failedRecoverNextResumeLoops.count > 0
+      ? [{ surfaces: ["recover_next"] as const, command: ["npm", "run", "cli", "--", "runs", "session-control-plane-recover-next-terminals", summary.session, "--server", "--status", "failed"] }]
+      : []),
     ...failedRecoverNextResumeLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
       { surfaces: ["recover_next"], command: loop.commands.inspectFailedResumes },
       ...(loop.commands.inspectHistory ? [{ surfaces: ["recover_next"] as const, command: loop.commands.inspectHistory }] : []),
@@ -16198,6 +16285,62 @@ function workerSessionBranchNativeNext(
       recordSkipped: summary.commands.branchNativeRecordPendingSkipped,
     },
     commands,
+  };
+}
+
+function summarizeRecoverNextTerminals(
+  sessionName: string,
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+  options: {
+    status: RecoverNextTerminalStatus;
+    loopAdvanceId?: string;
+    lines: number;
+    limit: number;
+  },
+): RecoverNextTerminalsResponse {
+  const terminalLoops = summary.recovery.failedRecoverNextResumeLoops.recent
+    .filter((loop) => (options.loopAdvanceId ? loop.loopAdvanceId === options.loopAdvanceId : true))
+    .slice(0, options.limit)
+    .map((loop) => ({
+      loopAdvanceId: loop.loopAdvanceId,
+      failedAttempts: loop.failedAttempts,
+      latestFailedAdvanceId: loop.latestFailedAdvanceId,
+      latestFailedExitCode: loop.latestFailedExitCode,
+      incomplete: loop.incomplete,
+      commands: {
+        inspectFailedResumes: loop.commands.inspectFailedResumes,
+        inspectHistory: loop.commands.inspectHistory,
+        resumeLoop: loop.commands.resumeLoop,
+        executeResumeHistory: loop.commands.executeResumeHistory,
+      },
+    }));
+  const queue = uniqueCommandQueue(terminalLoops.flatMap((loop) => [
+    loop.commands.inspectFailedResumes,
+    ...(loop.commands.inspectHistory ? [loop.commands.inspectHistory] : []),
+    ...(loop.commands.resumeLoop ? [loop.commands.resumeLoop] : []),
+    ...(loop.commands.executeResumeHistory ? [loop.commands.executeResumeHistory] : []),
+  ])).map((command) => ({ command }));
+  return {
+    ok: true,
+    session: sessionName,
+    filter: {
+      status: options.status,
+      loopAdvanceId: options.loopAdvanceId ?? null,
+      lines: options.lines,
+      limit: options.limit,
+    },
+    count: terminalLoops.length,
+    summary: {
+      failed: terminalLoops.length,
+      incomplete: terminalLoops.filter((loop) => loop.incomplete).length,
+      retryable: terminalLoops.filter((loop) => Boolean(loop.commands.resumeLoop || loop.commands.executeResumeHistory)).length,
+    },
+    commands: {
+      inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
+      inspectFailedResumes: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--failed-recover-next-resumes"],
+      queue,
+    },
+    terminalLoops,
   };
 }
 
@@ -16752,6 +16895,41 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     "  command_queue:",
     ...response.commands.map((item) => `    - ${formatShellCommand(item.command)}`),
   ].join("\n"));
+}
+
+function printRecoverNextTerminalsText(response: RecoverNextTerminalsResponse): void {
+  console.log(formatRecoverNextTerminalsText(response).join("\n"));
+}
+
+function formatRecoverNextTerminalsText(response: RecoverNextTerminalsResponse): string[] {
+  const lines = [
+    "recover_next_terminals:",
+    `  session: ${response.session}`,
+    `  filter: status=${response.filter.status} loop=${response.filter.loopAdvanceId ?? "*"} lines=${response.filter.lines} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  summary: failed=${response.summary.failed} incomplete=${response.summary.incomplete} retryable=${response.summary.retryable}`,
+    `  inspect_status: ${formatShellCommand(response.commands.inspectStatus)}`,
+    `  inspect_failed_resumes: ${formatShellCommand(response.commands.inspectFailedResumes)}`,
+    "  terminal_loops:",
+  ];
+  if (response.terminalLoops.length === 0) {
+    lines.push("    <empty>");
+    return lines;
+  }
+  for (const loop of response.terminalLoops) {
+    lines.push(
+      `    - loop: ${loop.loopAdvanceId ?? ""}`,
+      `      failed_attempts: ${loop.failedAttempts}`,
+      `      latest_failed_advance: ${loop.latestFailedAdvanceId}`,
+      `      latest_failed_exit_code: ${loop.latestFailedExitCode ?? ""}`,
+      `      incomplete: ${loop.incomplete}`,
+      `      inspect_failed_resumes: ${formatShellCommand(loop.commands.inspectFailedResumes)}`,
+      ...(loop.commands.inspectHistory ? [`      inspect_history: ${formatShellCommand(loop.commands.inspectHistory)}`] : []),
+      ...(loop.commands.resumeLoop ? [`      resume: ${formatShellCommand(loop.commands.resumeLoop)}`] : []),
+      ...(loop.commands.executeResumeHistory ? [`      execute_resume_history: ${formatShellCommand(loop.commands.executeResumeHistory)}`] : []),
+    );
+  }
+  return lines;
 }
 
 function workerSessionBranchNativeRecoverLoopCommand(
@@ -25573,6 +25751,7 @@ Commands:
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
   runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
