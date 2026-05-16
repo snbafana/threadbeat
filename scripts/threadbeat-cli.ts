@@ -5919,12 +5919,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const nextActionOnly = options["next-action"] === "1";
     const executeNext = options["execute-next"] === "1";
     const unreplayedNeedsAction = options["unreplayed-needs-action"] === "1";
+    const replayFirstUnreplayedNeedsAction = options["replay-first-unreplayed-needs-action"] === "1";
     const executionHistory = options["execution-history"] === "1" || unreplayedNeedsAction;
     const replayExecution = options["replay-execution"];
     const dryRun = options["dry-run"] === "1";
     const confirm = options.confirm === "1";
     if (unreplayedNeedsAction && (options.status || options["replay-state"])) {
       throw new Error("runs session-control-plane-terminal-overview --unreplayed-needs-action cannot be combined with --status or --replay-state");
+    }
+    if (replayFirstUnreplayedNeedsAction && (executionHistory || replayExecution || executeNext || nextActionOnly || options["commands-only"] === "1" || options.status || options["replay-state"])) {
+      throw new Error("runs session-control-plane-terminal-overview --replay-first-unreplayed-needs-action cannot be combined with --execution-history, --replay-execution, --execute-next, --next-action, --commands-only, --status, or --replay-state");
+    }
+    if (replayFirstUnreplayedNeedsAction && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-terminal-overview --replay-first-unreplayed-needs-action supports json or text output");
     }
     if (replayExecution && (executionHistory || executeNext || nextActionOnly || options["commands-only"] === "1")) {
       throw new Error("runs session-control-plane-terminal-overview --replay-execution cannot be combined with --execution-history, --execute-next, --next-action, or --commands-only");
@@ -5944,14 +5951,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (executeNext && outputFormat === "shell") {
       throw new Error("runs session-control-plane-terminal-overview --execute-next cannot use --format shell");
     }
-    if ((dryRun || confirm) && !executeNext && !replayExecution) {
-      throw new Error("runs session-control-plane-terminal-overview --dry-run/--confirm require --execute-next or --replay-execution");
+    if ((dryRun || confirm) && !executeNext && !replayExecution && !replayFirstUnreplayedNeedsAction) {
+      throw new Error("runs session-control-plane-terminal-overview --dry-run/--confirm require --execute-next, --replay-execution, or --replay-first-unreplayed-needs-action");
     }
     if (executeNext && [dryRun, confirm].filter(Boolean).length !== 1) {
       throw new Error("runs session-control-plane-terminal-overview --execute-next requires exactly one of --dry-run or --confirm");
     }
     if (replayExecution && [dryRun, confirm].filter(Boolean).length !== 1) {
       throw new Error("runs session-control-plane-terminal-overview --replay-execution requires exactly one of --dry-run or --confirm");
+    }
+    if (replayFirstUnreplayedNeedsAction && [dryRun, confirm].filter(Boolean).length !== 1) {
+      throw new Error("runs session-control-plane-terminal-overview --replay-first-unreplayed-needs-action requires exactly one of --dry-run or --confirm");
     }
     const commandSurfaces = options.surface
       ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
@@ -5999,61 +6009,28 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (replayExecution) {
       const sourceRecord = await readControlPlaneTerminalOverviewExecutionRecord(requiredSessionName, replayExecution);
-      const replayCommand = sourceRecord.command ?? sourceRecord.selectedAction?.command ?? null;
-      const executionPlan = replayCommand
-        ? controlPlaneTerminalOverviewExecutionPlan(replayCommand, { dryRun })
-        : { supported: false, command: null, unsupportedReason: "source execution record has no replayable command" };
-      const executed = executionPlan.command
-        ? await runCliWorker(cliCommandArgs(executionPlan.command))
-        : null;
-      if (!executionPlan.supported) {
-        process.exitCode = 1;
+      const response = await replayControlPlaneTerminalOverviewExecution(requiredSessionName, sourceRecord, { dryRun, confirm });
+      if (!response.replayExecution.supported || response.replayExecution.executed?.exitCode !== 0) process.exitCode = 1;
+      if (outputFormat === "text") {
+        printControlPlaneTerminalOverviewReplayExecutionText(response);
+      } else {
+        await printJson(response);
       }
-      if (executed?.exitCode !== 0) {
-        process.exitCode = 1;
-      }
-      const completedAt = new Date().toISOString();
-      const written = await writeControlPlaneTerminalOverviewExecutionRecord({
-        executionId: createControlPlaneTerminalOverviewExecutionId(completedAt),
-        replayOf: sourceRecord.executionId,
-        session: requiredSessionName,
-        observedAt: sourceRecord.observedAt,
-        completedAt,
-        dryRun,
-        confirmed: confirm,
-        commandSurfaces: sourceRecord.commandSurfaces,
-        selectedAction: sourceRecord.selectedAction,
-        supported: executionPlan.supported,
-        unsupportedReason: executionPlan.unsupportedReason,
-        command: executionPlan.command,
-        executed: executed && executionPlan.command
-          ? { command: executionPlan.command, ...executed, output: parseJsonMaybe(executed.stdout) }
-          : null,
+      return;
+    }
+    if (replayFirstUnreplayedNeedsAction) {
+      const [sourceRecord] = await listControlPlaneTerminalOverviewExecutionRecords(requiredSessionName, {
+        limit: 1,
+        commandSurfaces,
+        statuses: ["needs-action"],
+        actions: executionHistoryActions,
+        replayState: "unreplayed",
       });
-      const response: ControlPlaneTerminalOverviewReplayExecutionResponse = {
-        ok: true,
-        session: requiredSessionName,
-        replayExecution: {
-          sourceExecutionId: sourceRecord.executionId,
-          dryRun,
-          confirmed: confirm,
-          selectedAction: sourceRecord.selectedAction,
-          supported: executionPlan.supported,
-          unsupportedReason: executionPlan.unsupportedReason,
-          command: executionPlan.command,
-          executed: executed && executionPlan.command
-            ? { command: executionPlan.command, ...executed, output: parseJsonMaybe(executed.stdout) }
-            : null,
-        },
-        executionRecord: {
-          executionId: written.record.executionId,
-          executionPath: written.path,
-          inspectHistory: [
-            "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", requiredSessionName, "--server",
-            "--execution-history",
-          ],
-        },
-      };
+      if (!sourceRecord) {
+        throw new Error("no unreplayed needs-action terminal overview execution found");
+      }
+      const response = await replayControlPlaneTerminalOverviewExecution(requiredSessionName, sourceRecord, { dryRun, confirm });
+      if (!response.replayExecution.supported || response.replayExecution.executed?.exitCode !== 0) process.exitCode = 1;
       if (outputFormat === "text") {
         printControlPlaneTerminalOverviewReplayExecutionText(response);
       } else {
@@ -9924,7 +9901,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "execution-history" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "unreplayed-needs-action" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "execution-history" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "replay-first-unreplayed-needs-action" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "unreplayed-needs-action" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -18226,6 +18203,65 @@ function controlPlaneTerminalOverviewExecutionPlan(
     supported: true,
     command: [...withoutMode, options.dryRun ? "--dry-run" : "--confirm"],
     unsupportedReason: null,
+  };
+}
+
+async function replayControlPlaneTerminalOverviewExecution(
+  sessionName: string,
+  sourceRecord: ControlPlaneTerminalOverviewExecutionRecord,
+  options: { dryRun: boolean; confirm: boolean },
+): Promise<ControlPlaneTerminalOverviewReplayExecutionResponse> {
+  const replayCommand = sourceRecord.command ?? sourceRecord.selectedAction?.command ?? null;
+  const executionPlan = replayCommand
+    ? controlPlaneTerminalOverviewExecutionPlan(replayCommand, { dryRun: options.dryRun })
+    : {
+      supported: false,
+      command: null,
+      unsupportedReason: "source execution record has no replayable command",
+    };
+  const executed = executionPlan.command
+    ? await runCliWorker(cliCommandArgs(executionPlan.command))
+    : null;
+  const executionOutput = executed && executionPlan.command
+    ? { command: executionPlan.command, ...executed, output: parseJsonMaybe(executed.stdout) }
+    : null;
+  const completedAt = new Date().toISOString();
+  const written = await writeControlPlaneTerminalOverviewExecutionRecord({
+    executionId: createControlPlaneTerminalOverviewExecutionId(completedAt),
+    replayOf: sourceRecord.executionId,
+    session: sessionName,
+    observedAt: sourceRecord.observedAt,
+    completedAt,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    commandSurfaces: sourceRecord.commandSurfaces,
+    selectedAction: sourceRecord.selectedAction,
+    supported: executionPlan.supported,
+    unsupportedReason: executionPlan.unsupportedReason,
+    command: executionPlan.command,
+    executed: executionOutput,
+  });
+  return {
+    ok: true,
+    session: sessionName,
+    replayExecution: {
+      sourceExecutionId: sourceRecord.executionId,
+      dryRun: options.dryRun,
+      confirmed: options.confirm,
+      selectedAction: sourceRecord.selectedAction,
+      supported: executionPlan.supported,
+      unsupportedReason: executionPlan.unsupportedReason,
+      command: executionPlan.command,
+      executed: executionOutput,
+    },
+    executionRecord: {
+      executionId: written.record.executionId,
+      executionPath: written.path,
+      inspectHistory: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", sessionName, "--server",
+        "--execution-history",
+      ],
+    },
   };
 }
 
@@ -28179,7 +28215,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-execution execution_id --dry-run|--confirm] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-execution execution_id --dry-run|--confirm|--replay-first-unreplayed-needs-action --dry-run|--confirm [--action selected_action]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
