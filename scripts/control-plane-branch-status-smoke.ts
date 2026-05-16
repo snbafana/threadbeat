@@ -902,6 +902,52 @@ try {
   assert.equal(terminalOverviewReplayLoopsApi.commands.replayLoopDryRun.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`);
   assert.equal(terminalOverviewReplayLoopsApi.commands.replayLoopConfirm.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --confirm`);
 
+  const terminalOverviewReplayLoopsCli = await cliJson<{
+    count: number;
+    latest: { loopId: string } | null;
+    commands: { inspectSummary: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview-replay-loops",
+    sessionName,
+    "--server",
+    "--surface",
+    "control",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(terminalOverviewReplayLoopsCli.count, 1);
+  assert.equal(terminalOverviewReplayLoopsCli.latest?.loopId, replayLoopId);
+  assert.equal(terminalOverviewReplayLoopsCli.commands.inspectSummary.join(" "), `${terminalOverviewCommand} --replay-loop-summary --surface control`);
+
+  const terminalOverviewReplayLoopsCliText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview-replay-loops",
+    sessionName,
+    "--server",
+    "--surface",
+    "control",
+    "--format",
+    "text",
+  ]);
+  assert.match(terminalOverviewReplayLoopsCliText, /control_plane_terminal_overview_replay_loops:/);
+  assert.match(terminalOverviewReplayLoopsCliText, /attempts=1/);
+  assert.match(terminalOverviewReplayLoopsCliText, new RegExp(`loop_id: ${replayLoopId}`));
+
+  const terminalOverviewReplayLoopsCliCommands = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview-replay-loops",
+    sessionName,
+    "--server",
+    "--surface",
+    "control",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(terminalOverviewReplayLoopsCliCommands, new RegExp(`${terminalOverviewCommand} --replay-loop-summary --surface control`));
+  assert.match(terminalOverviewReplayLoopsCliCommands, new RegExp(`${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`));
+
   const terminalOverviewReplayLoopSummaryText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",

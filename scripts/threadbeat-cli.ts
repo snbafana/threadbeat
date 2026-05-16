@@ -6199,6 +6199,43 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-terminal-overview-replay-loops") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-terminal-overview-replay-loops <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-terminal-overview-replay-loops requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-terminal-overview-replay-loops --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-terminal-overview-replay-loops --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-terminal-overview-replay-loops --format text cannot be combined with --commands-only");
+    }
+    const response = await fetchControlPlaneTerminalOverviewReplayLoops(requiredSessionName, {
+      limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
+      loopId: options.loop,
+      surface: options.surface,
+      action: options.action,
+    });
+    if (options["commands-only"] === "1") {
+      const commands = controlPlaneTerminalOverviewReplayLoopCommands(response);
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        await printJson({ ok: true, session: response.session, commands });
+      }
+    } else if (outputFormat === "text") {
+      printControlPlaneTerminalOverviewReplayLoopsText(response);
+    } else {
+      await printJson(response);
+    }
+    return;
+  }
   if (subcommandName === "session-branch-native-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -17360,6 +17397,35 @@ type ControlPlaneTerminalOverviewReplayLoopSummaryResponse = {
   };
 };
 
+type ControlPlaneTerminalOverviewReplayLoopsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    limit: number;
+    loopIds: string[];
+    commandSurfaces: string[];
+    actions: string[];
+  };
+  count: number;
+  summary: {
+    attempts: number;
+    dryRun: number;
+    confirmed: number;
+    steps: number;
+    supported: number;
+    unsupported: number;
+    executed: number;
+    failed: number;
+  };
+  latest: ControlPlaneTerminalOverviewReplayLoopRecord | null;
+  loops: ControlPlaneTerminalOverviewReplayLoopRecord[];
+  commands: {
+    inspectSummary: string[];
+    replayLoopDryRun: string[];
+    replayLoopConfirm: string[];
+  };
+};
+
 type ControlPlaneTerminalOverviewExecutionRecord = {
   executionId: string;
   replayOf?: string;
@@ -18670,6 +18736,51 @@ function printControlPlaneTerminalOverviewReplayLoopSummaryText(
     `    replay_loop_confirm: ${formatShellCommand(response.commands.replayLoopConfirm)}`,
     `    inspect_history: ${formatShellCommand(response.commands.inspectHistory)}`,
   ].join("\n"));
+}
+
+function printControlPlaneTerminalOverviewReplayLoopsText(
+  response: ControlPlaneTerminalOverviewReplayLoopsResponse,
+): void {
+  console.log([
+    "control_plane_terminal_overview_replay_loops:",
+    `  session: ${response.session}`,
+    `  limit: ${response.filter.limit}`,
+    `  loop_ids: ${response.filter.loopIds.join(",") || "all"}`,
+    `  command_surfaces: ${response.filter.commandSurfaces.join(",") || "all"}`,
+    `  actions: ${response.filter.actions.join(",") || "all"}`,
+    `  summary: attempts=${response.summary.attempts} dry_run=${response.summary.dryRun} confirmed=${response.summary.confirmed} steps=${response.summary.steps} supported=${response.summary.supported} unsupported=${response.summary.unsupported} executed=${response.summary.executed} failed=${response.summary.failed}`,
+    "  latest:",
+    `    loop_id: ${response.latest?.loopId ?? ""}`,
+    `    stopped_reason: ${response.latest?.stoppedReason ?? ""}`,
+    `    steps: ${response.latest?.summary.steps ?? ""}`,
+    "  commands:",
+    `    inspect_summary: ${formatShellCommand(response.commands.inspectSummary)}`,
+    `    replay_loop_dry_run: ${formatShellCommand(response.commands.replayLoopDryRun)}`,
+    `    replay_loop_confirm: ${formatShellCommand(response.commands.replayLoopConfirm)}`,
+    "  loops:",
+    ...(response.loops.length > 0
+      ? response.loops.flatMap((loop) => [
+        `    - loop: ${loop.loopId}`,
+        `      completed_at: ${loop.completedAt}`,
+        `      dry_run: ${loop.dryRun}`,
+        `      confirmed: ${loop.confirmed}`,
+        `      stopped_reason: ${loop.stoppedReason}`,
+        `      command_surfaces: ${loop.commandSurfaces.join(",") || "all"}`,
+        `      actions: ${loop.actions.join(",") || "all"}`,
+        `      summary: steps=${loop.summary.steps} supported=${loop.summary.supported} unsupported=${loop.summary.unsupported} executed=${loop.summary.executed} failed=${loop.summary.failed}`,
+      ])
+      : ["    none"]),
+  ].join("\n"));
+}
+
+function controlPlaneTerminalOverviewReplayLoopCommands(
+  response: ControlPlaneTerminalOverviewReplayLoopsResponse,
+): CommandQueueOutput["commands"] {
+  return [
+    { command: response.commands.inspectSummary },
+    { command: response.commands.replayLoopDryRun },
+    { command: response.commands.replayLoopConfirm },
+  ];
 }
 
 function summarizeControlPlaneTerminalOverviewExecutionHistory(
@@ -20373,6 +20484,20 @@ async function fetchWorkerSessionControlPlaneAdvances(
     "GET",
     withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/control-plane-advances`, params),
   ) as WorkerSessionControlPlaneAdvancesResponse;
+}
+
+async function fetchControlPlaneTerminalOverviewReplayLoops(
+  sessionName: string,
+  options: { limit: number; loopId?: string; surface?: string; action?: string },
+): Promise<ControlPlaneTerminalOverviewReplayLoopsResponse> {
+  const params = new URLSearchParams({ limit: String(options.limit) });
+  if (options.loopId) params.set("loop", options.loopId);
+  if (options.surface) params.set("surface", options.surface);
+  if (options.action) params.set("action", options.action);
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/terminal-overview-replay-loops`, params),
+  ) as ControlPlaneTerminalOverviewReplayLoopsResponse;
 }
 
 async function startWorkerSessionControlPlaneAdvanceWorker(
@@ -28558,6 +28683,7 @@ Commands:
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-loop-summary [--action selected_action]|--replay-execution execution_id --dry-run|--confirm|--replay-first-unreplayed-needs-action --dry-run|--confirm [--action selected_action]|--replay-unreplayed-needs-action-loop --dry-run|--confirm [--action selected_action] [--max-steps 10]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview-replay-loops <name> --server [--loop loop_id] [--surface surface[,surface]] [--action selected_action[,action]] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
