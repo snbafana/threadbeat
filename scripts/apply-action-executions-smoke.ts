@@ -31,6 +31,7 @@ try {
   await app.listen({ host: settings.host, port: settings.port });
   const address = app.server.address() as AddressInfo;
   const baseUrl = `http://${settings.host}:${address.port}`;
+  await writeSessionRecord();
   const older = await writeExecution({
     executionId: `apply-action-execution-older-${Date.now().toString(36)}`,
     observedAt: "2026-05-13T10:00:00.000Z",
@@ -92,6 +93,77 @@ try {
     && command.command.includes("--execution")
     && command.command.includes(newer.executionId)
   )));
+
+  const terminals = await cliJson<{
+    count: number;
+    summary: { failedExecutions: number; recentExecutions: number };
+    actions: unknown[];
+    failedExecutions: Array<{
+      executionId: string;
+      applyId: string;
+      action: string;
+      exitCode: number | null;
+      commands: { inspectExecution: string[]; inspectApply: string[]; executeAction: string[] };
+    }>;
+    commands: { queue: Array<{ command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-apply-action-terminals",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(terminals.count, 1);
+  assert.equal(terminals.summary.failedExecutions, 1);
+  assert.equal(terminals.summary.recentExecutions, 2);
+  assert.deepEqual(terminals.actions, []);
+  assert.equal(terminals.failedExecutions[0]?.executionId, older.executionId);
+  assert.equal(terminals.failedExecutions[0]?.applyId, "apply-a");
+  assert.equal(terminals.failedExecutions[0]?.action, "inspect_drain_continuation_resets");
+  assert.equal(terminals.failedExecutions[0]?.exitCode, 1);
+  assert.ok(terminals.failedExecutions[0]?.commands.inspectExecution.includes(older.executionId));
+  assert.ok(terminals.failedExecutions[0]?.commands.inspectApply.includes("apply-a"));
+  assert.ok(terminals.failedExecutions[0]?.commands.executeAction.includes("--execute-next"));
+  assert.ok(terminals.commands.queue.some((item) => item.command.includes(older.executionId)));
+  assert.ok(terminals.commands.queue.some((item) => item.command.includes("--execute-next")));
+
+  const terminalText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-apply-action-terminals",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(terminalText, /apply_action_terminals:/);
+  assert.match(terminalText, /failed_executions=1/);
+  assert.match(terminalText, new RegExp(`execution: ${older.executionId}`));
+  assert.match(terminalText, /execute_action: npm run cli -- runs session-applies/);
+
+  const terminalShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-apply-action-terminals",
+    sessionName,
+    "--server",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(terminalShell, new RegExp(`--action-executions --execution ${older.executionId}`));
+  assert.match(terminalShell, /--action-queue --execute-next --apply-id apply-a --apply-action inspect_drain_continuation_resets/);
+
+  const branchNativeApplyShell = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "apply_action",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(branchNativeApplyShell, /session-control-plane-apply-action-terminals/);
+  assert.match(branchNativeApplyShell, /session-applies .* --action-executions --status failed/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", "apply-action-executions", sessionName), { recursive: true, force: true });
@@ -99,6 +171,19 @@ try {
 }
 
 console.log("apply-action executions smoke passed");
+
+async function writeSessionRecord(): Promise<void> {
+  const sessionPath = path.join(".threadbeat", "worker-sessions", `${sessionName}.json`);
+  await fs.mkdir(path.dirname(sessionPath), { recursive: true });
+  await fs.writeFile(sessionPath, `${JSON.stringify({
+    session: sessionName,
+    baseUrl: "http://127.0.0.1:0",
+    startedAt: "2026-05-13T10:00:00.000Z",
+    command: ["runs", "work", "--agent", "apply-action-executions-smoke"],
+    workers: [],
+    stoppedAt: "2026-05-13T10:00:01.000Z",
+  }, null, 2)}\n`);
+}
 
 type ApplyActionExecutionsResponse = {
   filter: { executionIds: string[] };
@@ -139,4 +224,13 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     maxBuffer: 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
+}
+
+async function cliText(baseUrl: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout;
 }
