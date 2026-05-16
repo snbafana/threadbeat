@@ -744,6 +744,69 @@ try {
   assert.match(resumableResultReviewLoopHistoryText, new RegExp(`resume: npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 3 --interval-ms 1`));
   assert.match(resumableResultReviewLoopHistoryText, new RegExp(`execute_resume: npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`));
 
+  const resumableResultReviewTerminals = await cliJson<{
+    count: number;
+    summary: { resumable: number; completed: number; unacknowledged: number; acknowledged: number; processed: number };
+    terminalLoops: Array<{
+      loopAdvanceId: string;
+      status: string;
+      remainingPending: number;
+      commands: { resumeLoop: string[] | null; executeResume: string[] | null; acknowledgeCompleted: string[] | null };
+    }>;
+    commands: { queue: Array<{ command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "resumable",
+  ]);
+  assert.equal(resumableResultReviewTerminals.count, 1);
+  assert.equal(resumableResultReviewTerminals.summary.resumable, 1);
+  assert.equal(resumableResultReviewTerminals.summary.completed, 0);
+  assert.equal(resumableResultReviewTerminals.summary.unacknowledged, 0);
+  assert.equal(resumableResultReviewTerminals.summary.acknowledged, 0);
+  assert.equal(resumableResultReviewTerminals.summary.processed, 2);
+  assert.equal(resumableResultReviewTerminals.terminalLoops[0]?.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.equal(resumableResultReviewTerminals.terminalLoops[0]?.status, "resumable");
+  assert.equal(resumableResultReviewTerminals.terminalLoops[0]?.remainingPending, 1);
+  assert.equal(resumableResultReviewTerminals.terminalLoops[0]?.commands.resumeLoop?.join(" "), `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 3 --interval-ms 1`);
+  assert.equal(resumableResultReviewTerminals.terminalLoops[0]?.commands.executeResume?.join(" "), `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`);
+  assert.equal(resumableResultReviewTerminals.terminalLoops[0]?.commands.acknowledgeCompleted, null);
+  assert.ok(resumableResultReviewTerminals.commands.queue.some((command) => command.command.join(" ") === `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 3 --interval-ms 1`));
+  assert.ok(resumableResultReviewTerminals.commands.queue.some((command) => command.command.join(" ") === `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`));
+
+  const resumableResultReviewTerminalsText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "resumable",
+    "--format",
+    "text",
+  ]);
+  assert.match(resumableResultReviewTerminalsText, /result_review_terminals:/);
+  assert.match(resumableResultReviewTerminalsText, /summary: completed=0 unacknowledged=0 acknowledged=0 processed=2 resumable=1/);
+  assert.match(resumableResultReviewTerminalsText, /status: resumable/);
+  assert.match(resumableResultReviewTerminalsText, new RegExp(`resume: npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 3 --interval-ms 1`));
+  assert.match(resumableResultReviewTerminalsText, new RegExp(`execute_resume: npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`));
+
+  const resumableResultReviewTerminalsShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "resumable",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(resumableResultReviewTerminalsShell, new RegExp(`--resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --dry-run --max-results 3 --interval-ms 1`));
+  assert.match(resumableResultReviewTerminalsShell, new RegExp(`--resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`));
+
   const branchNativeNextWithReviewLoopText = await cliText(baseUrl, [
     "runs",
     "session-branch-native-next",
