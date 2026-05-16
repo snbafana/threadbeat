@@ -5130,6 +5130,50 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(response);
     return;
   }
+  if (subcommandName === "session-control-plane-operator-loop-terminals") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-operator-loop-terminals <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-operator-loop-terminals requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-operator-loop-terminals --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-operator-loop-terminals --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-operator-loop-terminals --format text cannot be combined with --commands-only");
+    }
+    const status = parseOperatorLoopTerminalStatus(options.status ?? "resumable");
+    const limit = parsePositiveInteger(options.limit ?? "20", "--limit");
+    const lines = parsePositiveInteger(options.lines ?? String(limit), "--lines");
+    const summary = summarizeWorkerSessionControlPlaneStatus(
+      await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines }),
+    );
+    const terminals = summarizeOperatorLoopTerminals(requiredSessionName, summary, {
+      status,
+      loopAdvanceId: options["loop-advance-id"],
+      limit,
+      lines,
+    });
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(terminals.commands.queue);
+      } else {
+        await printJson({ ...terminals, commands: terminals.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printOperatorLoopTerminalsText(terminals);
+    } else {
+      await printJson(terminals);
+    }
+    return;
+  }
   if (subcommandName === "session-control-plane-topology") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -14702,6 +14746,147 @@ function workerSessionControlPlaneOperatorRunNextCommandQueue(
   ]).map((command) => ({ command }));
 }
 
+function summarizeOperatorLoopTerminals(
+  sessionName: string,
+  summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
+  options: { status: OperatorLoopTerminalStatus; loopAdvanceId?: string; limit: number; lines: number },
+): OperatorLoopTerminalsResponse {
+  const terminalLoops = summary.recovery.operatorLoops.resumableLoops.recent
+    .filter((loop) => !options.loopAdvanceId || loop.loopAdvanceId === options.loopAdvanceId)
+    .slice(0, options.limit)
+    .map((loop) => ({
+      loopAdvanceId: loop.loopAdvanceId,
+      latestAdvanceId: loop.latestAdvanceId,
+      attempts: loop.attempts,
+      totalSteps: loop.totalSteps,
+      dryRun: loop.dryRun,
+      lastObservedAt: loop.lastObservedAt,
+      lastCompletedAt: loop.lastCompletedAt,
+      stoppedReason: loop.stoppedReason,
+      maxSteps: loop.maxSteps,
+      intervalMs: loop.intervalMs,
+      maxCycles: loop.maxCycles,
+      cycleIntervalMs: loop.cycleIntervalMs,
+      lines: loop.lines,
+      commands: {
+        inspectLatest: loop.inspectLatestCommand,
+        inspectHistory: loop.inspectHistoryCommand,
+        resumeLoop: loop.resumeCommand,
+        executeResume: loop.executeResumeCommand,
+      },
+    }));
+  const queue = uniqueOperatorLoopTerminalCommandQueue(terminalLoops.flatMap((loop) => [
+    {
+      scope: "operator_loop_terminal" as const,
+      action: "inspect_latest" as const,
+      loopAdvanceId: loop.loopAdvanceId,
+      reason: loop.stoppedReason,
+      command: loop.commands.inspectLatest,
+    },
+    {
+      scope: "operator_loop_terminal" as const,
+      action: "inspect_history" as const,
+      loopAdvanceId: loop.loopAdvanceId,
+      reason: loop.stoppedReason,
+      command: loop.commands.inspectHistory,
+    },
+    {
+      scope: "operator_loop_terminal" as const,
+      action: "resume_loop" as const,
+      loopAdvanceId: loop.loopAdvanceId,
+      reason: loop.stoppedReason,
+      command: loop.commands.resumeLoop,
+    },
+    {
+      scope: "operator_loop_terminal" as const,
+      action: "execute_resume" as const,
+      loopAdvanceId: loop.loopAdvanceId,
+      reason: loop.stoppedReason,
+      command: loop.commands.executeResume,
+    },
+  ]).filter((item) => item.command.length > 0));
+  return {
+    ok: true,
+    session: sessionName,
+    filter: {
+      status: options.status,
+      loopAdvanceId: options.loopAdvanceId ?? null,
+      limit: options.limit,
+      lines: options.lines,
+    },
+    count: terminalLoops.length,
+    summary: {
+      resumable: terminalLoops.length,
+      totalSteps: terminalLoops.reduce((total, loop) => total + loop.totalSteps, 0),
+      dryRun: terminalLoops.filter((loop) => loop.dryRun).length,
+      executed: terminalLoops.filter((loop) => !loop.dryRun).length,
+    },
+    commands: {
+      inspectStatus: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary", "--lines", String(options.lines)],
+      inspectOperatorRuns: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", sessionName, "--server"],
+      inspectResumable: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-loop-terminals", sessionName, "--server", "--status", "resumable"],
+      queue,
+    },
+    terminalLoops,
+  };
+}
+
+function uniqueOperatorLoopTerminalCommandQueue(
+  commands: OperatorLoopTerminalsResponse["commands"]["queue"],
+): OperatorLoopTerminalsResponse["commands"]["queue"] {
+  const seen = new Set<string>();
+  const unique: OperatorLoopTerminalsResponse["commands"]["queue"] = [];
+  for (const command of commands) {
+    const key = command.command.join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(command);
+  }
+  return unique;
+}
+
+function printOperatorLoopTerminalsText(response: OperatorLoopTerminalsResponse): void {
+  console.log(formatOperatorLoopTerminalsText(response).join("\n"));
+}
+
+function formatOperatorLoopTerminalsText(response: OperatorLoopTerminalsResponse): string[] {
+  const lines = [
+    "operator_loop_terminals:",
+    `  session: ${response.session}`,
+    `  filter: status=${response.filter.status} loop=${response.filter.loopAdvanceId ?? "all"} lines=${response.filter.lines} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  summary: resumable=${response.summary.resumable} total_steps=${response.summary.totalSteps} dry_run=${response.summary.dryRun} executed=${response.summary.executed}`,
+    "  commands:",
+    `    inspect_status: ${formatShellCommand(response.commands.inspectStatus)}`,
+    `    inspect_operator_runs: ${formatShellCommand(response.commands.inspectOperatorRuns)}`,
+    `    inspect_resumable: ${formatShellCommand(response.commands.inspectResumable)}`,
+  ];
+  if (response.terminalLoops.length === 0) {
+    lines.push("  loops: none");
+    return lines;
+  }
+  lines.push("  loops:");
+  for (const loop of response.terminalLoops) {
+    lines.push(
+      `    - loop: ${loop.loopAdvanceId}`,
+      `      latest_advance: ${loop.latestAdvanceId}`,
+      `      attempts: ${loop.attempts}`,
+      `      total_steps: ${loop.totalSteps}`,
+      `      dry_run: ${loop.dryRun}`,
+      `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+      `      max_steps: ${loop.maxSteps ?? ""}`,
+      `      interval_ms: ${loop.intervalMs ?? ""}`,
+      `      max_cycles: ${loop.maxCycles ?? ""}`,
+      `      cycle_interval_ms: ${loop.cycleIntervalMs ?? ""}`,
+      `      inspect_latest: ${formatShellCommand(loop.commands.inspectLatest)}`,
+      `      inspect_history: ${formatShellCommand(loop.commands.inspectHistory)}`,
+      `      resume: ${formatShellCommand(loop.commands.resumeLoop)}`,
+      `      execute_resume: ${formatShellCommand(loop.commands.executeResume)}`,
+    );
+  }
+  return lines;
+}
+
 function printWorkerSessionControlPlaneOperatorRunNextText(
   response: WorkerSessionControlPlaneOperatorRunNextResponse,
 ): void {
@@ -16343,6 +16528,59 @@ type WorkerSessionBranchNativePostOperatorNext = {
   command: string[];
 };
 
+type OperatorLoopTerminalStatus = "resumable";
+
+type OperatorLoopTerminalsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    status: OperatorLoopTerminalStatus;
+    loopAdvanceId: string | null;
+    limit: number;
+    lines: number;
+  };
+  count: number;
+  summary: {
+    resumable: number;
+    totalSteps: number;
+    dryRun: number;
+    executed: number;
+  };
+  commands: {
+    inspectStatus: string[];
+    inspectOperatorRuns: string[];
+    inspectResumable: string[];
+    queue: Array<{
+      scope: "operator_loop_terminal";
+      action: "inspect_latest" | "inspect_history" | "resume_loop" | "execute_resume";
+      loopAdvanceId: string;
+      reason: string | null;
+      command: string[];
+    }>;
+  };
+  terminalLoops: Array<{
+    loopAdvanceId: string;
+    latestAdvanceId: string;
+    attempts: number;
+    totalSteps: number;
+    dryRun: boolean;
+    lastObservedAt: string;
+    lastCompletedAt: string;
+    stoppedReason: string | null;
+    maxSteps: number | null;
+    intervalMs: number | null;
+    maxCycles: number | null;
+    cycleIntervalMs: number | null;
+    lines: number | null;
+    commands: {
+      inspectLatest: string[];
+      inspectHistory: string[];
+      resumeLoop: string[];
+      executeResume: string[];
+    };
+  }>;
+};
+
 type WorkerSessionBranchNativeOperatorLoopResponse = Omit<WorkerSessionBranchNativeNextResponse, "ok"> & {
   ok: boolean;
   dryRun: boolean;
@@ -16462,7 +16700,9 @@ function workerSessionBranchNativeNext(
     { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", summary.session, "--server"] },
     { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", summary.session, "--server"] },
     { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers-next", summary.session, "--server"] },
+    { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-loop-terminals", summary.session, "--server"] },
     ...(summary.recovery.operatorLoops.resumableLoops.count > 0 ? [{ surfaces: ["operator"] as const, command: summary.commands.operatorLoops }] : []),
+    ...(summary.recovery.operatorLoops.resumableLoops.count > 0 ? [{ surfaces: ["operator"] as const, command: ["npm", "run", "cli", "--", "runs", "session-control-plane-operator-loop-terminals", summary.session, "--server", "--status", "resumable"] }] : []),
     ...operatorLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
       { surfaces: ["operator"], command: loop.resumeCommand },
       { surfaces: ["operator"], command: loop.inspectLatestCommand },
@@ -20368,6 +20608,11 @@ function parseControlPlaneWorkerKind(value: string): ControlPlaneWorkerKind {
 function parseControlPlaneWorkerTerminalStatus(value: string): ControlPlaneWorkerTerminalStatus {
   if (value === "restartable" || value === "stopped" || value === "all") return value;
   throw new Error(`Unsupported control-plane worker terminal status: ${value}`);
+}
+
+function parseOperatorLoopTerminalStatus(value: string): OperatorLoopTerminalStatus {
+  if (value === "resumable") return value;
+  throw new Error(`Unsupported operator loop terminal status: ${value}`);
 }
 
 function parseResultReviewWorkerAction(options: Record<string, string>, commandName: string): "reviewed" | "skipped" {
@@ -26584,6 +26829,7 @@ Commands:
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
   runs session-control-plane-operator-runs <name> --server [--latest] [--operator-run id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operator-runs-next <name> --server [--operator-run id] [--format json|text|shell]
+  runs session-control-plane-operator-loop-terminals <name> --server [--loop-advance-id loop_advance_id] [--status resumable] [--limit 20] [--lines 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-topology <name> --server [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id] [--commands-only] [--format json|shell]
   runs ensure-control-plane-topology <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
   runs ensure-control-plane-topology-loop <name> --server (--confirm|--dry-run) [--include-mutation-workers] [--max-iterations 3] [--loop-interval-ms 2000] [--advance-worker-id id] [--tick-worker-id id] [--apply-worker-id id] [--drain-worker-id id]
