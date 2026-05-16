@@ -54,6 +54,7 @@ try {
   const branchTerminalOverviewCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch`;
   const branchTerminalOverviewNextActionCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch --next-action`;
   const branchTerminalOverviewExecuteDryRunCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch --execute-next --dry-run`;
+  const terminalOverviewExecutionHistoryCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --execution-history`;
   const branchNativeNextCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server`;
   const branchNativeRecoverDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --dry-run`;
   const branchNativeRecoverConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --confirm`;
@@ -304,6 +305,7 @@ try {
       selectedAction: { surfaces: string[]; command: string[] } | null;
       executed: { command: string[]; exitCode: number | null; stdout: string; stderr: string; output: unknown } | null;
     };
+    executionRecord: { executionId: string; executionPath: string; inspectHistory: string[] };
   }>(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
@@ -322,6 +324,43 @@ try {
   assert.equal(terminalOverviewExecuteDryRun.executeNext.selectedAction?.command.join(" "), resumeBranchCommand);
   assert.equal(terminalOverviewExecuteDryRun.executeNext.executed?.command.join(" "), resumeBranchDryRunCommand);
   assert.equal(terminalOverviewExecuteDryRun.executeNext.executed?.exitCode, 0);
+  assert.match(terminalOverviewExecuteDryRun.executionRecord.executionId, /^terminal-overview-exec-/);
+  assert.match(terminalOverviewExecuteDryRun.executionRecord.executionPath, /terminal-overview-executions/);
+  assert.equal(terminalOverviewExecuteDryRun.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+
+  const terminalOverviewExecutionHistory = await cliJson<{
+    summary: { total: number; dryRun: number; supported: number; blocked: number; executed: number; failed: number };
+    records: Array<{
+      executionId: string;
+      dryRun: boolean;
+      confirmed: boolean;
+      supported: boolean;
+      command: string[] | null;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+  ]);
+  assert.ok(terminalOverviewExecutionHistory.summary.total >= 2);
+  assert.ok(terminalOverviewExecutionHistory.summary.dryRun >= 2);
+  assert.ok(terminalOverviewExecutionHistory.summary.supported >= 1);
+  assert.ok(terminalOverviewExecutionHistory.summary.blocked >= 1);
+  assert.ok(terminalOverviewExecutionHistory.summary.executed >= 1);
+  assert.equal(terminalOverviewExecutionHistory.summary.failed, 0);
+  const branchExecutionRecord = terminalOverviewExecutionHistory.records.find((record) => record.executionId === terminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.equal(branchExecutionRecord?.dryRun, true);
+  assert.equal(branchExecutionRecord?.confirmed, false);
+  assert.equal(branchExecutionRecord?.supported, true);
+  assert.equal(branchExecutionRecord?.selectedAction?.surfaces[0], "branch");
+  assert.equal(branchExecutionRecord?.selectedAction?.command.join(" "), resumeBranchCommand);
+  assert.equal(branchExecutionRecord?.command?.join(" "), resumeBranchDryRunCommand);
+  assert.equal(branchExecutionRecord?.executed?.command.join(" "), resumeBranchDryRunCommand);
+  assert.equal(branchExecutionRecord?.executed?.exitCode, 0);
 
   const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
     "runs",
@@ -340,6 +379,8 @@ try {
   assert.match(terminalOverviewExecuteDryRunText, new RegExp(`selected_command: ${resumeBranchCommand}`));
   assert.match(terminalOverviewExecuteDryRunText, new RegExp(`command: ${resumeBranchDryRunCommand}`));
   assert.match(terminalOverviewExecuteDryRunText, new RegExp(`executed_command: ${resumeBranchDryRunCommand}`));
+  assert.match(terminalOverviewExecuteDryRunText, /execution_record:/);
+  assert.match(terminalOverviewExecuteDryRunText, new RegExp(`inspect_history: ${terminalOverviewExecutionHistoryCommand}`));
 
   const branchNativeNext = await cliJson<{
     ok: boolean;
@@ -875,6 +916,7 @@ try {
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.out.log`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.err.log`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-executions", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 

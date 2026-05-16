@@ -5918,8 +5918,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     const nextActionOnly = options["next-action"] === "1";
     const executeNext = options["execute-next"] === "1";
+    const executionHistory = options["execution-history"] === "1";
     const dryRun = options["dry-run"] === "1";
     const confirm = options.confirm === "1";
+    if (executionHistory && (executeNext || nextActionOnly || options["commands-only"] === "1")) {
+      throw new Error("runs session-control-plane-terminal-overview --execution-history cannot be combined with --execute-next, --next-action, or --commands-only");
+    }
+    if (executionHistory && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-terminal-overview --execution-history supports json or text output");
+    }
     if (executeNext && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-terminal-overview --execute-next cannot be combined with --commands-only");
     }
@@ -5935,6 +5942,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const commandSurfaces = options.surface
       ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
       : [];
+    if (executionHistory) {
+      const history = await listControlPlaneTerminalOverviewExecutionRecords(requiredSessionName, {
+        limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
+        commandSurfaces,
+      });
+      const response = summarizeControlPlaneTerminalOverviewExecutionHistory(requiredSessionName, history, commandSurfaces);
+      if (outputFormat === "text") {
+        printControlPlaneTerminalOverviewExecutionHistoryText(response);
+      } else {
+        await printJson(response);
+      }
+      return;
+    }
     const status = await fetchWorkerSessionControlPlaneStatus(requiredSessionName, {
       lines: parsePositiveInteger(options.lines ?? "5", "--lines"),
     });
@@ -5963,6 +5983,23 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       if (executed?.exitCode !== 0) {
         process.exitCode = 1;
       }
+      const completedAt = new Date().toISOString();
+      const written = await writeControlPlaneTerminalOverviewExecutionRecord({
+        executionId: createControlPlaneTerminalOverviewExecutionId(completedAt),
+        session: requiredSessionName,
+        observedAt: branchNativeNext.observedAt,
+        completedAt,
+        dryRun,
+        confirmed: confirm,
+        commandSurfaces: overview.commandSurfaces,
+        selectedAction,
+        supported: executionPlan.supported,
+        unsupportedReason: executionPlan.unsupportedReason,
+        command: executionPlan.command,
+        executed: executed && executionPlan.command
+          ? { command: executionPlan.command, ...executed, output: parseJsonMaybe(executed.stdout) }
+          : null,
+      });
       const response: ControlPlaneTerminalOverviewExecuteNextResponse = {
         ...overview,
         executeNext: {
@@ -5975,6 +6012,14 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           executed: executed && executionPlan.command
             ? { command: executionPlan.command, ...executed, output: parseJsonMaybe(executed.stdout) }
             : null,
+        },
+        executionRecord: {
+          executionId: written.record.executionId,
+          executionPath: written.path,
+          inspectHistory: [
+            "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", requiredSessionName, "--server",
+            "--execution-history",
+          ],
         },
       };
       if (outputFormat === "text") {
@@ -9773,7 +9818,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "execution-history" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -17073,6 +17118,48 @@ type ControlPlaneTerminalOverviewExecuteNextResponse = ControlPlaneTerminalOverv
       output: unknown;
     } | null;
   };
+  executionRecord: {
+    executionId: string;
+    executionPath: string;
+    inspectHistory: string[];
+  };
+};
+
+type ControlPlaneTerminalOverviewExecutionRecord = {
+  executionId: string;
+  session: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+  selectedAction: WorkerSessionBranchNativeCommandQueueItem | null;
+  supported: boolean;
+  unsupportedReason: string | null;
+  command: string[] | null;
+  executed: {
+    command: string[];
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    output: unknown;
+  } | null;
+};
+
+type ControlPlaneTerminalOverviewExecutionHistoryResponse = {
+  ok: true;
+  session: string;
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+  summary: {
+    total: number;
+    dryRun: number;
+    confirmed: number;
+    supported: number;
+    blocked: number;
+    executed: number;
+    failed: number;
+  };
+  records: ControlPlaneTerminalOverviewExecutionRecord[];
 };
 
 type RecoverNextTerminalStatus = "failed" | "all";
@@ -18015,6 +18102,53 @@ function printControlPlaneTerminalOverviewExecuteNextText(response: ControlPlane
     `    command: ${response.executeNext.command ? formatShellCommand(response.executeNext.command) : "none"}`,
     `    executed_command: ${response.executeNext.executed ? formatShellCommand(response.executeNext.executed.command) : "none"}`,
     `    exit_code: ${response.executeNext.executed?.exitCode ?? ""}`,
+    "  execution_record:",
+    `    execution_id: ${response.executionRecord.executionId}`,
+    `    execution_path: ${response.executionRecord.executionPath}`,
+    `    inspect_history: ${formatShellCommand(response.executionRecord.inspectHistory)}`,
+  ].join("\n"));
+}
+
+function summarizeControlPlaneTerminalOverviewExecutionHistory(
+  sessionName: string,
+  records: ControlPlaneTerminalOverviewExecutionRecord[],
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[],
+): ControlPlaneTerminalOverviewExecutionHistoryResponse {
+  return {
+    ok: true,
+    session: sessionName,
+    commandSurfaces,
+    summary: {
+      total: records.length,
+      dryRun: records.filter((record) => record.dryRun).length,
+      confirmed: records.filter((record) => record.confirmed).length,
+      supported: records.filter((record) => record.supported).length,
+      blocked: records.filter((record) => !record.supported).length,
+      executed: records.filter((record) => Boolean(record.executed)).length,
+      failed: records.filter((record) => record.executed?.exitCode !== undefined && record.executed?.exitCode !== 0).length,
+    },
+    records,
+  };
+}
+
+function printControlPlaneTerminalOverviewExecutionHistoryText(response: ControlPlaneTerminalOverviewExecutionHistoryResponse): void {
+  console.log([
+    "control_plane_terminal_overview_execution_history:",
+    `  session: ${response.session}`,
+    `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
+    `  summary: total=${response.summary.total} dry_run=${response.summary.dryRun} confirmed=${response.summary.confirmed} supported=${response.summary.supported} blocked=${response.summary.blocked} executed=${response.summary.executed} failed=${response.summary.failed}`,
+    "  records:",
+    ...(response.records.length > 0
+      ? response.records.flatMap((record) => [
+        `    - execution: ${record.executionId}`,
+        `      completed_at: ${record.completedAt}`,
+        `      surface: ${record.selectedAction?.surfaces[0] ?? "none"}`,
+        `      selected_command: ${record.selectedAction ? formatShellCommand(record.selectedAction.command) : "none"}`,
+        `      command: ${record.command ? formatShellCommand(record.command) : "none"}`,
+        `      supported: ${record.supported}`,
+        `      exit_code: ${record.executed?.exitCode ?? ""}`,
+      ])
+      : ["    none"]),
   ].join("\n"));
 }
 
@@ -24840,8 +24974,46 @@ async function writeWorkerSessionDrainContinuationRecord(
   return { path: continuationPath, record };
 }
 
+async function listControlPlaneTerminalOverviewExecutionRecords(
+  sessionName: string,
+  options: { limit: number; commandSurfaces: WorkerSessionBranchNativeCommandSurface[] },
+): Promise<ControlPlaneTerminalOverviewExecutionRecord[]> {
+  assertSafeSessionName(sessionName);
+  const executionDir = controlPlaneTerminalOverviewExecutionDir(sessionName);
+  try {
+    const entries = await fs.readdir(executionDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(executionDir, entry.name), "utf8");
+        return JSON.parse(text) as ControlPlaneTerminalOverviewExecutionRecord;
+      }));
+    const requested = new Set(options.commandSurfaces);
+    return records
+      .filter((record) => requested.size === 0 || record.selectedAction?.surfaces.some((surface) => requested.has(surface)))
+      .sort((left, right) => right.completedAt.localeCompare(left.completedAt))
+      .slice(0, options.limit);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+async function writeControlPlaneTerminalOverviewExecutionRecord(
+  record: ControlPlaneTerminalOverviewExecutionRecord,
+): Promise<{ path: string; record: ControlPlaneTerminalOverviewExecutionRecord }> {
+  const executionPath = controlPlaneTerminalOverviewExecutionPath(record.session, record.executionId);
+  await fs.mkdir(path.dirname(executionPath), { recursive: true });
+  await fs.writeFile(executionPath, `${JSON.stringify(record, null, 2)}\n`);
+  return { path: executionPath, record };
+}
+
 function createDrainContinuationId(observedAt: string): string {
   return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createControlPlaneTerminalOverviewExecutionId(observedAt: string): string {
+  return `terminal-overview-exec-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function createRecoverNextLoopAdvanceId(observedAt: string): string {
@@ -27369,6 +27541,17 @@ function workerSessionDrainContinuationPath(sessionName: string, continuationId:
   return path.join(workerSessionDrainContinuationDir(sessionName), `${continuationId}.json`);
 }
 
+function controlPlaneTerminalOverviewExecutionDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, "terminal-overview-executions", sessionName);
+}
+
+function controlPlaneTerminalOverviewExecutionPath(sessionName: string, executionId: string): string {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(executionId);
+  return path.join(controlPlaneTerminalOverviewExecutionDir(sessionName), `${executionId}.json`);
+}
+
 function workerSessionControlPlaneTickDir(sessionName: string): string {
   assertSafeSessionName(sessionName);
   return path.join(workerSessionDir, "control-plane-ticks", sessionName);
@@ -27691,7 +27874,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
