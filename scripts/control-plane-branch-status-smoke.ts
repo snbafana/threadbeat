@@ -800,6 +800,75 @@ try {
   assert.equal(completedInterruptedLoopHistory.summary.completed, true);
   assert.equal(completedInterruptedLoopHistory.summary.steps, 3);
   assert.deepEqual(completedInterruptedLoopHistory.summary.stoppedReasons, ["dry_run", "empty"]);
+
+  const terminalOverviewRecoverRun = await db.createAgentRun({
+    agentId: agent.id,
+    objective: "terminal overview recover-next execute dry-run",
+    inputRef: "main",
+    runBranch: `threadbeat/runs/${sessionName}-terminal-overview-recover`,
+  });
+  await db.updateAgentRunCompleted({ id: terminalOverviewRecoverRun.id, status: "stopped" });
+  const terminalOverviewRecoverLoopDryRun = await cliJson<{
+    recoverNext: {
+      loopAdvanceId: string;
+      advancePath: string;
+      dryRun: boolean;
+      untilEmpty: boolean;
+      stoppedReason: string;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--recover-next",
+    "--until-empty",
+    "--dry-run",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(terminalOverviewRecoverLoopDryRun.recoverNext.dryRun, true);
+  assert.equal(terminalOverviewRecoverLoopDryRun.recoverNext.untilEmpty, true);
+  assert.equal(terminalOverviewRecoverLoopDryRun.recoverNext.stoppedReason, "dry_run");
+  await fs.rm(terminalOverviewRecoverLoopDryRun.recoverNext.advancePath, { force: true });
+  const terminalOverviewRecoverLoopId = terminalOverviewRecoverLoopDryRun.recoverNext.loopAdvanceId;
+  const terminalOverviewRecoverLoopDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --until-empty --resume-loop ${terminalOverviewRecoverLoopId} --max-steps 3 --interval-ms 0 --dry-run`;
+  const terminalOverviewRecoverLoopConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --until-empty --resume-loop ${terminalOverviewRecoverLoopId} --max-steps 3 --interval-ms 0 --confirm`;
+
+  const recoverNextTerminalOverviewExecuteDryRun = await cliJson<{
+    executeNext: {
+      dryRun: boolean;
+      confirmed: boolean;
+      supported: boolean;
+      command: string[] | null;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: { command: string[]; exitCode: number | null; output: { recoverNext?: { dryRun?: boolean; resumed?: boolean; loopAdvanceId?: string } } | null } | null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "recover_next",
+    "--execute-next",
+    "--dry-run",
+  ]);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.dryRun, true);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.confirmed, false);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.supported, true);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.selectedAction?.surfaces[0], "recover_next");
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.selectedAction?.command.join(" "), terminalOverviewRecoverLoopConfirmCommand);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.command?.join(" "), terminalOverviewRecoverLoopDryRunCommand);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.executed?.command.join(" "), terminalOverviewRecoverLoopDryRunCommand);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.executed?.exitCode, 0);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.executed?.output?.recoverNext?.dryRun, true);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.executed?.output?.recoverNext?.resumed, true);
+  assert.equal(recoverNextTerminalOverviewExecuteDryRun.executeNext.executed?.output?.recoverNext?.loopAdvanceId, terminalOverviewRecoverLoopId);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
