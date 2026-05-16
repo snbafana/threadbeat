@@ -5951,12 +5951,15 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (executeNext) {
       const selectedAction = overview.nextAction;
-      const command = selectedAction
-        ? controlPlaneTerminalOverviewExecutionCommand(selectedAction.command, { dryRun })
+      const executionPlan = selectedAction
+        ? controlPlaneTerminalOverviewExecutionPlan(selectedAction.command, { dryRun })
+        : { supported: false, command: null, unsupportedReason: "no next action selected" };
+      const executed = executionPlan.command
+        ? await runCliWorker(cliCommandArgs(executionPlan.command))
         : null;
-      const executed = command
-        ? await runCliWorker(cliCommandArgs(command))
-        : null;
+      if (!executionPlan.supported) {
+        process.exitCode = 1;
+      }
       if (executed?.exitCode !== 0) {
         process.exitCode = 1;
       }
@@ -5966,8 +5969,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
           dryRun,
           confirmed: confirm,
           selectedAction,
-          executed: executed && command
-            ? { command, ...executed, output: parseJsonMaybe(executed.stdout) }
+          supported: executionPlan.supported,
+          unsupportedReason: executionPlan.unsupportedReason,
+          command: executionPlan.command,
+          executed: executed && executionPlan.command
+            ? { command: executionPlan.command, ...executed, output: parseJsonMaybe(executed.stdout) }
             : null,
         },
       };
@@ -17056,6 +17062,9 @@ type ControlPlaneTerminalOverviewExecuteNextResponse = ControlPlaneTerminalOverv
     dryRun: boolean;
     confirmed: boolean;
     selectedAction: WorkerSessionBranchNativeCommandQueueItem | null;
+    supported: boolean;
+    unsupportedReason: string | null;
+    command: string[] | null;
     executed: {
       command: string[];
       exitCode: number | null;
@@ -17958,15 +17967,30 @@ function selectControlPlaneTerminalOverviewNextAction(
   return queue[0] ?? null;
 }
 
-function controlPlaneTerminalOverviewExecutionCommand(command: string[], options: { dryRun: boolean }): string[] {
+function controlPlaneTerminalOverviewExecutionPlan(
+  command: string[],
+  options: { dryRun: boolean },
+): { supported: boolean; command: string[] | null; unsupportedReason: string | null } {
   const withoutMode = command.filter((part) => part !== "--dry-run" && part !== "--confirm");
   if (isCliCommand(withoutMode, ["runs", "resume-branch"])) {
-    return options.dryRun ? [...withoutMode, "--dry-run"] : withoutMode;
+    return {
+      supported: true,
+      command: options.dryRun ? [...withoutMode, "--dry-run"] : withoutMode,
+      unsupportedReason: null,
+    };
   }
   if (!command.includes("--dry-run") && !command.includes("--confirm")) {
-    throw new Error(`terminal overview next action is not execution-gated: ${formatShellCommand(command)}`);
+    return {
+      supported: false,
+      command: null,
+      unsupportedReason: `next action does not accept --dry-run/--confirm: ${formatShellCommand(command)}`,
+    };
   }
-  return [...withoutMode, options.dryRun ? "--dry-run" : "--confirm"];
+  return {
+    supported: true,
+    command: [...withoutMode, options.dryRun ? "--dry-run" : "--confirm"],
+    unsupportedReason: null,
+  };
 }
 
 function isCliCommand(command: string[], argsPrefix: string[]): boolean {
@@ -17984,8 +18008,11 @@ function printControlPlaneTerminalOverviewExecuteNextText(response: ControlPlane
     "  execute_next:",
     `    dry_run: ${response.executeNext.dryRun}`,
     `    confirmed: ${response.executeNext.confirmed}`,
+    `    supported: ${response.executeNext.supported}`,
+    `    unsupported_reason: ${response.executeNext.unsupportedReason ?? ""}`,
     `    selected_surface: ${response.executeNext.selectedAction?.surfaces[0] ?? "none"}`,
     `    selected_command: ${response.executeNext.selectedAction ? formatShellCommand(response.executeNext.selectedAction.command) : "none"}`,
+    `    command: ${response.executeNext.command ? formatShellCommand(response.executeNext.command) : "none"}`,
     `    executed_command: ${response.executeNext.executed ? formatShellCommand(response.executeNext.executed.command) : "none"}`,
     `    exit_code: ${response.executeNext.executed?.exitCode ?? ""}`,
   ].join("\n"));

@@ -47,6 +47,7 @@ try {
   const baseUrl = `http://${settings.host}:${address.port}`;
 
   const branchResumeQueueCommand = `npm run cli -- runs session-branches ${sessionName} --server --resumable --branch-action resume_branch --limit 5 --commands-only --format shell`;
+  const controlStatusSummaryCommand = `npm run cli -- runs session-control-plane-status ${sessionName} --server --summary`;
   const branchTerminalsCommand = `npm run cli -- runs session-control-plane-branch-terminals ${sessionName} --server`;
   const branchTerminalsResumableCommand = `npm run cli -- runs session-control-plane-branch-terminals ${sessionName} --server --status resumable`;
   const terminalOverviewCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server`;
@@ -268,10 +269,38 @@ try {
   ]);
   assert.equal(terminalOverviewNextActionShell.trim(), resumeBranchCommand);
 
+  const terminalOverviewUnsupportedControlExecute = await cliJsonWithExit<{
+    executeNext: {
+      supported: boolean;
+      unsupportedReason: string | null;
+      command: string[] | null;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "control",
+    "--execute-next",
+    "--dry-run",
+  ]);
+  assert.equal(terminalOverviewUnsupportedControlExecute.exitCode, 1);
+  assert.equal(terminalOverviewUnsupportedControlExecute.json.executeNext.supported, false);
+  assert.match(terminalOverviewUnsupportedControlExecute.json.executeNext.unsupportedReason ?? "", /does not accept --dry-run\/--confirm/);
+  assert.equal(terminalOverviewUnsupportedControlExecute.json.executeNext.command, null);
+  assert.equal(terminalOverviewUnsupportedControlExecute.json.executeNext.selectedAction?.surfaces[0], "control");
+  assert.equal(terminalOverviewUnsupportedControlExecute.json.executeNext.selectedAction?.command.join(" "), controlStatusSummaryCommand);
+  assert.equal(terminalOverviewUnsupportedControlExecute.json.executeNext.executed, null);
+
   const terminalOverviewExecuteDryRun = await cliJson<{
     executeNext: {
       dryRun: boolean;
       confirmed: boolean;
+      supported: boolean;
+      command: string[] | null;
       selectedAction: { surfaces: string[]; command: string[] } | null;
       executed: { command: string[]; exitCode: number | null; stdout: string; stderr: string; output: unknown } | null;
     };
@@ -287,6 +316,8 @@ try {
   ]);
   assert.equal(terminalOverviewExecuteDryRun.executeNext.dryRun, true);
   assert.equal(terminalOverviewExecuteDryRun.executeNext.confirmed, false);
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.supported, true);
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.command?.join(" "), resumeBranchDryRunCommand);
   assert.equal(terminalOverviewExecuteDryRun.executeNext.selectedAction?.surfaces[0], "branch");
   assert.equal(terminalOverviewExecuteDryRun.executeNext.selectedAction?.command.join(" "), resumeBranchCommand);
   assert.equal(terminalOverviewExecuteDryRun.executeNext.executed?.command.join(" "), resumeBranchDryRunCommand);
@@ -307,6 +338,7 @@ try {
   assert.match(terminalOverviewExecuteDryRunText, /execute_next:/);
   assert.match(terminalOverviewExecuteDryRunText, new RegExp(`terminal_overview: ${branchTerminalOverviewExecuteDryRunCommand}`));
   assert.match(terminalOverviewExecuteDryRunText, new RegExp(`selected_command: ${resumeBranchCommand}`));
+  assert.match(terminalOverviewExecuteDryRunText, new RegExp(`command: ${resumeBranchDryRunCommand}`));
   assert.match(terminalOverviewExecuteDryRunText, new RegExp(`executed_command: ${resumeBranchDryRunCommand}`));
 
   const branchNativeNext = await cliJson<{
@@ -803,6 +835,26 @@ async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
     maxBuffer: 1024 * 1024,
   });
   return JSON.parse(stdout) as T;
+}
+
+async function cliJsonWithExit<T>(baseUrl: string, args: string[]): Promise<{ exitCode: number; json: T; stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+      cwd: path.resolve("."),
+      env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+      maxBuffer: 1024 * 1024,
+    });
+    return { exitCode: 0, json: JSON.parse(stdout) as T, stdout, stderr };
+  } catch (error) {
+    const failed = error as { code?: number | string; stdout?: string | Buffer; stderr?: string | Buffer };
+    const stdout = String(failed.stdout ?? "");
+    return {
+      exitCode: typeof failed.code === "number" ? failed.code : 1,
+      json: JSON.parse(stdout) as T,
+      stdout,
+      stderr: String(failed.stderr ?? ""),
+    };
+  }
 }
 
 async function cliText(baseUrl: string, args: string[]): Promise<string> {
