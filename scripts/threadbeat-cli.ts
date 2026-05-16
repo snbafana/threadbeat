@@ -10803,7 +10803,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
 };
 
 type WorkerSessionControlPlaneAdvanceAction = {
-  surface: "stale_run" | "branch" | "result_inspection" | "apply_action" | "drain_continuation" | "status_watch" | "worker_recovery" | "recover_next";
+  surface: "stale_run" | "branch" | "result_inspection" | "apply_action" | "drain_continuation" | "status_watch" | "worker_recovery" | "recover_next" | "operator";
   action: string;
   reason: string;
   count: number;
@@ -14704,6 +14704,9 @@ type WorkerSessionBranchNativeOperatorLoopResponse = Omit<WorkerSessionBranchNat
   dryRun: boolean;
   confirmed: boolean;
   selectedAction: "operate_until_empty";
+  loopAdvanceId: string;
+  advanceId: string;
+  advancePath: string;
   maxSteps: number;
   intervalMs: number;
   maxCycles: number;
@@ -14724,6 +14727,11 @@ type WorkerSessionBranchNativeOperatorLoopResponse = Omit<WorkerSessionBranchNat
   }>;
   after: WorkerSessionBranchNativeNextResponse | null;
   afterNext: WorkerSessionBranchNativePostOperatorNext | null;
+  loopCommands: {
+    inspectLoopRecord: string[];
+    inspectLoopHistory: string[];
+    listOperatorLoops: string[];
+  };
 };
 
 function workerSessionBranchNativeNext(
@@ -15005,6 +15013,8 @@ async function operateWorkerSessionBranchNativeNextLoop(
     limit: number;
   },
 ): Promise<WorkerSessionBranchNativeOperatorLoopResponse> {
+  const startedAt = new Date().toISOString();
+  const loopAdvanceId = createBranchNativeOperatorLoopAdvanceId(startedAt);
   const steps: WorkerSessionBranchNativeOperatorLoopResponse["steps"] = [];
   let stoppedReason: WorkerSessionBranchNativeOperatorLoopResponse["stoppedReason"] = "max_steps";
   let after: WorkerSessionBranchNativeNextResponse | null = null;
@@ -15054,12 +15064,48 @@ async function operateWorkerSessionBranchNativeNextLoop(
       await sleep(execution.intervalMs);
     }
   }
+  const completedAt = new Date().toISOString();
+  const writtenLoopRecord = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
+    advanceId: loopAdvanceId,
+    session: sessionName,
+    observedAt: startedAt,
+    completedAt,
+    dryRun: execution.dryRun,
+    selected: {
+      surface: "operator",
+      action: "branch_native_operate_until_empty",
+      reason: stoppedReason,
+      count: steps.length,
+      command: workerSessionBranchNativeOperatorCommand(sessionName, execution.dryRun, true),
+      loopAdvanceId,
+      operatorRunIds: steps.map((step) => step.operatorRunId),
+    },
+    detailCommand: "branch_native_operator_loop",
+    recovery: {
+      untilEmpty: true,
+      loopAdvanceId,
+      maxSteps: execution.maxSteps,
+      intervalMs: execution.intervalMs,
+      maxCycles: execution.maxCycles,
+      cycleIntervalMs: execution.cycleIntervalMs,
+      lines: execution.lines,
+      stoppedReason,
+      steps,
+      afterNext,
+    },
+    executed: null,
+    before,
+    after,
+  });
   return {
     ...before,
     ok: stoppedReason !== "operator_failed",
     dryRun: execution.dryRun,
     confirmed: execution.confirm,
     selectedAction: "operate_until_empty",
+    loopAdvanceId,
+    advanceId: writtenLoopRecord.record.advanceId,
+    advancePath: writtenLoopRecord.path,
     maxSteps: execution.maxSteps,
     intervalMs: execution.intervalMs,
     maxCycles: execution.maxCycles,
@@ -15069,6 +15115,16 @@ async function operateWorkerSessionBranchNativeNextLoop(
     steps,
     after,
     afterNext,
+    commands: [
+      ...before.commands,
+      { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", writtenLoopRecord.record.advanceId] },
+      { surfaces: ["operator"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "branch_native_operator_loop"] },
+    ],
+    loopCommands: {
+      inspectLoopRecord: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", writtenLoopRecord.record.advanceId],
+      inspectLoopHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "branch_native_operator_loop"],
+      listOperatorLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--detail-command", "branch_native_operator_loop"],
+    },
   };
 }
 
@@ -15296,6 +15352,8 @@ function printWorkerSessionBranchNativeNextOperatorLoopText(
     `  dry_run: ${response.dryRun}`,
     `  confirmed: ${response.confirmed}`,
     `  action: ${response.selectedAction}`,
+    `  loop: ${response.loopAdvanceId}`,
+    `  advance: ${response.advanceId}`,
     `  stopped_reason: ${response.stoppedReason}`,
     `  executed_steps: ${response.executedSteps}`,
     `  max_steps: ${response.maxSteps}`,
@@ -15306,6 +15364,8 @@ function printWorkerSessionBranchNativeNextOperatorLoopText(
     `  after_next_action: ${response.afterNext?.action ?? ""}`,
     `  after_next_reason: ${response.afterNext?.reason ?? ""}`,
     `  after_next_command: ${formatShellCommand(response.afterNext?.command ?? [])}`,
+    `  inspect_loop: ${formatShellCommand(response.loopCommands.inspectLoopRecord)}`,
+    `  inspect_history: ${formatShellCommand(response.loopCommands.inspectLoopHistory)}`,
     `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
     ...response.steps.flatMap((step) => [
       `  - step: ${step.step}`,
@@ -21052,6 +21112,10 @@ function createRecoverNextLoopAdvanceId(observedAt: string): string {
 
 function createContinueDeferredLoopAdvanceId(observedAt: string): string {
   return `continue-deferred-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createBranchNativeOperatorLoopAdvanceId(observedAt: string): string {
+  return `branch-native-operator-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function recoverNextLoopStepLoopId(record: { recovery?: unknown }): string | null {
