@@ -12,6 +12,7 @@ import { buildServer } from "../src/server.js";
 const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-worker-next-smoke-"));
 const sessionName = `worker-next-${Date.now().toString(36)}`;
+const replayStatusSessionName = `${sessionName}-replay-status`;
 const selectedAdvanceWorkerId = "advance-worker-selected";
 const otherAdvanceWorkerId = "advance-worker-other";
 const exitedAdvanceWorkerId = "advance-worker-exited";
@@ -19,6 +20,7 @@ const selectedTickWorkerId = "tick-worker-selected";
 const otherTickWorkerId = "tick-worker-other";
 const exitedTickWorkerId = "tick-worker-exited";
 const replayLoopWorkerId = "replay-loop-worker-selected";
+const statusReplayLoopWorkerId = "replay-loop-worker-status";
 
 const settings: Settings = {
   projectRoot: path.resolve("."),
@@ -34,7 +36,7 @@ const settings: Settings = {
 const { app } = await buildServer(settings);
 
 try {
-  await writeWorkerSessionRecord();
+  await writeWorkerSessionRecord(sessionName);
   await writeAdvanceWorker(selectedAdvanceWorkerId);
   await writeAdvanceWorker(otherAdvanceWorkerId);
   await writeAdvanceWorker(exitedAdvanceWorkerId, { stopped: false });
@@ -538,13 +540,111 @@ try {
     "--lines",
     "1",
   ]);
+
+  await writeWorkerSessionRecord(replayStatusSessionName);
+  await cliJson(baseUrl, [
+    "runs",
+    "start-terminal-overview-replay-loop-worker",
+    replayStatusSessionName,
+    "--server",
+    "--worker-id",
+    statusReplayLoopWorkerId,
+    "--dry-run",
+    "--max-steps",
+    "1",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    replayStatusSessionName,
+    "--server",
+    "--worker-id",
+    statusReplayLoopWorkerId,
+    "--lines",
+    "1",
+  ]);
+  const replayStatusSummary = await cliJson<WorkerStatusSummaryResponse>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    replayStatusSessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(replayStatusSummary.needsAction, true);
+  assert.equal(replayStatusSummary.nextRecovery?.surface, "worker_recovery");
+  assert.equal(replayStatusSummary.nextRecovery?.action, "reconcile_control_plane_workers");
+  assert.equal(replayStatusSummary.nextRecovery?.count, 1);
+  assert.equal(replayStatusSummary.nextActions[0]?.surface, "worker_recovery");
+  assert.equal(replayStatusSummary.nextActions[0]?.workerKind, "terminal_overview_replay_loop");
+  assert.equal(replayStatusSummary.nextActions[0]?.workerId, statusReplayLoopWorkerId);
+  assert.equal(
+    replayStatusSummary.nextRecovery?.dryRunCommand.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${replayStatusSessionName} --server --kind terminal-overview-replay-loop --worker-id ${statusReplayLoopWorkerId} --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --dry-run`,
+  );
+  assert.equal(
+    replayStatusSummary.nextRecovery?.command.join(" "),
+    `npm run cli -- runs session-control-plane-reconcile-workers ${replayStatusSessionName} --server --kind terminal-overview-replay-loop --worker-id ${statusReplayLoopWorkerId} --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --confirm`,
+  );
+  const replayStatusWatch = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    replayStatusSessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--execute-action",
+    "--dry-run",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+  ]);
+  const replayStatusWatchLines = replayStatusWatch.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    executedAction?: {
+      reason: string;
+      command: string[];
+      executed: { command: string[]; exitCode: number | null };
+    };
+  });
+  assert.equal(replayStatusWatchLines.length, 1);
+  assert.equal(replayStatusWatchLines[0]?.executedAction?.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(
+    replayStatusWatchLines[0]?.executedAction?.command,
+    [
+      "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", replayStatusSessionName, "--server",
+      "--kind", "terminal-overview-replay-loop", "--worker-id", statusReplayLoopWorkerId,
+      "--lines", "20", "--until-empty", "--max-steps", "10", "--interval-ms", "2000", "--dry-run",
+    ],
+  );
+  assert.equal(replayStatusWatchLines[0]?.executedAction?.executed.exitCode, 0);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    replayStatusSessionName,
+    "--server",
+    "--worker-id",
+    statusReplayLoopWorkerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", `${replayStatusSessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-tick-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loop-workers", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loop-workers", replayStatusSessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loops", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loops", replayStatusSessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-worker-reconciliations", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-worker-reconciliations", replayStatusSessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", replayStatusSessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
@@ -611,6 +711,11 @@ type WorkerStatusSummaryResponse = {
     command: string[];
     dryRunCommand: string[];
   } | null;
+  nextActions: Array<{
+    surface: string;
+    workerKind?: string;
+    workerId?: string;
+  }>;
   recovery: {
     workerReconciliations: {
       counts: {
@@ -663,11 +768,11 @@ type WorkerReconcileLoopResponse = {
   };
 };
 
-async function writeWorkerSessionRecord(): Promise<void> {
+async function writeWorkerSessionRecord(recordSessionName: string): Promise<void> {
   const sessionDir = path.join(".threadbeat", "worker-sessions");
   await fs.mkdir(sessionDir, { recursive: true });
-  await fs.writeFile(path.join(sessionDir, `${sessionName}.json`), `${JSON.stringify({
-    session: sessionName,
+  await fs.writeFile(path.join(sessionDir, `${recordSessionName}.json`), `${JSON.stringify({
+    session: recordSessionName,
     baseUrl: "http://127.0.0.1:0",
     startedAt: "2026-05-14T00:00:00.000Z",
     command: ["runs", "work", "--agent", "agt_worker_next"],

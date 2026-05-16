@@ -12112,6 +12112,7 @@ type WorkerSessionControlPlaneAdvanceAction = {
   reason: string;
   count: number;
   command: string[];
+  workerKind?: ControlPlaneWorkerKind;
   detailCommand?: string;
   loopAdvanceId?: string;
   runId?: string;
@@ -19945,21 +19946,24 @@ function selectWorkerSessionControlPlaneNextActions(
       command: ["npm", "run", "cli", "--", "runs", "session-drain-continuations", status.session, "--execute-next"],
     });
   }
-  const workerRecovery = [
-    ...status.recovery.nextSteps.watchWorkers,
-    ...status.recovery.nextSteps.drainWorkers,
-    ...status.recovery.nextSteps.applyActionWorkers,
-    ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
-    ...status.recovery.nextSteps.controlPlaneTickWorkers,
-    ...status.recovery.nextSteps.terminalOverviewReplayLoopWorkers,
-  ][0];
-  if (workerRecovery) {
+  const workerRecoveryGroups: Array<{ workerKind?: ControlPlaneWorkerKind; steps: WorkerSessionControlPlaneRecoveryNextStep[] }> = [
+    { steps: status.recovery.nextSteps.watchWorkers },
+    { workerKind: "drain", steps: status.recovery.nextSteps.drainWorkers },
+    { workerKind: "apply_action", steps: status.recovery.nextSteps.applyActionWorkers },
+    { workerKind: "control_plane_advance", steps: status.recovery.nextSteps.controlPlaneAdvanceWorkers },
+    { workerKind: "control_plane_tick", steps: status.recovery.nextSteps.controlPlaneTickWorkers },
+    { workerKind: "terminal_overview_replay_loop", steps: status.recovery.nextSteps.terminalOverviewReplayLoopWorkers },
+  ];
+  const workerRecoveryGroup = workerRecoveryGroups.find((group) => group.steps.length > 0);
+  const workerRecovery = workerRecoveryGroup?.steps[0];
+  if (workerRecovery && workerRecoveryGroup) {
     nextActions.push({
       surface: "worker_recovery",
       action: workerRecovery.action,
       reason: workerRecovery.reason,
       count: status.recovery.count,
       command: workerRecovery.command,
+      ...(workerRecoveryGroup.workerKind ? { workerKind: workerRecoveryGroup.workerKind } : {}),
       workerId: workerRecovery.workerId,
     });
   }
@@ -19983,14 +19987,17 @@ function selectWorkerSessionControlPlaneNextRecovery(
   const nextAction = nextActions[0];
   if (!nextAction) return null;
   if (nextAction.surface === "worker_recovery") {
+    const scopedWorker = status.recovery.count === 1 && nextAction.workerKind && nextAction.workerId
+      ? { kind: nextAction.workerKind, workerId: nextAction.workerId }
+      : null;
     return {
       kind: "control_plane_action",
       surface: nextAction.surface,
       action: "reconcile_control_plane_workers",
       reason: "restartable_workers_pending_reconcile",
       count: status.recovery.count,
-      command: workerSessionControlPlaneReconcileLoopCommand(status.session, false),
-      dryRunCommand: workerSessionControlPlaneReconcileLoopCommand(status.session, true),
+      command: workerSessionControlPlaneReconcileLoopCommand(status.session, false, scopedWorker),
+      dryRunCommand: workerSessionControlPlaneReconcileLoopCommand(status.session, true, scopedWorker),
     };
   }
   if (nextAction.surface === "status_watch" || nextAction.surface === "result_inspection") {
@@ -20070,9 +20077,11 @@ function selectWorkerSessionControlPlaneDeferredNextActions(
 function workerSessionControlPlaneReconcileLoopCommand(
   sessionName: string,
   dryRun: boolean,
+  scopedWorker: { kind: ControlPlaneWorkerKind; workerId: string } | null = null,
 ): string[] {
   return [
     "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+    ...(scopedWorker ? ["--kind", controlPlaneWorkerKindFlag(scopedWorker.kind), "--worker-id", scopedWorker.workerId] : []),
     "--lines", "20",
     "--until-empty",
     "--max-steps", "10",
