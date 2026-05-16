@@ -8,20 +8,17 @@ import type { AgentTemplateFile } from "./agentTemplate.js";
 
 const execFileAsync = promisify(execFile);
 
-export type InitialCommitInput = {
+type InitialCommitInput = {
   authorEmail?: string;
   authorName?: string;
   branch: string;
-  commitMessage?: string;
   files: AgentTemplateFile[];
   remoteUrl: string;
 };
 
-export type InitialCommitResult = {
-  branch: string;
+type InitialCommitResult = {
   commitSha: string;
   filesWritten: string[];
-  statusText: string;
 };
 
 export const createInitialCommit = async (input: InitialCommitInput): Promise<InitialCommitResult> => {
@@ -35,23 +32,20 @@ export const createInitialCommit = async (input: InitialCommitInput): Promise<In
     await git(repoDir, ["config", "user.email", input.authorEmail ?? "threadbeat@example.local"]);
     await git(repoDir, ["checkout", "-B", input.branch]);
     await git(repoDir, ["add", "."]);
-    await git(repoDir, ["commit", "-m", input.commitMessage ?? "Initialize agent template"]);
+    await git(repoDir, ["commit", "-m", "Initialize Threadbeat agent"]);
     const commitSha = (await git(repoDir, ["rev-parse", "HEAD"])).trim();
-    const statusText = await git(repoDir, ["status", "--short", "--branch"]);
     await git(repoDir, ["remote", "add", "origin", input.remoteUrl]);
     await git(repoDir, ["push", "-u", "origin", `HEAD:${input.branch}`]);
     return {
-      branch: input.branch,
       commitSha,
       filesWritten,
-      statusText,
     };
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 };
 
-export const writeTemplateFiles = async (root: string, files: AgentTemplateFile[]): Promise<string[]> => {
+const writeTemplateFiles = async (root: string, files: AgentTemplateFile[]): Promise<string[]> => {
   const written: string[] = [];
   for (const file of files) {
     if (!isSafeRelativePath(file.path)) throw new Error(`unsafe template path: ${file.path}`);

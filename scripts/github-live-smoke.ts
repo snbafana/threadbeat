@@ -2,22 +2,20 @@ import "dotenv/config";
 
 import assert from "node:assert/strict";
 
-import type { Settings } from "../src/config.js";
+import { DEFAULT_GITHUB_OWNER, DEFAULT_GITHUB_OWNER_TYPE, DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { GitHubHostedGitProvider } from "../src/hostedGit.js";
 import {
   assertCanCleanUpSmokeRepo,
   deleteGitHubRepo,
-  githubRepoPathFromRemoteUrl,
-  parseGitHubOwnerType,
   resolveGitHubToken,
 } from "./github-smoke-utils.js";
 
-const githubOwner = process.env.THREADBEAT_GITHUB_OWNER;
-const githubOwnerType = parseGitHubOwnerType(process.env.THREADBEAT_GITHUB_OWNER_TYPE ?? "auto");
-const githubToken = await resolveGitHubToken();
+const githubOwner = DEFAULT_GITHUB_OWNER;
+const githubOwnerType = DEFAULT_GITHUB_OWNER_TYPE;
+const githubToken = resolveGitHubToken();
 
-if (!githubOwner || !githubToken) {
-  console.log("GitHub live smoke skipped: THREADBEAT_GITHUB_OWNER and THREADBEAT_GITHUB_TOKEN/GITHUB_TOKEN/gh auth token are not set");
+if (!githubToken) {
+  console.log("GitHub live smoke skipped: gh auth token is not available");
   process.exit(0);
 }
 
@@ -29,8 +27,7 @@ const settings: Settings = {
   port: 0,
   modalMode: "dry-run",
   modalAppName: "threadbeat-github-live-smoke",
-  modalImage: "python:3.13-slim",
-  hostedGitProvider: "github",
+  modalImage: DEFAULT_MODAL_IMAGE,
   githubOwner,
   githubOwnerType,
   githubToken,
@@ -40,38 +37,28 @@ const agent = {
   id: repoId,
   name: "GitHub Live Smoke",
   repo_url: "https://github.com/octocat/Hello-World.git",
-  default_branch: "main",
   current_ref: "main",
 };
 
 const provider = new GitHubHostedGitProvider(settings);
-let created: Awaited<ReturnType<typeof provider.createRepository>> | undefined;
-let deleted = false;
+let repoPath: string | undefined;
 
 await assertCanCleanUpSmokeRepo(githubToken, "GitHub live smoke");
 
 try {
-  created = await provider.createRepository({ agent, dryRun: false, repoId });
+  const created = await provider.createRepository({ agent, dryRun: false, repoId });
 
-  assert.equal(created.live, true);
-  assert.equal(created.provider, "github");
   assert.equal(created.providerRepoId, repoId);
   assert.equal(created.namespace, githubOwner);
   assert.ok(created.remoteUrl?.includes(`github.com/`));
   assert.ok(created.remoteUrlRedacted?.includes("REDACTED"));
+  repoPath = `${created.namespace}/${created.providerRepoId}`;
 } finally {
-  if (created && process.env.THREADBEAT_GITHUB_LIVE_SMOKE_KEEP !== "1") {
-    const repoPath = githubRepoPathFromRemoteUrl(created.remoteUrl);
+  if (repoPath) {
     await deleteGitHubRepo(githubToken, repoPath);
-    deleted = true;
   }
 }
 
 console.log(JSON.stringify({
-  ok: true,
-  deleted,
-  namespace: created?.namespace,
-  providerRepoId: created?.providerRepoId,
-  remoteUrlRedacted: created?.remoteUrlRedacted,
-  source: created?.source,
+  repoPath,
 }, null, 2));

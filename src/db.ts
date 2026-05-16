@@ -2,12 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
 
-import { nextTickIso, nowIso } from "./time.js";
 import type {
   AgentRow,
   AgentRunRow,
-  CodeStorageRepoRow,
   HeartbeatRow,
+  HostedGitRepoRow,
   MessageRow,
   SandboxRow,
 } from "./types.js";
@@ -36,48 +35,41 @@ export class Database {
     for (const statement of splitSql(schema)) {
       await this.client.execute(statement);
     }
-    await this.ensureAgentColumns();
-    await this.ensureCodeStorageRepoColumns();
-    await this.ensureAgentRunColumns();
-    await this.ensureSandboxColumns();
   }
 
   async createAgent(input: {
     name: string;
     repoUrl: string;
-    repoWebUrl?: string | null;
-    defaultBranch?: string;
     currentRef?: string;
-    currentCommit?: string | null;
   }): Promise<AgentRow> {
     const id = randomId("agt");
-    const defaultBranch = input.defaultBranch ?? "main";
+    const currentRef = input.currentRef ?? "main";
     await this.client.execute({
       sql: `
         INSERT INTO agents (
-          id, name, repo_url, repo_web_url, default_branch, current_ref, current_commit
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          id, name, repo_url, current_ref
+        ) VALUES (?, ?, ?, ?)
       `,
       args: [
         id,
         input.name,
         input.repoUrl,
-        input.repoWebUrl ?? null,
-        defaultBranch,
-        input.currentRef ?? defaultBranch,
-        input.currentCommit ?? null,
+        currentRef,
       ],
     });
-    return this.mustGetAgent(id);
+    return {
+      id,
+      name: input.name,
+      repo_url: input.repoUrl,
+      current_ref: currentRef,
+    };
   }
 
   async listAgents(): Promise<AgentRow[]> {
     return this.all<AgentRow>(
       `
-        SELECT id, name, repo_url, repo_web_url, default_branch, current_ref, current_commit,
-               status, created_at, updated_at
+        SELECT id, name, repo_url, current_ref
         FROM agents
-        ORDER BY created_at DESC
       `,
     );
   }
@@ -85,8 +77,7 @@ export class Database {
   async getAgent(id: string): Promise<AgentRow | null> {
     return this.first<AgentRow>(
       `
-        SELECT id, name, repo_url, repo_web_url, default_branch, current_ref, current_commit,
-               status, created_at, updated_at
+        SELECT id, name, repo_url, current_ref
         FROM agents
         WHERE id = ?
       `,
@@ -97,39 +88,43 @@ export class Database {
   async createAgentRun(input: {
     id?: string;
     agentId: string;
-    kind?: string;
     objective: string;
     inputRef: string;
     runBranch: string;
-    baseCommit?: string | null;
-    status?: string;
   }): Promise<AgentRunRow> {
     const id = input.id ?? randomId("run");
     await this.client.execute({
       sql: `
         INSERT INTO agent_runs (
-          id, agent_id, kind, objective, input_ref, run_branch, base_commit, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, agent_id, objective, input_ref, run_branch, status
+        ) VALUES (?, ?, ?, ?, ?, ?)
       `,
       args: [
         id,
         input.agentId,
-        input.kind ?? "run",
         input.objective,
         input.inputRef,
         input.runBranch,
-        input.baseCommit ?? null,
-        input.status ?? "queued",
+        "planned",
       ],
     });
-    return this.mustGetAgentRun(id);
+    return {
+      id,
+      agent_id: input.agentId,
+      objective: input.objective,
+      input_ref: input.inputRef,
+      run_branch: input.runBranch,
+      result_commit: null,
+      worker_id: null,
+      status: "planned",
+    };
   }
 
   async getAgentRun(id: string): Promise<AgentRunRow | null> {
     return this.first<AgentRunRow>(
       `
-        SELECT id, agent_id, kind, objective, input_ref, run_branch, base_commit, result_commit,
-               status, result_summary, started_at, completed_at, created_at, updated_at
+        SELECT id, agent_id, objective, input_ref, run_branch, result_commit, worker_id,
+               status
         FROM agent_runs
         WHERE id = ?
       `,
@@ -137,158 +132,128 @@ export class Database {
     );
   }
 
-  async listAgentRuns(agentId: string): Promise<AgentRunRow[]> {
+  async listAgentRuns(agentId: string, statuses?: string[]): Promise<AgentRunRow[]> {
+    const statusClause = statuses && statuses.length > 0
+      ? ` AND status IN (${statuses.map(() => "?").join(", ")})`
+      : "";
     return this.all<AgentRunRow>(
       `
-        SELECT id, agent_id, kind, objective, input_ref, run_branch, base_commit, result_commit,
-               status, result_summary, started_at, completed_at, created_at, updated_at
+        SELECT id, agent_id, objective, input_ref, run_branch, result_commit, worker_id,
+               status
         FROM agent_runs
-        WHERE agent_id = ?
-        ORDER BY created_at DESC
+        WHERE agent_id = ?${statusClause}
       `,
-      [agentId],
+      [agentId, ...(statuses ?? [])],
     );
   }
 
-  async updateAgentRunStarted(id: string): Promise<AgentRunRow> {
+  async markAgentRunRunning(id: string): Promise<void> {
     await this.client.execute({
       sql: `
         UPDATE agent_runs
-        SET status = 'running', started_at = COALESCE(started_at, ?), updated_at = CURRENT_TIMESTAMP
+        SET status = 'running'
         WHERE id = ?
       `,
-      args: [nowIso(), id],
+      args: [id],
     });
-    return this.mustGetAgentRun(id);
   }
 
-  async updateAgentRunRestarted(id: string): Promise<AgentRunRow> {
-    await this.client.execute({
+  async claimAgentRun(id: string, workerId?: string): Promise<AgentRunRow | null> {
+    const result = await this.client.execute({
       sql: `
         UPDATE agent_runs
-        SET status = 'running', result_summary = NULL, completed_at = NULL,
-            started_at = COALESCE(started_at, ?), updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        SET status = 'running', worker_id = ?
+        WHERE id = ? AND status = 'planned'
       `,
-      args: [nowIso(), id],
+      args: [workerId ?? null, id],
     });
-    return this.mustGetAgentRun(id);
+    if (result.rowsAffected === 0) return null;
+    return this.getAgentRun(id);
+  }
+
+  async requeueAgentRun(id: string): Promise<AgentRunRow | null> {
+    const result = await this.client.execute({
+      sql: `
+        UPDATE agent_runs
+        SET status = 'planned', worker_id = NULL
+        WHERE id = ?
+          AND status != 'completed'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM sandboxes
+            WHERE sandboxes.run_id = agent_runs.id
+              AND sandboxes.state = 'running'
+          )
+      `,
+      args: [id],
+    });
+    if (result.rowsAffected === 0) return null;
+    return this.getAgentRun(id);
   }
 
   async updateAgentRunCompleted(input: {
     id: string;
     status: string;
     resultCommit?: string | null;
-    resultSummary?: string | null;
-  }): Promise<AgentRunRow> {
+  }): Promise<void> {
     await this.client.execute({
       sql: `
         UPDATE agent_runs
-        SET status = ?, result_commit = ?, result_summary = ?, completed_at = ?,
-            updated_at = CURRENT_TIMESTAMP
+        SET status = ?, result_commit = ?
         WHERE id = ?
       `,
       args: [
         input.status,
         input.resultCommit ?? null,
-        input.resultSummary ?? null,
-        nowIso(),
         input.id,
       ],
     });
-    return this.mustGetAgentRun(input.id);
   }
 
-  async updateAgentRunFailed(input: {
-    id: string;
-    resultSummary: string;
-  }): Promise<AgentRunRow> {
+  async updateAgentRunFailed(id: string): Promise<void> {
     await this.client.execute({
       sql: `
         UPDATE agent_runs
-        SET status = 'failed', result_summary = ?, completed_at = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        SET status = 'failed'
+        WHERE id = ? AND status != 'completed'
       `,
-      args: [input.resultSummary, nowIso(), input.id],
+      args: [id],
     });
-    return this.mustGetAgentRun(input.id);
   }
 
-  async createCodeStorageRepo(input: {
+  async createHostedGitRepo(input: {
     agentId: string;
-    codeStorageRepoId: string;
-    organizationName: string;
-    defaultBranch: string;
-    sourceProvider?: string | null;
-    sourceOwner?: string | null;
-    sourceName?: string | null;
-    sourceDefaultBranch?: string | null;
-    remoteUrlRedacted?: string | null;
-    status?: string;
-  }): Promise<CodeStorageRepoRow> {
-    const id = randomId("csr");
+    owner: string;
+    repo: string;
+  }): Promise<void> {
     await this.client.execute({
       sql: `
-        INSERT INTO code_storage_repos (
-          id, agent_id, code_storage_repo_id, organization_name, default_branch,
-          source_provider, source_owner, source_name, source_default_branch,
-          remote_url_redacted, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO hosted_git_repos (
+          agent_id, owner, repo
+        ) VALUES (?, ?, ?)
       `,
-      args: [
-        id,
-        input.agentId,
-        input.codeStorageRepoId,
-        input.organizationName,
-        input.defaultBranch,
-        input.sourceProvider ?? null,
-        input.sourceOwner ?? null,
-        input.sourceName ?? null,
-        input.sourceDefaultBranch ?? null,
-        input.remoteUrlRedacted ?? null,
-        input.status ?? "active",
-      ],
+      args: [input.agentId, input.owner, input.repo],
     });
-    return this.mustGetCodeStorageRepo(id);
   }
 
-  async getCodeStorageRepo(id: string): Promise<CodeStorageRepoRow | null> {
-    return this.first<CodeStorageRepoRow>(
+  async getHostedGitRepoForAgent(agentId: string): Promise<HostedGitRepoRow | null> {
+    return this.first<HostedGitRepoRow>(
       `
-        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
-               source_provider, source_owner, source_name, source_default_branch,
-               remote_url_redacted, status, created_at, updated_at
-        FROM code_storage_repos
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async getCodeStorageRepoForAgent(agentId: string): Promise<CodeStorageRepoRow | null> {
-    return this.first<CodeStorageRepoRow>(
-      `
-        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
-               source_provider, source_owner, source_name, source_default_branch,
-               remote_url_redacted, status, created_at, updated_at
-        FROM code_storage_repos
+        SELECT agent_id, owner, repo
+        FROM hosted_git_repos
         WHERE agent_id = ?
-        ORDER BY created_at DESC
         LIMIT 1
       `,
       [agentId],
     );
   }
 
-  async listCodeStorageRepos(): Promise<CodeStorageRepoRow[]> {
-    return this.all<CodeStorageRepoRow>(
+  async listHostedGitRepos(): Promise<HostedGitRepoRow[]> {
+    return this.all<HostedGitRepoRow>(
       `
-        SELECT id, agent_id, code_storage_repo_id, organization_name, default_branch,
-               source_provider, source_owner, source_name, source_default_branch,
-               remote_url_redacted, status, created_at, updated_at
-        FROM code_storage_repos
-        ORDER BY created_at DESC
+        SELECT agent_id, owner, repo
+        FROM hosted_git_repos
+        ORDER BY agent_id
       `,
     );
   }
@@ -296,52 +261,38 @@ export class Database {
   async createHeartbeat(input: {
     agentId: string;
     title: string;
-    cadenceSeconds: number;
-    action: string;
-    status?: string;
   }): Promise<HeartbeatRow> {
     const id = randomId("hb");
-    const status = input.status ?? "active";
     await this.client.execute({
       sql: `
         INSERT INTO heartbeats (
-          id, agent_id, title, cadence_seconds, action, status, next_tick
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          id, agent_id, title
+        ) VALUES (?, ?, ?)
       `,
       args: [
         id,
         input.agentId,
         input.title,
-        input.cadenceSeconds,
-        input.action,
-        status,
-        nextTickIso(input.cadenceSeconds, status),
       ],
     });
-    const heartbeat = await this.getHeartbeat(id);
-    if (!heartbeat) throw new Error("created heartbeat could not be loaded");
-    return heartbeat;
+    return { id, agent_id: input.agentId, title: input.title };
   }
 
   async listHeartbeats(agentId?: string): Promise<HeartbeatRow[]> {
     if (agentId) {
       return this.all<HeartbeatRow>(
         `
-          SELECT id, agent_id, title, cadence_seconds, action, status, last_tick, next_tick,
-                 created_at, updated_at
+          SELECT id, agent_id, title
           FROM heartbeats
           WHERE agent_id = ?
-          ORDER BY created_at DESC
         `,
         [agentId],
       );
     }
     return this.all<HeartbeatRow>(
       `
-        SELECT id, agent_id, title, cadence_seconds, action, status, last_tick, next_tick,
-               created_at, updated_at
+        SELECT id, agent_id, title
         FROM heartbeats
-        ORDER BY created_at DESC
       `,
     );
   }
@@ -349,8 +300,7 @@ export class Database {
   async getHeartbeat(id: string): Promise<HeartbeatRow | null> {
     return this.first<HeartbeatRow>(
       `
-        SELECT id, agent_id, title, cadence_seconds, action, status, last_tick, next_tick,
-               created_at, updated_at
+        SELECT id, agent_id, title
         FROM heartbeats
         WHERE id = ?
       `,
@@ -361,19 +311,22 @@ export class Database {
   async createSandbox(input: {
     agentId: string;
     runId?: string | null;
-    repoUrl: string;
-    branch: string;
-    workdir?: string;
   }): Promise<SandboxRow> {
     const id = randomId("sbx");
     await this.client.execute({
       sql: `
-        INSERT INTO sandboxes (id, agent_id, run_id, repo_url, branch, workdir)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO sandboxes (id, agent_id, run_id)
+        VALUES (?, ?, ?)
       `,
-      args: [id, input.agentId, input.runId ?? null, input.repoUrl, input.branch, input.workdir ?? "/workspace/agent"],
+      args: [id, input.agentId, input.runId ?? null],
     });
-    return this.mustGetSandbox(id);
+    return {
+      id,
+      agent_id: input.agentId,
+      run_id: input.runId ?? null,
+      provider_sandbox_id: null,
+      state: "starting",
+    };
   }
 
   async listSandboxes(filters: { agentId?: string; runId?: string } = {}): Promise<SandboxRow[]> {
@@ -390,11 +343,9 @@ export class Database {
     const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     return this.all<SandboxRow>(
       `
-        SELECT id, agent_id, run_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
-               started_at, stopped_at, created_at, updated_at
+        SELECT id, agent_id, run_id, provider_sandbox_id, state
         FROM sandboxes
         ${where}
-        ORDER BY started_at DESC, created_at DESC
       `,
       args,
     );
@@ -403,8 +354,7 @@ export class Database {
   async getSandbox(id: string): Promise<SandboxRow | null> {
     return this.first<SandboxRow>(
       `
-        SELECT id, agent_id, run_id, provider, provider_sandbox_id, state, repo_url, branch, workdir,
-               started_at, stopped_at, created_at, updated_at
+        SELECT id, agent_id, run_id, provider_sandbox_id, state
         FROM sandboxes
         WHERE id = ?
       `,
@@ -412,60 +362,48 @@ export class Database {
     );
   }
 
-  async updateSandboxStarted(id: string, providerSandboxId: string): Promise<SandboxRow> {
+  async updateSandboxStarted(id: string, providerSandboxId: string): Promise<void> {
     await this.client.execute({
       sql: `
         UPDATE sandboxes
-        SET provider_sandbox_id = ?, state = 'running', started_at = ?, updated_at = CURRENT_TIMESTAMP
+        SET provider_sandbox_id = ?, state = 'running'
         WHERE id = ?
       `,
-      args: [providerSandboxId, nowIso(), id],
+      args: [providerSandboxId, id],
     });
-    return this.mustGetSandbox(id);
   }
 
-  async updateSandboxState(id: string, state: string): Promise<SandboxRow> {
+  async updateSandboxState(id: string, state: string): Promise<void> {
     await this.client.execute({
       sql: `
         UPDATE sandboxes
-        SET state = ?, stopped_at = CASE WHEN ? IN ('stopped', 'failed') THEN ? ELSE stopped_at END,
-            updated_at = CURRENT_TIMESTAMP
+        SET state = ?
         WHERE id = ?
       `,
-      args: [state, state, nowIso(), id],
+      args: [state, id],
     });
-    return this.mustGetSandbox(id);
   }
 
   async appendMessage(input: {
     agentId?: string | null;
     sandboxId?: string | null;
     runId?: string | null;
-    source: string;
     type: string;
     text?: string | null;
-    data?: unknown;
-  }): Promise<MessageRow> {
-    const id = randomId("msg");
+  }): Promise<void> {
     await this.client.execute({
       sql: `
-        INSERT INTO messages (id, agent_id, sandbox_id, run_id, source, type, text, data_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (agent_id, sandbox_id, run_id, type, text)
+        VALUES (?, ?, ?, ?, ?)
       `,
       args: [
-        id,
         input.agentId ?? null,
         input.sandboxId ?? null,
         input.runId ?? null,
-        input.source,
         input.type,
         input.text ?? null,
-        input.data === undefined ? null : JSON.stringify(input.data),
       ],
     });
-    const message = await this.getMessage(id);
-    if (!message) throw new Error("created message could not be loaded");
-    return message;
   }
 
   async listMessages(filters: {
@@ -492,48 +430,12 @@ export class Database {
     args.push(filters.limit ?? 100);
     return this.all<MessageRow>(
       `
-        SELECT id, agent_id, sandbox_id, run_id, source, type, text, data_json, created_at
+        SELECT agent_id, sandbox_id, run_id, type, text
         FROM messages
         ${where}
-        ORDER BY created_at DESC
         LIMIT ?
       `,
       args,
-    );
-  }
-
-  private async mustGetAgent(id: string): Promise<AgentRow> {
-    const agent = await this.getAgent(id);
-    if (!agent) throw new Error(`agent not found after write: ${id}`);
-    return agent;
-  }
-
-  private async mustGetSandbox(id: string): Promise<SandboxRow> {
-    const sandbox = await this.getSandbox(id);
-    if (!sandbox) throw new Error(`sandbox not found after write: ${id}`);
-    return sandbox;
-  }
-
-  private async mustGetAgentRun(id: string): Promise<AgentRunRow> {
-    const run = await this.getAgentRun(id);
-    if (!run) throw new Error(`agent run not found after write: ${id}`);
-    return run;
-  }
-
-  private async mustGetCodeStorageRepo(id: string): Promise<CodeStorageRepoRow> {
-    const repo = await this.getCodeStorageRepo(id);
-    if (!repo) throw new Error(`Code.Storage repo not found after write: ${id}`);
-    return repo;
-  }
-
-  private async getMessage(id: string): Promise<MessageRow | null> {
-    return this.first<MessageRow>(
-      `
-        SELECT id, agent_id, sandbox_id, run_id, source, type, text, data_json, created_at
-        FROM messages
-        WHERE id = ?
-      `,
-      [id],
     );
   }
 
@@ -545,88 +447,6 @@ export class Database {
   private async all<T>(sql: string, args: SqlValue[] = []): Promise<T[]> {
     const result = await this.client.execute({ sql, args });
     return result.rows as T[];
-  }
-
-  private async ensureAgentColumns(): Promise<void> {
-    const names = await this.tableColumnNames("agents");
-    if (!names.has("repo_web_url")) {
-      await this.client.execute("ALTER TABLE agents ADD COLUMN repo_web_url TEXT");
-    }
-    if (!names.has("default_branch")) {
-      await this.client.execute("ALTER TABLE agents ADD COLUMN default_branch TEXT NOT NULL DEFAULT 'main'");
-    }
-    if (!names.has("current_ref")) {
-      await this.client.execute("ALTER TABLE agents ADD COLUMN current_ref TEXT NOT NULL DEFAULT 'main'");
-    }
-    if (!names.has("current_commit")) {
-      await this.client.execute("ALTER TABLE agents ADD COLUMN current_commit TEXT");
-    }
-  }
-
-  private async ensureAgentRunColumns(): Promise<void> {
-    const names = await this.tableColumnNames("agent_runs");
-    if (!names.has("objective")) {
-      await this.client.execute("ALTER TABLE agent_runs ADD COLUMN objective TEXT NOT NULL DEFAULT ''");
-    }
-    if (!names.has("input_ref")) {
-      await this.client.execute("ALTER TABLE agent_runs ADD COLUMN input_ref TEXT NOT NULL DEFAULT ''");
-    }
-    if (!names.has("base_commit")) {
-      await this.client.execute("ALTER TABLE agent_runs ADD COLUMN base_commit TEXT");
-    }
-    if (!names.has("result_commit")) {
-      await this.client.execute("ALTER TABLE agent_runs ADD COLUMN result_commit TEXT");
-    }
-    if (!names.has("result_summary")) {
-      await this.client.execute("ALTER TABLE agent_runs ADD COLUMN result_summary TEXT");
-    }
-    if (!names.has("started_at")) {
-      await this.client.execute("ALTER TABLE agent_runs ADD COLUMN started_at TEXT");
-    }
-    if (!names.has("completed_at")) {
-      await this.client.execute("ALTER TABLE agent_runs ADD COLUMN completed_at TEXT");
-    }
-  }
-
-  private async ensureSandboxColumns(): Promise<void> {
-    const names = await this.tableColumnNames("sandboxes");
-    if (!names.has("run_id")) {
-      await this.client.execute("ALTER TABLE sandboxes ADD COLUMN run_id TEXT");
-    }
-    await this.client.execute("CREATE INDEX IF NOT EXISTS idx_sandboxes_run_id ON sandboxes(run_id, created_at DESC)");
-  }
-
-  private async ensureCodeStorageRepoColumns(): Promise<void> {
-    const names = await this.tableColumnNames("code_storage_repos");
-    if (!names.has("code_storage_repo_id")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN code_storage_repo_id TEXT NOT NULL DEFAULT ''");
-    }
-    if (!names.has("organization_name")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN organization_name TEXT NOT NULL DEFAULT ''");
-    }
-    if (!names.has("default_branch")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN default_branch TEXT NOT NULL DEFAULT 'main'");
-    }
-    if (!names.has("source_provider")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_provider TEXT");
-    }
-    if (!names.has("source_owner")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_owner TEXT");
-    }
-    if (!names.has("source_name")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_name TEXT");
-    }
-    if (!names.has("source_default_branch")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN source_default_branch TEXT");
-    }
-    if (!names.has("remote_url_redacted")) {
-      await this.client.execute("ALTER TABLE code_storage_repos ADD COLUMN remote_url_redacted TEXT");
-    }
-  }
-
-  private async tableColumnNames(tableName: string): Promise<Set<string>> {
-    const columns = await this.all<{ name: string }>(`PRAGMA table_info(${tableName})`);
-    return new Set(columns.map((column) => column.name));
   }
 }
 

@@ -8,12 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { hasModalCredentials } from "../src/auth.js";
 import { buildServer } from "../src/server.js";
-import type { Settings } from "../src/config.js";
+import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 
 const execFileAsync = promisify(execFile);
 
-if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+if (!hasModalCredentials(process.env)) {
   console.log("Modal CLI live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }
@@ -25,8 +26,8 @@ const settings: Settings = {
   host: "127.0.0.1",
   port: 0,
   modalMode: "live",
-  modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-cli-live-smoke",
-  modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  modalAppName: "threadbeat-modal-cli-live-smoke",
+  modalImage: DEFAULT_MODAL_IMAGE,
 };
 
 const { app } = await buildServer(settings);
@@ -49,9 +50,8 @@ try {
   ]);
 
   const stepped = await cliJson<{
-    executed: { result: { exitCode: number; stderr: string; stdout: string } };
-    runId: string;
-    status: { sandboxes: Array<{ state: string }> };
+    result: { exitCode: number; stderr: string; stdout: string };
+    status: { run: { id: string }; sandboxes: Array<{ state: string }> };
   }>(baseUrl, [
     "runs",
     "step",
@@ -64,27 +64,22 @@ try {
     "--",
     "python --version",
   ]);
-  runId = stepped.runId;
+  runId = stepped.status.run.id;
 
-  assert.equal(stepped.executed.result.exitCode, 0);
-  assert.match(`${stepped.executed.result.stdout}${stepped.executed.result.stderr}`, /Python/);
+  assert.equal(stepped.result.exitCode, 0);
+  assert.match(`${stepped.result.stdout}${stepped.result.stderr}`, /Python/);
   assert.ok(stepped.status.sandboxes.some((sandbox) => sandbox.state === "running"));
 
-  const cleanup = await cliJson<{ stopped: Array<{ state: string }> }>(baseUrl, [
+  const cleanup = await cliJson<{ stoppedCount: number }>(baseUrl, [
     "sandboxes",
     "stop-running",
     "--run",
     runId,
   ]);
-  assert.equal(cleanup.stopped.length, 1);
-  assert.equal(cleanup.stopped[0]?.state, "stopped");
+  assert.equal(cleanup.stoppedCount, 1);
 
   console.log(JSON.stringify({
     ok: true,
-    modalAppName: settings.modalAppName,
-    modalImage: settings.modalImage,
-    runId,
-    stoppedSandboxes: cleanup.stopped.length,
   }, null, 2));
 } finally {
   if (runId) {
@@ -93,9 +88,7 @@ try {
       if (address) {
         await cliJson(`http://${settings.host}:${address.port}`, ["sandboxes", "stop-running", "--run", runId]);
       }
-    } catch {
-      // Best-effort cleanup. The main assertions already validated cleanup.
-    }
+    } catch {}
   }
   await app.close();
   await fs.rm(tempRoot, { recursive: true, force: true });

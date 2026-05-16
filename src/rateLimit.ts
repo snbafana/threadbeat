@@ -1,10 +1,10 @@
-export type RateLimitDecision = {
+type RateLimitDecision = {
   allowed: boolean;
   reason?: string;
   retryAfterMs?: number;
 };
 
-export type RateLimitRule = {
+type RateLimitRule = {
   limit: number;
   name: string;
   windowMs: number;

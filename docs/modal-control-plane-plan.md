@@ -46,43 +46,42 @@ exec(providerSandboxId, command[]) -> stdout/stderr/exitCode
 stop(providerSandboxId)
 ```
 
-This phase proves that the server can create a sandbox, run commands, capture
-output, persist messages, and stop the sandbox. It does not include Pi.
+This phase proves that the server can create a sandbox, run commands, return
+command output, record lifecycle events, and stop the sandbox. It does not
+include Pi.
 
-## Phase 3: Code Storage and Git
+## Phase 3: Hosted Git
 
 This is a separate phase before AI execution.
 
 Goals:
 
-- Use Code.Storage (`@pierre/storage`) as the durable Git infrastructure for
-  agent bodies when configured with `CODE_STORAGE_NAME` and
-  `CODE_STORAGE_PRIVATE_KEY`.
-- Clone or fork a template agent repo into a durable Code.Storage repo.
-- Store `repo_url`, `default_branch`, `current_ref`, and visible Git links on
-  the agent row.
-- Store each agent's Code.Storage repo id and redacted remote URL separately
-  from the authenticated remote URL.
+- Use GitHub as the durable Git infrastructure for agent bodies through the
+  central settings defaults and local GitHub CLI auth.
+- Clone or fork a template agent repo into a durable hosted Git repo.
+- Store `repo_url` and `current_ref` on the agent row; derive visible Git links
+  from Git refs when needed.
+- Store each agent's hosted Git owner/repo separately from authenticated clone
+  URLs, which are generated on demand.
 - Add persisted run branch planning with compare/tree links before any sandbox
   execution starts.
 - Add git status/diff/commit metadata.
 - Add a bootstrap action that starts a sandbox, installs git if needed, clones
   the agent repo into `/workspace/agent`, checks out the current ref, and emits
-  all stdout/stderr as messages.
+  lifecycle messages around the bootstrap commands.
 
 Important invariant:
 
 ```text
-Code.Storage/Git is durable state.
+Hosted Git is durable state.
 Modal is disposable compute.
-Authenticated Code.Storage remote URLs are generated on demand and not stored.
+Authenticated remote URLs are generated on demand and not stored.
 Promotion happens through Git refs and commits.
 ```
 
 Storage layers:
 
-- Code.Storage repo as the canonical agent body.
-- GitHub sync/public sync as a source or mirror when needed.
+- GitHub repo as the canonical agent body.
 - Modal Volume for dependency caches or large reusable artifacts.
 - Modal snapshots later for warm starts.
 
@@ -121,7 +120,7 @@ The agent sandbox Pi should:
 
 ## Phase 6: Self-Improvement
 
-Self-improvement is a special run kind on a branch.
+Self-improvement is a special run branch.
 
 Allowed self-edit targets:
 

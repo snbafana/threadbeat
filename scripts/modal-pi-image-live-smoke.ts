@@ -5,14 +5,15 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import type { Settings } from "../src/config.js";
+import { hasModalCredentials } from "../src/auth.js";
+import { DEFAULT_MODAL_IMAGE, type Settings } from "../src/config.js";
 import { Database } from "../src/db.js";
 import { buildModalImageCommands } from "../src/modalImage.js";
 import { createSandboxProvider } from "../src/modalProvider.js";
 import { MessageBus } from "../src/messageBus.js";
 import { SandboxService } from "../src/sandboxService.js";
 
-if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+if (!hasModalCredentials(process.env)) {
   console.log("Modal Pi image live smoke skipped: MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are not set");
   process.exit(0);
 }
@@ -24,8 +25,8 @@ const settings: Settings = {
   host: "127.0.0.1",
   port: 0,
   modalMode: "live",
-  modalAppName: process.env.THREADBEAT_MODAL_APP_NAME ?? "threadbeat-modal-pi-image-live-smoke",
-  modalImage: process.env.THREADBEAT_MODAL_IMAGE ?? "python:3.13-slim",
+  modalAppName: "threadbeat-modal-pi-image-live-smoke",
+  modalImage: DEFAULT_MODAL_IMAGE,
   modalInstallSandboxPi: true,
   modalImageCommands: buildModalImageCommands({ installSandboxPi: true }),
 };
@@ -39,23 +40,19 @@ try {
   const agent = await db.createAgent({
     name: "modal-pi-image-live-smoke-agent",
     repoUrl: "https://github.com/octocat/Hello-World.git",
-    defaultBranch: "master",
+    currentRef: "master",
   });
 
   const sandbox = await service.startForAgent(agent);
   sandboxId = sandbox.id;
-  const { result } = await service.exec(sandbox, ["bash", "-lc", "command -v pi && pi --help >/tmp/threadbeat-pi-help.txt 2>&1 && head -20 /tmp/threadbeat-pi-help.txt"]);
+  const result = await service.exec(sandbox, ["bash", "-lc", "command -v pi && pi --help >/tmp/threadbeat-pi-help.txt 2>&1 && head -20 /tmp/threadbeat-pi-help.txt"]);
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /pi/);
-  const stopped = await service.stop(sandbox);
-  assert.equal(stopped.state, "stopped");
+  await service.stop(sandbox);
+  assert.equal((await db.getSandbox(sandbox.id))?.state, "stopped");
 
   console.log(JSON.stringify({
     ok: true,
-    modalAppName: settings.modalAppName,
-    modalImage: settings.modalImage,
-    providerSandboxId: sandbox.provider_sandbox_id,
-    sandboxId: sandbox.id,
   }, null, 2));
 } finally {
   if (sandboxId) {

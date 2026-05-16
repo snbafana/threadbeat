@@ -1,8 +1,5 @@
+import { hasModalCredentials } from "./auth.js";
 import type { Settings } from "./config.js";
-
-export type SandboxStartInput = {
-  sandboxName: string;
-};
 
 export type SandboxExecResult = {
   stdout: string;
@@ -10,13 +7,9 @@ export type SandboxExecResult = {
   exitCode: number;
 };
 
-export type SandboxExecInput = {
-  timeoutMs?: number;
-};
-
 export interface SandboxProvider {
-  start(input: SandboxStartInput): Promise<{ providerSandboxId: string }>;
-  exec(providerSandboxId: string, command: string[], input?: SandboxExecInput): Promise<SandboxExecResult>;
+  start(input: { sandboxName: string }): Promise<{ providerSandboxId: string }>;
+  exec(providerSandboxId: string, command: string[], input?: { timeoutMs?: number }): Promise<SandboxExecResult>;
   stop(providerSandboxId: string): Promise<void>;
 }
 
@@ -26,11 +19,11 @@ export const createSandboxProvider = (settings: Settings): SandboxProvider => {
 };
 
 class DryRunSandboxProvider implements SandboxProvider {
-  async start(input: SandboxStartInput): Promise<{ providerSandboxId: string }> {
-    return { providerSandboxId: `dry_${input.sandboxName}_${Date.now()}` };
+  async start({ sandboxName }: { sandboxName: string }): Promise<{ providerSandboxId: string }> {
+    return { providerSandboxId: `dry_${sandboxName}_${Date.now()}` };
   }
 
-  async exec(_providerSandboxId: string, command: string[], _input: SandboxExecInput = {}): Promise<SandboxExecResult> {
+  async exec(_providerSandboxId: string, command: string[]): Promise<SandboxExecResult> {
     if (command.join(" ").includes("git rev-parse HEAD")) {
       return {
         stdout: "0123456789abcdef0123456789abcdef01234567\n",
@@ -45,17 +38,21 @@ class DryRunSandboxProvider implements SandboxProvider {
     };
   }
 
-  async stop(_providerSandboxId: string): Promise<void> {
-    return undefined;
-  }
+  async stop(_providerSandboxId: string): Promise<void> {}
 }
 
 class ModalSandboxProvider implements SandboxProvider {
   constructor(private readonly settings: Settings) {}
 
-  async start(input: SandboxStartInput): Promise<{ providerSandboxId: string }> {
+  async start(input: { sandboxName: string }): Promise<{ providerSandboxId: string }> {
     assertModalAuth();
-    const { modal, app, image } = await this.modalResources();
+    const modal = await this.modalClient();
+    const app = await modal.apps.fromName(this.settings.modalAppName, { createIfMissing: true });
+    const baseImage = modal.images.fromRegistry(this.settings.modalImage);
+    const imageCommands = this.settings.modalImageCommands ?? [];
+    const image = imageCommands.length > 0
+      ? baseImage.dockerfileCommands(imageCommands)
+      : baseImage;
     const sandbox = await modal.sandboxes.create(app, image, {
       command: ["sleep", "86400"],
       env: this.settings.sandboxEnv,
@@ -64,8 +61,8 @@ class ModalSandboxProvider implements SandboxProvider {
     return { providerSandboxId: sandbox.sandboxId as string };
   }
 
-  async exec(providerSandboxId: string, command: string[], input: SandboxExecInput = {}): Promise<SandboxExecResult> {
-    const { modal } = await this.modalResources();
+  async exec(providerSandboxId: string, command: string[], input: { timeoutMs?: number } = {}): Promise<SandboxExecResult> {
+    const modal = await this.modalClient();
     const sandbox = await modal.sandboxes.fromId(providerSandboxId);
     const process = await sandbox.exec(command, {
       stdout: "pipe",
@@ -81,26 +78,19 @@ class ModalSandboxProvider implements SandboxProvider {
   }
 
   async stop(providerSandboxId: string): Promise<void> {
-    const { modal } = await this.modalResources();
+    const modal = await this.modalClient();
     const sandbox = await modal.sandboxes.fromId(providerSandboxId);
     await sandbox.terminate();
   }
 
-  private async modalResources(): Promise<{ modal: any; app: any; image: any }> {
+  private async modalClient(): Promise<any> {
     const { ModalClient } = await import("modal");
-    const modal = new ModalClient();
-    const app = await modal.apps.fromName(this.settings.modalAppName, { createIfMissing: true });
-    const baseImage = modal.images.fromRegistry(this.settings.modalImage);
-    const imageCommands = this.settings.modalImageCommands ?? [];
-    const image = imageCommands.length > 0
-      ? baseImage.dockerfileCommands(imageCommands)
-      : baseImage;
-    return { modal, app, image };
+    return new ModalClient();
   }
 }
 
 const assertModalAuth = (): void => {
-  if (!process.env.MODAL_TOKEN_ID || !process.env.MODAL_TOKEN_SECRET) {
+  if (!hasModalCredentials(process.env)) {
     throw new Error("MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required for live Modal mode");
   }
 };

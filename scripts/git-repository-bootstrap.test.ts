@@ -6,15 +6,19 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildAgentTemplate } from "../src/agentTemplate.js";
-import { createInitialCommit, writeTemplateFiles } from "../src/gitRepositoryBootstrap.js";
+import { createInitialCommit } from "../src/gitRepositoryBootstrap.js";
 
 const execFileAsync = promisify(execFile);
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-git-bootstrap-test-"));
 
 try {
-  const unsafeRoot = path.join(tempRoot, "unsafe");
   await assert.rejects(
-    () => writeTemplateFiles(unsafeRoot, [{ path: "../bad", content: "bad" }]),
+    () =>
+      createInitialCommit({
+        branch: "main",
+        files: [{ path: "../bad", content: "bad" }],
+        remoteUrl: path.join(tempRoot, "unused.git"),
+      }),
     /unsafe template path/,
   );
 

@@ -1,15 +1,10 @@
 import type { Database } from "./db.js";
-import {
-  bootstrapSandbox,
-  type SandboxBootstrapCommandResult,
-  type SandboxBootstrapInput,
-} from "./sandboxBootstrap.js";
+import { bootstrapSandbox } from "./sandboxBootstrap.js";
 import type { SandboxExecResult, SandboxProvider } from "./modalProvider.js";
 import type { MessageBus } from "./messageBus.js";
 import type { AgentRow, MessageRow, SandboxRow } from "./types.js";
 
 type SandboxStartOptions = {
-  branch?: string;
   runId?: string | null;
 };
 
@@ -26,11 +21,13 @@ type SandboxBootstrapOptions = {
   repoUrlRedacted?: string;
 };
 
-export type SandboxFinalizeResult = {
+type SandboxFinalizeResult = {
   commitSha: string;
-  results: Array<SandboxExecResult & { command: string[] }>;
-  statusText: string;
 };
+
+type SandboxCommandResult = SandboxExecResult & { command: string[] };
+
+export const SANDBOX_WORKDIR = "/workspace/agent";
 
 export class SandboxService {
   constructor(
@@ -40,34 +37,32 @@ export class SandboxService {
   ) {}
 
   async startForAgent(agent: AgentRow, options: SandboxStartOptions = {}): Promise<SandboxRow> {
-    const branch = options.branch ?? agent.current_ref;
     let sandbox = await this.db.createSandbox({
       agentId: agent.id,
       runId: options.runId,
-      repoUrl: agent.repo_url,
-      branch,
     });
     await this.message({
       agentId: agent.id,
       sandboxId: sandbox.id,
       runId: options.runId,
-      source: "server",
       type: "sandbox_starting",
-      text: `Starting sandbox for ${agent.name}`,
-      data: { repoUrl: agent.repo_url, branch, runId: options.runId ?? null },
+      text: "Starting sandbox",
     });
 
     try {
       const started = await this.provider.start({ sandboxName: sandbox.id });
-      sandbox = await this.db.updateSandboxStarted(sandbox.id, started.providerSandboxId);
+      await this.db.updateSandboxStarted(sandbox.id, started.providerSandboxId);
+      sandbox = {
+        ...sandbox,
+        provider_sandbox_id: started.providerSandboxId,
+        state: "running",
+      };
       await this.message({
         agentId: agent.id,
         sandboxId: sandbox.id,
         runId: options.runId,
-        source: "modal",
         type: "sandbox_running",
-        text: `Sandbox running: ${started.providerSandboxId}`,
-        data: started,
+        text: "Sandbox running",
       });
       return sandbox;
     } catch (error) {
@@ -76,7 +71,6 @@ export class SandboxService {
         agentId: agent.id,
         sandboxId: sandbox.id,
         runId: options.runId,
-        source: "modal",
         type: "sandbox_failed",
         text: messageOf(error),
       });
@@ -88,7 +82,7 @@ export class SandboxService {
     sandbox: SandboxRow,
     command: string[],
     options: SandboxExecOptions = {},
-  ): Promise<{ sandbox: SandboxRow; result: SandboxExecResult }> {
+  ): Promise<SandboxExecResult> {
     if (!sandbox.provider_sandbox_id) throw new Error("sandbox has no provider id");
     if (sandbox.state !== "running") throw new Error(`sandbox is not running: ${sandbox.state}`);
     const redact = createRedactor(options.redact);
@@ -98,85 +92,62 @@ export class SandboxService {
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
       runId: sandbox.run_id,
-      source: "server",
       type: "exec_started",
       text: redact(execCommand.join(" ")),
-      data: { command: execCommand.map(redact), cwd: options.cwd ?? null, timeoutMs: options.timeoutMs ?? null },
     });
     const result = await this.provider.exec(sandbox.provider_sandbox_id, execCommand, { timeoutMs: options.timeoutMs });
-    const redactedResult = {
-      exitCode: result.exitCode,
-      stderr: redact(result.stderr),
-      stdout: redact(result.stdout),
-    };
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
       runId: sandbox.run_id,
-      source: "sandbox",
       type: "exec_completed",
-      text: redactedResult.stdout || redactedResult.stderr || `exit ${result.exitCode}`,
-      data: redactedResult,
+      text: result.exitCode === 0 ? "Command completed" : "Command failed",
     });
-    return { sandbox, result };
+    return result;
   }
 
   async bootstrap(
     sandbox: SandboxRow,
     options: SandboxBootstrapOptions = {},
-  ): Promise<{ sandbox: SandboxRow; results: SandboxBootstrapCommandResult[] }> {
-    const repoUrl = options.repoUrl ?? sandbox.repo_url;
+  ): Promise<SandboxCommandResult[]> {
+    const ref = await this.sandboxRef(sandbox);
+    const repoUrl = options.repoUrl ?? await this.sandboxRepoUrl(sandbox);
     const repoUrlRedacted = options.repoUrlRedacted ?? repoUrl;
     const redactMap = repoUrl === repoUrlRedacted ? undefined : { [repoUrl]: repoUrlRedacted };
-    const redact = createRedactor(redactMap);
-    const input: SandboxBootstrapInput = {
+    const input = {
       baseRef: options.baseRef,
       pushRef: options.pushRef,
       repoUrl,
-      ref: sandbox.branch,
-      workdir: sandbox.workdir,
+      ref,
+      workdir: SANDBOX_WORKDIR,
     };
-    const redactedInput = { ...input, repoUrl: repoUrlRedacted };
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
       runId: sandbox.run_id,
-      source: "server",
       type: "bootstrap_started",
-      text: `Bootstrapping sandbox workdir ${sandbox.workdir}`,
-      data: redactedInput,
+      text: "Bootstrapping sandbox",
     });
 
     try {
       const results = await bootstrapSandbox(input, async (command) => {
-        const { result } = await this.exec(sandbox, command, { redact: redactMap });
-        return result;
+        return this.exec(sandbox, command, { redact: redactMap });
       });
-      const redactedResults = results.map((result) => ({
-        ...result,
-        command: result.command.map(redact),
-        stderr: redact(result.stderr),
-        stdout: redact(result.stdout),
-      }));
       await this.message({
         agentId: sandbox.agent_id,
         sandboxId: sandbox.id,
         runId: sandbox.run_id,
-        source: "sandbox",
         type: "bootstrap_completed",
-        text: `Sandbox bootstrap completed in ${sandbox.workdir}`,
-        data: { ...redactedInput, results: redactedResults },
+        text: "Sandbox bootstrap completed",
       });
-      return { sandbox, results };
+      return results;
     } catch (error) {
       await this.message({
         agentId: sandbox.agent_id,
         sandboxId: sandbox.id,
         runId: sandbox.run_id,
-        source: "sandbox",
         type: "bootstrap_failed",
         text: messageOf(error),
-        data: redactedInput,
       });
       throw error;
     }
@@ -185,8 +156,9 @@ export class SandboxService {
   async finalizeRunBranch(
     sandbox: SandboxRow,
     input: { commitMessage: string; timeoutMs?: number },
-  ): Promise<{ sandbox: SandboxRow; result: SandboxFinalizeResult }> {
+  ): Promise<SandboxFinalizeResult> {
     const commitMessage = requireNonEmpty(input.commitMessage, "commitMessage");
+    const branch = await this.sandboxRef(sandbox);
     const commands = [
       ["git", "status", "--short"],
       ["git", "add", "-A"],
@@ -197,7 +169,7 @@ export class SandboxService {
         "-lc",
         `git diff --cached --quiet || git commit -m ${shellQuote(commitMessage)}`,
       ],
-      ["git", "push", "origin", `HEAD:${sandbox.branch}`],
+      ["git", "push", "origin", `HEAD:${branch}`],
       ["git", "rev-parse", "HEAD"],
     ];
 
@@ -205,73 +177,84 @@ export class SandboxService {
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
       runId: sandbox.run_id,
-      source: "server",
       type: "run_finalize_started",
-      text: `Finalizing run branch ${sandbox.branch}`,
-      data: { branch: sandbox.branch, commitMessage, workdir: sandbox.workdir },
+      text: "Finalizing run branch",
     });
 
     const results = [];
     for (const command of commands) {
-      const { result } = await this.exec(sandbox, command, { cwd: sandbox.workdir, timeoutMs: input.timeoutMs });
+      const result = await this.exec(sandbox, command, { cwd: SANDBOX_WORKDIR, timeoutMs: input.timeoutMs });
       results.push({ command, ...result });
       if (result.exitCode !== 0) {
         await this.message({
           agentId: sandbox.agent_id,
           sandboxId: sandbox.id,
           runId: sandbox.run_id,
-          source: "sandbox",
           type: "run_finalize_failed",
-          text: result.stderr || result.stdout || `exit ${result.exitCode}`,
-          data: { command, result },
+          text: `exit ${result.exitCode}`,
         });
         throw new Error(`run finalize command failed (${result.exitCode}): ${command.join(" ")}`);
       }
     }
 
     const commitSha = requireCommitSha(results.at(-1)?.stdout.trim() ?? "");
-    const statusText = results[0]?.stdout ?? "";
-    const finalizeResult = { commitSha, results, statusText };
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
       runId: sandbox.run_id,
-      source: "sandbox",
       type: "run_finalize_completed",
-      text: `Finalized run branch ${sandbox.branch} at ${commitSha}`,
-      data: finalizeResult,
+      text: "Run branch finalized",
     });
-    return { sandbox, result: finalizeResult };
+    return { commitSha };
   }
 
-  async stop(sandbox: SandboxRow): Promise<SandboxRow> {
+  async stop(sandbox: SandboxRow): Promise<void> {
     if (sandbox.provider_sandbox_id && sandbox.state === "running") {
       await this.provider.stop(sandbox.provider_sandbox_id);
     }
-    const stopped = await this.db.updateSandboxState(sandbox.id, "stopped");
+    await this.db.updateSandboxState(sandbox.id, "stopped");
     await this.message({
       agentId: sandbox.agent_id,
       sandboxId: sandbox.id,
       runId: sandbox.run_id,
-      source: "server",
       type: "sandbox_stopped",
-      text: `Sandbox stopped: ${sandbox.id}`,
+      text: "Sandbox stopped",
     });
-    return stopped;
   }
 
   private async message(input: {
     agentId: string;
     sandboxId: string;
     runId?: string | null;
-    source: string;
     type: string;
     text?: string | null;
-    data?: unknown;
-  }): Promise<MessageRow> {
-    const message = await this.db.appendMessage(input);
+  }): Promise<void> {
+    const message: MessageRow = {
+      agent_id: input.agentId,
+      sandbox_id: input.sandboxId,
+      run_id: input.runId ?? null,
+      type: input.type,
+      text: input.text ?? null,
+    };
+    await this.db.appendMessage(input);
     this.bus.publish(message);
-    return message;
+  }
+
+  private async sandboxRepoUrl(sandbox: SandboxRow): Promise<string> {
+    const agent = await this.db.getAgent(sandbox.agent_id);
+    if (!agent) throw new Error(`sandbox agent not found: ${sandbox.agent_id}`);
+    return agent.repo_url;
+  }
+
+  private async sandboxRef(sandbox: SandboxRow): Promise<string> {
+    if (!sandbox.run_id) {
+      const agent = await this.db.getAgent(sandbox.agent_id);
+      if (!agent) throw new Error(`sandbox agent not found: ${sandbox.agent_id}`);
+      return agent.current_ref;
+    }
+    const run = await this.db.getAgentRun(sandbox.run_id);
+    if (!run) throw new Error(`sandbox run not found: ${sandbox.run_id}`);
+    return run.run_branch;
   }
 }
 

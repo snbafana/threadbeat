@@ -19,7 +19,6 @@ const baseSettings: Settings = {
   agentPiProvider: "deepseek",
   agentPiModel: "deepseek-v4-flash",
   agentPiApiKeyEnv: "DEEPSEEK_API_KEY",
-  hostedGitProvider: "github",
   githubOwner: "snbafana",
   githubToken: "ghp-test",
 };
@@ -38,8 +37,6 @@ try {
   process.env.MODAL_TOKEN_SECRET = "secret";
   const ready = buildPreflightReport(baseSettings);
   assert.equal(ready.ok, true);
-  assert.deepEqual(ready.sandboxEnvResolvedNames, ["DEEPSEEK_API_KEY"]);
-  assert.deepEqual(ready.recommendedSandboxEnvNames, ["DEEPSEEK_API_KEY"]);
 
   const missingSandboxEnv = buildPreflightReport({
     ...baseSettings,
@@ -47,8 +44,7 @@ try {
     sandboxEnvNames: [],
   });
   assert.equal(missingSandboxEnv.ok, false);
-  assert.equal(missingSandboxEnv.checks.find((check) => check.name === "sandbox_env_allowlist")?.ok, false);
-  assert.equal(missingSandboxEnv.checks.find((check) => check.name === "sandbox_pi_api_key")?.ok, false);
+  assert.equal(missingSandboxEnv.checks.find((check) => check.name === "sandbox_pi_auth")?.ok, false);
 } finally {
   process.env = originalEnv;
 }

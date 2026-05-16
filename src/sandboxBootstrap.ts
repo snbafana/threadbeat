@@ -1,4 +1,4 @@
-export type SandboxBootstrapInput = {
+type SandboxBootstrapInput = {
   baseRef?: string;
   pushRef?: boolean;
   repoUrl: string;
@@ -6,26 +6,17 @@ export type SandboxBootstrapInput = {
   workdir: string;
 };
 
-export type SandboxBootstrapExecResult = {
+type SandboxBootstrapExecResult = {
   stdout: string;
   stderr: string;
   exitCode: number;
 };
 
-export type SandboxBootstrapCommandResult = SandboxBootstrapExecResult & {
+type SandboxBootstrapCommandResult = SandboxBootstrapExecResult & {
   command: string[];
 };
 
-export type SandboxBootstrapExec = (command: string[]) => Promise<SandboxBootstrapExecResult>;
-
-export class SandboxBootstrapError extends Error {
-  constructor(
-    readonly commandResult: SandboxBootstrapCommandResult,
-    readonly completedResults: SandboxBootstrapCommandResult[],
-  ) {
-    super(`bootstrap command failed (${commandResult.exitCode}): ${commandResult.command.join(" ")}`);
-  }
-}
+type SandboxBootstrapExec = (command: string[]) => Promise<SandboxBootstrapExecResult>;
 
 export const buildSandboxBootstrapCommands = (input: SandboxBootstrapInput): string[][] => {
   const repoUrl = requireNonEmpty(input.repoUrl, "repoUrl");
@@ -60,10 +51,9 @@ export const bootstrapSandbox = async (
   const results: SandboxBootstrapCommandResult[] = [];
   for (const command of buildSandboxBootstrapCommands(input)) {
     const result = await exec(command);
-    const commandResult = { command, ...result };
-    results.push(commandResult);
-    if (commandResult.exitCode !== 0) {
-      throw new SandboxBootstrapError(commandResult, [...results]);
+    results.push({ command, ...result });
+    if (result.exitCode !== 0) {
+      throw new Error(`bootstrap command failed (${result.exitCode}): ${command.join(" ")}`);
     }
   }
   return results;

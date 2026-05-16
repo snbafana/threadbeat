@@ -1,0 +1,2103 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import fs from "node:fs/promises";
+import type { AddressInfo } from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+
+import type { Settings } from "../src/config.js";
+import { buildServer } from "../src/server.js";
+import { writeWorkerSessionControlPlaneAdvanceRecord } from "../src/workerSessionControlPlaneAdvances.js";
+
+const execFileAsync = promisify(execFile);
+const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "threadbeat-status-topology-smoke-"));
+const sessionName = `status-topology-${Date.now().toString(36)}`;
+
+const settings: Settings = {
+  projectRoot: path.resolve("."),
+  dbUrl: `file:${path.join(tempRoot, "threadbeat.db")}`,
+  host: "127.0.0.1",
+  port: 0,
+  modalMode: "dry-run",
+  modalAppName: "threadbeat-status-topology-smoke",
+  modalImage: "python:3.13-slim",
+  githubOwner: "threadbeat-status-topology-smoke",
+};
+
+const { app } = await buildServer(settings);
+
+try {
+  await writeWorkerSessionRecord();
+  await app.listen({ host: settings.host, port: settings.port });
+  const address = app.server.address() as AddressInfo;
+  const baseUrl = `http://${settings.host}:${address.port}`;
+
+  const summary = await cliJson<{
+    commands: {
+      inspectTopology: string[];
+      ensureTopologyDryRun: string[];
+      ensureTopologyConfirm: string[];
+      ensureTopologyLoopDryRun: string[];
+      ensureTopologyLoopConfirm: string[];
+      startTopologyWorkerDryRun: string[];
+      ensureTopologyWorkerConfirm: string[];
+      inspectTopologyWorkers: string[];
+      topologyWorkerNextSteps: string[];
+      inspectControlPlaneWorkers: string[];
+      inspectControlPlaneWorkerProgress: string[];
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(summary.commands.inspectTopology.join(" "), `npm run cli -- runs session-control-plane-topology ${sessionName} --server`);
+  assert.equal(summary.commands.ensureTopologyDryRun.join(" "), `npm run cli -- runs ensure-control-plane-topology ${sessionName} --server --dry-run`);
+  assert.equal(summary.commands.ensureTopologyConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology ${sessionName} --server --confirm`);
+  assert.equal(summary.commands.ensureTopologyLoopDryRun.join(" "), `npm run cli -- runs ensure-control-plane-topology-loop ${sessionName} --server --dry-run --max-iterations 3 --loop-interval-ms 2000`);
+  assert.equal(summary.commands.ensureTopologyLoopConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology-loop ${sessionName} --server --confirm --max-iterations 3 --loop-interval-ms 2000`);
+  assert.equal(summary.commands.startTopologyWorkerDryRun.join(" "), `npm run cli -- runs start-control-plane-topology-worker ${sessionName} --server --dry-run --max-iterations 60 --loop-interval-ms 2000`);
+  assert.equal(summary.commands.ensureTopologyWorkerConfirm.join(" "), `npm run cli -- runs ensure-control-plane-topology-worker ${sessionName} --server --confirm --max-iterations 60 --loop-interval-ms 2000`);
+  assert.equal(summary.commands.inspectTopologyWorkers.join(" "), `npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server`);
+  assert.equal(summary.commands.topologyWorkerNextSteps.join(" "), `npm run cli -- runs session-control-plane-topology-workers-next ${sessionName} --server`);
+  assert.equal(summary.commands.inspectControlPlaneWorkers.join(" "), `npm run cli -- runs session-control-plane-workers ${sessionName} --server --include-retired --lines 5`);
+  assert.equal(summary.commands.inspectControlPlaneWorkerProgress.join(" "), `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`);
+
+  const commandQueue = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+  ]);
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.inspectTopology.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyLoopDryRun.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyLoopConfirm.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.startTopologyWorkerDryRun.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.ensureTopologyWorkerConfirm.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.inspectTopologyWorkers.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.topologyWorkerNextSteps.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.inspectControlPlaneWorkers.join(" ")));
+  assert.ok(commandQueue.commands.some((command) => command.command.join(" ") === summary.commands.inspectControlPlaneWorkerProgress.join(" ")));
+
+  const text = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(text, /^control_plane_topology:$/m);
+  assert.match(text, new RegExp(`ensure_loop_dry_run: .*ensure-control-plane-topology-loop ${sessionName}`));
+  assert.match(text, new RegExp(`start_worker_dry_run: .*start-control-plane-topology-worker ${sessionName}`));
+  assert.match(text, new RegExp(`inspect_workers: .*session-control-plane-topology-workers ${sessionName}`));
+  assert.match(text, /^control_plane_workers:$/m);
+  assert.match(text, new RegExp(`inspect_all: .*session-control-plane-workers ${sessionName} --server --include-retired --lines 5`));
+  assert.match(text, new RegExp(`inspect_progress: .*session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
+  assert.match(text, /^worker_health:$/m);
+  assert.match(text, /watch: total=0 alive=0 stopped=0 retired=0/);
+  assert.match(text, /terminal_overview_replay_loop: total=0 alive=0 stopped=0 retired=0/);
+  assert.match(text, /topology_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
+  assert.match(text, /result_review_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
+  assert.match(text, /bundle_recovery_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
+  assert.match(text, /^control_plane_worker_progress:$/m);
+  assert.match(text, /latest_results: count=0 recorded=0 progress=0 recent_progress=0/);
+  const watchedSummary = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedSummaryLines = watchedSummary.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    ok: boolean;
+    session: string;
+    poll: number;
+    summary: { session: string; workers: { controlPlaneAdvance: { latestResults: unknown[] } } };
+  });
+  assert.equal(watchedSummaryLines.length, 2);
+  assert.equal(watchedSummaryLines[0]?.ok, true);
+  assert.equal(watchedSummaryLines[0]?.session, sessionName);
+  assert.equal(watchedSummaryLines[0]?.poll, 1);
+  assert.equal(watchedSummaryLines[1]?.poll, 2);
+  assert.equal(watchedSummaryLines[0]?.summary.session, sessionName);
+  assert.deepEqual(watchedSummaryLines[0]?.summary.workers.controlPlaneAdvance.latestResults, []);
+  const watchedUntilActionEmpty = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--max-polls",
+    "2",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedUntilActionEmptyLines = watchedUntilActionEmpty.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    poll: number;
+    untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
+  });
+  assert.equal(watchedUntilActionEmptyLines.length, 2);
+  assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.done, false);
+  assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.reason, null);
+  assert.equal(watchedUntilActionEmptyLines[0]?.untilAction.command, null);
+  const watchedText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(watchedText, /^control-plane status watch poll=1 observed_at=/m);
+  assert.match(watchedText, /^control-plane status summary$/m);
+  assert.match(watchedText, /^control_plane_worker_progress:$/m);
+
+  const workerId = "status-topology-worker";
+  const started = await cliJson<{ worker: { workerId: string; mode: string; command: string[] } }>(baseUrl, [
+    "runs",
+    "start-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--dry-run",
+    "--max-iterations",
+    "1",
+    "--loop-interval-ms",
+    "0",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(started.worker.workerId, workerId);
+  assert.equal(started.worker.mode, "topology_loop");
+  assert.deepEqual(started.worker.command, [
+    "runs",
+    "ensure-control-plane-topology-loop",
+    sessionName,
+    "--server",
+    "--dry-run",
+    "--max-iterations",
+    "1",
+    "--loop-interval-ms",
+    "0",
+    "--lines",
+    "5",
+    "--progress-json",
+  ]);
+  const inspected = await cliJson<{ count: number; workers: Array<{ workerId: string; mode: string }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-topology-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(inspected.count, 1);
+  assert.equal(inspected.workers[0]?.workerId, workerId);
+  assert.equal(inspected.workers[0]?.mode, "topology_loop");
+  const completedTopologyWorker = await waitForTopologyWorkerResult(baseUrl, workerId, { iterations: 1, state: "completed" });
+  assert.equal(completedTopologyWorker.latestResult?.iterations, 1);
+  assert.equal(completedTopologyWorker.latestResult?.totalCoreExecuted, 0);
+  assert.equal(completedTopologyWorker.latestResult?.totalMutationExecuted, 0);
+  const completedWorkerRecord = await readTopologyWorkerRecord(workerId);
+  assert.equal(completedWorkerRecord.recentProgress?.length, 1);
+  assert.equal(completedWorkerRecord.recentProgress?.[0]?.iterations, 1);
+  const completedStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(completedStatusText, /control_plane_advance: total=1 alive=0 stopped=0 retired=0 completed=1/);
+  assert.match(completedStatusText, /topology_loop: total=1 alive=0 stopped=0 retired=0 completed=1/);
+  assert.match(completedStatusText, /control_plane_worker_progress:/);
+  assert.match(completedStatusText, /latest_results: count=1 recorded=1 progress=0 recent_progress=1/);
+  assert.match(completedStatusText, new RegExp(`worker: ${workerId}`));
+  assert.match(completedStatusText, /mode: topology_loop/);
+  assert.match(completedStatusText, /source: recorded/);
+  assert.match(completedStatusText, /iterations: 1/);
+  assert.match(completedStatusText, /core: 0/);
+  assert.match(completedStatusText, /mutation: 0/);
+  assert.match(completedStatusText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${workerId} --kind control-plane-topology --limit 5`));
+  const completedStatusCommands = await cliJson<{ commands: Array<{ command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--commands-only",
+  ]);
+  assert.ok(completedStatusCommands.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${workerId} --kind control-plane-topology --limit 5`
+  )));
+
+  const aggregateBeforeStop = await cliJson<{
+    summary: {
+      topology: {
+        total: number;
+        latestResults: {
+          count: number;
+          recorded: number;
+          progress: number;
+          recentProgress: number;
+          iterations: number;
+          totalCoreExecuted: number;
+          totalMutationExecuted: number;
+        };
+      };
+      advance: { total: number; latestResults: { count: number; recorded: number; progress: number; recentProgress: number } };
+    };
+    workers: Array<{ kind: string; workerId: string | null; latestResultSource?: string; latestProgress?: unknown; recentProgress?: unknown[]; commands: { restart: string[] } | null }>;
+    commands: { inspectTopologyWorkers: string[]; inspectProgress: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(aggregateBeforeStop.summary.topology.total, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.count, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.recorded, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.progress, 0);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.recentProgress, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.iterations, 1);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.totalCoreExecuted, 0);
+  assert.equal(aggregateBeforeStop.summary.topology.latestResults.totalMutationExecuted, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.total, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.latestResults.count, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.latestResults.recorded, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.latestResults.progress, 0);
+  assert.equal(aggregateBeforeStop.summary.advance.latestResults.recentProgress, 0);
+  const aggregateTopologyWorker = aggregateBeforeStop.workers.find((worker) => worker.workerId === workerId);
+  assert.equal(aggregateTopologyWorker?.kind, "control_plane_topology");
+  assert.equal(aggregateTopologyWorker?.latestResultSource, "recorded");
+  assert.equal(aggregateTopologyWorker?.latestProgress, null);
+  assert.equal(aggregateTopologyWorker?.recentProgress?.length, 1);
+  assert.equal(
+    aggregateTopologyWorker?.commands?.restart.join(" "),
+    `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId} --include-retired`,
+  );
+  assert.equal(
+    aggregateBeforeStop.commands.inspectTopologyWorkers.join(" "),
+    `npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`,
+  );
+  assert.equal(
+    aggregateBeforeStop.commands.inspectProgress.join(" "),
+    `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`,
+  );
+
+  const bundleRecoveryWorkerId = "status-bundle-recovery-worker";
+  const startedBundleRecovery = await cliJson<{ worker: { workerId: string; mode: string; command: string[] } }>(baseUrl, [
+    "runs",
+    "start-control-plane-worker-bundle-recovery-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    bundleRecoveryWorkerId,
+    "--dry-run",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(startedBundleRecovery.worker.workerId, bundleRecoveryWorkerId);
+  assert.equal(startedBundleRecovery.worker.mode, "bundle_recovery_loop");
+  assert.deepEqual(startedBundleRecovery.worker.command, [
+    "runs",
+    "recover-control-plane-worker-bundles",
+    "--server",
+    "--session",
+    sessionName,
+    "--loop",
+    "--max-polls",
+    "1",
+    "--interval-ms",
+    "1",
+    "--lines",
+    "1",
+    "--progress-json",
+    "--dry-run",
+  ]);
+  const completedBundleRecoveryWorker = await waitForBundleRecoveryWorkerResult(baseUrl, bundleRecoveryWorkerId, { state: "completed" });
+  assert.equal(completedBundleRecoveryWorker.latestResult?.profileCount, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.planned, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.actionable, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.blocked, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.executed, 0);
+  assert.equal(completedBundleRecoveryWorker.latestResult?.polls, 1);
+  const bundleRecoveryStatus = await cliJson<{
+    workers: {
+      controlPlaneAdvance: {
+        modes: { bundle_recovery_loop: { total: number; alive: number; stopped: number; retired: number; completed: number } };
+        latestResults: Array<{ workerId: string; mode: string; latestResultSource: string; latestResult: { profileCount?: number; polls?: number } }>;
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.deepEqual(bundleRecoveryStatus.workers.controlPlaneAdvance.modes.bundle_recovery_loop, {
+    total: 1,
+    alive: 0,
+    stopped: 0,
+    retired: 0,
+    completed: 1,
+  });
+  const bundleRecoveryLatestResult = bundleRecoveryStatus.workers.controlPlaneAdvance.latestResults.find((result) => result.workerId === bundleRecoveryWorkerId);
+  assert.equal(bundleRecoveryLatestResult?.mode, "bundle_recovery_loop");
+  assert.equal(bundleRecoveryLatestResult?.latestResultSource, "recorded");
+  assert.equal(bundleRecoveryLatestResult?.latestResult.profileCount, 0);
+  assert.equal(bundleRecoveryLatestResult?.latestResult.polls, 1);
+  const bundleRecoveryStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(bundleRecoveryStatusText, /bundle_recovery_loop: total=1 alive=0 stopped=0 retired=0 completed=1/);
+  assert.match(bundleRecoveryStatusText, new RegExp(`worker: ${bundleRecoveryWorkerId}`));
+  assert.match(bundleRecoveryStatusText, /mode: bundle_recovery_loop/);
+  assert.match(bundleRecoveryStatusText, /profile_count: 0/);
+  assert.match(bundleRecoveryStatusText, /planned: 0/);
+  assert.match(bundleRecoveryStatusText, /actionable: 0/);
+  assert.match(bundleRecoveryStatusText, /blocked: 0/);
+  assert.match(bundleRecoveryStatusText, /executed: 0/);
+  assert.match(bundleRecoveryStatusText, /polls: 1/);
+  assert.match(bundleRecoveryStatusText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${bundleRecoveryWorkerId} --kind control-plane-bundle-recovery --limit 5`));
+  const completedProgress = await cliJson<{
+    count: number;
+    progress: Array<{ kind: string; workerId: string | null; state: string | null; source: string | null; iterations?: number; stoppedReason?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--kind",
+    "topology",
+    "--include-retired",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(completedProgress.count, 1);
+  assert.equal(completedProgress.progress[0]?.kind, "control_plane_topology");
+  assert.equal(completedProgress.progress[0]?.workerId, workerId);
+  assert.equal(completedProgress.progress[0]?.state, "completed");
+  assert.equal(completedProgress.progress[0]?.source, "recorded");
+  assert.equal(completedProgress.progress[0]?.iterations, 1);
+  assert.equal(completedProgress.progress[0]?.stoppedReason, "running");
+  const completedProgressTimeline = await cliJson<{
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{
+      source: string;
+      event: string;
+      workerId?: string;
+      status?: string;
+      reason?: string;
+      mode?: string;
+      progressIndex?: number;
+      progressTotal?: number;
+      iterations?: number;
+      totalCoreExecuted?: number;
+      totalMutationExecuted?: number;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--event",
+    "worker_progress_recorded",
+    "--worker",
+    workerId,
+    "--status",
+    "running",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(completedProgressTimeline.count, 1);
+  assert.equal(completedProgressTimeline.counts.worker_progress_recorded, 1);
+  assert.equal(completedProgressTimeline.events[0]?.source, "control_plane_advance_worker");
+  assert.equal(completedProgressTimeline.events[0]?.event, "worker_progress_recorded");
+  assert.equal(completedProgressTimeline.events[0]?.workerId, workerId);
+  assert.equal(completedProgressTimeline.events[0]?.status, "running");
+  assert.equal(completedProgressTimeline.events[0]?.reason, "running");
+  assert.equal(completedProgressTimeline.events[0]?.mode, "topology_loop");
+  assert.equal(completedProgressTimeline.events[0]?.progressIndex, 1);
+  assert.equal(completedProgressTimeline.events[0]?.progressTotal, 1);
+  assert.equal(completedProgressTimeline.events[0]?.iterations, 1);
+  assert.equal(completedProgressTimeline.events[0]?.totalCoreExecuted, 0);
+  assert.equal(completedProgressTimeline.events[0]?.totalMutationExecuted, 0);
+  const completedProgressText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--kind",
+    "topology",
+    "--include-retired",
+    "--limit",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(completedProgressText, /^control_plane_worker_progress:$/m);
+  assert.match(completedProgressText, new RegExp(`worker=${workerId} state=completed source=recorded index=1/1 iterations=1 reason=running`));
+  const aggregateTextBeforeStop = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateTextBeforeStop, /^control_plane_workers:$/m);
+  assert.match(aggregateTextBeforeStop, new RegExp(`session: ${sessionName}`));
+  assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 exited_unrecorded=0 restartable=0 command_drift=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextBeforeStop, new RegExp(`inspect_topology: npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`));
+  assert.match(aggregateTextBeforeStop, new RegExp(`inspect_progress: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
+
+  const replayLoopWorkerId = "status-replay-loop-worker";
+  const startedReplayLoop = await cliJson<{ worker: { workerId: string; dryRun: boolean; command: string[] } }>(baseUrl, [
+    "runs",
+    "start-terminal-overview-replay-loop-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--dry-run",
+    "--max-steps",
+    "1",
+  ]);
+  assert.equal(startedReplayLoop.worker.workerId, replayLoopWorkerId);
+  assert.equal(startedReplayLoop.worker.dryRun, true);
+  assert.deepEqual(startedReplayLoop.worker.command, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--replay-unreplayed-needs-action-loop",
+    "--dry-run",
+    "--max-steps",
+    "1",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--lines",
+    "1",
+  ]);
+  const aggregateWithReplayLoop = await cliJson<{
+    summary: { terminalOverviewReplayLoop: { total: number; stopped: number; restartable: number } };
+    workers: Array<{ kind: string; workerId: string | null; commands: { restart: string[] } | null }>;
+    commands: { inspectTerminalOverviewReplayLoopWorkers: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(aggregateWithReplayLoop.summary.terminalOverviewReplayLoop.total, 1);
+  assert.equal(aggregateWithReplayLoop.summary.terminalOverviewReplayLoop.stopped, 1);
+  assert.equal(aggregateWithReplayLoop.summary.terminalOverviewReplayLoop.restartable, 1);
+  const replayLoopWorker = aggregateWithReplayLoop.workers.find((worker) => worker.workerId === replayLoopWorkerId);
+  assert.equal(replayLoopWorker?.kind, "terminal_overview_replay_loop");
+  assert.equal(
+    replayLoopWorker?.commands?.restart.join(" "),
+    `npm run cli -- runs restart-terminal-overview-replay-loop-worker ${sessionName} --server --worker-id ${replayLoopWorkerId} --include-retired`,
+  );
+  assert.equal(
+    aggregateWithReplayLoop.commands.inspectTerminalOverviewReplayLoopWorkers.join(" "),
+    `npm run cli -- runs terminal-overview-replay-loop-workers ${sessionName} --server --include-retired --lines 1`,
+  );
+  const aggregateTextWithReplayLoop = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateTextWithReplayLoop, /terminal_overview_replay_loop: total=1 alive=0 stopped=1 completed=0 retired=0 exited_unrecorded=0 restartable=1 command_drift=0/);
+  assert.match(aggregateTextWithReplayLoop, new RegExp(`inspect_terminal_overview_replay_loop: npm run cli -- runs terminal-overview-replay-loop-workers ${sessionName} --server --include-retired --lines 1`));
+  const replayLoopTerminals = await cliJson<{
+    count: number;
+    workers: Array<{ kind: string; workerId: string | null; commands: { restart: string[] } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-terminals",
+    sessionName,
+    "--server",
+    "--kind",
+    "terminal-overview-replay-loop",
+    "--status",
+    "restartable",
+    "--include-retired",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(replayLoopTerminals.count, 1);
+  assert.equal(replayLoopTerminals.workers[0]?.kind, "terminal_overview_replay_loop");
+  assert.equal(replayLoopTerminals.workers[0]?.workerId, replayLoopWorkerId);
+  assert.equal(
+    replayLoopTerminals.workers[0]?.commands.restart.join(" "),
+    `npm run cli -- runs restart-terminal-overview-replay-loop-worker ${sessionName} --server --worker-id ${replayLoopWorkerId} --include-retired`,
+  );
+  const replayLoopProgress = await cliJson<{ count: number }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--kind",
+    "terminal-overview-replay-loop",
+    "--include-retired",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(replayLoopProgress.count, 0);
+  const statusWithReplayLoopRecovery = await cliJson<{
+    branchNativeNext: { surface: string; action: string; reason: string; command: string[] } | null;
+    recovery: {
+      count: number;
+      actions: Record<string, number>;
+      nextSteps: {
+        terminalOverviewReplayLoopWorkers: Array<{ action: string; reason: string; workerId: string; command: string[]; commands: Record<string, string[]> }>;
+      };
+    };
+    nextRecovery: { surface: string; action: string; reason: string; command: string[]; dryRunCommand: string[] } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; workerId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+  ]);
+  const statusWithReplayLoopRecoverySummary = await cliJson<{
+    nextRecovery: { surface: string; action: string; reason: string; command: string[]; dryRunCommand: string[] } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; workerId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusWithReplayLoopRecovery.recovery.count, 1);
+  assert.equal(statusWithReplayLoopRecovery.recovery.actions.restart_terminal_overview_replay_loop_worker, 1);
+  assert.equal(statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers.length, 1);
+  assert.equal(statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.workerId, replayLoopWorkerId);
+  assert.equal(statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.action, "restart_terminal_overview_replay_loop_worker");
+  assert.deepEqual(
+    statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command,
+    ["npm", "run", "cli", "--", "runs", "restart-terminal-overview-replay-loop-worker", sessionName, "--server", "--worker-id", replayLoopWorkerId, "--include-retired"],
+  );
+  assert.equal(statusWithReplayLoopRecovery.branchNativeNext?.surface, "worker_recovery");
+  assert.equal(statusWithReplayLoopRecovery.branchNativeNext?.action, "restart_terminal_overview_replay_loop_worker");
+  assert.deepEqual(statusWithReplayLoopRecovery.branchNativeNext?.command, statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command);
+  assert.ok(statusWithReplayLoopRecoverySummary.nextActions.some((action) => (
+    action.surface === "worker_recovery"
+    && action.action === "restart_terminal_overview_replay_loop_worker"
+    && action.workerId === replayLoopWorkerId
+  )));
+  assert.equal(statusWithReplayLoopRecoverySummary.nextRecovery?.surface, "worker_recovery");
+  assert.equal(statusWithReplayLoopRecoverySummary.nextRecovery?.action, "reconcile_control_plane_workers");
+  const replayLoopWorkerAlert = await cliJson<{
+    summary: { total: number };
+    alerts: Array<{ surface: string; reason: string; action: string; workerId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--worker",
+    replayLoopWorkerId,
+  ]);
+  assert.equal(replayLoopWorkerAlert.summary.total, 1);
+  assert.equal(replayLoopWorkerAlert.alerts[0]?.surface, "worker_recovery");
+  assert.equal(replayLoopWorkerAlert.alerts[0]?.action, "restart_terminal_overview_replay_loop_worker");
+  assert.equal(replayLoopWorkerAlert.alerts[0]?.workerId, replayLoopWorkerId);
+  assert.deepEqual(replayLoopWorkerAlert.alerts[0]?.command, statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command);
+  const replayLoopWorkerAlertPreview = await cliJson<{
+    details: {
+      kind: string;
+      target: { kind: string; worker: { workerId: string } | null };
+      commands: { inspectWorker: string[] | null; restartWorker: string[]; retireWorker: string[] | null };
+    } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--worker",
+    replayLoopWorkerId,
+  ]);
+  assert.equal(replayLoopWorkerAlertPreview.details?.kind, "worker_recovery");
+  assert.equal(replayLoopWorkerAlertPreview.details?.target.kind, "terminal_overview_replay_loop_worker");
+  assert.equal(replayLoopWorkerAlertPreview.details?.target.worker?.workerId, replayLoopWorkerId);
+  assert.deepEqual(replayLoopWorkerAlertPreview.details?.commands.restartWorker, statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command);
+  assert.deepEqual(
+    replayLoopWorkerAlertPreview.details?.commands.inspectWorker,
+    ["npm", "run", "cli", "--", "runs", "terminal-overview-replay-loop-workers", sessionName, "--server", "--worker-id", replayLoopWorkerId, "--include-retired"],
+  );
+  assert.deepEqual(
+    replayLoopWorkerAlertPreview.details?.commands.retireWorker,
+    ["npm", "run", "cli", "--", "runs", "stop-terminal-overview-replay-loop-workers", sessionName, "--server", "--worker-id", replayLoopWorkerId, "--retire"],
+  );
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
+
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--lines",
+    "1",
+  ]);
+  const watchedUntilActionStopped = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--max-polls",
+    "5",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedUntilActionStoppedLines = watchedUntilActionStopped.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    poll: number;
+    untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
+  });
+  assert.equal(watchedUntilActionStoppedLines.length, 1);
+  assert.equal(watchedUntilActionStoppedLines[0]?.poll, 1);
+  assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.done, true);
+  const workerRecoveryReconcileCommand = ["npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server", "--lines", "20", "--until-empty", "--max-steps", "10", "--interval-ms", "2000", "--confirm"];
+  const workerRecoveryReconcileDryRunCommand = ["npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server", "--lines", "20", "--until-empty", "--max-steps", "10", "--interval-ms", "2000", "--dry-run"];
+  assert.equal(watchedUntilActionStoppedLines[0]?.untilAction.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.command, workerRecoveryReconcileCommand);
+  assert.deepEqual(watchedUntilActionStoppedLines[0]?.untilAction.dryRunCommand, workerRecoveryReconcileDryRunCommand);
+  const watchedUntilActionDryRun = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--watch",
+    "--until-action",
+    "--execute-action",
+    "--dry-run",
+    "--max-polls",
+    "5",
+    "--interval-ms",
+    "1",
+  ]);
+  const watchedUntilActionDryRunLines = watchedUntilActionDryRun.trim().split(/\r?\n/).map((line) => JSON.parse(line) as {
+    poll: number;
+    untilAction: { done: boolean; reason: string | null; command: string[] | null; dryRunCommand: string[] | null };
+    executedAction?: { dryRun: boolean; reason: string; command: string[]; advanceId: string; advancePath: string; executed: { command: string[]; exitCode: number | null } };
+  });
+  assert.equal(watchedUntilActionDryRunLines.length, 1);
+  assert.equal(watchedUntilActionDryRunLines[0]?.untilAction.done, true);
+  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.dryRun, true);
+  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.command, workerRecoveryReconcileDryRunCommand);
+  assert.deepEqual(watchedUntilActionDryRunLines[0]?.executedAction?.executed.command, workerRecoveryReconcileDryRunCommand);
+  assert.equal(watchedUntilActionDryRunLines[0]?.executedAction?.executed.exitCode, 0);
+  assert.ok(watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  const watchActionAdvances = await cliJson<{
+    count: number;
+    advances: Array<{ advanceId: string; dryRun: boolean; detailCommand: string; selected: { surface: string; action: string; reason: string; command: string[] }; executed: { command: string[]; exitCode: number | null } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--status-watch-executions",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(watchActionAdvances.count, 1);
+  assert.equal(watchActionAdvances.advances[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  assert.equal(watchActionAdvances.advances[0]?.dryRun, true);
+  assert.equal(watchActionAdvances.advances[0]?.detailCommand, "status_watch_execute_action");
+  assert.equal(watchActionAdvances.advances[0]?.selected.surface, "worker_recovery");
+  assert.equal(watchActionAdvances.advances[0]?.selected.action, "reconcile_control_plane_workers");
+  assert.equal(watchActionAdvances.advances[0]?.selected.reason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(watchActionAdvances.advances[0]?.selected.command, workerRecoveryReconcileDryRunCommand);
+  assert.equal(watchActionAdvances.advances[0]?.executed.exitCode, 0);
+  const watchActionAdvancesText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--status-watch-executions",
+    "--format",
+    "text",
+  ]);
+  assert.match(watchActionAdvancesText, /detail_commands=status_watch_execute_action/);
+  assert.match(watchActionAdvancesText, /detail_command: status_watch_execute_action/);
+  const summaryAfterWatchExecution = await cliJson<{
+    recovery: {
+      statusWatchExecutions: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number };
+        recent: Array<{
+          advanceId: string;
+          command: string[];
+          selectedSurface: string | null;
+          selectedAction: string | null;
+          selectedReason: string | null;
+          selectedCommand: string[] | null;
+          executedCommand: string[] | null;
+          executedExitCode: number | null;
+        }>;
+      };
+    };
+    commands: { statusWatchExecutions: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.total, 1);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.dryRun, 1);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.executed, 1);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.attempts.failed, 0);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedSurface, "worker_recovery");
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedAction, "reconcile_control_plane_workers");
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedReason, "control_plane_action:reconcile_control_plane_workers");
+  assert.deepEqual(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.selectedCommand, workerRecoveryReconcileDryRunCommand);
+  assert.deepEqual(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.executedCommand, workerRecoveryReconcileDryRunCommand);
+  assert.equal(summaryAfterWatchExecution.recovery.statusWatchExecutions.recent[0]?.executedExitCode, 0);
+  assert.deepEqual(summaryAfterWatchExecution.commands.statusWatchExecutions, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions"]);
+  const summaryTextAfterWatchExecution = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(summaryTextAfterWatchExecution, /status_watch_executions: total=1 dry_run=1 executed=1 failed=0/);
+  assert.match(summaryTextAfterWatchExecution, new RegExp(`inspect: npm run cli -- runs session-control-plane-advances ${sessionName} --server --status-watch-executions`));
+  assert.match(summaryTextAfterWatchExecution, /recent_status_watch_executions:/);
+  assert.match(summaryTextAfterWatchExecution, /selected: worker_recovery reconcile_control_plane_workers/);
+  assert.match(summaryTextAfterWatchExecution, /selected_reason: control_plane_action:reconcile_control_plane_workers/);
+  assert.match(summaryTextAfterWatchExecution, new RegExp(`selected_command: npm run cli -- runs session-control-plane-reconcile-workers ${sessionName} --server --lines 20 --until-empty --max-steps 10 --interval-ms 2000 --dry-run`));
+  assert.match(summaryTextAfterWatchExecution, /executed_exit_code: 0/);
+  const statusWatchTimeline = await cliJson<{
+    count: number;
+    counts: Record<string, number>;
+    events: Array<{
+      source: string;
+      event: string;
+      status: string;
+      advanceId: string;
+      detailCommand: string;
+      command: string[];
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "status_watch_execution",
+    "--event",
+    "status_watch_executed",
+    "--status",
+    "dry_run",
+  ]);
+  assert.equal(statusWatchTimeline.count, 1);
+  assert.equal(statusWatchTimeline.counts.status_watch_executed, 1);
+  assert.equal(statusWatchTimeline.events[0]?.source, "status_watch_execution");
+  assert.equal(statusWatchTimeline.events[0]?.event, "status_watch_executed");
+  assert.equal(statusWatchTimeline.events[0]?.status, "dry_run");
+  assert.equal(statusWatchTimeline.events[0]?.advanceId, watchedUntilActionDryRunLines[0]?.executedAction?.advanceId);
+  assert.equal(statusWatchTimeline.events[0]?.detailCommand, "status_watch_execute_action");
+  assert.deepEqual(statusWatchTimeline.events[0]?.command, workerRecoveryReconcileDryRunCommand);
+  const statusWatchTimelineCommands = await cliJson<{ commands: Array<{ action: string; command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-timeline",
+    sessionName,
+    "--server",
+    "--source",
+    "status_watch_execution",
+    "--commands-only",
+  ]);
+  assert.ok(statusWatchTimelineCommands.commands.some((command) => (
+    command.action === "inspect_status_watch_execution"
+    && command.command.join(" ") === `npm run cli -- runs session-control-plane-advances ${sessionName} --server --status-watch-executions --advance ${watchedUntilActionDryRunLines[0]?.executedAction?.advanceId} --limit 20`
+  )));
+  assert.ok(statusWatchTimelineCommands.commands.some((command) => (
+    command.action === "run_selected_command"
+    && command.command.join(" ") === workerRecoveryReconcileDryRunCommand.join(" ")
+  )));
+  const failedStatusWatch = await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {
+    session: sessionName,
+    observedAt: "2026-05-14T00:00:02.000Z",
+    completedAt: "2026-05-14T00:00:03.000Z",
+    dryRun: false,
+    detailCommand: "status_watch_execute_action",
+    selected: {
+      surface: "status_watch",
+      action: "execute_action",
+      reason: "control_plane_action:failed_status_watch_smoke",
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+    },
+    executed: {
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+      exitCode: 1,
+      stdout: "",
+      stderr: "status watch failed",
+      output: null,
+    },
+    before: null,
+    after: null,
+  });
+  const statusWatchAlerts = await cliJson<{
+    summary: { total: number; errors: number };
+    alerts: Array<{ surface: string; severity: string; reason: string; advanceId: string; action: string; command: string[] }>;
+    recentTimeline: { counts: Record<string, number> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+  ]);
+  assert.equal(statusWatchAlerts.summary.total, 1);
+  assert.equal(statusWatchAlerts.summary.errors, 1);
+  assert.equal(statusWatchAlerts.alerts[0]?.surface, "status_watch");
+  assert.equal(statusWatchAlerts.alerts[0]?.severity, "error");
+  assert.equal(statusWatchAlerts.alerts[0]?.reason, "failed_status_watch_execution");
+  assert.equal(statusWatchAlerts.alerts[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(statusWatchAlerts.alerts[0]?.action, "inspect_status_watch_execution");
+  assert.deepEqual(statusWatchAlerts.alerts[0]?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions", "--advance", failedStatusWatch.record.advanceId]);
+  assert.equal(statusWatchAlerts.recentTimeline.counts.status_watch_executed, 1);
+  const statusWatchAlertPreview = await cliJson<{
+    alert: { surface: string; advanceId: string } | null;
+    details: {
+      kind: string;
+      advance: { advanceId: string; detailCommand: string; executed: { exitCode: number | null } | null };
+      commands: {
+        inspectStatusWatchExecution: string[];
+        timelineStatusWatchExecution: string[];
+        runSelectedCommand: string[] | null;
+        previewSelectedCommand: string[] | null;
+        retrySelectedCommand: string[] | null;
+      };
+    } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+  ]);
+  assert.equal(statusWatchAlertPreview.alert?.surface, "status_watch");
+  assert.equal(statusWatchAlertPreview.alert?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(statusWatchAlertPreview.details?.kind, "status_watch_execution");
+  assert.equal(statusWatchAlertPreview.details?.advance.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(statusWatchAlertPreview.details?.advance.detailCommand, "status_watch_execute_action");
+  assert.equal(statusWatchAlertPreview.details?.advance.executed?.exitCode, 1);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.inspectStatusWatchExecution, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--status-watch-executions", "--advance", failedStatusWatch.record.advanceId]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.timelineStatusWatchExecution, ["npm", "run", "cli", "--", "runs", "session-control-plane-timeline", sessionName, "--server", "--source", "status_watch_execution", "--advance", failedStatusWatch.record.advanceId]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.runSelectedCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.previewSelectedCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", sessionName, "--server", "--surface", "status_watch", "--reason", "failed_status_watch_execution", "--action", "inspect_status_watch_execution", "--detail-command", "run_selected_command", "--dry-run", "--lines", "5"]);
+  assert.deepEqual(statusWatchAlertPreview.details?.commands.retrySelectedCommand, ["npm", "run", "cli", "--", "runs", "session-control-plane-alert-execute", sessionName, "--server", "--surface", "status_watch", "--reason", "failed_status_watch_execution", "--action", "inspect_status_watch_execution", "--detail-command", "run_selected_command", "--confirm", "--lines", "5"]);
+  const statusWatchAlertCommands = await cliJson<{ commands: Array<{ action: string; advanceId?: string; command: string[] }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--commands-only",
+  ]);
+  assert.ok(statusWatchAlertCommands.commands.some((command) => (
+    command.action === "inspect_status_watch_execution"
+    && command.advanceId === failedStatusWatch.record.advanceId
+  )));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "timeline_status_watch_execution"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "acknowledge_status_watch_execution"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "run_selected_command"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "preview_selected_command"));
+  assert.ok(statusWatchAlertCommands.commands.some((command) => command.action === "retry_selected_command"));
+  const statusWatchAlertText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--format",
+    "text",
+  ]);
+  assert.match(statusWatchAlertText, /surface: status_watch/);
+  assert.match(statusWatchAlertText, new RegExp(`advance: ${failedStatusWatch.record.advanceId}`));
+  assert.match(statusWatchAlertText, /status_watch_execution:/);
+  assert.match(statusWatchAlertText, /inspect_status_watch_execution: npm run cli -- runs session-control-plane-advances/);
+  assert.match(statusWatchAlertText, /preview_selected_command: npm run cli -- runs session-control-plane-alert-execute/);
+  assert.match(statusWatchAlertText, /retry_selected_command: npm run cli -- runs session-control-plane-alert-execute/);
+  const statusWatchRetryDryRun = await cliJson<{
+    dryRun: boolean;
+    detailCommand: string;
+    selected: { surface: string; action: string; reason: string; command: string[] } | null;
+    executed: unknown | null;
+    executionSafety: { mutating: boolean; blocked: boolean; confirmationRequired: boolean };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--reason",
+    "failed_status_watch_execution",
+    "--action",
+    "inspect_status_watch_execution",
+    "--detail-command",
+    "run_selected_command",
+    "--dry-run",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(statusWatchRetryDryRun.dryRun, true);
+  assert.equal(statusWatchRetryDryRun.detailCommand, "run_selected_command");
+  assert.equal(statusWatchRetryDryRun.executionSafety.mutating, true);
+  assert.equal(statusWatchRetryDryRun.executionSafety.blocked, false);
+  assert.equal(statusWatchRetryDryRun.executionSafety.confirmationRequired, true);
+  assert.equal(statusWatchRetryDryRun.selected?.surface, "status_watch");
+  assert.equal(statusWatchRetryDryRun.selected?.action, "run_selected_command");
+  assert.deepEqual(statusWatchRetryDryRun.selected?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"]);
+  assert.equal(statusWatchRetryDryRun.executed, null);
+  const summaryAfterFailedStatusWatch = await cliJson<{
+    needsAction: boolean;
+    nextRecovery: { surface: string; action: string; reason: string; count: number; command: string[]; dryRunCommand: string[] } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; count: number; advanceId?: string; command: string[] }>;
+    recovery: { statusWatchExecutions: { attempts: { total: number; dryRun: number; executed: number; failed: number }; recent: Array<{ advanceId: string; failed: boolean; command: string[] }>; failedRecent: Array<{ advanceId: string; failed: boolean; command: string[] }> } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(summaryAfterFailedStatusWatch.needsAction, true);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.total, 2);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.dryRun, 1);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.executed, 2);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.failed, 1);
+  const failedStatusWatchSummaryAttempt = summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.recent.find((attempt) => attempt.advanceId === failedStatusWatch.record.advanceId);
+  assert.equal(failedStatusWatchSummaryAttempt?.failed, true);
+  assert.deepEqual(failedStatusWatchSummaryAttempt?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", failedStatusWatch.record.advanceId, "--status-watch-executions"]);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.failedRecent[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(summaryAfterFailedStatusWatch.recovery.statusWatchExecutions.failedRecent[0]?.failed, true);
+  assert.equal(summaryAfterFailedStatusWatch.nextRecovery?.surface, "status_watch");
+  assert.equal(summaryAfterFailedStatusWatch.nextRecovery?.action, "inspect_failed_status_watch_execution");
+  assert.equal(summaryAfterFailedStatusWatch.nextRecovery?.reason, "failed_status_watch_execution");
+  assert.equal(summaryAfterFailedStatusWatch.nextRecovery?.count, 1);
+  assert.deepEqual(summaryAfterFailedStatusWatch.nextRecovery?.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-alert", sessionName, "--server", "--surface", "status_watch"]);
+  assert.deepEqual(summaryAfterFailedStatusWatch.nextRecovery?.dryRunCommand, summaryAfterFailedStatusWatch.nextRecovery?.command);
+  assert.ok(summaryAfterFailedStatusWatch.nextActions.some((action) => (
+    action.surface === "status_watch"
+    && action.action === "inspect_failed_status_watch_execution"
+    && action.advanceId === failedStatusWatch.record.advanceId
+  )));
+  const summaryTextAfterFailedStatusWatch = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(summaryTextAfterFailedStatusWatch, /status_watch_executions: total=2 dry_run=1 executed=2 failed=1/);
+  assert.match(summaryTextAfterFailedStatusWatch, /next_recovery:\n  kind: control_plane_action\n  action: inspect_failed_status_watch_execution\n  reason: failed_status_watch_execution/);
+  assert.match(summaryTextAfterFailedStatusWatch, /next_actions:\n  - surface: status_watch/);
+  assert.match(summaryTextAfterFailedStatusWatch, new RegExp(`advance: ${failedStatusWatch.record.advanceId}`));
+  await writeWorkerSessionControlPlaneAdvanceRecord(settings.projectRoot, {
+    session: sessionName,
+    observedAt: "2026-05-14T00:00:04.000Z",
+    completedAt: "2026-05-14T00:00:05.000Z",
+    dryRun: false,
+    detailCommand: "status_watch_execute_action",
+    selected: {
+      surface: "status_watch",
+      action: "execute_action",
+      reason: "control_plane_action:successful_status_watch_smoke",
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+    },
+    executed: {
+      command: ["npm", "run", "cli", "--", "runs", "session-control-plane-advance", sessionName, "--server", "--confirm"],
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      output: null,
+    },
+    before: null,
+    after: null,
+  });
+  const compactSummaryAfterFailedStatusWatch = await cliJson<{
+    nextRecovery: { surface: string; action: string; reason: string; count: number; command: string[]; dryRunCommand: string[] } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; count: number; advanceId?: string; command: string[] }>;
+    recovery: { statusWatchExecutions: { attempts: { total: number; failed: number }; recent: Array<{ advanceId: string; failed: boolean }>; failedRecent: Array<{ advanceId: string; failed: boolean; command: string[] }> } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.total, 3);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.attempts.failed, 1);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.recent.length, 1);
+  assert.notEqual(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.recent[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(compactSummaryAfterFailedStatusWatch.recovery.statusWatchExecutions.failedRecent[0]?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(compactSummaryAfterFailedStatusWatch.nextRecovery?.surface, "status_watch");
+  assert.equal(compactSummaryAfterFailedStatusWatch.nextActions[0]?.advanceId, failedStatusWatch.record.advanceId);
+  const compactSummaryTextAfterFailedStatusWatch = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(compactSummaryTextAfterFailedStatusWatch, /failed_status_watch_executions:/);
+  assert.match(compactSummaryTextAfterFailedStatusWatch, new RegExp(`advance: ${failedStatusWatch.record.advanceId}`));
+  const recoverNextStatusWatch = await cliJson<{
+    ok: boolean;
+    dryRun: boolean;
+    advanceId: string;
+    selected: { kind: string; surface: string; action: string; reason: string; command: string[] } | null;
+    command: string[] | null;
+    result: { alert: { surface: string; advanceId: string } | null } | null;
+    executed: { exitCode: number | null; command: string[] } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-recover-next",
+    sessionName,
+    "--server",
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(recoverNextStatusWatch.ok, true);
+  assert.equal(recoverNextStatusWatch.dryRun, false);
+  assert.equal(recoverNextStatusWatch.selected?.kind, "control_plane_action");
+  assert.equal(recoverNextStatusWatch.selected?.surface, "status_watch");
+  assert.equal(recoverNextStatusWatch.selected?.action, "inspect_failed_status_watch_execution");
+  assert.deepEqual(recoverNextStatusWatch.command, ["npm", "run", "cli", "--", "runs", "session-control-plane-alert", sessionName, "--server", "--surface", "status_watch"]);
+  assert.equal(recoverNextStatusWatch.result?.alert?.surface, "status_watch");
+  assert.equal(recoverNextStatusWatch.result?.alert?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(recoverNextStatusWatch.executed?.exitCode, 0);
+  assert.deepEqual(recoverNextStatusWatch.executed?.command, recoverNextStatusWatch.command);
+  const summaryAfterRecoverNextStatusWatch = await cliJson<{
+    recovery: {
+      recoverNext: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number };
+        recent: Array<{
+          advanceId: string;
+          detailCommand: string | null;
+          dryRun: boolean;
+          selectedKind: string | null;
+          selectedSurface: string | null;
+          selectedAction: string | null;
+          selectedReason: string | null;
+          selectedCommand: string[] | null;
+          executedCommand: string[] | null;
+          executedExitCode: number | null;
+        }>;
+      };
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(summaryAfterRecoverNextStatusWatch.recovery.recoverNext.attempts.total, 1);
+  assert.equal(summaryAfterRecoverNextStatusWatch.recovery.recoverNext.attempts.dryRun, 0);
+  assert.equal(summaryAfterRecoverNextStatusWatch.recovery.recoverNext.attempts.executed, 1);
+  assert.equal(summaryAfterRecoverNextStatusWatch.recovery.recoverNext.attempts.failed, 0);
+  const recoverNextStatusWatchSummary = summaryAfterRecoverNextStatusWatch.recovery.recoverNext.recent[0];
+  assert.equal(recoverNextStatusWatchSummary?.advanceId, recoverNextStatusWatch.advanceId);
+  assert.equal(recoverNextStatusWatchSummary?.detailCommand, "recover_next");
+  assert.equal(recoverNextStatusWatchSummary?.dryRun, false);
+  assert.equal(recoverNextStatusWatchSummary?.selectedKind, "control_plane_action");
+  assert.equal(recoverNextStatusWatchSummary?.selectedSurface, "status_watch");
+  assert.equal(recoverNextStatusWatchSummary?.selectedAction, "inspect_failed_status_watch_execution");
+  assert.equal(recoverNextStatusWatchSummary?.selectedReason, "failed_status_watch_execution");
+  assert.deepEqual(recoverNextStatusWatchSummary?.selectedCommand, recoverNextStatusWatch.command);
+  assert.deepEqual(recoverNextStatusWatchSummary?.executedCommand, recoverNextStatusWatch.command);
+  assert.equal(recoverNextStatusWatchSummary?.executedExitCode, 0);
+  const summaryTextAfterRecoverNextStatusWatch = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(summaryTextAfterRecoverNextStatusWatch, /selected: control_plane_action status_watch inspect_failed_status_watch_execution/);
+  assert.match(summaryTextAfterRecoverNextStatusWatch, /reason: failed_status_watch_execution/);
+  assert.match(summaryTextAfterRecoverNextStatusWatch, /executed_exit_code: 0/);
+  const acknowledgeStatusWatch = await cliJson<{
+    dryRun: boolean;
+    detailCommand: string;
+    selected: { surface: string; action: string; advanceId: string } | null;
+    executed: { exitCode: number | null; output: { acknowledgedAdvanceId: string | null } } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert-execute",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+    "--reason",
+    "failed_status_watch_execution",
+    "--action",
+    "inspect_status_watch_execution",
+    "--detail-command",
+    "acknowledge_status_watch_execution",
+    "--confirm",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(acknowledgeStatusWatch.dryRun, false);
+  assert.equal(acknowledgeStatusWatch.detailCommand, "acknowledge_status_watch_execution");
+  assert.equal(acknowledgeStatusWatch.selected?.surface, "status_watch");
+  assert.equal(acknowledgeStatusWatch.selected?.action, "acknowledge_status_watch_execution");
+  assert.equal(acknowledgeStatusWatch.selected?.advanceId, failedStatusWatch.record.advanceId);
+  assert.equal(acknowledgeStatusWatch.executed?.exitCode, 0);
+  assert.equal(acknowledgeStatusWatch.executed?.output.acknowledgedAdvanceId, failedStatusWatch.record.advanceId);
+  const statusWatchAlertsAfterAck = await cliJson<{
+    summary: { total: number; errors: number };
+    alerts: Array<{ surface: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--surface",
+    "status_watch",
+  ]);
+  assert.equal(statusWatchAlertsAfterAck.summary.total, 0);
+  assert.equal(statusWatchAlertsAfterAck.summary.errors, 0);
+  assert.equal(statusWatchAlertsAfterAck.alerts.length, 0);
+  const summaryAfterStatusWatchAck = await cliJson<{
+    nextRecovery: { surface: string } | null;
+    nextActions: Array<{ surface: string }>;
+    recovery: { statusWatchExecutions: { attempts: { failed: number }; failedRecent: Array<{ advanceId: string }>; acknowledgements: { attempts: { total: number; executed: number; failed: number } } } };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.attempts.failed, 1);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.failedRecent.length, 0);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.acknowledgements.attempts.total, 1);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.acknowledgements.attempts.executed, 1);
+  assert.equal(summaryAfterStatusWatchAck.recovery.statusWatchExecutions.acknowledgements.attempts.failed, 0);
+  assert.notEqual(summaryAfterStatusWatchAck.nextRecovery?.surface, "status_watch");
+  assert.ok(!summaryAfterStatusWatchAck.nextActions.some((action) => action.surface === "status_watch"));
+  const nextSteps = await cliJson<{ count: number; nextSteps: Array<{ command: string[]; commands: { retireControlPlaneAdvanceWorker: string[] } }> }>(baseUrl, [
+    "runs",
+    "session-control-plane-topology-workers-next",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+  ]);
+  assert.equal(nextSteps.count, 1);
+  assert.equal(nextSteps.nextSteps[0]?.command.join(" "), `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`);
+  assert.equal(nextSteps.nextSteps[0]?.commands.retireControlPlaneAdvanceWorker.join(" "), `npm run cli -- runs stop-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId} --retire`);
+
+  const aggregateAfterStop = await cliJson<{
+    summary: { topology: { stopped: number; restartable: number } };
+    nextSteps: Array<{ kind: string; workerId: string | null; command: string[] }>;
+    commands: { restartNext: string[] | null };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(aggregateAfterStop.summary.topology.stopped, 1);
+  assert.equal(aggregateAfterStop.summary.topology.restartable, 1);
+  assert.ok(aggregateAfterStop.nextSteps.some((step) => (
+    step.kind === "control_plane_topology"
+    && step.workerId === workerId
+    && step.command.join(" ") === `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`
+  )));
+  assert.equal(
+    aggregateAfterStop.commands.restartNext?.join(" "),
+    `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`,
+  );
+  const aggregateTextAfterStop = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateTextAfterStop, /topology: total=1 alive=0 stopped=1 completed=0 retired=0 exited_unrecorded=0 restartable=1 command_drift=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
+  assert.match(aggregateTextAfterStop, new RegExp(`restart_next: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
+  assert.match(aggregateTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
+  const branchNativeAfterStop = await cliJson<{
+    counts: { workerRecovery: number; latestWorkerResults: number };
+    workers: {
+      controlPlaneAdvance: {
+        latestResults: Array<{ workerId: string; mode: string; latestResultSource: string; lifecycle: { state: string } }>;
+        modes: { topology_loop: { total: number; alive: number; stopped: number; retired: number; completed: number } };
+      };
+    };
+    workerActions: Array<{ surface: string; action: string; workerId: string | null; command: string[] }>;
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(branchNativeAfterStop.counts.workerRecovery, 1);
+  assert.ok(branchNativeAfterStop.counts.latestWorkerResults >= 1);
+  assert.equal(branchNativeAfterStop.workers.controlPlaneAdvance.modes.topology_loop.total, 1);
+  assert.equal(branchNativeAfterStop.workers.controlPlaneAdvance.modes.topology_loop.stopped, 1);
+  assert.equal(branchNativeAfterStop.workers.controlPlaneAdvance.modes.topology_loop.completed, 0);
+  assert.ok(branchNativeAfterStop.workers.controlPlaneAdvance.latestResults.some((result) => (
+    result.workerId === workerId
+    && result.mode === "topology_loop"
+    && result.latestResultSource === "recorded"
+    && result.lifecycle.state === "stopped"
+  )));
+  assert.ok(branchNativeAfterStop.workerActions.some((action) => (
+    action.surface === "worker_recovery"
+    && action.workerId === workerId
+    && action.command.join(" ") === `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-workers ${sessionName} --server --include-retired --lines 5`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5`
+  )));
+  assert.ok(branchNativeAfterStop.commands.some((command) => (
+    command.command.join(" ") === `npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${workerId} --kind control-plane-topology --limit 5`
+  )));
+  const controlPlaneStatusAfterStop = await cliJson<{
+    branchNativeNext: { surface: string; action: string; reason: string; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(controlPlaneStatusAfterStop.branchNativeNext.surface, "worker_recovery");
+  assert.equal(controlPlaneStatusAfterStop.branchNativeNext.action, "restart_control_plane_advance_worker");
+  assert.equal(controlPlaneStatusAfterStop.branchNativeNext.reason, "stopped_control_plane_advance_worker");
+  assert.equal(
+    controlPlaneStatusAfterStop.branchNativeNext.command.join(" "),
+    `npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`,
+  );
+  const branchNativeTextAfterStop = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeTextAfterStop, /worker_recovery: 1/);
+  assert.match(branchNativeTextAfterStop, /control_plane_workers:/);
+  assert.match(branchNativeTextAfterStop, new RegExp(`restart_queue: npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5`));
+  assert.match(branchNativeTextAfterStop, /operator_control:/);
+  assert.match(branchNativeTextAfterStop, new RegExp(`branch_native_operate_dry_run: npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --dry-run --max-cycles 1 --cycle-interval-ms 2000`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`branch_native_operate_confirm: npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --confirm --max-cycles 1 --cycle-interval-ms 2000`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`branch_native_operate_until_empty_confirm: npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --confirm --max-cycles 1 --cycle-interval-ms 2000 --until-empty --max-steps 10 --interval-ms 2000`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`operate_dry_run: npm run cli -- runs session-control-plane-operate ${sessionName} --server --dry-run --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`operate_until_empty_confirm: npm run cli -- runs session-control-plane-operate ${sessionName} --server --confirm --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers --until-empty --max-steps 10 --interval-ms 2000`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`ensure_worker_confirm: npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --confirm --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`ensure_worker_until_empty_confirm: npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --confirm --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers --until-empty --max-steps 10 --interval-ms 2000`));
+  assert.match(branchNativeTextAfterStop, /worker_health:/);
+  assert.match(branchNativeTextAfterStop, /topology_loop: total=1 alive=0 stopped=1 retired=0 completed=0/);
+  assert.match(branchNativeTextAfterStop, /control_plane_worker_progress:/);
+  assert.match(branchNativeTextAfterStop, new RegExp(`worker: ${workerId}`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`command: npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}`));
+  const branchNativeOperatorCommands = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "operator",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --dry-run --max-cycles 1 --cycle-interval-ms 2000$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --confirm --max-cycles 1 --cycle-interval-ms 2000$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --dry-run --max-cycles 1 --cycle-interval-ms 2000 --until-empty --max-steps 10 --interval-ms 2000$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-control-plane-operate ${sessionName} --server --dry-run --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-control-plane-operate ${sessionName} --server --confirm --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-control-plane-operate ${sessionName} --server --dry-run --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers --until-empty --max-steps 10 --interval-ms 2000$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --dry-run --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --confirm --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --dry-run --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers --until-empty --max-steps 10 --interval-ms 2000$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-control-plane-operator-runs ${sessionName} --server$`, "m"));
+  assert.doesNotMatch(branchNativeOperatorCommands, /restart-control-plane-topology-worker/);
+  const branchNativeOperatorDryRun = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    operator: { dryRun: boolean; confirmed: boolean; stoppedReason: string; cycles: Array<{ status: string; action: { surface: string; action: string } | null }>; operatorRunRecord: { status: string } };
+    after: null;
+    afterNext: null;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+  ]);
+  assert.equal(branchNativeOperatorDryRun.dryRun, true);
+  assert.equal(branchNativeOperatorDryRun.confirmed, false);
+  assert.equal(branchNativeOperatorDryRun.selectedAction, "operate");
+  assert.equal(branchNativeOperatorDryRun.operator.dryRun, true);
+  assert.equal(branchNativeOperatorDryRun.operator.confirmed, false);
+  assert.equal(branchNativeOperatorDryRun.operator.operatorRunRecord.status, "dry_run");
+  assert.equal(branchNativeOperatorDryRun.operator.cycles[0]?.action?.surface, "worker_recovery");
+  assert.equal(branchNativeOperatorDryRun.operator.cycles[0]?.action?.action, "reconcile_control_plane_workers");
+  assert.equal(branchNativeOperatorDryRun.after, null);
+  assert.equal(branchNativeOperatorDryRun.afterNext, null);
+  const branchNativeOperatorDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeOperatorDryRunText, /branch_native_next_operator_execution:/);
+  assert.match(branchNativeOperatorDryRunText, /action: operate/);
+  assert.match(branchNativeOperatorDryRunText, /operator_status: dry_run/);
+  assert.match(branchNativeOperatorDryRunText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
+  const branchNativeOperatorLoopDryRun = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    loopAdvanceId: string;
+    advanceId: string;
+    resumed: boolean;
+    resumedLoopAdvanceId: string | null;
+    previousSteps: number;
+    totalSteps: number;
+    stoppedReason: string;
+    executedSteps: number;
+    steps: Array<{ operatorStatus: string; operatorStoppedReason: string; cycles: number; afterNext: null }>;
+    after: null;
+    afterNext: null;
+    loopCommands: { inspectLoopRecord: string[]; inspectLoopHistory: string[]; listOperatorLoops: string[]; resumeLoop: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--until-empty",
+    "--dry-run",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "0",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+  ]);
+  assert.equal(branchNativeOperatorLoopDryRun.dryRun, true);
+  assert.equal(branchNativeOperatorLoopDryRun.confirmed, false);
+  assert.equal(branchNativeOperatorLoopDryRun.selectedAction, "operate_until_empty");
+  assert.match(branchNativeOperatorLoopDryRun.loopAdvanceId, /^branch-native-operator-loop-/);
+  assert.equal(branchNativeOperatorLoopDryRun.advanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(branchNativeOperatorLoopDryRun.resumed, false);
+  assert.equal(branchNativeOperatorLoopDryRun.resumedLoopAdvanceId, null);
+  assert.equal(branchNativeOperatorLoopDryRun.previousSteps, 0);
+  assert.equal(branchNativeOperatorLoopDryRun.totalSteps, 1);
+  assert.equal(branchNativeOperatorLoopDryRun.stoppedReason, "dry_run");
+  assert.equal(branchNativeOperatorLoopDryRun.executedSteps, 1);
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.operatorStatus, "dry_run");
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.operatorStoppedReason, "max_cycles");
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.cycles, 1);
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.afterNext, null);
+  assert.equal(branchNativeOperatorLoopDryRun.after, null);
+  assert.equal(branchNativeOperatorLoopDryRun.afterNext, null);
+  assert.ok(branchNativeOperatorLoopDryRun.loopCommands.inspectLoopRecord.includes(branchNativeOperatorLoopDryRun.advanceId));
+  assert.ok(branchNativeOperatorLoopDryRun.loopCommands.inspectLoopHistory.includes(branchNativeOperatorLoopDryRun.loopAdvanceId));
+  assert.ok(branchNativeOperatorLoopDryRun.loopCommands.resumeLoop.includes(branchNativeOperatorLoopDryRun.loopAdvanceId));
+  const branchNativeOperatorLoopHistory = await cliJson<{
+    filter: { loopAdvanceIds: string[]; detailCommands: string[] };
+    advances: Array<{
+      advanceId: string;
+      dryRun: boolean;
+      detailCommand: string;
+      selected: { surface: string; action: string; loopAdvanceId: string; count: number };
+      recovery: { stoppedReason: string; steps: unknown[] };
+      executed: null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    branchNativeOperatorLoopDryRun.loopAdvanceId,
+    "--detail-command",
+    "branch_native_operator_loop",
+  ]);
+  assert.deepEqual(branchNativeOperatorLoopHistory.filter.loopAdvanceIds, [branchNativeOperatorLoopDryRun.loopAdvanceId]);
+  assert.deepEqual(branchNativeOperatorLoopHistory.filter.detailCommands, ["branch_native_operator_loop"]);
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.advanceId, branchNativeOperatorLoopDryRun.advanceId);
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.dryRun, true);
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.detailCommand, "branch_native_operator_loop");
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.selected.surface, "operator");
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.selected.action, "branch_native_operate_until_empty");
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.selected.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.selected.count, 1);
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.recovery.stoppedReason, "dry_run");
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.recovery.steps.length, 1);
+  assert.equal(branchNativeOperatorLoopHistory.advances[0]?.executed, null);
+  const branchNativeOperatorLoopResumeDryRun = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    loopAdvanceId: string;
+    advanceId: string;
+    resumed: boolean;
+    resumedLoopAdvanceId: string | null;
+    resumeSourceAdvanceId: string | null;
+    previousSteps: number;
+    totalSteps: number;
+    maxSteps: number;
+    intervalMs: number;
+    maxCycles: number;
+    cycleIntervalMs: number;
+    stoppedReason: string;
+    executedSteps: number;
+    steps: Array<{ operatorStatus: string; operatorStoppedReason: string; cycles: number; afterNext: null }>;
+    loopCommands: { resumeLoop: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--until-empty",
+    "--resume-loop",
+    branchNativeOperatorLoopDryRun.loopAdvanceId,
+    "--dry-run",
+  ]);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.dryRun, true);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.confirmed, false);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.selectedAction, "operate_until_empty");
+  assert.equal(branchNativeOperatorLoopResumeDryRun.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.match(branchNativeOperatorLoopResumeDryRun.advanceId, /^branch-native-operator-loop-resume-/);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.resumed, true);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.resumedLoopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.resumeSourceAdvanceId, branchNativeOperatorLoopDryRun.advanceId);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.previousSteps, 1);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.totalSteps, 2);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.maxSteps, 2);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.intervalMs, 0);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.maxCycles, 1);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.cycleIntervalMs, 0);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.stoppedReason, "dry_run");
+  assert.equal(branchNativeOperatorLoopResumeDryRun.executedSteps, 1);
+  assert.equal(branchNativeOperatorLoopResumeDryRun.steps[0]?.operatorStatus, "dry_run");
+  assert.ok(branchNativeOperatorLoopResumeDryRun.loopCommands.resumeLoop.includes(branchNativeOperatorLoopDryRun.loopAdvanceId));
+  const branchNativeOperatorLoopHistoryAfterResume = await cliJson<{
+    advances: Array<{ advanceId: string; recovery: { resumed: boolean; resumedLoopAdvanceId: string | null; previousSteps: number; totalSteps: number } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-advances",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    branchNativeOperatorLoopDryRun.loopAdvanceId,
+    "--detail-command",
+    "branch_native_operator_loop",
+  ]);
+  assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances.length, 2);
+  assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.advanceId, branchNativeOperatorLoopResumeDryRun.advanceId);
+  assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.recovery.resumed, true);
+  assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.recovery.resumedLoopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.recovery.previousSteps, 1);
+  assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.recovery.totalSteps, 2);
+  const operatorLoopStatusSummary = await cliJson<{
+    recovery: {
+      operatorLoops: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number };
+        resumableLoops: {
+          count: number;
+          recent: Array<{
+            loopAdvanceId: string;
+            latestAdvanceId: string;
+            attempts: number;
+            totalSteps: number;
+            stoppedReason: string | null;
+            resumeCommand: string[];
+            inspectLatestCommand: string[];
+            inspectHistoryCommand: string[];
+            executeResumeCommand: string[];
+          }>;
+        };
+      };
+    };
+    commands: {
+      operatorLoops: string[];
+      operatorLoopNextInspect: string[] | null;
+      operatorLoopNextResume: string[] | null;
+    };
+    nextActions: Array<{ surface: string; action: string; loopAdvanceId?: string; command: string[] }>;
+    nextRecovery: { surface?: string; action: string; command: string[]; dryRunCommand: string[] } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.total, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.dryRun, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.executed, 0);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.failed, 0);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.count, 1);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.latestAdvanceId, branchNativeOperatorLoopResumeDryRun.advanceId);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.attempts, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.totalSteps, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.stoppedReason, "dry_run");
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand.includes("--resume-loop"));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand.includes(branchNativeOperatorLoopDryRun.loopAdvanceId));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.inspectLatestCommand.includes(branchNativeOperatorLoopResumeDryRun.advanceId));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.inspectHistoryCommand.includes("branch_native_operator_loop"));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.executeResumeCommand.includes("--confirm"));
+  assert.equal(operatorLoopStatusSummary.commands.operatorLoops.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --detail-command branch_native_operator_loop`);
+  assert.deepEqual(operatorLoopStatusSummary.commands.operatorLoopNextInspect, operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.inspectLatestCommand);
+  assert.deepEqual(operatorLoopStatusSummary.commands.operatorLoopNextResume, operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand);
+  assert.equal(operatorLoopStatusSummary.nextActions[0]?.surface, "operator");
+  assert.equal(operatorLoopStatusSummary.nextActions[0]?.action, "resume_branch_native_operator_loop");
+  assert.equal(operatorLoopStatusSummary.nextActions[0]?.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(operatorLoopStatusSummary.nextRecovery?.surface, "operator");
+  assert.equal(operatorLoopStatusSummary.nextRecovery?.action, "resume_branch_native_operator_loop");
+  assert.ok(operatorLoopStatusSummary.nextRecovery?.command.includes("--confirm"));
+  assert.ok(operatorLoopStatusSummary.nextRecovery?.dryRunCommand.includes("--dry-run"));
+  const operatorLoopStatusSummaryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(operatorLoopStatusSummaryText, /operator_loops: total=2 dry_run=2 executed=0 failed=0 resumable=1/);
+  assert.match(operatorLoopStatusSummaryText, /operator_loop_queue: npm run cli -- runs session-control-plane-advances/);
+  assert.match(operatorLoopStatusSummaryText, /operator_loop_next_resume: npm run cli -- runs session-branch-native-next/);
+  assert.match(operatorLoopStatusSummaryText, /resumable_operator_loops:/);
+  const operatorLoopBranchNativeNext = await cliJson<{
+    counts: { operatorLoops: number };
+    operatorLoops: Array<{ loopAdvanceId: string; latestAdvanceId: string; totalSteps: number; resumeCommand: string[] }>;
+    commands: Array<{ surfaces: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(operatorLoopBranchNativeNext.counts.operatorLoops, 1);
+  assert.equal(operatorLoopBranchNativeNext.operatorLoops[0]?.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(operatorLoopBranchNativeNext.operatorLoops[0]?.latestAdvanceId, branchNativeOperatorLoopResumeDryRun.advanceId);
+  assert.equal(operatorLoopBranchNativeNext.operatorLoops[0]?.totalSteps, 2);
+  assert.ok(operatorLoopBranchNativeNext.operatorLoops[0]?.resumeCommand.includes("--resume-loop"));
+  assert.ok(operatorLoopBranchNativeNext.commands.some((command) => (
+    command.surfaces.includes("operator")
+    && command.command.includes("--resume-loop")
+    && command.command.includes(branchNativeOperatorLoopDryRun.loopAdvanceId)
+  )));
+  const branchNativeOperatorLoopDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--until-empty",
+    "--dry-run",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "0",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeOperatorLoopDryRunText, /branch_native_next_operator_loop:/);
+  assert.match(branchNativeOperatorLoopDryRunText, /action: operate_until_empty/);
+  assert.match(branchNativeOperatorLoopDryRunText, /loop: branch-native-operator-loop-/);
+  assert.match(branchNativeOperatorLoopDryRunText, /stopped_reason: dry_run/);
+  assert.match(branchNativeOperatorLoopDryRunText, /operator_status: dry_run/);
+  assert.match(branchNativeOperatorLoopDryRunText, /inspect_loop: npm run cli -- runs session-control-plane-advances/);
+  assert.match(branchNativeOperatorLoopDryRunText, /inspect_history: npm run cli -- runs session-control-plane-advances/);
+  assert.match(branchNativeOperatorLoopDryRunText, /resume_loop: npm run cli -- runs session-branch-native-next/);
+  const branchNativeWorkerCommands = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs session-control-plane-workers ${sessionName} --server --include-retired --lines 5$`, "m"));
+  assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5$`, "m"));
+  assert.match(branchNativeWorkerCommands, new RegExp(`^npm run cli -- runs restart-control-plane-topology-worker ${sessionName} --server --worker-id ${workerId}$`, "m"));
+  assert.doesNotMatch(branchNativeWorkerCommands, /session-branch-native-next .*--recover-next/);
+
+  const branchNativeOperatorConfirm = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    operator: { dryRun: boolean; confirmed: boolean; operatorRunRecord: { status: string } };
+    after: { counts: { workerRecovery: number; resultPending: number } } | null;
+    afterNext: { surface: string; action: string; reason: string; command: string[] } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--confirm",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+  ]);
+  assert.equal(branchNativeOperatorConfirm.dryRun, false);
+  assert.equal(branchNativeOperatorConfirm.confirmed, true);
+  assert.equal(branchNativeOperatorConfirm.selectedAction, "operate");
+  assert.equal(branchNativeOperatorConfirm.operator.dryRun, false);
+  assert.equal(branchNativeOperatorConfirm.operator.confirmed, true);
+  assert.equal(branchNativeOperatorConfirm.operator.operatorRunRecord.status, "executed");
+  assert.ok(branchNativeOperatorConfirm.after);
+  assert.ok(branchNativeOperatorConfirm.afterNext);
+  assert.ok(branchNativeOperatorConfirm.afterNext.command.length > 0);
+  const branchNativeOperatorConfirmText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--confirm",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeOperatorConfirmText, /branch_native_next_operator_execution:/);
+  assert.match(branchNativeOperatorConfirmText, /confirmed: true/);
+  assert.match(branchNativeOperatorConfirmText, /after_next_surface: /);
+  assert.match(branchNativeOperatorConfirmText, /after_next_command: npm run cli -- runs/);
+
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    workerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
+
+  const liveWorkerId = "status-topology-live-worker";
+  await cliJson(baseUrl, [
+    "runs",
+    "start-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--dry-run",
+    "--max-iterations",
+    "2",
+    "--loop-interval-ms",
+    "5000",
+    "--lines",
+    "1",
+  ]);
+  const liveTopologyWorker = await waitForTopologyWorkerResult(baseUrl, liveWorkerId, { iterations: 1, alive: true, state: "running" });
+  assert.equal(liveTopologyWorker.alive, true);
+  assert.equal(liveTopologyWorker.latestResult?.iterations, 1);
+  assert.equal(liveTopologyWorker.latestResult?.stoppedReason, "running");
+  assert.equal(liveTopologyWorker.latestResultSource, "stdout");
+  assert.equal(liveTopologyWorker.latestProgress?.iterations, 1);
+  assert.equal(liveTopologyWorker.recentProgress.length, 1);
+  const liveStatusText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(liveStatusText, new RegExp(`worker: ${liveWorkerId}`));
+  assert.match(liveStatusText, /source: stdout/);
+  assert.match(liveStatusText, /stopped_reason: running/);
+  assert.match(liveStatusText, new RegExp(`inspect: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --worker-id ${liveWorkerId} --kind control-plane-topology --limit 5`));
+  const liveWorkerRecord = await readTopologyWorkerRecord(liveWorkerId);
+  assert.equal(liveWorkerRecord.latestResult, null);
+  assert.equal(liveWorkerRecord.recentProgress?.length, 1);
+  assert.equal(liveWorkerRecord.recentProgress?.[0]?.iterations, 1);
+  const liveAggregate = await cliJson<{
+    summary: { topology: { latestResults: { count: number; recorded: number; progress: number; recentProgress: number; iterations: number } } };
+    workers: Array<{ kind: string; workerId: string | null; latestResultSource?: string; latestProgress?: { iterations?: number } | null; recentProgress?: Array<{ iterations?: number }> }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--lines",
+    "1",
+  ]);
+  assert.ok(liveAggregate.summary.topology.latestResults.count >= 1);
+  assert.ok(liveAggregate.summary.topology.latestResults.recentProgress >= 1);
+  assert.ok(liveAggregate.summary.topology.latestResults.iterations >= 1);
+  const liveAggregateWorker = liveAggregate.workers.find((worker) => worker.workerId === liveWorkerId);
+  assert.ok(liveAggregateWorker?.latestResultSource === "stdout" || liveAggregateWorker?.latestResultSource === "recorded");
+  assert.equal(liveAggregateWorker?.recentProgress?.[0]?.iterations, 1);
+  const liveProgress = await cliJson<{
+    count: number;
+    progress: Array<{ kind: string; workerId: string | null; state: string | null; source: string | null; iterations?: number; stoppedReason?: string }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--kind",
+    "topology",
+    "--limit",
+    "5",
+  ]);
+  assert.ok(liveProgress.count >= 1);
+  const liveProgressRow = liveProgress.progress.find((progress) => progress.workerId === liveWorkerId);
+  assert.equal(liveProgressRow?.kind, "control_plane_topology");
+  assert.ok(liveProgressRow?.state === "running" || liveProgressRow?.state === "completed");
+  assert.ok(liveProgressRow?.source === "stdout" || liveProgressRow?.source === "recorded");
+  assert.ok((liveProgressRow?.iterations ?? 0) >= 1);
+  assert.ok(liveProgressRow?.stoppedReason === "running" || liveProgressRow?.stoppedReason === "completed");
+  const liveProgressText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--kind",
+    "topology",
+    "--limit",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(liveProgressText, new RegExp(`worker=${liveWorkerId} state=(running|completed) source=(stdout|recorded) index=\\d+/\\d+ iterations=\\d+ reason=(running|completed)`));
+  const liveAggregateText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(liveAggregateText, /topology: total=1 alive=\d+ stopped=0 completed=\d+ retired=0 exited_unrecorded=0 restartable=0 command_drift=0 latest_results=count=\d+,recorded=\d+,progress=\d+,recent_progress=\d+,iterations=\d+,core=0,mutation=0/);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-control-plane-topology-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    liveWorkerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
+} finally {
+  await app.close();
+  await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loop-workers", sessionName), { recursive: true, force: true });
+  await fs.rm(tempRoot, { recursive: true, force: true });
+}
+
+console.log("control-plane status topology smoke passed");
+
+async function cliJson<T>(baseUrl: string, args: string[]): Promise<T> {
+  const stdout = await cliText(baseUrl, args);
+  return JSON.parse(stdout) as T;
+}
+
+async function cliText(baseUrl: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("npm", ["run", "--silent", "cli", "--", ...args], {
+    cwd: path.resolve("."),
+    env: { ...process.env, THREADBEAT_BASE_URL: baseUrl },
+    maxBuffer: 1024 * 1024,
+  });
+  return stdout;
+}
+
+async function waitForTopologyWorkerResult(
+  baseUrl: string,
+  workerId: string,
+  options: { iterations?: number; alive?: boolean; state?: string } = {},
+): Promise<{
+  alive: boolean;
+  lifecycle: { state: string };
+  latestResultSource: string;
+  latestProgress: {
+    iterations?: number;
+    stoppedReason?: string;
+    totalCoreExecuted?: number;
+    totalMutationExecuted?: number;
+  } | null;
+  recentProgress: Array<{
+    iterations?: number;
+    stoppedReason?: string;
+    totalCoreExecuted?: number;
+    totalMutationExecuted?: number;
+  }>;
+  latestResult: {
+    iterations?: number;
+    stoppedReason?: string;
+    totalCoreExecuted?: number;
+    totalMutationExecuted?: number;
+  } | null;
+}> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const inspected = await cliJson<{ workers: Array<{ alive: boolean; lifecycle: { state: string }; latestResultSource: string; latestProgress: { iterations?: number; stoppedReason?: string; totalCoreExecuted?: number; totalMutationExecuted?: number } | null; recentProgress: Array<{ iterations?: number; stoppedReason?: string; totalCoreExecuted?: number; totalMutationExecuted?: number }>; latestResult: { iterations?: number; stoppedReason?: string; totalCoreExecuted?: number; totalMutationExecuted?: number } | null }> }>(baseUrl, [
+      "runs",
+      "session-control-plane-topology-workers",
+      sessionName,
+      "--server",
+      "--worker-id",
+      workerId,
+      "--include-retired",
+      "--lines",
+      "1",
+    ]);
+    const worker = inspected.workers[0];
+    if (
+      worker?.latestResult
+      && (options.iterations === undefined || worker.latestResult.iterations === options.iterations)
+      && (options.alive === undefined || worker.alive === options.alive)
+      && (options.state === undefined || worker.lifecycle.state === options.state)
+    ) {
+      return worker;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`topology worker ${workerId} did not record latestResult`);
+}
+
+async function waitForBundleRecoveryWorkerResult(
+  baseUrl: string,
+  workerId: string,
+  options: { alive?: boolean; state?: string } = {},
+): Promise<{
+  alive: boolean;
+  lifecycle: { state: string };
+  latestResultSource: string;
+  latestResult: {
+    profileCount?: number;
+    planned?: number;
+    actionable?: number;
+    blocked?: number;
+    executed?: number;
+    polls?: number;
+  } | null;
+}> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const inspected = await cliJson<{ workers: Array<{ alive: boolean; lifecycle: { state: string }; latestResultSource: string; latestResult: { profileCount?: number; planned?: number; actionable?: number; blocked?: number; executed?: number; polls?: number } | null }> }>(baseUrl, [
+      "runs",
+      "session-control-plane-worker-bundle-recovery-workers",
+      sessionName,
+      "--server",
+      "--worker-id",
+      workerId,
+      "--include-retired",
+      "--lines",
+      "1",
+    ]);
+    const worker = inspected.workers[0];
+    if (
+      worker?.latestResult
+      && (options.alive === undefined || worker.alive === options.alive)
+      && (options.state === undefined || worker.lifecycle.state === options.state)
+    ) {
+      return worker;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`bundle recovery worker ${workerId} did not record latestResult`);
+}
+
+async function readTopologyWorkerRecord(workerId: string): Promise<{
+  latestResult?: unknown;
+  recentProgress?: Array<{ iterations?: number; stoppedReason?: string }>;
+}> {
+  const text = await fs.readFile(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName, `${workerId}.json`), "utf8");
+  return JSON.parse(text) as {
+    latestResult?: unknown;
+    recentProgress?: Array<{ iterations?: number; stoppedReason?: string }>;
+  };
+}
+
+async function writeWorkerSessionRecord(): Promise<void> {
+  const sessionDir = path.join(".threadbeat", "worker-sessions");
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(path.join(sessionDir, `${sessionName}.json`), `${JSON.stringify({
+    session: sessionName,
+    baseUrl: "http://127.0.0.1:0",
+    startedAt: "2026-05-14T00:00:00.000Z",
+    command: ["runs", "work", "--agent", "agt_status_topology"],
+    workers: [],
+    stoppedAt: "2026-05-14T00:00:01.000Z",
+  }, null, 2)}\n`);
+}
