@@ -7481,6 +7481,54 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(queue);
     return;
   }
+  if (subcommandName === "session-control-plane-worker-terminals") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-worker-terminals requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-worker-terminals --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-worker-terminals --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-worker-terminals --format text cannot be combined with --commands-only");
+    }
+    const status = parseControlPlaneWorkerTerminalStatus(options.status ?? "restartable");
+    const kind = options.kind ? parseControlPlaneWorkerKind(options.kind) : null;
+    const requiredSessionName = required(sessionName, "runs session-control-plane-worker-terminals <session> --server");
+    const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+    const aggregate = await fetchWorkerSessionControlPlaneWorkers(
+      requiredSessionName,
+      {
+        workerId: options["worker-id"],
+        includeRetired: options["include-retired"] === "1",
+        lines,
+      },
+    );
+    const terminals = workerSessionControlPlaneWorkerTerminals(aggregate, {
+      kind,
+      status,
+      limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
+    });
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(terminals.commands.queue);
+      } else {
+        await printJson({ ...terminals, commands: terminals.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printWorkerSessionControlPlaneWorkerTerminalsText(terminals);
+      return;
+    }
+    await printJson(terminals);
+    return;
+  }
   if (subcommandName === "session-control-plane-worker-progress") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -16424,7 +16472,9 @@ function workerSessionBranchNativeNext(
     { surfaces: ["worker_recovery"], command: summary.commands.inspectControlPlaneWorkers },
     { surfaces: ["worker_recovery"], command: summary.commands.inspectControlPlaneWorkerProgress },
     { surfaces: ["worker_recovery"], command: summary.commands.workerReconciliations },
+    { surfaces: ["worker_recovery"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-terminals", summary.session, "--server"] },
     ...(summary.recovery.count > 0 ? [{ surfaces: ["worker_recovery"] as const, command: summary.commands.workerRestartQueue }] : []),
+    ...(summary.recovery.count > 0 ? [{ surfaces: ["worker_recovery"] as const, command: ["npm", "run", "cli", "--", "runs", "session-control-plane-worker-terminals", summary.session, "--server", "--status", "restartable", "--include-retired"] }] : []),
     ...workerActions.map((action): WorkerSessionBranchNativeCommandQueueItem => ({ surfaces: ["worker_recovery"], command: action.command })),
     ...latestWorkerResults.map((result): WorkerSessionBranchNativeCommandQueueItem => ({
       surfaces: ["worker_recovery"],
@@ -19190,6 +19240,53 @@ type WorkerSessionControlPlaneWorkerRestartQueueResponse = {
   };
 };
 
+type ControlPlaneWorkerTerminalStatus = "restartable" | "stopped" | "all";
+
+type WorkerSessionControlPlaneWorkerTerminalsResponse = {
+  ok: true;
+  session: string;
+  filter: WorkerSessionControlPlaneWorkersResponse["filter"] & {
+    kind: ControlPlaneWorkerKind | null;
+    status: ControlPlaneWorkerTerminalStatus;
+    limit: number;
+  };
+  count: number;
+  summary: ControlPlaneWorkerSummary;
+  workers: Array<{
+    kind: ControlPlaneWorkerKind;
+    workerId: string | null;
+    alive: boolean;
+    state: string | null;
+    restartable: boolean;
+    reason: string | null;
+    action: string | null;
+    actionReason: string | null;
+    command: string[];
+    commands: {
+      inspect: string[];
+      restart: string[];
+      stop: string[];
+      retire: string[];
+    };
+  }>;
+  commands: {
+    inspectWorkers: string[];
+    inspectProgress: string[];
+    restartQueue: string[];
+    reconcileDryRun: string[];
+    reconcileConfirm: string[];
+    reconcileUntilEmptyConfirm: string[];
+    queue: Array<{
+      scope: "control_plane_worker_terminal";
+      action: "inspect_worker" | "restart_worker" | "retire_worker";
+      kind: ControlPlaneWorkerKind;
+      workerId: string | null;
+      reason: string | null;
+      command: string[];
+    }>;
+  };
+};
+
 async function fetchWorkerSessionControlPlaneWorkers(
   sessionName: string,
   options: { workerId?: string; includeRetired: boolean; lines: number },
@@ -19420,6 +19517,113 @@ function workerSessionControlPlaneWorkerRestartQueue(
   };
 }
 
+function workerSessionControlPlaneWorkerTerminals(
+  response: WorkerSessionControlPlaneWorkersResponse,
+  options: { kind: ControlPlaneWorkerKind | null; status: ControlPlaneWorkerTerminalStatus; limit: number },
+): WorkerSessionControlPlaneWorkerTerminalsResponse {
+  const nextSteps = new Map(response.nextSteps.map((step) => [`${step.kind}\0${step.workerId ?? ""}`, step]));
+  const filteredWorkers = response.workers
+    .filter((worker) => !options.kind || worker.kind === options.kind)
+    .filter((worker) => {
+      if (options.status === "all") return true;
+      if (options.status === "restartable") return worker.restartable;
+      return worker.state === "stopped" || worker.state === "exited_unrecorded";
+    })
+    .slice(0, options.limit);
+  const workers = filteredWorkers.map((worker) => {
+    const nextStep = nextSteps.get(`${worker.kind}\0${worker.workerId ?? ""}`);
+    const restart = nextStep?.command.length ? nextStep.command : worker.commands?.restart ?? [];
+    return {
+      kind: worker.kind,
+      workerId: worker.workerId,
+      alive: worker.alive,
+      state: worker.state,
+      restartable: worker.restartable,
+      reason: worker.reason,
+      action: nextStep?.action ?? null,
+      actionReason: nextStep?.reason ?? null,
+      command: restart,
+      commands: {
+        inspect: worker.commands?.inspect ?? [],
+        restart,
+        stop: worker.commands?.stop ?? [],
+        retire: worker.commands?.retire ?? [],
+      },
+    };
+  });
+  return {
+    ok: true,
+    session: response.session,
+    filter: {
+      ...response.filter,
+      kind: options.kind,
+      status: options.status,
+      limit: options.limit,
+    },
+    count: workers.length,
+    summary: summarizeControlPlaneWorkers(filteredWorkers),
+    workers,
+    commands: {
+      inspectWorkers: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-workers", response.session, "--server",
+        ...(response.filter.workerId ? ["--worker-id", response.filter.workerId] : []),
+        ...(response.filter.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(response.filter.lines),
+      ],
+      inspectProgress: response.commands.inspectProgress,
+      restartQueue: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-worker-restart-queue", response.session, "--server",
+        ...(response.filter.workerId ? ["--worker-id", response.filter.workerId] : []),
+        ...(response.filter.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(response.filter.lines),
+      ],
+      reconcileDryRun: response.commands.reconcileDryRun,
+      reconcileConfirm: response.commands.reconcileConfirm,
+      reconcileUntilEmptyConfirm: response.commands.reconcileUntilEmptyConfirm,
+      queue: uniqueWorkerTerminalCommandQueue(workers.flatMap((worker) => [
+        {
+          scope: "control_plane_worker_terminal" as const,
+          action: "inspect_worker" as const,
+          kind: worker.kind,
+          workerId: worker.workerId,
+          reason: worker.reason,
+          command: worker.commands.inspect,
+        },
+        {
+          scope: "control_plane_worker_terminal" as const,
+          action: "restart_worker" as const,
+          kind: worker.kind,
+          workerId: worker.workerId,
+          reason: worker.actionReason ?? worker.reason,
+          command: worker.commands.restart,
+        },
+        {
+          scope: "control_plane_worker_terminal" as const,
+          action: "retire_worker" as const,
+          kind: worker.kind,
+          workerId: worker.workerId,
+          reason: worker.reason,
+          command: worker.commands.retire,
+        },
+      ]).filter((command) => command.command.length > 0)),
+    },
+  };
+}
+
+function uniqueWorkerTerminalCommandQueue(
+  commands: WorkerSessionControlPlaneWorkerTerminalsResponse["commands"]["queue"],
+): WorkerSessionControlPlaneWorkerTerminalsResponse["commands"]["queue"] {
+  const seen = new Set<string>();
+  const unique: WorkerSessionControlPlaneWorkerTerminalsResponse["commands"]["queue"] = [];
+  for (const command of commands) {
+    const key = command.command.join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(command);
+  }
+  return unique;
+}
+
 function emptyControlPlaneWorkerKindCounts(): Record<ControlPlaneWorkerKind, number> {
   return {
     control_plane_advance: 0,
@@ -19431,6 +19635,52 @@ function emptyControlPlaneWorkerKindCounts(): Record<ControlPlaneWorkerKind, num
     apply_action: 0,
     drain: 0,
   };
+}
+
+function printWorkerSessionControlPlaneWorkerTerminalsText(
+  response: WorkerSessionControlPlaneWorkerTerminalsResponse,
+): void {
+  console.log(formatWorkerSessionControlPlaneWorkerTerminalsText(response).join("\n"));
+}
+
+function formatWorkerSessionControlPlaneWorkerTerminalsText(
+  response: WorkerSessionControlPlaneWorkerTerminalsResponse,
+): string[] {
+  const lines = [
+    "control_plane_worker_terminals:",
+    `  session: ${response.session}`,
+    `  filter: worker=${response.filter.workerId ?? "all"} kind=${response.filter.kind ?? "all"} status=${response.filter.status} include_retired=${response.filter.includeRetired} lines=${response.filter.lines} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  summary: ${formatControlPlaneWorkerSummary(response.summary)}`,
+    "  commands:",
+    `    inspect_workers: ${formatShellCommand(response.commands.inspectWorkers)}`,
+    `    inspect_progress: ${formatShellCommand(response.commands.inspectProgress)}`,
+    `    restart_queue: ${formatShellCommand(response.commands.restartQueue)}`,
+    `    reconcile_dry_run: ${formatShellCommand(response.commands.reconcileDryRun)}`,
+    `    reconcile_confirm: ${formatShellCommand(response.commands.reconcileConfirm)}`,
+    `    reconcile_until_empty_confirm: ${formatShellCommand(response.commands.reconcileUntilEmptyConfirm)}`,
+  ];
+  if (response.workers.length === 0) {
+    lines.push("  workers: none");
+    return lines;
+  }
+  lines.push("  workers:");
+  for (const worker of response.workers) {
+    lines.push(
+      `    - kind: ${worker.kind}`,
+      `      worker: ${worker.workerId ?? "<missing>"}`,
+      `      state: ${worker.state ?? "unknown"}`,
+      `      alive: ${worker.alive}`,
+      `      restartable: ${worker.restartable}`,
+      `      reason: ${worker.reason ?? ""}`,
+      `      action: ${worker.action ?? ""}`,
+      `      action_reason: ${worker.actionReason ?? ""}`,
+      `      inspect: ${formatShellCommand(worker.commands.inspect)}`,
+      `      restart: ${formatShellCommand(worker.commands.restart)}`,
+      `      retire: ${formatShellCommand(worker.commands.retire)}`,
+    );
+  }
+  return lines;
 }
 
 function printWorkerSessionControlPlaneWorkerRestartQueueText(
@@ -20113,6 +20363,11 @@ function parseControlPlaneWorkerKind(value: string): ControlPlaneWorkerKind {
   if (value === "apply-action" || value === "apply_action") return "apply_action";
   if (value === "drain") return "drain";
   throw new Error(`Unsupported control-plane worker kind: ${value}`);
+}
+
+function parseControlPlaneWorkerTerminalStatus(value: string): ControlPlaneWorkerTerminalStatus {
+  if (value === "restartable" || value === "stopped" || value === "all") return value;
+  throw new Error(`Unsupported control-plane worker terminal status: ${value}`);
 }
 
 function parseResultReviewWorkerAction(options: Record<string, string>, commandName: string): "reviewed" | "skipped" {
@@ -26378,6 +26633,7 @@ Commands:
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-worker-restart-queue <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--dry-run|--confirm] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--format json|text|shell]
+  runs session-control-plane-worker-terminals <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--status restartable|stopped|all] [--include-retired] [--limit 20] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
   runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
   runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]

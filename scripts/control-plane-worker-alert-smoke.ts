@@ -526,6 +526,84 @@ try {
   ]);
   assert.match(workerRestartQueueShell, new RegExp(`restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
 
+  const workerTerminals = await cliJson<{
+    count: number;
+    summary: { restartable: number; stopped: number };
+    workers: Array<{
+      kind: string;
+      workerId: string | null;
+      restartable: boolean;
+      action: string | null;
+      actionReason: string | null;
+      commands: { inspect: string[]; restart: string[]; retire: string[] };
+    }>;
+    commands: { queue: Array<{ action: string; command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-terminals",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "5",
+  ]);
+  assert.equal(workerTerminals.count, 1);
+  assert.equal(workerTerminals.summary.restartable, 1);
+  assert.equal(workerTerminals.summary.stopped, 1);
+  assert.equal(workerTerminals.workers[0]?.kind, "control_plane_advance");
+  assert.equal(workerTerminals.workers[0]?.workerId, workerId);
+  assert.equal(workerTerminals.workers[0]?.restartable, true);
+  assert.equal(workerTerminals.workers[0]?.action, "restart_control_plane_advance_worker");
+  assert.equal(workerTerminals.workers[0]?.actionReason, "stopped_control_plane_advance_worker");
+  assert.deepEqual(workerTerminals.workers[0]?.commands.restart, workerRestartQueue.workers[0]?.command);
+  assert.ok(workerTerminals.commands.queue.some((command) => command.action === "restart_worker" && command.command.join(" ") === workerRestartQueue.workers[0]?.command.join(" ")));
+  assert.ok(workerTerminals.commands.queue.some((command) => command.action === "inspect_worker" && command.command.includes("session-control-plane-advance-workers")));
+  assert.ok(workerTerminals.commands.queue.some((command) => command.action === "retire_worker" && command.command.includes("--retire")));
+
+  const workerTerminalsText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-terminals",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "5",
+    "--format",
+    "text",
+  ]);
+  assert.match(workerTerminalsText, /control_plane_worker_terminals:/);
+  assert.match(workerTerminalsText, /summary: total=1 alive=0 stopped=1/);
+  assert.match(workerTerminalsText, new RegExp(`worker: ${workerId}`));
+  assert.match(workerTerminalsText, /restart-control-plane-advance-workers/);
+
+  const workerTerminalsShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-worker-terminals",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(workerTerminalsShell, new RegExp(`session-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
+  assert.match(workerTerminalsShell, new RegExp(`restart-control-plane-advance-workers ${sessionName} --server --worker-id ${workerId}`));
+  assert.match(workerTerminalsShell, /--retire/);
+
+  const workerRecoveryBranchNativeShell = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(workerRecoveryBranchNativeShell, /session-control-plane-worker-terminals/);
+  assert.match(workerRecoveryBranchNativeShell, /--status restartable --include-retired/);
+
   const workerRestartQueueDryRun = await cliJson<{
     count: number;
     reconciliation: {
