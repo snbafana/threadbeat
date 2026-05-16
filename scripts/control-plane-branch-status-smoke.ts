@@ -842,6 +842,124 @@ try {
   assert.equal(completedInterruptedLoopHistory.summary.steps, 3);
   assert.deepEqual(completedInterruptedLoopHistory.summary.stoppedReasons, ["dry_run", "empty"]);
 
+  const terminalOverviewOperatorLoopDryRun = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    loopAdvanceId: string;
+    stoppedReason: string;
+    executedSteps: number;
+    loopCommands: { resumeLoop: string[]; inspectLoopHistory: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--dry-run",
+    "--until-empty",
+    "--max-steps",
+    "3",
+    "--interval-ms",
+    "0",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(terminalOverviewOperatorLoopDryRun.dryRun, true);
+  assert.equal(terminalOverviewOperatorLoopDryRun.confirmed, false);
+  assert.equal(terminalOverviewOperatorLoopDryRun.selectedAction, "operate_until_empty");
+  assert.equal(terminalOverviewOperatorLoopDryRun.stoppedReason, "dry_run");
+  assert.equal(terminalOverviewOperatorLoopDryRun.executedSteps, 1);
+  const terminalOverviewOperatorLoopId = terminalOverviewOperatorLoopDryRun.loopAdvanceId;
+  const terminalOverviewOperatorLoopResumeCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --dry-run --until-empty --resume-loop ${terminalOverviewOperatorLoopId} --max-steps 3 --interval-ms 0 --max-cycles 1 --cycle-interval-ms 0 --lines 1`;
+  const terminalOverviewOperatorLoopConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --until-empty --resume-loop ${terminalOverviewOperatorLoopId} --max-steps 3 --interval-ms 0 --max-cycles 1 --cycle-interval-ms 0 --lines 1 --confirm`;
+  const terminalOverviewOperatorLoopResumeDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --until-empty --resume-loop ${terminalOverviewOperatorLoopId} --max-steps 3 --interval-ms 0 --max-cycles 1 --cycle-interval-ms 0 --lines 1 --dry-run`;
+  assert.equal(terminalOverviewOperatorLoopDryRun.loopCommands.resumeLoop.join(" "), terminalOverviewOperatorLoopResumeCommand);
+
+  const operatorTerminalOverviewExecuteDryRun = await cliJson<{
+    executeNext: {
+      dryRun: boolean;
+      confirmed: boolean;
+      supported: boolean;
+      command: string[] | null;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: { command: string[]; exitCode: number | null; output: { dryRun?: boolean; resumed?: boolean; loopAdvanceId?: string; stoppedReason?: string } | null } | null;
+    };
+    executionRecord: { executionId: string; inspectHistory: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "operator",
+    "--execute-next",
+    "--dry-run",
+  ]);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.dryRun, true);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.confirmed, false);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.supported, true);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.selectedAction?.surfaces[0], "operator");
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.selectedAction?.command.join(" "), terminalOverviewOperatorLoopConfirmCommand);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.command?.join(" "), terminalOverviewOperatorLoopResumeDryRunCommand);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.executed?.command.join(" "), terminalOverviewOperatorLoopResumeDryRunCommand);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.executed?.exitCode, 0);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.executed?.output?.dryRun, true);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.executed?.output?.resumed, true);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.executed?.output?.loopAdvanceId, terminalOverviewOperatorLoopId);
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executeNext.executed?.output?.stoppedReason, "dry_run");
+  assert.equal(operatorTerminalOverviewExecuteDryRun.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+
+  const operatorTerminalOverviewExecutionHistory = await cliJson<{
+    summary: { total: number; dryRun: number; supported: number; executed: number; failed: number };
+    records: Array<{
+      executionId: string;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      command: string[] | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "operator",
+  ]);
+  assert.ok(operatorTerminalOverviewExecutionHistory.summary.total >= 1);
+  assert.ok(operatorTerminalOverviewExecutionHistory.summary.dryRun >= 1);
+  assert.ok(operatorTerminalOverviewExecutionHistory.summary.supported >= 1);
+  assert.ok(operatorTerminalOverviewExecutionHistory.summary.executed >= 1);
+  assert.equal(operatorTerminalOverviewExecutionHistory.summary.failed, 0);
+  const operatorExecutionRecord = operatorTerminalOverviewExecutionHistory.records.find((record) => record.executionId === operatorTerminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.equal(operatorExecutionRecord?.selectedAction?.surfaces[0], "operator");
+  assert.equal(operatorExecutionRecord?.selectedAction?.command.join(" "), terminalOverviewOperatorLoopConfirmCommand);
+  assert.equal(operatorExecutionRecord?.command?.join(" "), terminalOverviewOperatorLoopResumeDryRunCommand);
+  assert.equal(operatorExecutionRecord?.executed?.command.join(" "), terminalOverviewOperatorLoopResumeDryRunCommand);
+  assert.equal(operatorExecutionRecord?.executed?.exitCode, 0);
+
+  const operatorTerminalOverviewExecutionHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "operator",
+    "--format",
+    "text",
+  ]);
+  assert.match(operatorTerminalOverviewExecutionHistoryText, /control_plane_terminal_overview_execution_history:/);
+  assert.match(operatorTerminalOverviewExecutionHistoryText, /command_surfaces: operator/);
+  assert.match(operatorTerminalOverviewExecutionHistoryText, new RegExp(`selected_command: ${terminalOverviewOperatorLoopConfirmCommand}`));
+  assert.match(operatorTerminalOverviewExecutionHistoryText, new RegExp(`command: ${terminalOverviewOperatorLoopResumeDryRunCommand}`));
+  assert.match(operatorTerminalOverviewExecutionHistoryText, new RegExp(`^\\s+surface: operator$`, "m"));
+
   const terminalOverviewRecoverRun = await db.createAgentRun({
     agentId: agent.id,
     objective: "terminal overview recover-next execute dry-run",
@@ -916,6 +1034,7 @@ try {
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.out.log`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.err.log`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-operator-runs", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-executions", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
