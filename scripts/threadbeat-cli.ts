@@ -10724,10 +10724,14 @@ type WorkerSessionControlPlaneStatusResponse = {
           maxResults: number | null;
           intervalMs: number | null;
           remainingPending: number | null;
+          acknowledged: boolean;
+          acknowledgementAdvanceId: string | null;
+          acknowledgedAt: string | null;
           resumeCommand: string[];
           inspectLatestCommand: string[];
           inspectHistoryCommand: string[];
           executeResumeCommand: string[];
+          acknowledgeCompletedCommand: string[] | null;
         }>;
       };
       completedLoops: {
@@ -10745,10 +10749,64 @@ type WorkerSessionControlPlaneStatusResponse = {
           maxResults: number | null;
           intervalMs: number | null;
           remainingPending: number | null;
+          acknowledged: boolean;
+          acknowledgementAdvanceId: string | null;
+          acknowledgedAt: string | null;
           resumeCommand: string[];
           inspectLatestCommand: string[];
           inspectHistoryCommand: string[];
           executeResumeCommand: string[];
+          acknowledgeCompletedCommand: string[] | null;
+        }>;
+      };
+      unacknowledgedCompletedLoops: {
+        count: number;
+        recent: Array<{
+          loopAdvanceId: string;
+          latestAdvanceId: string;
+          attempts: number;
+          totalProcessed: number;
+          dryRun: boolean;
+          action: "reviewed" | "skipped";
+          lastObservedAt: string;
+          lastCompletedAt: string;
+          stoppedReason: string | null;
+          maxResults: number | null;
+          intervalMs: number | null;
+          remainingPending: number | null;
+          acknowledged: boolean;
+          acknowledgementAdvanceId: string | null;
+          acknowledgedAt: string | null;
+          resumeCommand: string[];
+          inspectLatestCommand: string[];
+          inspectHistoryCommand: string[];
+          executeResumeCommand: string[];
+          acknowledgeCompletedCommand: string[] | null;
+        }>;
+      };
+      acknowledgedCompletedLoops: {
+        count: number;
+        recent: Array<{
+          loopAdvanceId: string;
+          latestAdvanceId: string;
+          attempts: number;
+          totalProcessed: number;
+          dryRun: boolean;
+          action: "reviewed" | "skipped";
+          lastObservedAt: string;
+          lastCompletedAt: string;
+          stoppedReason: string | null;
+          maxResults: number | null;
+          intervalMs: number | null;
+          remainingPending: number | null;
+          acknowledged: boolean;
+          acknowledgementAdvanceId: string | null;
+          acknowledgedAt: string | null;
+          resumeCommand: string[];
+          inspectLatestCommand: string[];
+          inspectHistoryCommand: string[];
+          executeResumeCommand: string[];
+          acknowledgeCompletedCommand: string[] | null;
         }>;
       };
     };
@@ -14443,7 +14501,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `recover_next_incomplete_loops: ${summary.recovery.recoverNext.incompleteLoops.count}`,
     `continue_deferred_loops: total=${summary.recovery.continueDeferred.attempts.total} dry_run=${summary.recovery.continueDeferred.attempts.dryRun} executed=${summary.recovery.continueDeferred.attempts.executed} failed=${summary.recovery.continueDeferred.attempts.failed} resumable=${summary.recovery.continueDeferred.resumableLoops.count}`,
     `operator_loops: total=${summary.recovery.operatorLoops.attempts.total} dry_run=${summary.recovery.operatorLoops.attempts.dryRun} executed=${summary.recovery.operatorLoops.attempts.executed} failed=${summary.recovery.operatorLoops.attempts.failed} resumable=${summary.recovery.operatorLoops.resumableLoops.count}`,
-    `result_review_loops: total=${summary.recovery.resultReviewLoops.attempts.total} dry_run=${summary.recovery.resultReviewLoops.attempts.dryRun} executed=${summary.recovery.resultReviewLoops.attempts.executed} failed=${summary.recovery.resultReviewLoops.attempts.failed} resumable=${summary.recovery.resultReviewLoops.resumableLoops.count} completed=${summary.recovery.resultReviewLoops.completedLoops.count}`,
+    `result_review_loops: total=${summary.recovery.resultReviewLoops.attempts.total} dry_run=${summary.recovery.resultReviewLoops.attempts.dryRun} executed=${summary.recovery.resultReviewLoops.attempts.executed} failed=${summary.recovery.resultReviewLoops.attempts.failed} resumable=${summary.recovery.resultReviewLoops.resumableLoops.count} completed=${summary.recovery.resultReviewLoops.completedLoops.count} unacknowledged_completed=${summary.recovery.resultReviewLoops.unacknowledgedCompletedLoops.count} acknowledged_completed=${summary.recovery.resultReviewLoops.acknowledgedCompletedLoops.count}`,
     `result_review_loop_history: ${formatShellCommand(summary.commands.resultReviewLoopHistory)}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
@@ -14952,8 +15010,12 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    max_results: ${loop.maxResults ?? ""}`,
         `    interval_ms: ${loop.intervalMs ?? ""}`,
         `    stopped_reason: ${loop.stoppedReason ?? ""}`,
+        `    acknowledged: ${loop.acknowledged}`,
+        `    acknowledgement: ${loop.acknowledgementAdvanceId ?? ""}`,
+        `    acknowledged_at: ${loop.acknowledgedAt ?? ""}`,
         `    inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
         `    inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+        ...(loop.acknowledgeCompletedCommand ? [`    acknowledge_completed: ${formatShellCommand(loop.acknowledgeCompletedCommand)}`] : []),
       );
     }
   }
@@ -15639,6 +15701,8 @@ type WorkerSessionBranchNativeNextResponse = {
     operatorLoops: number;
     resultReviewLoops: number;
     completedResultReviewLoops: number;
+    unacknowledgedCompletedResultReviewLoops: number;
+    acknowledgedCompletedResultReviewLoops: number;
     resultCommits: number;
     resultPending: number;
     resultReviewed: number;
@@ -15652,6 +15716,7 @@ type WorkerSessionBranchNativeNextResponse = {
   operatorLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["operatorLoops"]["resumableLoops"]["recent"];
   resultReviewLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["resultReviewLoops"]["resumableLoops"]["recent"];
   completedResultReviewLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["resultReviewLoops"]["completedLoops"]["recent"];
+  unacknowledgedCompletedResultReviewLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["resultReviewLoops"]["unacknowledgedCompletedLoops"]["recent"];
   resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
   resultReviewCommands: {
     previewReviewed: string[];
@@ -15730,6 +15795,7 @@ function workerSessionBranchNativeNext(
   const operatorLoops = summary.recovery.operatorLoops.resumableLoops.recent.slice(0, options.limit);
   const resultReviewLoops = summary.recovery.resultReviewLoops.resumableLoops.recent.slice(0, options.limit);
   const completedResultReviewLoops = summary.recovery.resultReviewLoops.completedLoops.recent.slice(0, options.limit);
+  const unacknowledgedCompletedResultReviewLoops = summary.recovery.resultReviewLoops.unacknowledgedCompletedLoops.recent.slice(0, options.limit);
   const requestedCommandSurfaces = options.commandSurfaces ?? [];
   const commands = filterWorkerSessionBranchNativeCommandQueue(uniqueWorkerSessionBranchNativeCommandQueue([
     { surfaces: ["control"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"] },
@@ -15800,11 +15866,22 @@ function workerSessionBranchNativeNext(
     ...(summary.recovery.resultReviewLoops.resumableLoops.count > 0 || summary.recovery.resultReviewLoops.completedLoops.count > 0
       ? [{ surfaces: ["result_inspection"] as const, command: summary.commands.resultReviewLoopHistory }]
       : []),
+    ...(summary.recovery.resultReviewLoops.unacknowledgedCompletedLoops.count > 0
+      ? [{
+          surfaces: ["result_inspection"] as const,
+          command: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", summary.session, "--server", "--status", "unacknowledged-completed"],
+        }]
+      : []),
     ...resultReviewLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
       { surfaces: ["result_inspection"], command: loop.resumeCommand },
       { surfaces: ["result_inspection"], command: loop.inspectLatestCommand },
       { surfaces: ["result_inspection"], command: loop.inspectHistoryCommand },
       { surfaces: ["result_inspection"], command: loop.executeResumeCommand },
+    ]),
+    ...unacknowledgedCompletedResultReviewLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
+      { surfaces: ["result_inspection"], command: loop.inspectLatestCommand },
+      { surfaces: ["result_inspection"], command: loop.inspectHistoryCommand },
+      ...(loop.acknowledgeCompletedCommand ? [{ surfaces: ["result_inspection"] as const, command: loop.acknowledgeCompletedCommand }] : []),
     ]),
     ...(summary.results.counts.pending > 0
       ? [
@@ -15846,6 +15923,8 @@ function workerSessionBranchNativeNext(
       operatorLoops: summary.recovery.operatorLoops.resumableLoops.count,
       resultReviewLoops: summary.recovery.resultReviewLoops.resumableLoops.count,
       completedResultReviewLoops: summary.recovery.resultReviewLoops.completedLoops.count,
+      unacknowledgedCompletedResultReviewLoops: summary.recovery.resultReviewLoops.unacknowledgedCompletedLoops.count,
+      acknowledgedCompletedResultReviewLoops: summary.recovery.resultReviewLoops.acknowledgedCompletedLoops.count,
       resultCommits: summary.results.counts.resultCommits,
       resultPending: summary.results.counts.pending,
       resultReviewed: summary.results.counts.reviewed,
@@ -15859,6 +15938,7 @@ function workerSessionBranchNativeNext(
     operatorLoops,
     resultReviewLoops,
     completedResultReviewLoops,
+    unacknowledgedCompletedResultReviewLoops,
     resultActions,
     resultReviewCommands: {
       previewReviewed: summary.commands.branchNativePreviewPendingReviewed,
@@ -16222,6 +16302,8 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `  operator_loops: ${response.counts.operatorLoops}`,
     `  result_review_loops: ${response.counts.resultReviewLoops}`,
     `  completed_result_review_loops: ${response.counts.completedResultReviewLoops}`,
+    `  unacknowledged_completed_result_review_loops: ${response.counts.unacknowledgedCompletedResultReviewLoops}`,
+    `  acknowledged_completed_result_review_loops: ${response.counts.acknowledgedCompletedResultReviewLoops}`,
     `  result_commits: ${response.counts.resultCommits}`,
     `  result_pending: ${response.counts.resultPending}`,
     `  result_reviewed: ${response.counts.resultReviewed}`,
@@ -16377,11 +16459,28 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
           `      total_processed: ${loop.totalProcessed}`,
           `      remaining_pending: ${loop.remainingPending ?? ""}`,
           `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+          `      acknowledged: ${loop.acknowledged}`,
+          `      acknowledgement: ${loop.acknowledgementAdvanceId ?? ""}`,
+          `      acknowledged_at: ${loop.acknowledgedAt ?? ""}`,
+          `      inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
+          `      inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+          ...(loop.acknowledgeCompletedCommand ? [`      acknowledge_completed: ${formatShellCommand(loop.acknowledgeCompletedCommand)}`] : []),
+        ]),
+      ]
+      : ["  completed_result_review_loops: none"]),
+    ...(response.unacknowledgedCompletedResultReviewLoops.length > 0
+      ? [
+        "  unacknowledged_completed_result_review_loops:",
+        ...response.unacknowledgedCompletedResultReviewLoops.flatMap((loop) => [
+          `    - loop: ${loop.loopAdvanceId}`,
+          `      latest_advance: ${loop.latestAdvanceId}`,
+          `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+          `      acknowledge_completed: ${formatShellCommand(loop.acknowledgeCompletedCommand ?? [])}`,
           `      inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
           `      inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
         ]),
       ]
-      : ["  completed_result_review_loops: none"]),
+      : ["  unacknowledged_completed_result_review_loops: none"]),
     ...(response.resultActions.length > 0
       ? [
         "  result_actions:",

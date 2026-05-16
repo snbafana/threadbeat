@@ -1616,10 +1616,19 @@ try {
             totalProcessed: number;
             remainingPending: number;
             stoppedReason: string;
+            acknowledged: boolean;
+            acknowledgementAdvanceId: string | null;
+            acknowledgedAt: string | null;
             inspectLatestCommand: string[];
             inspectHistoryCommand: string[];
+            acknowledgeCompletedCommand: string[] | null;
           }>;
         };
+        unacknowledgedCompletedLoops: {
+          count: number;
+          recent: Array<{ loopAdvanceId: string; acknowledgeCompletedCommand: string[] | null }>;
+        };
+        acknowledgedCompletedLoops: { count: number };
       };
     };
   }>(baseUrl, [
@@ -1632,6 +1641,8 @@ try {
   assert.ok(completedResultReviewLoopStatus.recovery.resultReviewLoops.attempts.total >= 1);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.count, 1);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.count, 1);
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.unacknowledgedCompletedLoops.count, 1);
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.acknowledgedCompletedLoops.count, 0);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.latestAdvanceId, emptyBranchNativeReviewLoop.advanceRecord.advanceId);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.attempts, 1);
@@ -1639,8 +1650,14 @@ try {
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.totalProcessed, 0);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.remainingPending, 0);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.stoppedReason, "no_pending_result_commits");
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.acknowledged, false);
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.acknowledgementAdvanceId, null);
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.acknowledgedAt, null);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.inspectLatestCommand.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --advance ${emptyBranchNativeReviewLoop.advanceRecord.advanceId}`);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.inspectHistoryCommand.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${emptyBranchNativeReviewLoop.loopAdvanceId} --detail-command branch_native_result_review_loop`);
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.acknowledgeCompletedCommand?.join(" "), `npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server --loop-advance-id ${emptyBranchNativeReviewLoop.loopAdvanceId} --status completed --acknowledge-completed --confirm`);
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.unacknowledgedCompletedLoops.recent[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
+  assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.unacknowledgedCompletedLoops.recent[0]?.acknowledgeCompletedCommand?.join(" "), `npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server --loop-advance-id ${emptyBranchNativeReviewLoop.loopAdvanceId} --status completed --acknowledge-completed --confirm`);
 
   const completedResultReviewLoopHistoryView = await cliJson<{
     count: number;
@@ -1703,6 +1720,35 @@ try {
   assert.equal(completedResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.advanceId, emptyBranchNativeReviewLoop.advanceRecord.advanceId);
   assert.equal(completedResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.totalProcessed, 0);
   assert.deepEqual(completedResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.records, []);
+
+  const unacknowledgedCompletedBranchNativeNext = await cliJson<{
+    counts: {
+      resultReviewLoops: number;
+      completedResultReviewLoops: number;
+      unacknowledgedCompletedResultReviewLoops: number;
+      acknowledgedCompletedResultReviewLoops: number;
+    };
+    completedResultReviewLoops: Array<{ loopAdvanceId: string; acknowledged: boolean; acknowledgementAdvanceId: string | null; acknowledgeCompletedCommand: string[] | null }>;
+    unacknowledgedCompletedResultReviewLoops: Array<{ loopAdvanceId: string; acknowledgeCompletedCommand: string[] | null }>;
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  const acknowledgeCompletedCommand = `npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server --loop-advance-id ${emptyBranchNativeReviewLoop.loopAdvanceId} --status completed --acknowledge-completed --confirm`;
+  assert.equal(unacknowledgedCompletedBranchNativeNext.counts.resultReviewLoops, 1);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.counts.completedResultReviewLoops, 1);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.counts.unacknowledgedCompletedResultReviewLoops, 1);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.counts.acknowledgedCompletedResultReviewLoops, 0);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.completedResultReviewLoops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.completedResultReviewLoops[0]?.acknowledged, false);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.completedResultReviewLoops[0]?.acknowledgementAdvanceId, null);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.completedResultReviewLoops[0]?.acknowledgeCompletedCommand?.join(" "), acknowledgeCompletedCommand);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.unacknowledgedCompletedResultReviewLoops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
+  assert.equal(unacknowledgedCompletedBranchNativeNext.unacknowledgedCompletedResultReviewLoops[0]?.acknowledgeCompletedCommand?.join(" "), acknowledgeCompletedCommand);
+  assert.ok(unacknowledgedCompletedBranchNativeNext.commands.some((command) => command.command.join(" ") === acknowledgeCompletedCommand));
 
   const acknowledgedCompletedResultReviewLoop = await cliJson<{
     ok: true;
@@ -1794,8 +1840,10 @@ try {
   assert.match(completedResultReviewLoopStatusText, /stopped_reason: no_pending_result_commits/);
 
   const completedBranchNativeNext = await cliJson<{
-    counts: { resultReviewLoops: number; completedResultReviewLoops: number };
-    completedResultReviewLoops: Array<{ loopAdvanceId: string; latestAdvanceId: string; stoppedReason: string }>;
+    counts: { resultReviewLoops: number; completedResultReviewLoops: number; unacknowledgedCompletedResultReviewLoops: number; acknowledgedCompletedResultReviewLoops: number };
+    completedResultReviewLoops: Array<{ loopAdvanceId: string; latestAdvanceId: string; stoppedReason: string; acknowledged: boolean; acknowledgementAdvanceId: string | null; acknowledgeCompletedCommand: string[] | null }>;
+    unacknowledgedCompletedResultReviewLoops: Array<{ loopAdvanceId: string }>;
+    commands: Array<{ command: string[] }>;
   }>(baseUrl, [
     "runs",
     "session-branch-native-next",
@@ -1804,9 +1852,16 @@ try {
   ]);
   assert.equal(completedBranchNativeNext.counts.resultReviewLoops, 1);
   assert.equal(completedBranchNativeNext.counts.completedResultReviewLoops, 1);
+  assert.equal(completedBranchNativeNext.counts.unacknowledgedCompletedResultReviewLoops, 0);
+  assert.equal(completedBranchNativeNext.counts.acknowledgedCompletedResultReviewLoops, 1);
   assert.equal(completedBranchNativeNext.completedResultReviewLoops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
   assert.equal(completedBranchNativeNext.completedResultReviewLoops[0]?.latestAdvanceId, emptyBranchNativeReviewLoop.advanceRecord.advanceId);
   assert.equal(completedBranchNativeNext.completedResultReviewLoops[0]?.stoppedReason, "no_pending_result_commits");
+  assert.equal(completedBranchNativeNext.completedResultReviewLoops[0]?.acknowledged, true);
+  assert.equal(completedBranchNativeNext.completedResultReviewLoops[0]?.acknowledgementAdvanceId, acknowledgedCompletedResultReviewLoop.acknowledgement.advanceId);
+  assert.equal(completedBranchNativeNext.completedResultReviewLoops[0]?.acknowledgeCompletedCommand, null);
+  assert.equal(completedBranchNativeNext.unacknowledgedCompletedResultReviewLoops.length, 0);
+  assert.ok(!completedBranchNativeNext.commands.some((command) => command.command.join(" ") === acknowledgeCompletedCommand));
 
   const completedBranchNativeNextText = await cliText(baseUrl, [
     "runs",
@@ -1817,8 +1872,12 @@ try {
     "text",
   ]);
   assert.match(completedBranchNativeNextText, /completed_result_review_loops: 1/);
+  assert.match(completedBranchNativeNextText, /unacknowledged_completed_result_review_loops: 0/);
+  assert.match(completedBranchNativeNextText, /acknowledged_completed_result_review_loops: 1/);
   assert.match(completedBranchNativeNextText, /completed_result_review_loops:\n    - loop: branch-native-result-review-loop-/);
+  assert.match(completedBranchNativeNextText, /acknowledged: true/);
   assert.match(completedBranchNativeNextText, /stopped_reason: no_pending_result_commits/);
+  assert.doesNotMatch(completedBranchNativeNextText, /acknowledge_completed:/);
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
