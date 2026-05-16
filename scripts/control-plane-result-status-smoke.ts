@@ -60,6 +60,8 @@ try {
   const resultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --result-commits`;
   const pendingResultCommitViewCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --result-commits`;
   const pendingResultCommandQueueCommand = `npm run cli -- runs session-result-inspections ${sessionName} --server --review-state pending --limit 5 --result-commits --commands-only --format shell`;
+  const resultCommitTerminalsAllCommand = `npm run cli -- runs session-control-plane-result-commit-terminals ${sessionName} --server --status all`;
+  const resultCommitTerminalsPendingCommand = `npm run cli -- runs session-control-plane-result-commit-terminals ${sessionName} --server --status pending`;
   const branchNativeNextCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server`;
   const recordNextReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed`;
   const recordNextSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped`;
@@ -363,6 +365,8 @@ try {
   assert.equal(branchNativeNext.resultReviewCommands.recordSkipped.join(" "), branchNativeRecordPendingSkippedCommand);
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeNextCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === pendingResultCommandQueueCommand));
+  assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === resultCommitTerminalsAllCommand));
+  assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === resultCommitTerminalsPendingCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativePreviewPendingReviewedCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecordPendingReviewedCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === recordScopedReviewedCommand));
@@ -387,6 +391,7 @@ try {
   assert.match(branchNativeNextText, new RegExp(`branch_native_preview_reviewed: ${branchNativePreviewPendingReviewedCommand}`));
   assert.match(branchNativeNextText, new RegExp(`branch_native_record_reviewed: ${branchNativeRecordPendingReviewedCommand}`));
   assert.match(branchNativeNextText, new RegExp(`record_reviewed: ${recordScopedReviewedCommand}`));
+  assert.match(branchNativeNextText, new RegExp(`- ${resultCommitTerminalsPendingCommand}`));
   assert.match(branchNativeNextText, new RegExp(`- ${pendingResultCommandQueueCommand}`));
 
   const branchNativeNextShell = await cliText(baseUrl, [
@@ -401,6 +406,8 @@ try {
   const branchNativeNextShellLines = branchNativeNextShell.trim().split("\n").filter(Boolean);
   assert.ok(branchNativeNextShellLines.some((line) => line === branchNativeNextCommand));
   assert.ok(branchNativeNextShellLines.some((line) => line === pendingResultCommandQueueCommand));
+  assert.ok(branchNativeNextShellLines.some((line) => line === resultCommitTerminalsAllCommand));
+  assert.ok(branchNativeNextShellLines.some((line) => line === resultCommitTerminalsPendingCommand));
   assert.ok(branchNativeNextShellLines.some((line) => line === branchNativePreviewPendingReviewedCommand));
   assert.ok(branchNativeNextShellLines.some((line) => line === branchNativeRecordPendingReviewedCommand));
   assert.ok(branchNativeNextShellLines.some((line) => line === recordScopedReviewedCommand));
@@ -1286,6 +1293,92 @@ try {
   assert.match(resultCommitViewShell, new RegExp(reviewCommand));
   assert.match(resultCommitViewShell, new RegExp(recordReviewedCommand));
   assert.match(resultCommitViewShell, new RegExp(recordSkippedCommand));
+
+  const resultCommitTerminals = await cliJson<{
+    count: number;
+    summary: { pending: number; reviewed: number; skipped: number; inspectable: number };
+    commands: {
+      inspectAll: string[];
+      inspectPending: string[];
+      inspectReviewed: string[];
+      inspectSkipped: string[];
+      queue: Array<{ action: string; runId: string; resultCommit: string; reviewState: string; command: string[] }>;
+    };
+    terminalCommits: Array<{
+      runId: string;
+      branchName: string;
+      resultCommit: string;
+      reviewState: string;
+      commands: {
+        inspectResult: string[];
+        checkoutBranch: string[];
+        reviewRun: string[];
+        recordReviewed: string[] | null;
+        recordSkipped: string[] | null;
+      };
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-commit-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "pending",
+    "--result-commit",
+    resultCommit,
+  ]);
+  assert.equal(resultCommitTerminals.count, 1);
+  assert.equal(resultCommitTerminals.summary.pending, 1);
+  assert.equal(resultCommitTerminals.summary.inspectable, 1);
+  assert.equal(resultCommitTerminals.commands.inspectAll.join(" "), resultCommitTerminalsAllCommand);
+  assert.equal(resultCommitTerminals.commands.inspectPending.join(" "), resultCommitTerminalsPendingCommand);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.runId, run.id);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.branchName, run.run_branch);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.resultCommit, resultCommit);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.reviewState, "pending");
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.commands.inspectResult.join(" "), inspectResultCommand);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.commands.checkoutBranch.join(" "), checkoutCommand);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.commands.reviewRun.join(" "), reviewCommand);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.commands.recordReviewed?.join(" "), recordReviewedCommand);
+  assert.equal(resultCommitTerminals.terminalCommits[0]?.commands.recordSkipped?.join(" "), recordSkippedCommand);
+  assert.ok(resultCommitTerminals.commands.queue.some((command) => command.action === "inspect_result" && command.command.join(" ") === inspectResultCommand));
+  assert.ok(resultCommitTerminals.commands.queue.some((command) => command.action === "checkout_branch" && command.command.join(" ") === checkoutCommand));
+  assert.ok(resultCommitTerminals.commands.queue.some((command) => command.action === "record_reviewed" && command.command.join(" ") === recordReviewedCommand));
+  assert.ok(resultCommitTerminals.commands.queue.some((command) => command.action === "record_skipped" && command.command.join(" ") === recordSkippedCommand));
+
+  const resultCommitTerminalsText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-commit-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "pending",
+    "--format",
+    "text",
+  ]);
+  assert.match(resultCommitTerminalsText, /result_commit_terminals:/);
+  assert.match(resultCommitTerminalsText, /summary: pending=1 reviewed=0 skipped=0 inspectable=1/);
+  assert.match(resultCommitTerminalsText, new RegExp(`inspect_pending: ${resultCommitTerminalsPendingCommand}`));
+  assert.match(resultCommitTerminalsText, new RegExp(`run: ${run.id}`));
+  assert.match(resultCommitTerminalsText, new RegExp(`result_commit: ${resultCommit}`));
+  assert.match(resultCommitTerminalsText, new RegExp(`record_reviewed: ${recordReviewedCommand}`));
+  assert.match(resultCommitTerminalsText, new RegExp(`record_skipped: ${recordSkippedCommand}`));
+
+  const resultCommitTerminalsShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-commit-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "pending",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(resultCommitTerminalsShell, new RegExp(inspectResultCommand));
+  assert.match(resultCommitTerminalsShell, new RegExp(checkoutCommand));
+  assert.match(resultCommitTerminalsShell, new RegExp(recordReviewedCommand));
+  assert.match(resultCommitTerminalsShell, new RegExp(recordSkippedCommand));
 
   const nextResultInspection = await cliJson<{
     count: number;

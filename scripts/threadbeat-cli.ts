@@ -5812,6 +5812,51 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(resultInspections);
     return;
   }
+  if (subcommandName === "session-control-plane-result-commit-terminals") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-result-commit-terminals <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-result-commit-terminals requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "text" && outputFormat !== "shell") {
+      throw new Error("runs session-control-plane-result-commit-terminals --format must be json, text, or shell");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-result-commit-terminals --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-result-commit-terminals --format text cannot be combined with --commands-only");
+    }
+    const status = parseResultCommitTerminalStatus(options.status ?? "pending");
+    const limit = parsePositiveInteger(options.limit ?? "20", "--limit");
+    const resultInspections = await fetchWorkerSessionResultInspections(requiredSessionName, {
+      runId: options.run,
+      reviewState: status === "all" ? undefined : status,
+      limit: options["result-commit"] ? null : limit,
+    });
+    const terminals = summarizeResultCommitTerminals(requiredSessionName, resultInspections, {
+      status,
+      runId: options.run,
+      resultCommit: options["result-commit"],
+      limit,
+    });
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(terminals.commands.queue);
+      } else {
+        await printJson({ ...terminals, commands: terminals.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printResultCommitTerminalsText(terminals);
+    } else {
+      await printJson(terminals);
+    }
+    return;
+  }
   if (subcommandName === "session-branch-native-next") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -10510,6 +10555,61 @@ type WorkerSessionResultCommitViewResponse = {
     reviewNext: string[];
   };
   resultCommits: WorkerSessionResultCommitViewRecord[];
+};
+
+type ResultCommitTerminalStatus = "pending" | "reviewed" | "skipped" | "all";
+
+type ResultCommitTerminalsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    status: ResultCommitTerminalStatus;
+    runId: string | null;
+    resultCommit: string | null;
+    limit: number;
+  };
+  count: number;
+  summary: {
+    pending: number;
+    reviewed: number;
+    skipped: number;
+    inspectable: number;
+  };
+  commands: {
+    inspectAll: string[];
+    inspectPending: string[];
+    inspectReviewed: string[];
+    inspectSkipped: string[];
+    reviewNext: string[];
+    queue: Array<{
+      scope: "result_commit_terminal";
+      action: "inspect_result" | "checkout_branch" | "review_run" | "inspect_reviews" | "record_reviewed" | "record_skipped" | "next_step";
+      runId: string;
+      resultCommit: string;
+      reviewState: WorkerSessionResultInspectionRecord["reviewState"];
+      command: string[];
+    }>;
+  };
+  terminalCommits: Array<{
+    runId: string;
+    objective: string;
+    status: string;
+    branchName: string;
+    resultCommit: string;
+    workerId: string | null;
+    reviewState: WorkerSessionResultInspectionRecord["reviewState"];
+    links: WorkerSessionResultInspectionRecord["links"];
+    nextStep: WorkerSessionResultInspectionRecord["nextStep"];
+    commands: {
+      inspectResult: string[];
+      checkoutBranch: string[];
+      reviewRun: string[];
+      inspectReviews: string[];
+      recordReviewed: string[] | null;
+      recordSkipped: string[] | null;
+      nextStep: string[];
+    };
+  }>;
 };
 
 type RecordWorkerSessionResultReviewResponse = {
@@ -16298,6 +16398,187 @@ function workerSessionResultCommitViewCommands(
   return uniqueCommandQueue(commands).map((command) => ({ command }));
 }
 
+function summarizeResultCommitTerminals(
+  sessionName: string,
+  response: WorkerSessionResultInspectionsResponse,
+  options: { status: ResultCommitTerminalStatus; runId?: string; resultCommit?: string; limit: number },
+): ResultCommitTerminalsResponse {
+  const terminalCommits = response.resultCommits
+    .filter((result) => !options.resultCommit || result.resultCommit === options.resultCommit)
+    .slice(0, options.limit)
+    .map((result) => ({
+      runId: result.runId,
+      objective: result.objective,
+      status: result.status,
+      branchName: result.branchName,
+      resultCommit: result.resultCommit,
+      workerId: result.workerId,
+      reviewState: result.reviewState,
+      links: result.links,
+      nextStep: result.nextStep,
+      commands: {
+        inspectResult: result.commands.inspectResult,
+        checkoutBranch: result.commands.checkoutBranch,
+        reviewRun: result.commands.reviewRun,
+        inspectReviews: result.commands.inspectReviews,
+        recordReviewed: result.reviewState === "pending" ? result.commands.recordReviewed : null,
+        recordSkipped: result.reviewState === "pending" ? result.commands.recordSkipped : null,
+        nextStep: result.nextStep.command,
+      },
+    }));
+  const queue = uniqueResultCommitTerminalCommandQueue(terminalCommits.flatMap((result) => [
+    {
+      scope: "result_commit_terminal" as const,
+      action: "inspect_result" as const,
+      runId: result.runId,
+      resultCommit: result.resultCommit,
+      reviewState: result.reviewState,
+      command: result.commands.inspectResult,
+    },
+    {
+      scope: "result_commit_terminal" as const,
+      action: "checkout_branch" as const,
+      runId: result.runId,
+      resultCommit: result.resultCommit,
+      reviewState: result.reviewState,
+      command: result.commands.checkoutBranch,
+    },
+    {
+      scope: "result_commit_terminal" as const,
+      action: "review_run" as const,
+      runId: result.runId,
+      resultCommit: result.resultCommit,
+      reviewState: result.reviewState,
+      command: result.commands.reviewRun,
+    },
+    {
+      scope: "result_commit_terminal" as const,
+      action: "inspect_reviews" as const,
+      runId: result.runId,
+      resultCommit: result.resultCommit,
+      reviewState: result.reviewState,
+      command: result.commands.inspectReviews,
+    },
+    ...(result.commands.recordReviewed
+      ? [{
+          scope: "result_commit_terminal" as const,
+          action: "record_reviewed" as const,
+          runId: result.runId,
+          resultCommit: result.resultCommit,
+          reviewState: result.reviewState,
+          command: result.commands.recordReviewed,
+        }]
+      : []),
+    ...(result.commands.recordSkipped
+      ? [{
+          scope: "result_commit_terminal" as const,
+          action: "record_skipped" as const,
+          runId: result.runId,
+          resultCommit: result.resultCommit,
+          reviewState: result.reviewState,
+          command: result.commands.recordSkipped,
+        }]
+      : [{
+          scope: "result_commit_terminal" as const,
+          action: "next_step" as const,
+          runId: result.runId,
+          resultCommit: result.resultCommit,
+          reviewState: result.reviewState,
+          command: result.commands.nextStep,
+        }]),
+  ]));
+  return {
+    ok: true,
+    session: sessionName,
+    filter: {
+      status: options.status,
+      runId: options.runId ?? null,
+      resultCommit: options.resultCommit ?? null,
+      limit: options.limit,
+    },
+    count: terminalCommits.length,
+    summary: {
+      pending: terminalCommits.filter((result) => result.reviewState === "pending").length,
+      reviewed: terminalCommits.filter((result) => result.reviewState === "reviewed").length,
+      skipped: terminalCommits.filter((result) => result.reviewState === "skipped").length,
+      inspectable: terminalCommits.length,
+    },
+    commands: {
+      inspectAll: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", sessionName, "--server", "--status", "all"],
+      inspectPending: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", sessionName, "--server", "--status", "pending"],
+      inspectReviewed: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", sessionName, "--server", "--status", "reviewed"],
+      inspectSkipped: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", sessionName, "--server", "--status", "skipped"],
+      reviewNext: ["npm", "run", "cli", "--", "runs", "session-result-review-next", sessionName, "--server"],
+      queue,
+    },
+    terminalCommits,
+  };
+}
+
+function uniqueResultCommitTerminalCommandQueue(
+  commands: ResultCommitTerminalsResponse["commands"]["queue"],
+): ResultCommitTerminalsResponse["commands"]["queue"] {
+  const seen = new Set<string>();
+  const unique: ResultCommitTerminalsResponse["commands"]["queue"] = [];
+  for (const command of commands) {
+    const key = command.command.join("\0");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(command);
+  }
+  return unique;
+}
+
+function printResultCommitTerminalsText(response: ResultCommitTerminalsResponse): void {
+  console.log(formatResultCommitTerminalsText(response).join("\n"));
+}
+
+function formatResultCommitTerminalsText(response: ResultCommitTerminalsResponse): string[] {
+  const lines = [
+    "result_commit_terminals:",
+    `  session: ${response.session}`,
+    `  filter: status=${response.filter.status} run=${response.filter.runId ?? "all"} result_commit=${response.filter.resultCommit ?? "all"} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  summary: pending=${response.summary.pending} reviewed=${response.summary.reviewed} skipped=${response.summary.skipped} inspectable=${response.summary.inspectable}`,
+    "  commands:",
+    `    inspect_all: ${formatShellCommand(response.commands.inspectAll)}`,
+    `    inspect_pending: ${formatShellCommand(response.commands.inspectPending)}`,
+    `    inspect_reviewed: ${formatShellCommand(response.commands.inspectReviewed)}`,
+    `    inspect_skipped: ${formatShellCommand(response.commands.inspectSkipped)}`,
+    `    review_next: ${formatShellCommand(response.commands.reviewNext)}`,
+  ];
+  if (response.terminalCommits.length === 0) {
+    lines.push("  result_commits: none");
+    return lines;
+  }
+  lines.push("  result_commits:");
+  for (const result of response.terminalCommits) {
+    lines.push(
+      `    - run: ${result.runId}`,
+      `      objective: ${result.objective}`,
+      `      status: ${result.status}`,
+      `      review_state: ${result.reviewState}`,
+      `      branch: ${result.branchName}`,
+      `      result_commit: ${result.resultCommit}`,
+      `      worker: ${result.workerId ?? ""}`,
+      `      result_commit_url: ${result.links.resultCommitUrl ?? ""}`,
+      `      result_compare: ${result.links.resultCompareUrl ?? ""}`,
+      `      inspect_result: ${formatShellCommand(result.commands.inspectResult)}`,
+      `      checkout: ${formatShellCommand(result.commands.checkoutBranch)}`,
+      `      review: ${formatShellCommand(result.commands.reviewRun)}`,
+      `      inspect_reviews: ${formatShellCommand(result.commands.inspectReviews)}`,
+      `      next: ${formatShellCommand(result.commands.nextStep)}`,
+    );
+    if (result.commands.recordReviewed) {
+      lines.push(`      record_reviewed: ${formatShellCommand(result.commands.recordReviewed)}`);
+    }
+    if (result.commands.recordSkipped) {
+      lines.push(`      record_skipped: ${formatShellCommand(result.commands.recordSkipped)}`);
+    }
+  }
+  return lines;
+}
+
 function workerSessionResultInspectionCommands(
   response: WorkerSessionResultInspectionsResponse,
 ): CommandQueueOutput["commands"] {
@@ -16731,6 +17012,14 @@ function workerSessionBranchNativeNext(
     ]),
     { surfaces: ["result_inspection"], command: summary.commands.resultCommitView },
     { surfaces: ["result_inspection"], command: summary.commands.pendingResultCommitView },
+    { surfaces: ["result_inspection"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", summary.session, "--server", "--status", "all"] },
+    { surfaces: ["result_inspection"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", summary.session, "--server", "--status", "pending"] },
+    ...(summary.results.counts.reviewed > 0
+      ? [{ surfaces: ["result_inspection"] as const, command: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", summary.session, "--server", "--status", "reviewed"] }]
+      : []),
+    ...(summary.results.counts.skipped > 0
+      ? [{ surfaces: ["result_inspection"] as const, command: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-commit-terminals", summary.session, "--server", "--status", "skipped"] }]
+      : []),
     ...(summary.recovery.resultReviewLoops.resumableLoops.count > 0 ? [{ surfaces: ["result_inspection"] as const, command: summary.commands.resultReviewLoops }] : []),
     ...(summary.recovery.resultReviewLoops.resumableLoops.count > 0 || summary.recovery.resultReviewLoops.completedLoops.count > 0
       ? [{ surfaces: ["result_inspection"] as const, command: summary.commands.resultReviewLoopHistory }]
@@ -20613,6 +20902,11 @@ function parseControlPlaneWorkerTerminalStatus(value: string): ControlPlaneWorke
 function parseOperatorLoopTerminalStatus(value: string): OperatorLoopTerminalStatus {
   if (value === "resumable") return value;
   throw new Error(`Unsupported operator loop terminal status: ${value}`);
+}
+
+function parseResultCommitTerminalStatus(value: string): ResultCommitTerminalStatus {
+  if (value === "pending" || value === "reviewed" || value === "skipped" || value === "all") return value;
+  throw new Error(`Unsupported result commit terminal status: ${value}`);
 }
 
 function parseResultReviewWorkerAction(options: Record<string, string>, commandName: string): "reviewed" | "skipped" {
@@ -26846,6 +27140,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
+  runs session-control-plane-result-commit-terminals <name> --server [--run run_id] [--result-commit sha] [--status pending|reviewed|skipped|all] [--limit 20] [--commands-only] [--format json|text|shell]
   runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000] --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty [--resume-loop loop_advance_id] --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
