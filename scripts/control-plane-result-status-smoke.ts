@@ -67,6 +67,10 @@ try {
   const previewPendingSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped --until-empty --dry-run`;
   const recordPendingReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed --until-empty`;
   const recordPendingSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped --until-empty`;
+  const branchNativePreviewPendingReviewedCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --dry-run --max-results 10 --interval-ms 1`;
+  const branchNativePreviewPendingSkippedCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-skipped --until-empty --dry-run --max-results 10 --interval-ms 1`;
+  const branchNativeRecordPendingReviewedCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --confirm --max-results 10 --interval-ms 1`;
+  const branchNativeRecordPendingSkippedCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-skipped --until-empty --confirm --max-results 10 --interval-ms 1`;
   const latestResultReviewsCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --latest`;
   const recordReviewedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-reviewed --run ${run.id} --result-commit ${resultCommit}`;
   const recordSkippedCommand = `npm run cli -- runs session-result-reviews ${sessionName} --server --record-skipped --run ${run.id} --result-commit ${resultCommit}`;
@@ -101,6 +105,10 @@ try {
       previewPendingSkipped: string[];
       recordPendingReviewed: string[];
       recordPendingSkipped: string[];
+      branchNativePreviewPendingReviewed: string[];
+      branchNativePreviewPendingSkipped: string[];
+      branchNativeRecordPendingReviewed: string[];
+      branchNativeRecordPendingSkipped: string[];
       latestResultReviews: string[];
       failedResultReviewAttempts: string[];
     };
@@ -161,6 +169,10 @@ try {
   assert.equal(summary.commands.previewPendingSkipped.join(" "), previewPendingSkippedCommand);
   assert.equal(summary.commands.recordPendingReviewed.join(" "), recordPendingReviewedCommand);
   assert.equal(summary.commands.recordPendingSkipped.join(" "), recordPendingSkippedCommand);
+  assert.equal(summary.commands.branchNativePreviewPendingReviewed.join(" "), branchNativePreviewPendingReviewedCommand);
+  assert.equal(summary.commands.branchNativePreviewPendingSkipped.join(" "), branchNativePreviewPendingSkippedCommand);
+  assert.equal(summary.commands.branchNativeRecordPendingReviewed.join(" "), branchNativeRecordPendingReviewedCommand);
+  assert.equal(summary.commands.branchNativeRecordPendingSkipped.join(" "), branchNativeRecordPendingSkippedCommand);
   assert.equal(summary.commands.latestResultReviews.join(" "), latestResultReviewsCommand);
   assert.equal(summary.commands.failedResultReviewAttempts.join(" "), failedResultReviewAttemptsCommand);
   assert.equal(summary.results.reviews.counts.failed, 0);
@@ -278,6 +290,10 @@ try {
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === previewPendingSkippedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordPendingReviewedCommand));
   assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === recordPendingSkippedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === branchNativePreviewPendingReviewedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === branchNativePreviewPendingSkippedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === branchNativeRecordPendingReviewedCommand));
+  assert.ok(commandSummary.commands.some((command) => command.command.join(" ") === branchNativeRecordPendingSkippedCommand));
 
   const pendingStatusText = await cliText(baseUrl, [
     "runs",
@@ -300,6 +316,10 @@ try {
   assert.match(pendingStatusText, new RegExp(`preview_pending_skipped: ${previewPendingSkippedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_pending_reviewed: ${recordPendingReviewedCommand}`));
   assert.match(pendingStatusText, new RegExp(`record_pending_skipped: ${recordPendingSkippedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`branch_native_preview_pending_reviewed: ${branchNativePreviewPendingReviewedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`branch_native_preview_pending_skipped: ${branchNativePreviewPendingSkippedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`branch_native_record_pending_reviewed: ${branchNativeRecordPendingReviewedCommand}`));
+  assert.match(pendingStatusText, new RegExp(`branch_native_record_pending_skipped: ${branchNativeRecordPendingSkippedCommand}`));
   assert.match(pendingStatusText, /next_recovery:\n  kind: control_plane_action\n  action: review_result\n  reason: result_commit_available/);
   assert.match(pendingStatusText, /next_actions:\n  - surface: result_inspection/);
   assert.match(pendingStatusText, new RegExp(`record_reviewed: ${recordScopedReviewedCommand}`));
@@ -312,6 +332,7 @@ try {
     counts: { branchActions: number; resultPending: number; resultCommits: number };
     branchActions: unknown[];
     resultActions: Array<{ runId: string; resultCommit: string; commands: { inspectResult: string[]; recordReviewed: string[]; recordSkipped: string[] } }>;
+    resultReviewCommands: { previewReviewed: string[]; previewSkipped: string[]; recordReviewed: string[]; recordSkipped: string[] };
     commands: Array<{ command: string[] }>;
   }>(baseUrl, [
     "runs",
@@ -329,8 +350,14 @@ try {
   assert.deepEqual(branchNativeNext.resultActions[0]?.commands.inspectResult, summary.results.inspection.nextSteps[0]?.commands.inspectResult);
   assert.deepEqual(branchNativeNext.resultActions[0]?.commands.recordReviewed, summary.results.inspection.nextSteps[0]?.commands.recordReviewed);
   assert.deepEqual(branchNativeNext.resultActions[0]?.commands.recordSkipped, summary.results.inspection.nextSteps[0]?.commands.recordSkipped);
+  assert.equal(branchNativeNext.resultReviewCommands.previewReviewed.join(" "), branchNativePreviewPendingReviewedCommand);
+  assert.equal(branchNativeNext.resultReviewCommands.previewSkipped.join(" "), branchNativePreviewPendingSkippedCommand);
+  assert.equal(branchNativeNext.resultReviewCommands.recordReviewed.join(" "), branchNativeRecordPendingReviewedCommand);
+  assert.equal(branchNativeNext.resultReviewCommands.recordSkipped.join(" "), branchNativeRecordPendingSkippedCommand);
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeNextCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === pendingResultCommandQueueCommand));
+  assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativePreviewPendingReviewedCommand));
+  assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === branchNativeRecordPendingReviewedCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === recordScopedReviewedCommand));
   assert.ok(branchNativeNext.commands.some((command) => command.command.join(" ") === recordScopedSkippedCommand));
 
@@ -346,6 +373,8 @@ try {
   assert.match(branchNativeNextText, /branch_actions: none/);
   assert.match(branchNativeNextText, /result_pending: 1/);
   assert.match(branchNativeNextText, new RegExp(`result_commit: ${resultCommit}`));
+  assert.match(branchNativeNextText, new RegExp(`branch_native_preview_reviewed: ${branchNativePreviewPendingReviewedCommand}`));
+  assert.match(branchNativeNextText, new RegExp(`branch_native_record_reviewed: ${branchNativeRecordPendingReviewedCommand}`));
   assert.match(branchNativeNextText, new RegExp(`record_reviewed: ${recordScopedReviewedCommand}`));
   assert.match(branchNativeNextText, new RegExp(`- ${pendingResultCommandQueueCommand}`));
 
@@ -361,6 +390,8 @@ try {
   const branchNativeNextShellLines = branchNativeNextShell.trim().split("\n").filter(Boolean);
   assert.ok(branchNativeNextShellLines.some((line) => line === branchNativeNextCommand));
   assert.ok(branchNativeNextShellLines.some((line) => line === pendingResultCommandQueueCommand));
+  assert.ok(branchNativeNextShellLines.some((line) => line === branchNativePreviewPendingReviewedCommand));
+  assert.ok(branchNativeNextShellLines.some((line) => line === branchNativeRecordPendingReviewedCommand));
   assert.ok(branchNativeNextShellLines.some((line) => line === recordScopedReviewedCommand));
 
   const branchNativeReviewDryRun = await cliJson<{

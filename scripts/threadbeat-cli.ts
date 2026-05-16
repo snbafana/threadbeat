@@ -13889,6 +13889,10 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
       lines.push(`  preview_pending_skipped: ${formatShellCommand(summary.commands.previewPendingSkipped)}`);
       lines.push(`  record_pending_reviewed: ${formatShellCommand(summary.commands.recordPendingReviewed)}`);
       lines.push(`  record_pending_skipped: ${formatShellCommand(summary.commands.recordPendingSkipped)}`);
+      lines.push(`  branch_native_preview_pending_reviewed: ${formatShellCommand(summary.commands.branchNativePreviewPendingReviewed)}`);
+      lines.push(`  branch_native_preview_pending_skipped: ${formatShellCommand(summary.commands.branchNativePreviewPendingSkipped)}`);
+      lines.push(`  branch_native_record_pending_reviewed: ${formatShellCommand(summary.commands.branchNativeRecordPendingReviewed)}`);
+      lines.push(`  branch_native_record_pending_skipped: ${formatShellCommand(summary.commands.branchNativeRecordPendingSkipped)}`);
     }
     if (summary.results.counts.reviewed > 0) {
       lines.push(`  inspect_reviewed: ${formatShellCommand(summary.commands.reviewedResultInspections)}`);
@@ -14289,6 +14293,10 @@ function workerSessionControlPlaneStatusSummaryCommands(
     commands.push({ command: summary.commands.previewPendingSkipped });
     commands.push({ command: summary.commands.recordPendingReviewed });
     commands.push({ command: summary.commands.recordPendingSkipped });
+    commands.push({ command: summary.commands.branchNativePreviewPendingReviewed });
+    commands.push({ command: summary.commands.branchNativePreviewPendingSkipped });
+    commands.push({ command: summary.commands.branchNativeRecordPendingReviewed });
+    commands.push({ command: summary.commands.branchNativeRecordPendingSkipped });
     commands.push({ command: summary.commands.pendingResultInspections });
     commands.push({ command: summary.commands.pendingResultCommitView });
     commands.push({ command: summary.commands.pendingResultCommandQueue });
@@ -14795,6 +14803,12 @@ type WorkerSessionBranchNativeNextResponse = {
   failedRecoverNextResumeLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["failedRecoverNextResumeLoops"]["recent"];
   operatorLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["operatorLoops"]["resumableLoops"]["recent"];
   resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
+  resultReviewCommands: {
+    previewReviewed: string[];
+    previewSkipped: string[];
+    recordReviewed: string[];
+    recordSkipped: string[];
+  };
   commands: WorkerSessionBranchNativeCommandQueueItem[];
 };
 
@@ -14939,6 +14953,10 @@ function workerSessionBranchNativeNext(
         { surfaces: ["result_inspection"] as const, command: summary.commands.previewPendingSkipped },
         { surfaces: ["result_inspection"] as const, command: summary.commands.recordPendingReviewed },
         { surfaces: ["result_inspection"] as const, command: summary.commands.recordPendingSkipped },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.branchNativePreviewPendingReviewed },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.branchNativePreviewPendingSkipped },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.branchNativeRecordPendingReviewed },
+        { surfaces: ["result_inspection"] as const, command: summary.commands.branchNativeRecordPendingSkipped },
       ]
       : []),
     ...resultActions.flatMap((action): WorkerSessionBranchNativeCommandQueueItem[] => [
@@ -14976,6 +14994,12 @@ function workerSessionBranchNativeNext(
     failedRecoverNextResumeLoops,
     operatorLoops,
     resultActions,
+    resultReviewCommands: {
+      previewReviewed: summary.commands.branchNativePreviewPendingReviewed,
+      previewSkipped: summary.commands.branchNativePreviewPendingSkipped,
+      recordReviewed: summary.commands.branchNativeRecordPendingReviewed,
+      recordSkipped: summary.commands.branchNativeRecordPendingSkipped,
+    },
     commands,
   };
 }
@@ -15010,6 +15034,21 @@ function workerSessionBranchNativeOperatorCommand(sessionName: string, dryRun: b
     "--max-cycles", "1",
     "--cycle-interval-ms", "2000",
     ...(untilEmpty ? ["--until-empty", "--max-steps", "10", "--interval-ms", "2000"] : []),
+  ];
+}
+
+function workerSessionBranchNativeResultReviewCommand(
+  sessionName: string,
+  action: "reviewed" | "skipped",
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+    action === "reviewed" ? "--record-reviewed" : "--record-skipped",
+    "--until-empty",
+    dryRun ? "--dry-run" : "--confirm",
+    "--max-results", "10",
+    "--interval-ms", "1",
   ];
 }
 
@@ -15335,6 +15374,11 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `    ensure_worker_until_empty_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, false, true))}`,
     `    operator_runs: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-operator-runs", response.session, "--server"])}`,
     `    operator_workers: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-operator-workers", response.session, "--server"])}`,
+    "  result_review_control:",
+    `    branch_native_preview_reviewed: ${formatShellCommand(response.resultReviewCommands.previewReviewed)}`,
+    `    branch_native_preview_skipped: ${formatShellCommand(response.resultReviewCommands.previewSkipped)}`,
+    `    branch_native_record_reviewed: ${formatShellCommand(response.resultReviewCommands.recordReviewed)}`,
+    `    branch_native_record_skipped: ${formatShellCommand(response.resultReviewCommands.recordSkipped)}`,
     "  worker_health:",
     `    watch: ${formatBasicControlPlaneWorkerHealth(response.workers.watch)}`,
     `    drain: ${formatBasicControlPlaneWorkerHealth(response.workers.drain)}`,
@@ -16107,6 +16151,10 @@ function summarizeWorkerSessionControlPlaneStatus(
     previewPendingSkipped: string[];
     recordPendingReviewed: string[];
     recordPendingSkipped: string[];
+    branchNativePreviewPendingReviewed: string[];
+    branchNativePreviewPendingSkipped: string[];
+    branchNativeRecordPendingReviewed: string[];
+    branchNativeRecordPendingSkipped: string[];
     pendingResultInspections: string[];
     pendingResultCommitView: string[];
     pendingResultCommandQueue: string[];
@@ -16277,6 +16325,10 @@ function summarizeWorkerSessionControlPlaneStatus(
       previewPendingSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped", "--until-empty", "--dry-run"],
       recordPendingReviewed: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-reviewed", "--until-empty"],
       recordPendingSkipped: ["npm", "run", "cli", "--", "runs", "session-result-review-next", status.session, "--server", "--record-skipped", "--until-empty"],
+      branchNativePreviewPendingReviewed: workerSessionBranchNativeResultReviewCommand(status.session, "reviewed", true),
+      branchNativePreviewPendingSkipped: workerSessionBranchNativeResultReviewCommand(status.session, "skipped", true),
+      branchNativeRecordPendingReviewed: workerSessionBranchNativeResultReviewCommand(status.session, "reviewed", false),
+      branchNativeRecordPendingSkipped: workerSessionBranchNativeResultReviewCommand(status.session, "skipped", false),
       pendingResultInspections: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending"],
       pendingResultCommitView: ["npm", "run", "cli", "--", "runs", "session-result-inspections", status.session, "--server", "--review-state", "pending", "--result-commits"],
       pendingResultCommandQueue: [
