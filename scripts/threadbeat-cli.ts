@@ -5921,6 +5921,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const unreplayedNeedsAction = options["unreplayed-needs-action"] === "1";
     const replayFirstUnreplayedNeedsAction = options["replay-first-unreplayed-needs-action"] === "1";
     const replayUnreplayedNeedsActionLoop = options["replay-unreplayed-needs-action-loop"] === "1";
+    const replayLoopSummary = options["replay-loop-summary"] === "1";
     const executionHistory = options["execution-history"] === "1" || unreplayedNeedsAction;
     const replayExecution = options["replay-execution"];
     const dryRun = options["dry-run"] === "1";
@@ -5939,6 +5940,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if (replayUnreplayedNeedsActionLoop && outputFormat === "shell") {
       throw new Error("runs session-control-plane-terminal-overview --replay-unreplayed-needs-action-loop supports json or text output");
+    }
+    if (replayLoopSummary && (executionHistory || replayExecution || replayFirstUnreplayedNeedsAction || replayUnreplayedNeedsActionLoop || executeNext || nextActionOnly || options["commands-only"] === "1" || options.status || options["replay-state"])) {
+      throw new Error("runs session-control-plane-terminal-overview --replay-loop-summary cannot be combined with --execution-history, --replay-execution, replay flags, --execute-next, --next-action, --commands-only, --status, or --replay-state");
+    }
+    if (replayLoopSummary && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-terminal-overview --replay-loop-summary supports json or text output");
     }
     if (replayExecution && (executionHistory || executeNext || nextActionOnly || options["commands-only"] === "1")) {
       throw new Error("runs session-control-plane-terminal-overview --replay-execution cannot be combined with --execution-history, --execute-next, --next-action, or --commands-only");
@@ -5960,6 +5967,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     if ((dryRun || confirm) && !executeNext && !replayExecution && !replayFirstUnreplayedNeedsAction && !replayUnreplayedNeedsActionLoop) {
       throw new Error("runs session-control-plane-terminal-overview --dry-run/--confirm require --execute-next, --replay-execution, --replay-first-unreplayed-needs-action, or --replay-unreplayed-needs-action-loop");
+    }
+    if (replayLoopSummary && (dryRun || confirm)) {
+      throw new Error("runs session-control-plane-terminal-overview --replay-loop-summary cannot use --dry-run or --confirm");
     }
     if (executeNext && [dryRun, confirm].filter(Boolean).length !== 1) {
       throw new Error("runs session-control-plane-terminal-overview --execute-next requires exactly one of --dry-run or --confirm");
@@ -5989,6 +5999,25 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const executionHistoryReplayState = unreplayedNeedsAction
       ? "unreplayed"
       : parseControlPlaneTerminalOverviewExecutionHistoryReplayState(options["replay-state"] ?? "all");
+    if (replayLoopSummary) {
+      const records = await listControlPlaneTerminalOverviewExecutionRecords(requiredSessionName, {
+        limit: parsePositiveInteger(options.limit ?? "100", "--limit"),
+        commandSurfaces,
+        statuses: ["needs-action"],
+        actions: executionHistoryActions,
+        replayState: "all",
+      });
+      const response = summarizeControlPlaneTerminalOverviewReplayLoop(requiredSessionName, records, {
+        commandSurfaces,
+        actions: executionHistoryActions,
+      });
+      if (outputFormat === "text") {
+        printControlPlaneTerminalOverviewReplayLoopSummaryText(response);
+      } else {
+        await printJson(response);
+      }
+      return;
+    }
     if (executionHistory) {
       const history = await listControlPlaneTerminalOverviewExecutionRecords(requiredSessionName, {
         limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
@@ -9929,7 +9958,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "execution-history" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "replay-first-unreplayed-needs-action" || key === "replay-unreplayed-needs-action-loop" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "unreplayed-needs-action" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledge-completed" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "execution-history" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "next-action" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "replay-first-unreplayed-needs-action" || key === "replay-loop-summary" || key === "replay-unreplayed-needs-action-loop" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "unreplayed-needs-action" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -17287,6 +17316,33 @@ type ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse = {
   };
 };
 
+type ControlPlaneTerminalOverviewReplayLoopSummaryResponse = {
+  ok: true;
+  session: string;
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+  actions: string[];
+  summary: {
+    records: number;
+    sources: number;
+    replays: number;
+    replayedSources: number;
+    unreplayedNeedsAction: number;
+    unsupported: number;
+    failed: number;
+  };
+  latest: {
+    unreplayedNeedsAction: ControlPlaneTerminalOverviewExecutionRecord | null;
+    replay: ControlPlaneTerminalOverviewExecutionRecord | null;
+    replayedSource: ControlPlaneTerminalOverviewExecutionRecord | null;
+  };
+  commands: {
+    inspectUnreplayedNeedsAction: string[];
+    replayLoopDryRun: string[];
+    replayLoopConfirm: string[];
+    inspectHistory: string[];
+  };
+};
+
 type ControlPlaneTerminalOverviewExecutionRecord = {
   executionId: string;
   replayOf?: string;
@@ -18377,6 +18433,61 @@ async function replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(
   };
 }
 
+function summarizeControlPlaneTerminalOverviewReplayLoop(
+  sessionName: string,
+  records: ControlPlaneTerminalOverviewExecutionRecord[],
+  filter: {
+    commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+    actions: string[];
+  },
+): ControlPlaneTerminalOverviewReplayLoopSummaryResponse {
+  const sources = records.filter((record) => !record.replayOf);
+  const replays = records.filter((record) => Boolean(record.replayOf));
+  const unreplayedNeedsAction = sources.filter((record) => (record.replayedBy?.length ?? 0) === 0);
+  const replayedSources = sources.filter((record) => (record.replayedBy?.length ?? 0) > 0);
+  const inspectUnreplayedNeedsAction = [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", sessionName, "--server",
+    "--unreplayed-needs-action",
+    ...(filter.commandSurfaces.length > 0 ? ["--surface", filter.commandSurfaces.join(",")] : []),
+    ...(filter.actions.length > 0 ? ["--action", filter.actions.join(",")] : []),
+  ];
+  const replayLoopCommand = [
+    "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", sessionName, "--server",
+    "--replay-unreplayed-needs-action-loop",
+    ...(filter.commandSurfaces.length > 0 ? ["--surface", filter.commandSurfaces.join(",")] : []),
+    ...(filter.actions.length > 0 ? ["--action", filter.actions.join(",")] : []),
+  ];
+  return {
+    ok: true,
+    session: sessionName,
+    commandSurfaces: filter.commandSurfaces,
+    actions: filter.actions,
+    summary: {
+      records: records.length,
+      sources: sources.length,
+      replays: replays.length,
+      replayedSources: replayedSources.length,
+      unreplayedNeedsAction: unreplayedNeedsAction.length,
+      unsupported: records.filter((record) => !record.supported).length,
+      failed: records.filter((record) => record.executed?.exitCode !== undefined && record.executed?.exitCode !== 0).length,
+    },
+    latest: {
+      unreplayedNeedsAction: unreplayedNeedsAction[0] ?? null,
+      replay: replays[0] ?? null,
+      replayedSource: replayedSources[0] ?? null,
+    },
+    commands: {
+      inspectUnreplayedNeedsAction,
+      replayLoopDryRun: [...replayLoopCommand, "--dry-run"],
+      replayLoopConfirm: [...replayLoopCommand, "--confirm"],
+      inspectHistory: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", sessionName, "--server",
+        "--execution-history",
+      ],
+    },
+  };
+}
+
 function parseControlPlaneTerminalOverviewExecutionHistoryStatuses(
   value: string,
 ): ControlPlaneTerminalOverviewExecutionHistoryStatus[] {
@@ -18475,6 +18586,30 @@ function printControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopText(
         `      exit_code: ${step.replayExecution.executed?.exitCode ?? ""}`,
       ])
       : ["    none"]),
+  ].join("\n"));
+}
+
+function printControlPlaneTerminalOverviewReplayLoopSummaryText(
+  response: ControlPlaneTerminalOverviewReplayLoopSummaryResponse,
+): void {
+  console.log([
+    "control_plane_terminal_overview_replay_loop_summary:",
+    `  session: ${response.session}`,
+    `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
+    `  actions: ${response.actions.join(",") || "all"}`,
+    `  summary: records=${response.summary.records} sources=${response.summary.sources} replays=${response.summary.replays} replayed_sources=${response.summary.replayedSources} unreplayed_needs_action=${response.summary.unreplayedNeedsAction} unsupported=${response.summary.unsupported} failed=${response.summary.failed}`,
+    "  latest:",
+    `    unreplayed_execution_id: ${response.latest.unreplayedNeedsAction?.executionId ?? ""}`,
+    `    unreplayed_command: ${response.latest.unreplayedNeedsAction?.selectedAction ? formatShellCommand(response.latest.unreplayedNeedsAction.selectedAction.command) : ""}`,
+    `    replay_execution_id: ${response.latest.replay?.executionId ?? ""}`,
+    `    replay_of: ${response.latest.replay?.replayOf ?? ""}`,
+    `    replayed_source_execution_id: ${response.latest.replayedSource?.executionId ?? ""}`,
+    `    replayed_by: ${response.latest.replayedSource?.replayedBy?.join(",") ?? ""}`,
+    "  commands:",
+    `    inspect_unreplayed_needs_action: ${formatShellCommand(response.commands.inspectUnreplayedNeedsAction)}`,
+    `    replay_loop_dry_run: ${formatShellCommand(response.commands.replayLoopDryRun)}`,
+    `    replay_loop_confirm: ${formatShellCommand(response.commands.replayLoopConfirm)}`,
+    `    inspect_history: ${formatShellCommand(response.commands.inspectHistory)}`,
   ].join("\n"));
 }
 
@@ -28359,7 +28494,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-execution execution_id --dry-run|--confirm|--replay-first-unreplayed-needs-action --dry-run|--confirm [--action selected_action]|--replay-unreplayed-needs-action-loop --dry-run|--confirm [--action selected_action] [--max-steps 10]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-loop-summary [--action selected_action]|--replay-execution execution_id --dry-run|--confirm|--replay-first-unreplayed-needs-action --dry-run|--confirm [--action selected_action]|--replay-unreplayed-needs-action-loop --dry-run|--confirm [--action selected_action] [--max-steps 10]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
