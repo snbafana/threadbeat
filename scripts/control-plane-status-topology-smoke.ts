@@ -1188,6 +1188,8 @@ try {
   assert.match(branchNativeTextAfterStop, /control_plane_workers:/);
   assert.match(branchNativeTextAfterStop, new RegExp(`restart_queue: npm run cli -- runs session-control-plane-worker-restart-queue ${sessionName} --server --include-retired --lines 5`));
   assert.match(branchNativeTextAfterStop, /operator_control:/);
+  assert.match(branchNativeTextAfterStop, new RegExp(`branch_native_operate_dry_run: npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --dry-run --max-cycles 1 --cycle-interval-ms 2000`));
+  assert.match(branchNativeTextAfterStop, new RegExp(`branch_native_operate_confirm: npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --confirm --max-cycles 1 --cycle-interval-ms 2000`));
   assert.match(branchNativeTextAfterStop, new RegExp(`operate_dry_run: npm run cli -- runs session-control-plane-operate ${sessionName} --server --dry-run --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers`));
   assert.match(branchNativeTextAfterStop, new RegExp(`ensure_worker_confirm: npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --confirm --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers`));
   assert.match(branchNativeTextAfterStop, /worker_health:/);
@@ -1206,12 +1208,59 @@ try {
     "--format",
     "shell",
   ]);
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --dry-run --max-cycles 1 --cycle-interval-ms 2000$`, "m"));
+  assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-branch-native-next ${sessionName} --server --operate --confirm --max-cycles 1 --cycle-interval-ms 2000$`, "m"));
   assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-control-plane-operate ${sessionName} --server --dry-run --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
   assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-control-plane-operate ${sessionName} --server --confirm --max-cycles 1 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
   assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --dry-run --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
   assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs ensure-control-plane-operator-worker ${sessionName} --server --confirm --worker-id threadbeat-control-plane-operator --max-cycles 60 --cycle-interval-ms 2000 --reconcile-workers$`, "m"));
   assert.match(branchNativeOperatorCommands, new RegExp(`^npm run cli -- runs session-control-plane-operator-runs ${sessionName} --server$`, "m"));
   assert.doesNotMatch(branchNativeOperatorCommands, /restart-control-plane-topology-worker/);
+  const branchNativeOperatorDryRun = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    operator: { dryRun: boolean; confirmed: boolean; stoppedReason: string; cycles: Array<{ status: string; action: { surface: string; action: string } | null }>; operatorRunRecord: { status: string } };
+    after: null;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+  ]);
+  assert.equal(branchNativeOperatorDryRun.dryRun, true);
+  assert.equal(branchNativeOperatorDryRun.confirmed, false);
+  assert.equal(branchNativeOperatorDryRun.selectedAction, "operate");
+  assert.equal(branchNativeOperatorDryRun.operator.dryRun, true);
+  assert.equal(branchNativeOperatorDryRun.operator.confirmed, false);
+  assert.equal(branchNativeOperatorDryRun.operator.operatorRunRecord.status, "dry_run");
+  assert.equal(branchNativeOperatorDryRun.operator.cycles[0]?.action?.surface, "worker_recovery");
+  assert.equal(branchNativeOperatorDryRun.operator.cycles[0]?.action?.action, "reconcile_control_plane_workers");
+  assert.equal(branchNativeOperatorDryRun.after, null);
+  const branchNativeOperatorDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--dry-run",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeOperatorDryRunText, /branch_native_next_operator_execution:/);
+  assert.match(branchNativeOperatorDryRunText, /action: operate/);
+  assert.match(branchNativeOperatorDryRunText, /operator_status: dry_run/);
+  assert.match(branchNativeOperatorDryRunText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
   const branchNativeWorkerCommands = await cliText(baseUrl, [
     "runs",
     "session-branch-native-next",

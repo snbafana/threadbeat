@@ -5628,6 +5628,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ? "skipped"
         : null;
     const recoverNext = options["recover-next"] === "1";
+    const operate = options.operate === "1";
     const dryRun = options["dry-run"] === "1";
     const confirm = options.confirm === "1";
     if (options.server !== "1") {
@@ -5648,11 +5649,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recordAction && options["commands-only"] === "1") {
       throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped cannot be combined with --commands-only");
     }
-    if (recoverNext && options["commands-only"] === "1") {
-      throw new Error("runs session-branch-native-next --recover-next cannot be combined with --commands-only");
+    if ((recoverNext || operate) && options["commands-only"] === "1") {
+      throw new Error("runs session-branch-native-next --recover-next|--operate cannot be combined with --commands-only");
     }
-    if (recoverNext && recordAction) {
-      throw new Error("runs session-branch-native-next accepts only one mutating action: --recover-next or --record-reviewed|--record-skipped");
+    if ([recoverNext, operate, Boolean(recordAction)].filter(Boolean).length > 1) {
+      throw new Error("runs session-branch-native-next accepts only one mutating action: --recover-next, --operate, or --record-reviewed|--record-skipped");
     }
     if (recordAction && options["until-empty"] !== "1") {
       throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped requires --until-empty");
@@ -5666,8 +5667,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recoverNext && dryRun === confirm) {
       throw new Error("runs session-branch-native-next --recover-next requires exactly one of --dry-run or --confirm");
     }
-    if (!recordAction && !recoverNext && (dryRun || confirm || options["until-empty"] === "1")) {
-      throw new Error("runs session-branch-native-next --dry-run, --confirm, and --until-empty require --recover-next, --record-reviewed, or --record-skipped");
+    if (operate && dryRun === confirm) {
+      throw new Error("runs session-branch-native-next --operate requires exactly one of --dry-run or --confirm");
+    }
+    if (!recordAction && !recoverNext && !operate && (dryRun || confirm || options["until-empty"] === "1")) {
+      throw new Error("runs session-branch-native-next --dry-run, --confirm, and --until-empty require --recover-next, --operate, --record-reviewed, or --record-skipped");
     }
     if (recordAction && outputFormat === "shell") {
       throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped supports --format json or text");
@@ -5675,10 +5679,13 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recoverNext && outputFormat === "shell") {
       throw new Error("runs session-branch-native-next --recover-next supports --format json or text");
     }
+    if (operate && outputFormat === "shell") {
+      throw new Error("runs session-branch-native-next --operate supports --format json or text");
+    }
     const commandSurfaces = options.surface
       ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
       : [];
-    if (commandSurfaces.length > 0 && (recordAction || recoverNext)) {
+    if (commandSurfaces.length > 0 && (recordAction || recoverNext || operate)) {
       throw new Error("runs session-branch-native-next --surface cannot be combined with mutating actions");
     }
     const requiredSessionName = required(sessionName, "runs session-branch-native-next <session> --server");
@@ -5688,6 +5695,43 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
       commandSurfaces,
     });
+    if (operate) {
+      if (options["until-empty"] === "1" || options["resume-loop"]) {
+        throw new Error("runs session-branch-native-next --operate cannot be combined with --until-empty or --resume-loop");
+      }
+      const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+      const operator = await operateWorkerSessionControlPlane(requiredSessionName, options, {
+        dryRun,
+        confirm,
+        lines,
+        maxCycles: parsePositiveInteger(options["max-cycles"] ?? "1", "--max-cycles"),
+        cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "2000", "--cycle-interval-ms"),
+        reconcileWorkers: true,
+        recoverWorkerBundles: options["recover-worker-bundles"] === "1",
+      });
+      if (!operator.ok) {
+        process.exitCode = 1;
+      }
+      const afterStatus = confirm
+        ? await fetchWorkerSessionControlPlaneStatus(requiredSessionName, { lines })
+        : null;
+      const executionResponse = {
+        ...response,
+        dryRun,
+        confirmed: confirm,
+        selectedAction: "operate",
+        operator,
+        after: afterStatus ? workerSessionBranchNativeNext(summarizeWorkerSessionControlPlaneStatus(afterStatus), {
+          limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
+        }) : null,
+      };
+      if (outputFormat === "text") {
+        printWorkerSessionBranchNativeNextOperatorExecutionText(executionResponse);
+      } else {
+        await printJson(executionResponse);
+      }
+      return;
+    }
     if (recordAction) {
       const reviewLoop = await recordWorkerSessionResultReviewNextLoop(requiredSessionName, {
         action: recordAction,
@@ -8954,7 +8998,7 @@ function parseOptions(args: string[]): Record<string, string> {
     const arg = args[index];
     if (!arg.startsWith("--")) continue;
     const key = arg.slice(2);
-    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
+    if (key === "ack-reset-audit" || key === "acknowledged-recover-next-resume-history" || key === "action-executions" || key === "action-queue" || key === "blocked" || key === "bootstrap" || key === "boot" || key === "changed-only" || key === "check-runtime" || key === "checkout" || key === "commands-only" || key === "confirm" || key === "confirmation-queue" || key === "continue-deferred-loop-history" || key === "continue-drains" || key === "continue-on-failure" || key === "detach" || key === "drain-confirmations" || key === "exclude-operator-worker" || key === "execute-action" || key === "execute-confirmation" || key === "execute-next-confirmation" || key === "execute-next" || key === "execute-queued" || key === "execute-resume" || key === "failed-recover-next-resumes" || key === "finalize" || key === "from-profile" || key === "include-mutation-workers" || key === "include-operator-worker" || key === "include-result-review-worker" || key === "include-retired" || key === "include-stopped" || key === "inspect" || key === "latest" || key === "live" || key === "dry-run" || key === "loop" || key === "mutating" || key === "needs-action" || key === "next" || key === "no-bootstrap" || key === "operate" || key === "operator-recover-worker-bundles" || key === "operator-reconcile-workers" || key === "progress-json" || key === "queue" || key === "ready-results" || key === "reconcile-workers" || key === "recover-next" || key === "recover-next-loop-history" || key === "recover-worker-bundles" || key === "record-reviewed" || key === "record-skipped" || key === "recover" || key === "recoverable" || key === "reset-failed" || key === "reset-running" || key === "result-commits" || key === "resume-confirm" || key === "resumable" || key === "resume" || key === "resume-stopped" || key === "retire" || key === "save-profile" || key === "server" || key === "status-watch-executions" || key === "summary" || key === "until-action" || key === "until-empty" || key === "wait" || key === "watch") {
       options[key] = "1";
       continue;
     }
@@ -14633,6 +14677,8 @@ function workerSessionBranchNativeNext(
       ...(loop.commands.resumeLoop ? [{ surfaces: ["recover_next"] as const, command: loop.commands.resumeLoop }] : []),
       ...(loop.commands.executeResumeHistory ? [{ surfaces: ["recover_next"] as const, command: loop.commands.executeResumeHistory }] : []),
     ]),
+    { surfaces: ["operator"], command: workerSessionBranchNativeOperatorCommand(summary.session, true) },
+    { surfaces: ["operator"], command: workerSessionBranchNativeOperatorCommand(summary.session, false) },
     { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, true) },
     { surfaces: ["operator"], command: workerSessionControlPlaneOperatorCommand(summary.session, false) },
     { surfaces: ["operator"], command: workerSessionControlPlaneOperatorWorkerCommand(summary.session, true) },
@@ -14729,6 +14775,16 @@ function workerSessionControlPlaneOperatorCommand(sessionName: string, dryRun: b
   ];
 }
 
+function workerSessionBranchNativeOperatorCommand(sessionName: string, dryRun: boolean): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+    "--operate",
+    dryRun ? "--dry-run" : "--confirm",
+    "--max-cycles", "1",
+    "--cycle-interval-ms", "2000",
+  ];
+}
+
 function workerSessionControlPlaneOperatorWorkerCommand(sessionName: string, dryRun: boolean): string[] {
   return [
     "npm", "run", "cli", "--", "runs", "ensure-control-plane-operator-worker", sessionName, "--server",
@@ -14790,6 +14846,8 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `    inspect_progress: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-worker-progress", response.session, "--server", "--include-retired", "--limit", "5"])}`,
     `    restart_queue: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-control-plane-worker-restart-queue", response.session, "--server", "--include-retired", "--lines", "5"])}`,
     "  operator_control:",
+    `    branch_native_operate_dry_run: ${formatShellCommand(workerSessionBranchNativeOperatorCommand(response.session, true))}`,
+    `    branch_native_operate_confirm: ${formatShellCommand(workerSessionBranchNativeOperatorCommand(response.session, false))}`,
     `    operate_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, true))}`,
     `    operate_confirm: ${formatShellCommand(workerSessionControlPlaneOperatorCommand(response.session, false))}`,
     `    ensure_worker_dry_run: ${formatShellCommand(workerSessionControlPlaneOperatorWorkerCommand(response.session, true))}`,
@@ -14940,6 +14998,33 @@ function printWorkerSessionBranchNativeNextExecutionText(
     ...response.resultReviewLoop.records.map((record) => (
       `  - run: ${record.selected.runId} result_commit=${record.selected.resultCommit} recorded=${record.recorded} review=${record.review.reviewId}`
     )),
+  ].join("\n"));
+}
+
+function printWorkerSessionBranchNativeNextOperatorExecutionText(
+  response: WorkerSessionBranchNativeNextResponse & {
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    operator: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>;
+    after: WorkerSessionBranchNativeNextResponse | null;
+  },
+): void {
+  console.log([
+    "branch_native_next_operator_execution:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  action: ${response.selectedAction}`,
+    `  operator_run: ${response.operator.operatorRunRecord.operatorRunId}`,
+    `  operator_status: ${response.operator.operatorRunRecord.status}`,
+    `  stopped_reason: ${response.operator.stoppedReason}`,
+    `  cycles: ${response.operator.cycles.length}`,
+    `  after_worker_recovery: ${response.after?.counts.workerRecovery ?? ""}`,
+    `  after_result_pending: ${response.after?.counts.resultPending ?? ""}`,
+    `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
+    `  inspect_operator_run: ${formatShellCommand(response.operator.commands.inspectOperatorRuns)}`,
+    `  inspect_operator_timeline: ${formatShellCommand(response.operator.commands.inspectOperatorRunTimeline)}`,
   ].join("\n"));
 }
 
@@ -23522,7 +23607,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection] [--commands-only] [--format json|text|shell] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
