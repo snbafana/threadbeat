@@ -68,6 +68,12 @@ import {
   summarizeControlPlaneTerminalOverviewReplayLoopRecords,
 } from "./workerSessionTerminalOverviewReplayLoops.js";
 import {
+  listWorkerSessionTerminalOverviewReplayLoopWorkers,
+  restartWorkerSessionTerminalOverviewReplayLoopWorker,
+  startWorkerSessionTerminalOverviewReplayLoopWorker,
+  stopWorkerSessionTerminalOverviewReplayLoopWorkers,
+} from "./workerSessionTerminalOverviewReplayLoopWorkers.js";
+import {
   listWorkerSessionControlPlaneTickWorkerNextSteps,
   listWorkerSessionControlPlaneTickWorkers,
   restartWorkerSessionControlPlaneTickWorker,
@@ -1167,6 +1173,95 @@ export const buildServer = async (settings: Settings): Promise<AppParts> => {
           replayLoopDryRun: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-unreplayed-needs-action-loop", ...commandFilterArgs, "--dry-run"],
           replayLoopConfirm: ["npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", name, "--server", "--replay-unreplayed-needs-action-loop", ...commandFilterArgs, "--confirm"],
         },
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.get("/api/worker-sessions/:name/terminal-overview-replay-loop-workers", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const query = request.query as Record<string, string | undefined>;
+      const workers = await listWorkerSessionTerminalOverviewReplayLoopWorkers(settings.projectRoot, {
+        sessionName: name,
+        ...(query.workerId ? { workerId: query.workerId } : {}),
+        includeRetired: parseBoolean(query.includeRetired, false),
+      }, parseOptionalInteger(query.lines) ?? 20);
+      return {
+        ok: true,
+        session: name,
+        count: workers.length,
+        workers,
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/terminal-overview-replay-loop-workers/start", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      const worker = await startWorkerSessionTerminalOverviewReplayLoopWorker(
+        settings.projectRoot,
+        requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+        name,
+        {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          dryRun: parseBoolean(body.dryRun, false),
+          commandSurfaces: [
+            ...parseOptionalList(body.surface),
+            ...parseOptionalList(body.surfaces),
+            ...parseOptionalList(body.commandSurface),
+            ...parseOptionalList(body.commandSurfaces),
+          ],
+          actions: [
+            ...parseOptionalList(body.action),
+            ...parseOptionalList(body.actions),
+          ],
+          maxSteps: parseOptionalInteger(body.maxSteps) ?? 10,
+        },
+      );
+      return { ok: true, session: name, worker };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/terminal-overview-replay-loop-workers/stop", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await stopWorkerSessionTerminalOverviewReplayLoopWorkers(settings.projectRoot, name, {
+          ...(parseOptionalString(body.workerId) ? { workerId: parseOptionalString(body.workerId) } : {}),
+          retire: parseBoolean(body.retire, false),
+          lines: parseOptionalInteger(body.lines) ?? 20,
+        }),
+      };
+    } catch (error) {
+      return reply.code(400).send({ ok: false, error: messageOf(error) });
+    }
+  });
+
+  app.post("/api/worker-sessions/:name/terminal-overview-replay-loop-workers/restart", async (request, reply) => {
+    try {
+      const { name } = request.params as { name: string };
+      const body = requestBody(request.body);
+      return {
+        ok: true,
+        ...await restartWorkerSessionTerminalOverviewReplayLoopWorker(
+          settings.projectRoot,
+          requestBaseUrl(request.headers.host, request.headers["x-forwarded-proto"]),
+          name,
+          {
+            workerId: parseString(body.workerId, "workerId"),
+            includeRetired: parseBoolean(body.includeRetired, false),
+            lines: parseOptionalInteger(body.lines) ?? 20,
+          },
+        ),
       };
     } catch (error) {
       return reply.code(400).send({ ok: false, error: messageOf(error) });

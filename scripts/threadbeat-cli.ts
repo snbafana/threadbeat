@@ -23,6 +23,13 @@ import {
   listControlPlaneTerminalOverviewReplayLoopRecords,
   writeControlPlaneTerminalOverviewReplayLoopRecord,
 } from "../src/workerSessionTerminalOverviewReplayLoops.js";
+import {
+  type TerminalOverviewReplayLoopWorker,
+  listWorkerSessionTerminalOverviewReplayLoopWorkers,
+  restartWorkerSessionTerminalOverviewReplayLoopWorker,
+  startWorkerSessionTerminalOverviewReplayLoopWorker,
+  stopWorkerSessionTerminalOverviewReplayLoopWorkers,
+} from "../src/workerSessionTerminalOverviewReplayLoopWorkers.js";
 
 const baseUrl = normalizeBaseUrl(process.env.THREADBEAT_BASE_URL ?? "http://127.0.0.1:8000");
 const workerSessionDir = path.join(process.cwd(), ".threadbeat", "worker-sessions");
@@ -6234,6 +6241,81 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     } else {
       await printJson(response);
     }
+    return;
+  }
+  if (subcommandName === "start-terminal-overview-replay-loop-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs start-terminal-overview-replay-loop-worker <session>");
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if ([dryRun, confirm].filter(Boolean).length !== 1) {
+      throw new Error("runs start-terminal-overview-replay-loop-worker requires exactly one of --dry-run or --confirm");
+    }
+    const payload = {
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+      dryRun,
+      commandSurfaces: options.surface ? parseList(options.surface) : [],
+      actions: options.action ? parseList(options.action) : [],
+      maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+    };
+    if (options.server === "1") {
+      await printJson(await startTerminalOverviewReplayLoopWorkerViaServer(requiredSessionName, payload));
+      return;
+    }
+    const worker = await startWorkerSessionTerminalOverviewReplayLoopWorker(process.cwd(), baseUrl, requiredSessionName, payload);
+    await printJson({ ok: true, session: requiredSessionName, worker });
+    return;
+  }
+  if (subcommandName === "terminal-overview-replay-loop-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs terminal-overview-replay-loop-workers <session>");
+    const workerOptions = {
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+      includeRetired: options["include-retired"] === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    };
+    if (options.server === "1") {
+      await printJson(await fetchTerminalOverviewReplayLoopWorkers(requiredSessionName, workerOptions));
+      return;
+    }
+    const workers = await listWorkerSessionTerminalOverviewReplayLoopWorkers(process.cwd(), {
+      sessionName: requiredSessionName,
+      ...(workerOptions.workerId ? { workerId: workerOptions.workerId } : {}),
+      includeRetired: workerOptions.includeRetired,
+    }, workerOptions.lines);
+    await printJson({ ok: true, session: requiredSessionName, count: workers.length, workers });
+    return;
+  }
+  if (subcommandName === "stop-terminal-overview-replay-loop-workers") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs stop-terminal-overview-replay-loop-workers <session>");
+    const workerOptions = {
+      ...(options["worker-id"] ? { workerId: options["worker-id"] } : {}),
+      retire: options.retire === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    };
+    const response = options.server === "1"
+      ? await stopTerminalOverviewReplayLoopWorkersViaServer(requiredSessionName, workerOptions)
+      : await stopWorkerSessionTerminalOverviewReplayLoopWorkers(process.cwd(), requiredSessionName, workerOptions);
+    await printJson({ ok: true, ...response });
+    return;
+  }
+  if (subcommandName === "restart-terminal-overview-replay-loop-worker") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const requiredSessionName = required(sessionName, "runs restart-terminal-overview-replay-loop-worker <session>");
+    const workerOptions = {
+      workerId: required(options["worker-id"], "runs restart-terminal-overview-replay-loop-worker <session> --worker-id <id>"),
+      includeRetired: options["include-retired"] === "1",
+      lines: parsePositiveInteger(options.lines ?? "20", "--lines"),
+    };
+    const response = options.server === "1"
+      ? await restartTerminalOverviewReplayLoopWorkerViaServer(requiredSessionName, workerOptions)
+      : await restartWorkerSessionTerminalOverviewReplayLoopWorker(process.cwd(), baseUrl, requiredSessionName, workerOptions);
+    await printJson({ ok: true, ...response });
     return;
   }
   if (subcommandName === "session-branch-native-next") {
@@ -20511,6 +20593,96 @@ async function fetchControlPlaneTerminalOverviewReplayLoops(
   ) as ControlPlaneTerminalOverviewReplayLoopsResponse;
 }
 
+async function startTerminalOverviewReplayLoopWorkerViaServer(
+  sessionName: string,
+  options: { workerId?: string; dryRun: boolean; commandSurfaces: string[]; actions: string[]; maxSteps: number },
+): Promise<{
+  ok: true;
+  session: string;
+  worker: TerminalOverviewReplayLoopWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } };
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/terminal-overview-replay-loop-workers/start`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      dryRun: options.dryRun,
+      ...(options.commandSurfaces.length > 0 ? { commandSurfaces: options.commandSurfaces } : {}),
+      ...(options.actions.length > 0 ? { actions: options.actions } : {}),
+      maxSteps: options.maxSteps,
+    },
+  ) as {
+    ok: true;
+    session: string;
+    worker: TerminalOverviewReplayLoopWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } };
+  };
+}
+
+async function fetchTerminalOverviewReplayLoopWorkers(
+  sessionName: string,
+  options: { workerId?: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  workers: Array<TerminalOverviewReplayLoopWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+}> {
+  const params = new URLSearchParams({ lines: String(options.lines) });
+  if (options.workerId) params.set("workerId", options.workerId);
+  if (options.includeRetired) params.set("includeRetired", "1");
+  return await requestJson(
+    "GET",
+    withQuery(`/api/worker-sessions/${encodeURIComponent(sessionName)}/terminal-overview-replay-loop-workers`, params),
+  ) as {
+    ok: true;
+    session: string;
+    count: number;
+    workers: Array<TerminalOverviewReplayLoopWorker & { alive: boolean; stdout: { path: string; lines: string[] }; stderr: { path: string; lines: string[] } }>;
+  };
+}
+
+async function stopTerminalOverviewReplayLoopWorkersViaServer(
+  sessionName: string,
+  options: { workerId?: string; retire: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  stopped: unknown[];
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/terminal-overview-replay-loop-workers/stop`,
+    {
+      ...(options.workerId ? { workerId: options.workerId } : {}),
+      retire: options.retire,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; count: number; stopped: unknown[]; workers: unknown[] };
+}
+
+async function restartTerminalOverviewReplayLoopWorkerViaServer(
+  sessionName: string,
+  options: { workerId: string; includeRetired: boolean; lines: number },
+): Promise<{
+  ok: true;
+  session: string;
+  count: number;
+  restarted: unknown[];
+  workers: unknown[];
+}> {
+  return await requestJson(
+    "POST",
+    `/api/worker-sessions/${encodeURIComponent(sessionName)}/terminal-overview-replay-loop-workers/restart`,
+    {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+    },
+  ) as { ok: true; session: string; count: number; restarted: unknown[]; workers: unknown[] };
+}
+
 async function startWorkerSessionControlPlaneAdvanceWorker(
   sessionName: string,
   options: {
@@ -28695,6 +28867,10 @@ Commands:
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action] [--replay-state all|replayed|unreplayed]|--unreplayed-needs-action [--action selected_action]|--replay-loop-summary [--action selected_action]|--replay-execution execution_id --dry-run|--confirm|--replay-first-unreplayed-needs-action --dry-run|--confirm [--action selected_action]|--replay-unreplayed-needs-action-loop --dry-run|--confirm [--action selected_action] [--max-steps 10]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-terminal-overview-replay-loops <name> --server [--loop loop_id] [--surface surface[,surface]] [--action selected_action[,action]] [--limit 20] [--commands-only] [--format json|text|shell]
+  runs start-terminal-overview-replay-loop-worker <name> [--server] [--worker-id id] (--dry-run|--confirm) [--surface surface[,surface]] [--action selected_action[,action]] [--max-steps 10]
+  runs terminal-overview-replay-loop-workers <name> [--server] [--worker-id id] [--include-retired] [--lines 20]
+  runs stop-terminal-overview-replay-loop-workers <name> [--server] [--worker-id id] [--retire] [--lines 20]
+  runs restart-terminal-overview-replay-loop-worker <name> [--server] --worker-id id [--include-retired] [--lines 20]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]

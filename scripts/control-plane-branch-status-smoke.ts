@@ -972,6 +972,78 @@ try {
   assert.match(terminalOverviewReplayLoopSummaryText, new RegExp(`loop_id: ${replayLoopId}`));
   assert.match(terminalOverviewReplayLoopSummaryText, new RegExp(`replay_loop_dry_run: ${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`));
 
+  const replayLoopWorkerId = `replay-loop-worker-${sessionName}`;
+  const replayLoopWorkerStart = await cliJson<{
+    worker: { workerId: string; dryRun: boolean; maxSteps: number; command: string[] };
+  }>(baseUrl, [
+    "runs",
+    "start-terminal-overview-replay-loop-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--dry-run",
+    "--surface",
+    "control",
+    "--max-steps",
+    "1",
+  ]);
+  assert.equal(replayLoopWorkerStart.worker.workerId, replayLoopWorkerId);
+  assert.equal(replayLoopWorkerStart.worker.dryRun, true);
+  assert.equal(replayLoopWorkerStart.worker.maxSteps, 1);
+  assert.equal(replayLoopWorkerStart.worker.command.join(" "), `runs session-control-plane-terminal-overview ${sessionName} --server --replay-unreplayed-needs-action-loop --dry-run --max-steps 1 --surface control`);
+
+  const replayLoopWorkerList = await cliJson<{ count: number; workers: Array<{ workerId: string; command: string[] }> }>(baseUrl, [
+    "runs",
+    "terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(replayLoopWorkerList.count, 1);
+  assert.equal(replayLoopWorkerList.workers[0]?.workerId, replayLoopWorkerId);
+
+  const replayLoopWorkerStop = await cliJson<{ stopped: Array<{ workerId: string; stoppedAt: string }> }>(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(replayLoopWorkerStop.stopped[0]?.workerId, replayLoopWorkerId);
+  assert.equal(typeof replayLoopWorkerStop.stopped[0]?.stoppedAt, "string");
+
+  const replayLoopWorkerRestart = await cliJson<{ restarted: Array<{ workerId: string; restartCount: number; command: string[] }> }>(baseUrl, [
+    "runs",
+    "restart-terminal-overview-replay-loop-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--lines",
+    "1",
+  ]);
+  assert.equal(replayLoopWorkerRestart.restarted[0]?.workerId, replayLoopWorkerId);
+  assert.equal(replayLoopWorkerRestart.restarted[0]?.restartCount, 1);
+  assert.equal(replayLoopWorkerRestart.restarted[0]?.command.join(" "), replayLoopWorkerStart.worker.command.join(" "));
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
+
   const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
@@ -1647,6 +1719,7 @@ try {
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-operator-runs", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-executions", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loops", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loop-workers", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 

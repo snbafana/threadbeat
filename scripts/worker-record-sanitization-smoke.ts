@@ -37,6 +37,15 @@ const cases = [
     stop: ["runs", "stop-session-watch-workers", `worker-record-watch-${suffix}`, "--worker-id", `watch-worker-${suffix}`, "--lines", "1"],
     restart: ["runs", "restart-session-watch-workers", `worker-record-watch-${suffix}`, "--worker-id", `watch-worker-${suffix}`, "--lines", "1"],
   },
+  {
+    session: `worker-record-replay-${suffix}`,
+    workerId: `replay-loop-worker-${suffix}`,
+    workerDir: "terminal-overview-replay-loop-workers",
+    start: ["runs", "start-terminal-overview-replay-loop-worker", `worker-record-replay-${suffix}`, "--worker-id", `replay-loop-worker-${suffix}`, "--dry-run", "--max-steps", "1"],
+    list: ["runs", "terminal-overview-replay-loop-workers", `worker-record-replay-${suffix}`, "--worker-id", `replay-loop-worker-${suffix}`, "--lines", "1"],
+    stop: ["runs", "stop-terminal-overview-replay-loop-workers", `worker-record-replay-${suffix}`, "--worker-id", `replay-loop-worker-${suffix}`, "--lines", "1"],
+    restart: ["runs", "restart-terminal-overview-replay-loop-worker", `worker-record-replay-${suffix}`, "--worker-id", `replay-loop-worker-${suffix}`, "--lines", "1"],
+  },
 ];
 
 try {
