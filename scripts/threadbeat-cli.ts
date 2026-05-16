@@ -6710,6 +6710,61 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     await printJson(selectedAdvances);
     return;
   }
+  if (subcommandName === "session-control-plane-result-review-loops") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-result-review-loops <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-result-review-loops requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-result-review-loops --format must be json, shell, or text");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-result-review-loops --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-result-review-loops --format text cannot be combined with --commands-only");
+    }
+    const action = options.action;
+    if (action !== undefined && action !== "reviewed" && action !== "skipped") {
+      throw new Error("runs session-control-plane-result-review-loops --action must be reviewed or skipped");
+    }
+    const actionFilter = action === "reviewed" || action === "skipped" ? action : undefined;
+    const status = options.status ?? "all";
+    if (status !== "resumable" && status !== "completed" && status !== "all") {
+      throw new Error("runs session-control-plane-result-review-loops --status must be resumable, completed, or all");
+    }
+    const statusFilter = status === "resumable" || status === "completed" ? status : "all";
+    const limit = parsePositiveInteger(options.limit ?? "100", "--limit");
+    const advances = await fetchWorkerSessionControlPlaneAdvances(requiredSessionName, {
+      limit,
+      detailCommand: "branch_native_result_review_loop",
+      loopAdvanceId: options["loop-advance-id"],
+    });
+    const history = summarizeResultReviewLoopHistory(requiredSessionName, advances, {
+      action: actionFilter,
+      status: statusFilter,
+      loopAdvanceId: options["loop-advance-id"],
+      limit,
+    });
+    if (options["commands-only"] === "1") {
+      const commands = resultReviewLoopHistoryCommandQueue(history);
+      if (outputFormat === "shell") {
+        printCommandQueueShell(commands);
+      } else {
+        await printJson({ ...history, commands });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printResultReviewLoopHistoryText(history);
+    } else {
+      await printJson(history);
+    }
+    return;
+  }
   if (subcommandName === "start-control-plane-advance-worker") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -11284,6 +11339,78 @@ type ContinueDeferredLoopHistoryResponse = {
   records: ContinueDeferredLoopHistoryRecord[];
 };
 
+type ResultReviewLoopHistoryRecord = {
+  advanceId: string;
+  observedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  loopAdvanceId: string;
+  action: "reviewed" | "skipped";
+  resumed: boolean;
+  resumedLoopAdvanceId: string | null;
+  resumeSourceAdvanceId: string | null;
+  processed: number;
+  previousProcessed: number;
+  totalProcessed: number;
+  remainingPending: number;
+  maxResults: number | null;
+  intervalMs: number | null;
+  stoppedReason: string | null;
+  records: Array<{
+    runId: string | null;
+    resultCommit: string | null;
+    reviewId: string | null;
+    recorded: boolean | null;
+  }>;
+  inspectCommand: string[];
+};
+
+type ResultReviewLoopHistoryResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    loopAdvanceId: string | null;
+    action: "reviewed" | "skipped" | null;
+    status: "resumable" | "completed" | "all";
+    limit: number;
+  };
+  count: number;
+  summary: {
+    attempts: number;
+    dryRun: number;
+    executed: number;
+    resumable: number;
+    completed: number;
+    processed: number;
+  };
+  commands: {
+    inspectAll: string[];
+    inspectRaw: string[];
+  };
+  loops: Array<{
+    loopAdvanceId: string;
+    status: "resumable" | "completed";
+    action: "reviewed" | "skipped";
+    attempts: number;
+    latestAdvanceId: string;
+    latestObservedAt: string;
+    dryRunAttempts: number;
+    executedAttempts: number;
+    totalProcessed: number;
+    remainingPending: number;
+    stoppedReason: string | null;
+    reviewIds: string[];
+    runIds: string[];
+    resultCommits: string[];
+    commands: {
+      inspectLatest: string[];
+      inspectHistory: string[];
+      inspectRawHistory: string[];
+    };
+    attemptsHistory: ResultReviewLoopHistoryRecord[];
+  }>;
+};
+
 type ContinueDeferredLoopHistoryResumeResponse = {
   ok: boolean;
   session: string;
@@ -12299,6 +12426,140 @@ function printWorkerSessionControlPlaneAdvancesText(
   console.log(formatWorkerSessionControlPlaneAdvancesText(response).join("\n"));
 }
 
+function resultReviewLoopHistoryRecord(
+  sessionName: string,
+  advance: WorkerSessionControlPlaneAdvancesResponse["advances"][number],
+): ResultReviewLoopHistoryRecord {
+  const recovery = unknownRecord((advance as { recovery?: unknown }).recovery);
+  const selected = unknownRecord(advance.selected);
+  const action = stringRecordField(recovery, "action") === "skipped" ? "skipped" : "reviewed";
+  const loopAdvanceId = stringRecordField(recovery, "loopAdvanceId")
+    ?? stringRecordField(selected, "loopAdvanceId")
+    ?? advance.advanceId;
+  const records = (Array.isArray(recovery?.records) ? recovery.records : [])
+    .map((value) => unknownRecord(value))
+    .filter((value): value is Record<string, unknown> => Boolean(value))
+    .map((record) => ({
+      runId: stringRecordField(record, "runId"),
+      resultCommit: stringRecordField(record, "resultCommit"),
+      reviewId: stringRecordField(record, "reviewId"),
+      recorded: booleanRecordField(record, "recorded"),
+    }));
+  return {
+    advanceId: advance.advanceId,
+    observedAt: advance.observedAt,
+    completedAt: advance.completedAt,
+    dryRun: advance.dryRun,
+    loopAdvanceId,
+    action,
+    resumed: booleanRecordField(recovery, "resumed") ?? false,
+    resumedLoopAdvanceId: stringRecordField(recovery, "resumedLoopAdvanceId"),
+    resumeSourceAdvanceId: stringRecordField(recovery, "resumeSourceAdvanceId"),
+    processed: numberRecordField(recovery, "processed") ?? records.length,
+    previousProcessed: numberRecordField(recovery, "previousProcessed") ?? 0,
+    totalProcessed: numberRecordField(recovery, "totalProcessed") ?? records.length,
+    remainingPending: numberRecordField(recovery, "remainingPending") ?? 0,
+    maxResults: numberRecordField(recovery, "maxResults"),
+    intervalMs: numberRecordField(recovery, "intervalMs"),
+    stoppedReason: stringRecordField(recovery, "stoppedReason"),
+    records,
+    inspectCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", advance.advanceId],
+  };
+}
+
+function summarizeResultReviewLoopHistory(
+  sessionName: string,
+  response: WorkerSessionControlPlaneAdvancesResponse,
+  options: {
+    action?: "reviewed" | "skipped";
+    status: "resumable" | "completed" | "all";
+    loopAdvanceId?: string;
+    limit: number;
+  },
+): ResultReviewLoopHistoryResponse {
+  const records = response.advances
+    .filter((advance) => advance.detailCommand === "branch_native_result_review_loop")
+    .map((advance) => resultReviewLoopHistoryRecord(sessionName, advance))
+    .filter((record) => (options.action ? record.action === options.action : true));
+  const grouped = new Map<string, ResultReviewLoopHistoryRecord[]>();
+  for (const record of records) {
+    grouped.set(record.loopAdvanceId, [...(grouped.get(record.loopAdvanceId) ?? []), record]);
+  }
+  const loops = [...grouped.entries()]
+    .map(([loopAdvanceId, attempts]) => {
+      const attemptsHistory = [...attempts].sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+      const latest = attemptsHistory[0];
+      if (!latest) return null;
+      const status = latest.stoppedReason === "no_pending_result_commits" ? "completed" as const : "resumable" as const;
+      if (options.status !== "all" && status !== options.status) return null;
+      const reviewIds = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.reviewId)));
+      const runIds = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.runId)));
+      const resultCommits = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.resultCommit)));
+      return {
+        loopAdvanceId,
+        status,
+        action: latest.action,
+        attempts: attemptsHistory.length,
+        latestAdvanceId: latest.advanceId,
+        latestObservedAt: latest.observedAt,
+        dryRunAttempts: attemptsHistory.filter((attempt) => attempt.dryRun).length,
+        executedAttempts: attemptsHistory.filter((attempt) => !attempt.dryRun).length,
+        totalProcessed: latest.totalProcessed,
+        remainingPending: latest.remainingPending,
+        stoppedReason: latest.stoppedReason,
+        reviewIds,
+        runIds,
+        resultCommits,
+        commands: {
+          inspectLatest: latest.inspectCommand,
+          inspectHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", sessionName, "--server", "--loop-advance-id", loopAdvanceId],
+          inspectRawHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "branch_native_result_review_loop"],
+        },
+        attemptsHistory,
+      };
+    })
+    .filter((loop): loop is ResultReviewLoopHistoryResponse["loops"][number] => Boolean(loop))
+    .sort((left, right) => right.latestObservedAt.localeCompare(left.latestObservedAt));
+  return {
+    ok: true,
+    session: sessionName,
+    filter: {
+      loopAdvanceId: options.loopAdvanceId ?? null,
+      action: options.action ?? null,
+      status: options.status,
+      limit: options.limit,
+    },
+    count: loops.length,
+    summary: {
+      attempts: loops.reduce((total, loop) => total + loop.attempts, 0),
+      dryRun: loops.reduce((total, loop) => total + loop.dryRunAttempts, 0),
+      executed: loops.reduce((total, loop) => total + loop.executedAttempts, 0),
+      resumable: loops.filter((loop) => loop.status === "resumable").length,
+      completed: loops.filter((loop) => loop.status === "completed").length,
+      processed: loops.reduce((total, loop) => total + loop.totalProcessed, 0),
+    },
+    commands: {
+      inspectAll: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", sessionName, "--server"],
+      inspectRaw: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--detail-command", "branch_native_result_review_loop"],
+    },
+    loops,
+  };
+}
+
+function uniqueNonNullStrings(values: Array<string | null>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+function resultReviewLoopHistoryCommandQueue(
+  history: ResultReviewLoopHistoryResponse,
+): Array<{ command: string[] }> {
+  return uniqueCommandQueue(history.loops.flatMap((loop) => [
+    loop.commands.inspectLatest,
+    loop.commands.inspectHistory,
+    loop.commands.inspectRawHistory,
+  ])).map((command) => ({ command }));
+}
+
 function summarizeRecoverNextLoopHistory(
   sessionName: string,
   response: WorkerSessionControlPlaneAdvancesResponse,
@@ -12586,6 +12847,46 @@ function printContinueDeferredLoopHistoryText(history: ContinueDeferredLoopHisto
 
 function printAcknowledgedRecoverNextResumeHistoryText(response: AcknowledgedRecoverNextResumeHistoryResponse): void {
   console.log(formatAcknowledgedRecoverNextResumeHistoryText(response).join("\n"));
+}
+
+function printResultReviewLoopHistoryText(history: ResultReviewLoopHistoryResponse): void {
+  console.log(formatResultReviewLoopHistoryText(history).join("\n"));
+}
+
+function formatResultReviewLoopHistoryText(history: ResultReviewLoopHistoryResponse): string[] {
+  const lines = [
+    "result_review_loops:",
+    `  session: ${history.session}`,
+    `  filter: loop=${history.filter.loopAdvanceId ?? "*"} action=${history.filter.action ?? "*"} status=${history.filter.status} limit=${history.filter.limit}`,
+    `  count: ${history.count}`,
+    `  summary: attempts=${history.summary.attempts} dry_run=${history.summary.dryRun} executed=${history.summary.executed} resumable=${history.summary.resumable} completed=${history.summary.completed} processed=${history.summary.processed}`,
+    `  inspect_all: ${formatShellCommand(history.commands.inspectAll)}`,
+    `  inspect_raw: ${formatShellCommand(history.commands.inspectRaw)}`,
+    "  loops:",
+  ];
+  if (history.loops.length === 0) {
+    lines.push("    <empty>");
+    return lines;
+  }
+  for (const loop of history.loops) {
+    lines.push(
+      `    - loop: ${loop.loopAdvanceId}`,
+      `      status: ${loop.status}`,
+      `      action: ${loop.action}`,
+      `      attempts: ${loop.attempts}`,
+      `      total_processed: ${loop.totalProcessed}`,
+      `      remaining_pending: ${loop.remainingPending}`,
+      `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+      `      latest_advance: ${loop.latestAdvanceId}`,
+      `      review_ids: ${loop.reviewIds.join(",") || "*"}`,
+      `      run_ids: ${loop.runIds.join(",") || "*"}`,
+      `      result_commits: ${loop.resultCommits.join(",") || "*"}`,
+      `      inspect_latest: ${formatShellCommand(loop.commands.inspectLatest)}`,
+      `      inspect_history: ${formatShellCommand(loop.commands.inspectHistory)}`,
+      `      inspect_raw_history: ${formatShellCommand(loop.commands.inspectRawHistory)}`,
+    );
+  }
+  return lines;
 }
 
 function formatAcknowledgedRecoverNextResumeHistoryText(response: AcknowledgedRecoverNextResumeHistoryResponse): string[] {
@@ -13800,6 +14101,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `continue_deferred_loops: total=${summary.recovery.continueDeferred.attempts.total} dry_run=${summary.recovery.continueDeferred.attempts.dryRun} executed=${summary.recovery.continueDeferred.attempts.executed} failed=${summary.recovery.continueDeferred.attempts.failed} resumable=${summary.recovery.continueDeferred.resumableLoops.count}`,
     `operator_loops: total=${summary.recovery.operatorLoops.attempts.total} dry_run=${summary.recovery.operatorLoops.attempts.dryRun} executed=${summary.recovery.operatorLoops.attempts.executed} failed=${summary.recovery.operatorLoops.attempts.failed} resumable=${summary.recovery.operatorLoops.resumableLoops.count}`,
     `result_review_loops: total=${summary.recovery.resultReviewLoops.attempts.total} dry_run=${summary.recovery.resultReviewLoops.attempts.dryRun} executed=${summary.recovery.resultReviewLoops.attempts.executed} failed=${summary.recovery.resultReviewLoops.attempts.failed} resumable=${summary.recovery.resultReviewLoops.resumableLoops.count} completed=${summary.recovery.resultReviewLoops.completedLoops.count}`,
+    `result_review_loop_history: ${formatShellCommand(summary.commands.resultReviewLoopHistory)}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
@@ -15152,6 +15454,9 @@ function workerSessionBranchNativeNext(
     { surfaces: ["result_inspection"], command: summary.commands.resultCommitView },
     { surfaces: ["result_inspection"], command: summary.commands.pendingResultCommitView },
     ...(summary.recovery.resultReviewLoops.resumableLoops.count > 0 ? [{ surfaces: ["result_inspection"] as const, command: summary.commands.resultReviewLoops }] : []),
+    ...(summary.recovery.resultReviewLoops.resumableLoops.count > 0 || summary.recovery.resultReviewLoops.completedLoops.count > 0
+      ? [{ surfaces: ["result_inspection"] as const, command: summary.commands.resultReviewLoopHistory }]
+      : []),
     ...resultReviewLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
       { surfaces: ["result_inspection"], command: loop.resumeCommand },
       { surfaces: ["result_inspection"], command: loop.inspectLatestCommand },
@@ -16467,6 +16772,7 @@ function summarizeWorkerSessionControlPlaneStatus(
     operatorLoopNextInspect: string[] | null;
     operatorLoopNextResume: string[] | null;
     resultReviewLoops: string[];
+    resultReviewLoopHistory: string[];
     resultReviewLoopNextInspect: string[] | null;
     resultReviewLoopNextResume: string[] | null;
     recoverNextIncompleteLoopQueue: string[];
@@ -16665,6 +16971,7 @@ function summarizeWorkerSessionControlPlaneStatus(
       operatorLoopNextInspect: status.recovery.operatorLoops.resumableLoops.recent[0]?.inspectLatestCommand ?? null,
       operatorLoopNextResume: status.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand ?? null,
       resultReviewLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", status.session, "--server", "--detail-command", "branch_native_result_review_loop"],
+      resultReviewLoopHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", status.session, "--server"],
       resultReviewLoopNextInspect: status.recovery.resultReviewLoops.resumableLoops.recent[0]?.inspectLatestCommand ?? null,
       resultReviewLoopNextResume: status.recovery.resultReviewLoops.resumableLoops.recent[0]?.resumeCommand ?? null,
       recoverNextIncompleteLoopQueue: [
@@ -24601,6 +24908,7 @@ Commands:
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history|--continue-deferred-loop-history [--execute-resume --confirm]] [--acknowledged-recover-next-resume-history [--advance acknowledgement_or_attempt_or_loop_id]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery] [--status-watch-executions] [--failed-recover-next-resumes] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-result-review-loops <name> --server [--loop-advance-id loop_advance_id] [--action reviewed|skipped] [--status resumable|completed|all] [--limit 100] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]

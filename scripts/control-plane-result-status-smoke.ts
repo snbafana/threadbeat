@@ -595,7 +595,7 @@ try {
         };
       };
     };
-    commands: { resultReviewLoops: string[]; resultReviewLoopNextInspect: string[]; resultReviewLoopNextResume: string[] };
+    commands: { resultReviewLoops: string[]; resultReviewLoopHistory: string[]; resultReviewLoopNextInspect: string[]; resultReviewLoopNextResume: string[] };
   }>(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -618,6 +618,7 @@ try {
   assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.inspectHistoryCommand.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${branchNativeReviewDryRun.loopAdvanceId} --detail-command branch_native_result_review_loop`);
   assert.equal(resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.executeResumeCommand.join(" "), `npm run cli -- runs session-branch-native-next ${sessionName} --server --record-reviewed --until-empty --resume-loop ${branchNativeReviewDryRun.loopAdvanceId} --confirm --max-results 3 --interval-ms 1`);
   assert.equal(resumableResultReviewLoopStatus.commands.resultReviewLoops.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --detail-command branch_native_result_review_loop`);
+  assert.equal(resumableResultReviewLoopStatus.commands.resultReviewLoopHistory.join(" "), `npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server`);
   assert.deepEqual(resumableResultReviewLoopStatus.commands.resultReviewLoopNextInspect, resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.inspectLatestCommand);
   assert.deepEqual(resumableResultReviewLoopStatus.commands.resultReviewLoopNextResume, resumableResultReviewLoopStatus.recovery.resultReviewLoops.resumableLoops.recent[0]?.resumeCommand);
   assert.equal(resumableResultReviewLoopStatus.nextRecovery.surface, "result_inspection");
@@ -659,10 +660,85 @@ try {
   assert.equal(branchNativeNextWithReviewLoop.resultReviewLoops[0]?.action, "reviewed");
   assert.equal(branchNativeNextWithReviewLoop.resultReviewLoops[0]?.totalProcessed, 2);
   assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === resumableResultReviewLoopStatus.commands.resultReviewLoops.join(" ")));
+  assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === resumableResultReviewLoopStatus.commands.resultReviewLoopHistory.join(" ")));
   assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.resumeCommand.join(" ")));
   assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.inspectLatestCommand.join(" ")));
   assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.inspectHistoryCommand.join(" ")));
   assert.ok(branchNativeNextWithReviewLoop.commands.some((command) => command.command.join(" ") === branchNativeNextWithReviewLoop.resultReviewLoops[0]?.executeResumeCommand.join(" ")));
+
+  const resumableResultReviewLoopHistoryView = await cliJson<{
+    count: number;
+    summary: { attempts: number; dryRun: number; resumable: number; completed: number; processed: number };
+    loops: Array<{
+      loopAdvanceId: string;
+      status: string;
+      action: string;
+      attempts: number;
+      latestAdvanceId: string;
+      totalProcessed: number;
+      remainingPending: number;
+      stoppedReason: string;
+      reviewIds: string[];
+      runIds: string[];
+      resultCommits: string[];
+      commands: { inspectLatest: string[]; inspectHistory: string[]; inspectRawHistory: string[] };
+      attemptsHistory: Array<{ advanceId: string; totalProcessed: number; records: Array<{ runId: string; resultCommit: string; reviewId: string; recorded: boolean }> }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-loops",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    branchNativeReviewDryRun.loopAdvanceId,
+    "--action",
+    "reviewed",
+    "--status",
+    "resumable",
+  ]);
+  assert.equal(resumableResultReviewLoopHistoryView.count, 1);
+  assert.equal(resumableResultReviewLoopHistoryView.summary.attempts, 2);
+  assert.equal(resumableResultReviewLoopHistoryView.summary.dryRun, 2);
+  assert.equal(resumableResultReviewLoopHistoryView.summary.resumable, 1);
+  assert.equal(resumableResultReviewLoopHistoryView.summary.completed, 0);
+  assert.equal(resumableResultReviewLoopHistoryView.summary.processed, 2);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.status, "resumable");
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.action, "reviewed");
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.attempts, 2);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.latestAdvanceId, branchNativeReviewResumeDryRun.advanceRecord.advanceId);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.totalProcessed, 2);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.remainingPending, 1);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.stoppedReason, "dry_run_previewed");
+  assert.deepEqual(resumableResultReviewLoopHistoryView.loops[0]?.reviewIds, ["dry-run"]);
+  assert.deepEqual(resumableResultReviewLoopHistoryView.loops[0]?.runIds, [run.id]);
+  assert.deepEqual(resumableResultReviewLoopHistoryView.loops[0]?.resultCommits, [resultCommit]);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.commands.inspectLatest.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --advance ${branchNativeReviewResumeDryRun.advanceRecord.advanceId}`);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.commands.inspectHistory.join(" "), `npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server --loop-advance-id ${branchNativeReviewDryRun.loopAdvanceId}`);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.commands.inspectRawHistory.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${branchNativeReviewDryRun.loopAdvanceId} --detail-command branch_native_result_review_loop`);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.advanceId, branchNativeReviewResumeDryRun.advanceRecord.advanceId);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.totalProcessed, 2);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.records[0]?.runId, run.id);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.records[0]?.resultCommit, resultCommit);
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.records[0]?.reviewId, "dry-run");
+  assert.equal(resumableResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.records[0]?.recorded, false);
+
+  const resumableResultReviewLoopHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-loops",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    branchNativeReviewDryRun.loopAdvanceId,
+    "--status",
+    "resumable",
+    "--format",
+    "text",
+  ]);
+  assert.match(resumableResultReviewLoopHistoryText, /result_review_loops:/);
+  assert.match(resumableResultReviewLoopHistoryText, /status: resumable/);
+  assert.match(resumableResultReviewLoopHistoryText, /review_ids: dry-run/);
+  assert.match(resumableResultReviewLoopHistoryText, new RegExp(`inspect_history: npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server --loop-advance-id ${branchNativeReviewDryRun.loopAdvanceId}`));
 
   const branchNativeNextWithReviewLoopText = await cliText(baseUrl, [
     "runs",
@@ -1522,6 +1598,75 @@ try {
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.inspectLatestCommand.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --advance ${emptyBranchNativeReviewLoop.advanceRecord.advanceId}`);
   assert.equal(completedResultReviewLoopStatus.recovery.resultReviewLoops.completedLoops.recent[0]?.inspectHistoryCommand.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${emptyBranchNativeReviewLoop.loopAdvanceId} --detail-command branch_native_result_review_loop`);
 
+  const completedResultReviewLoopHistoryView = await cliJson<{
+    count: number;
+    summary: { attempts: number; dryRun: number; executed: number; resumable: number; completed: number; processed: number };
+    loops: Array<{
+      loopAdvanceId: string;
+      status: string;
+      action: string;
+      attempts: number;
+      latestAdvanceId: string;
+      totalProcessed: number;
+      remainingPending: number;
+      stoppedReason: string;
+      reviewIds: string[];
+      runIds: string[];
+      resultCommits: string[];
+      commands: { inspectLatest: string[]; inspectHistory: string[]; inspectRawHistory: string[] };
+      attemptsHistory: Array<{ advanceId: string; totalProcessed: number; records: unknown[] }>;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-loops",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    emptyBranchNativeReviewLoop.loopAdvanceId,
+    "--status",
+    "completed",
+  ]);
+  assert.equal(completedResultReviewLoopHistoryView.count, 1);
+  assert.equal(completedResultReviewLoopHistoryView.summary.attempts, 1);
+  assert.equal(completedResultReviewLoopHistoryView.summary.dryRun, 0);
+  assert.equal(completedResultReviewLoopHistoryView.summary.executed, 1);
+  assert.equal(completedResultReviewLoopHistoryView.summary.resumable, 0);
+  assert.equal(completedResultReviewLoopHistoryView.summary.completed, 1);
+  assert.equal(completedResultReviewLoopHistoryView.summary.processed, 0);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.status, "completed");
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.action, "reviewed");
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.attempts, 1);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.latestAdvanceId, emptyBranchNativeReviewLoop.advanceRecord.advanceId);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.totalProcessed, 0);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.remainingPending, 0);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.stoppedReason, "no_pending_result_commits");
+  assert.deepEqual(completedResultReviewLoopHistoryView.loops[0]?.reviewIds, []);
+  assert.deepEqual(completedResultReviewLoopHistoryView.loops[0]?.runIds, []);
+  assert.deepEqual(completedResultReviewLoopHistoryView.loops[0]?.resultCommits, []);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.commands.inspectLatest.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --advance ${emptyBranchNativeReviewLoop.advanceRecord.advanceId}`);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.commands.inspectHistory.join(" "), `npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server --loop-advance-id ${emptyBranchNativeReviewLoop.loopAdvanceId}`);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.commands.inspectRawHistory.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --loop-advance-id ${emptyBranchNativeReviewLoop.loopAdvanceId} --detail-command branch_native_result_review_loop`);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.advanceId, emptyBranchNativeReviewLoop.advanceRecord.advanceId);
+  assert.equal(completedResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.totalProcessed, 0);
+  assert.deepEqual(completedResultReviewLoopHistoryView.loops[0]?.attemptsHistory[0]?.records, []);
+
+  const completedResultReviewLoopHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-loops",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    emptyBranchNativeReviewLoop.loopAdvanceId,
+    "--status",
+    "completed",
+    "--format",
+    "text",
+  ]);
+  assert.match(completedResultReviewLoopHistoryText, /status: completed/);
+  assert.match(completedResultReviewLoopHistoryText, /stopped_reason: no_pending_result_commits/);
+  assert.match(completedResultReviewLoopHistoryText, /review_ids: \*/);
+
   const completedResultReviewLoopStatusText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-status",
@@ -1532,6 +1677,7 @@ try {
     "text",
   ]);
   assert.match(completedResultReviewLoopStatusText, /result_review_loops: total=\d+ dry_run=\d+ executed=0 failed=0 resumable=1 completed=1/);
+  assert.match(completedResultReviewLoopStatusText, new RegExp(`result_review_loop_history: npm run cli -- runs session-control-plane-result-review-loops ${sessionName} --server`));
   assert.match(completedResultReviewLoopStatusText, /completed_result_review_loops:/);
   assert.match(completedResultReviewLoopStatusText, new RegExp(`loop: ${emptyBranchNativeReviewLoop.loopAdvanceId}`));
   assert.match(completedResultReviewLoopStatusText, /stopped_reason: no_pending_result_commits/);
