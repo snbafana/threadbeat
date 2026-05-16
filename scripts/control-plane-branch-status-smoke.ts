@@ -767,6 +767,7 @@ try {
       executionRecord: { executionId: string; inspectHistory: string[] };
     }>;
     commands: { inspectUnreplayedNeedsAction: string[]; inspectHistory: string[] };
+    loopRecord: { loopId: string; loopPath: string; inspectSummary: string[] };
   }>(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
@@ -799,6 +800,9 @@ try {
   assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
   assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.commands.inspectUnreplayedNeedsAction.join(" "), `${terminalOverviewCommand} --unreplayed-needs-action --surface control`);
   assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.commands.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+  assert.match(terminalOverviewReplayUnreplayedNeedsActionLoop.json.loopRecord.loopId, /^terminal-overview-replay-loop-/);
+  assert.match(terminalOverviewReplayUnreplayedNeedsActionLoop.json.loopRecord.loopPath, /terminal-overview-replay-loops/);
+  assert.equal(terminalOverviewReplayUnreplayedNeedsActionLoop.json.loopRecord.inspectSummary.join(" "), `${terminalOverviewCommand} --replay-loop-summary`);
 
   const terminalOverviewUnreplayedAfterLoop = await cliJson<{
     summary: { total: number; unreplayedNeedsAction: number };
@@ -826,11 +830,13 @@ try {
       unreplayedNeedsAction: number;
       unsupported: number;
       failed: number;
+      loopAttempts: number;
     };
     latest: {
       unreplayedNeedsAction: null;
       replay: { executionId: string; replayOf?: string } | null;
       replayedSource: { executionId: string; replayedBy?: string[] } | null;
+      loop: { loopId: string; stoppedReason: string; summary: { steps: number } } | null;
     };
     commands: {
       inspectUnreplayedNeedsAction: string[];
@@ -848,6 +854,7 @@ try {
     "control",
   ]);
   const loopReplayExecutionId = terminalOverviewReplayUnreplayedNeedsActionLoop.json.steps[0]?.executionRecord.executionId;
+  const replayLoopId = terminalOverviewReplayUnreplayedNeedsActionLoop.json.loopRecord.loopId;
   assert.equal(terminalOverviewReplayLoopSummary.summary.records, 4);
   assert.equal(terminalOverviewReplayLoopSummary.summary.sources, 2);
   assert.equal(terminalOverviewReplayLoopSummary.summary.replays, 2);
@@ -855,11 +862,15 @@ try {
   assert.equal(terminalOverviewReplayLoopSummary.summary.unreplayedNeedsAction, 0);
   assert.equal(terminalOverviewReplayLoopSummary.summary.unsupported, 4);
   assert.equal(terminalOverviewReplayLoopSummary.summary.failed, 0);
+  assert.equal(terminalOverviewReplayLoopSummary.summary.loopAttempts, 1);
   assert.equal(terminalOverviewReplayLoopSummary.latest.unreplayedNeedsAction, null);
   assert.equal(terminalOverviewReplayLoopSummary.latest.replay?.executionId, loopReplayExecutionId);
   assert.equal(terminalOverviewReplayLoopSummary.latest.replay?.replayOf, loopSourceExecutionId);
   assert.equal(terminalOverviewReplayLoopSummary.latest.replayedSource?.executionId, loopSourceExecutionId);
   assert.deepEqual(terminalOverviewReplayLoopSummary.latest.replayedSource?.replayedBy, [loopReplayExecutionId]);
+  assert.equal(terminalOverviewReplayLoopSummary.latest.loop?.loopId, replayLoopId);
+  assert.equal(terminalOverviewReplayLoopSummary.latest.loop?.stoppedReason, "queue_empty");
+  assert.equal(terminalOverviewReplayLoopSummary.latest.loop?.summary.steps, 1);
   assert.equal(terminalOverviewReplayLoopSummary.commands.inspectUnreplayedNeedsAction.join(" "), `${terminalOverviewCommand} --unreplayed-needs-action --surface control`);
   assert.equal(terminalOverviewReplayLoopSummary.commands.replayLoopDryRun.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`);
   assert.equal(terminalOverviewReplayLoopSummary.commands.replayLoopConfirm.join(" "), `${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --confirm`);
@@ -878,8 +889,10 @@ try {
   ]);
   assert.match(terminalOverviewReplayLoopSummaryText, /control_plane_terminal_overview_replay_loop_summary:/);
   assert.match(terminalOverviewReplayLoopSummaryText, /unreplayed_needs_action=0/);
+  assert.match(terminalOverviewReplayLoopSummaryText, /loop_attempts=1/);
   assert.match(terminalOverviewReplayLoopSummaryText, new RegExp(`replay_execution_id: ${loopReplayExecutionId}`));
   assert.match(terminalOverviewReplayLoopSummaryText, new RegExp(`replay_of: ${loopSourceExecutionId}`));
+  assert.match(terminalOverviewReplayLoopSummaryText, new RegExp(`loop_id: ${replayLoopId}`));
   assert.match(terminalOverviewReplayLoopSummaryText, new RegExp(`replay_loop_dry_run: ${terminalOverviewCommand} --replay-unreplayed-needs-action-loop --surface control --dry-run`));
 
   const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
@@ -1556,6 +1569,7 @@ try {
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-operator-runs", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-executions", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loops", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 

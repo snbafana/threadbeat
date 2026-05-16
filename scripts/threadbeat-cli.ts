@@ -6007,7 +6007,12 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         actions: executionHistoryActions,
         replayState: "all",
       });
-      const response = summarizeControlPlaneTerminalOverviewReplayLoop(requiredSessionName, records, {
+      const loopRecords = await listControlPlaneTerminalOverviewReplayLoopRecords(requiredSessionName, {
+        limit: parsePositiveInteger(options.limit ?? "100", "--limit"),
+        commandSurfaces,
+        actions: executionHistoryActions,
+      });
+      const response = summarizeControlPlaneTerminalOverviewReplayLoop(requiredSessionName, records, loopRecords, {
         commandSurfaces,
         actions: executionHistoryActions,
       });
@@ -17314,6 +17319,11 @@ type ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse = {
     inspectUnreplayedNeedsAction: string[];
     inspectHistory: string[];
   };
+  loopRecord: {
+    loopId: string;
+    loopPath: string;
+    inspectSummary: string[];
+  };
 };
 
 type ControlPlaneTerminalOverviewReplayLoopSummaryResponse = {
@@ -17329,11 +17339,13 @@ type ControlPlaneTerminalOverviewReplayLoopSummaryResponse = {
     unreplayedNeedsAction: number;
     unsupported: number;
     failed: number;
+    loopAttempts: number;
   };
   latest: {
     unreplayedNeedsAction: ControlPlaneTerminalOverviewExecutionRecord | null;
     replay: ControlPlaneTerminalOverviewExecutionRecord | null;
     replayedSource: ControlPlaneTerminalOverviewExecutionRecord | null;
+    loop: ControlPlaneTerminalOverviewReplayLoopRecord | null;
   };
   commands: {
     inspectUnreplayedNeedsAction: string[];
@@ -17341,6 +17353,28 @@ type ControlPlaneTerminalOverviewReplayLoopSummaryResponse = {
     replayLoopConfirm: string[];
     inspectHistory: string[];
   };
+};
+
+type ControlPlaneTerminalOverviewReplayLoopRecord = {
+  loopId: string;
+  session: string;
+  startedAt: string;
+  completedAt: string;
+  dryRun: boolean;
+  confirmed: boolean;
+  commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+  actions: string[];
+  maxSteps: number;
+  stoppedReason: ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse["stoppedReason"];
+  summary: ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse["summary"];
+  steps: Array<{
+    sourceExecutionId: string;
+    replayExecutionId: string;
+    supported: boolean;
+    unsupportedReason: string | null;
+    command: string[] | null;
+    exitCode: number | null;
+  }>;
 };
 
 type ControlPlaneTerminalOverviewExecutionRecord = {
@@ -18382,6 +18416,7 @@ async function replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(
     maxSteps: number;
   },
 ): Promise<ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse> {
+  const startedAt = new Date().toISOString();
   const steps: ControlPlaneTerminalOverviewReplayExecutionResponse[] = [];
   let stoppedReason: ControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopResponse["stoppedReason"] = "queue_empty";
   for (let step = 0; step < options.maxSteps; step += 1) {
@@ -18401,6 +18436,35 @@ async function replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(
       stoppedReason = "max_steps";
     }
   }
+  const completedAt = new Date().toISOString();
+  const summary = {
+    steps: steps.length,
+    supported: steps.filter((step) => step.replayExecution.supported).length,
+    unsupported: steps.filter((step) => !step.replayExecution.supported).length,
+    executed: steps.filter((step) => Boolean(step.replayExecution.executed)).length,
+    failed: steps.filter((step) => step.replayExecution.executed?.exitCode !== undefined && step.replayExecution.executed?.exitCode !== 0).length,
+  };
+  const writtenLoop = await writeControlPlaneTerminalOverviewReplayLoopRecord({
+    loopId: createControlPlaneTerminalOverviewReplayLoopId(completedAt),
+    session: sessionName,
+    startedAt,
+    completedAt,
+    dryRun: options.dryRun,
+    confirmed: options.confirm,
+    commandSurfaces: options.commandSurfaces,
+    actions: options.actions,
+    maxSteps: options.maxSteps,
+    stoppedReason,
+    summary,
+    steps: steps.map((step) => ({
+      sourceExecutionId: step.replayExecution.sourceExecutionId,
+      replayExecutionId: step.executionRecord.executionId,
+      supported: step.replayExecution.supported,
+      unsupportedReason: step.replayExecution.unsupportedReason,
+      command: step.replayExecution.command,
+      exitCode: step.replayExecution.executed?.exitCode ?? null,
+    })),
+  });
   return {
     ok: true,
     session: sessionName,
@@ -18410,13 +18474,7 @@ async function replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(
     actions: options.actions,
     maxSteps: options.maxSteps,
     stoppedReason,
-    summary: {
-      steps: steps.length,
-      supported: steps.filter((step) => step.replayExecution.supported).length,
-      unsupported: steps.filter((step) => !step.replayExecution.supported).length,
-      executed: steps.filter((step) => Boolean(step.replayExecution.executed)).length,
-      failed: steps.filter((step) => step.replayExecution.executed?.exitCode !== undefined && step.replayExecution.executed?.exitCode !== 0).length,
-    },
+    summary,
     steps,
     commands: {
       inspectUnreplayedNeedsAction: [
@@ -18430,12 +18488,21 @@ async function replayControlPlaneTerminalOverviewUnreplayedNeedsActionLoop(
         "--execution-history",
       ],
     },
+    loopRecord: {
+      loopId: writtenLoop.record.loopId,
+      loopPath: writtenLoop.path,
+      inspectSummary: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-terminal-overview", sessionName, "--server",
+        "--replay-loop-summary",
+      ],
+    },
   };
 }
 
 function summarizeControlPlaneTerminalOverviewReplayLoop(
   sessionName: string,
   records: ControlPlaneTerminalOverviewExecutionRecord[],
+  loopRecords: ControlPlaneTerminalOverviewReplayLoopRecord[],
   filter: {
     commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
     actions: string[];
@@ -18470,11 +18537,13 @@ function summarizeControlPlaneTerminalOverviewReplayLoop(
       unreplayedNeedsAction: unreplayedNeedsAction.length,
       unsupported: records.filter((record) => !record.supported).length,
       failed: records.filter((record) => record.executed?.exitCode !== undefined && record.executed?.exitCode !== 0).length,
+      loopAttempts: loopRecords.length,
     },
     latest: {
       unreplayedNeedsAction: unreplayedNeedsAction[0] ?? null,
       replay: replays[0] ?? null,
       replayedSource: replayedSources[0] ?? null,
+      loop: loopRecords[0] ?? null,
     },
     commands: {
       inspectUnreplayedNeedsAction,
@@ -18572,6 +18641,10 @@ function printControlPlaneTerminalOverviewReplayUnreplayedNeedsActionLoopText(
     `  summary: steps=${response.summary.steps} supported=${response.summary.supported} unsupported=${response.summary.unsupported} executed=${response.summary.executed} failed=${response.summary.failed}`,
     `  inspect_unreplayed_needs_action: ${formatShellCommand(response.commands.inspectUnreplayedNeedsAction)}`,
     `  inspect_history: ${formatShellCommand(response.commands.inspectHistory)}`,
+    "  loop_record:",
+    `    loop_id: ${response.loopRecord.loopId}`,
+    `    loop_path: ${response.loopRecord.loopPath}`,
+    `    inspect_summary: ${formatShellCommand(response.loopRecord.inspectSummary)}`,
     "  steps:",
     ...(response.steps.length > 0
       ? response.steps.flatMap((step, index) => [
@@ -18597,7 +18670,7 @@ function printControlPlaneTerminalOverviewReplayLoopSummaryText(
     `  session: ${response.session}`,
     `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
     `  actions: ${response.actions.join(",") || "all"}`,
-    `  summary: records=${response.summary.records} sources=${response.summary.sources} replays=${response.summary.replays} replayed_sources=${response.summary.replayedSources} unreplayed_needs_action=${response.summary.unreplayedNeedsAction} unsupported=${response.summary.unsupported} failed=${response.summary.failed}`,
+    `  summary: records=${response.summary.records} sources=${response.summary.sources} replays=${response.summary.replays} replayed_sources=${response.summary.replayedSources} unreplayed_needs_action=${response.summary.unreplayedNeedsAction} unsupported=${response.summary.unsupported} failed=${response.summary.failed} loop_attempts=${response.summary.loopAttempts}`,
     "  latest:",
     `    unreplayed_execution_id: ${response.latest.unreplayedNeedsAction?.executionId ?? ""}`,
     `    unreplayed_command: ${response.latest.unreplayedNeedsAction?.selectedAction ? formatShellCommand(response.latest.unreplayedNeedsAction.selectedAction.command) : ""}`,
@@ -18605,6 +18678,9 @@ function printControlPlaneTerminalOverviewReplayLoopSummaryText(
     `    replay_of: ${response.latest.replay?.replayOf ?? ""}`,
     `    replayed_source_execution_id: ${response.latest.replayedSource?.executionId ?? ""}`,
     `    replayed_by: ${response.latest.replayedSource?.replayedBy?.join(",") ?? ""}`,
+    `    loop_id: ${response.latest.loop?.loopId ?? ""}`,
+    `    loop_stopped_reason: ${response.latest.loop?.stoppedReason ?? ""}`,
+    `    loop_steps: ${response.latest.loop?.summary.steps ?? ""}`,
     "  commands:",
     `    inspect_unreplayed_needs_action: ${formatShellCommand(response.commands.inspectUnreplayedNeedsAction)}`,
     `    replay_loop_dry_run: ${formatShellCommand(response.commands.replayLoopDryRun)}`,
@@ -25573,6 +25649,37 @@ async function listControlPlaneTerminalOverviewExecutionRecords(
   }
 }
 
+async function listControlPlaneTerminalOverviewReplayLoopRecords(
+  sessionName: string,
+  options: {
+    limit: number;
+    commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+    actions: string[];
+  },
+): Promise<ControlPlaneTerminalOverviewReplayLoopRecord[]> {
+  assertSafeSessionName(sessionName);
+  const loopDir = controlPlaneTerminalOverviewReplayLoopDir(sessionName);
+  try {
+    const entries = await fs.readdir(loopDir, { withFileTypes: true });
+    const records = await Promise.all(entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+      .map(async (entry) => {
+        const text = await fs.readFile(path.join(loopDir, entry.name), "utf8");
+        return JSON.parse(text) as ControlPlaneTerminalOverviewReplayLoopRecord;
+      }));
+    const requested = new Set(options.commandSurfaces);
+    const requestedActions = new Set(options.actions);
+    return records
+      .filter((record) => requested.size === 0 || record.commandSurfaces.some((surface) => requested.has(surface)))
+      .filter((record) => requestedActions.size === 0 || record.actions.some((action) => requestedActions.has(action)))
+      .sort((left, right) => right.completedAt.localeCompare(left.completedAt))
+      .slice(0, options.limit);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+}
+
 async function readControlPlaneTerminalOverviewExecutionRecord(
   sessionName: string,
   executionId: string,
@@ -25628,12 +25735,25 @@ async function writeControlPlaneTerminalOverviewExecutionRecord(
   return { path: executionPath, record };
 }
 
+async function writeControlPlaneTerminalOverviewReplayLoopRecord(
+  record: ControlPlaneTerminalOverviewReplayLoopRecord,
+): Promise<{ path: string; record: ControlPlaneTerminalOverviewReplayLoopRecord }> {
+  const loopPath = controlPlaneTerminalOverviewReplayLoopPath(record.session, record.loopId);
+  await fs.mkdir(path.dirname(loopPath), { recursive: true });
+  await fs.writeFile(loopPath, `${JSON.stringify(record, null, 2)}\n`);
+  return { path: loopPath, record };
+}
+
 function createDrainContinuationId(observedAt: string): string {
   return `${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function createControlPlaneTerminalOverviewExecutionId(observedAt: string): string {
   return `terminal-overview-exec-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function createControlPlaneTerminalOverviewReplayLoopId(observedAt: string): string {
+  return `terminal-overview-replay-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function createRecoverNextLoopAdvanceId(observedAt: string): string {
@@ -28170,6 +28290,17 @@ function controlPlaneTerminalOverviewExecutionPath(sessionName: string, executio
   assertSafeSessionName(sessionName);
   assertSafeSessionName(executionId);
   return path.join(controlPlaneTerminalOverviewExecutionDir(sessionName), `${executionId}.json`);
+}
+
+function controlPlaneTerminalOverviewReplayLoopDir(sessionName: string): string {
+  assertSafeSessionName(sessionName);
+  return path.join(workerSessionDir, "terminal-overview-replay-loops", sessionName);
+}
+
+function controlPlaneTerminalOverviewReplayLoopPath(sessionName: string, loopId: string): string {
+  assertSafeSessionName(sessionName);
+  assertSafeSessionName(loopId);
+  return path.join(controlPlaneTerminalOverviewReplayLoopDir(sessionName), `${loopId}.json`);
 }
 
 function workerSessionControlPlaneTickDir(sessionName: string): string {
