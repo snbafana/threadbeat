@@ -2001,6 +2001,101 @@ try {
   ]);
   assert.match(unacknowledgedResultReviewTerminalsShell, new RegExp(acknowledgeCompletedCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
+  const acknowledgeCompletedCommandParts = acknowledgeCompletedCommand.split(" ");
+  const acknowledgeCompletedDryRunCommandParts = [
+    ...acknowledgeCompletedCommandParts.filter((part) => part !== "--dry-run" && part !== "--confirm"),
+    "--dry-run",
+  ];
+  const acknowledgeCompletedTerminalOverview = await cliJson<{
+    nextAction: { surfaces: string[]; command: string[] } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "result_inspection",
+  ]);
+  assert.equal(acknowledgeCompletedTerminalOverview.nextAction?.surfaces[0], "result_inspection");
+  assert.equal(acknowledgeCompletedTerminalOverview.nextAction?.command.join(" "), acknowledgeCompletedCommand);
+
+  const acknowledgeCompletedTerminalOverviewExecuteDryRun = await cliJson<{
+    executeNext: {
+      dryRun: boolean;
+      confirmed: boolean;
+      supported: boolean;
+      command: string[] | null;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: {
+        command: string[];
+        exitCode: number | null;
+        output: {
+          dryRun?: boolean;
+          alreadyAcknowledged?: boolean;
+          loopAdvanceId?: string;
+          command?: string[];
+          acknowledgement?: { acknowledgedAdvanceId: string };
+          after?: { summary: { acknowledgedCompleted: number; unacknowledgedCompleted: number } };
+        } | null;
+      } | null;
+    };
+    executionRecord: { executionId: string; inspectHistory: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "result_inspection",
+    "--execute-next",
+    "--dry-run",
+  ]);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.dryRun, true);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.confirmed, false);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.supported, true);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.selectedAction?.surfaces[0], "result_inspection");
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.selectedAction?.command.join(" "), acknowledgeCompletedCommand);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.command?.join(" "), acknowledgeCompletedDryRunCommandParts.join(" "));
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.command.join(" "), acknowledgeCompletedDryRunCommandParts.join(" "));
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.exitCode, 0);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.output?.dryRun, true);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.output?.alreadyAcknowledged, false);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.output?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.output?.command?.join(" "), acknowledgeCompletedDryRunCommandParts.join(" "));
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.output?.acknowledgement?.acknowledgedAdvanceId, emptyBranchNativeReviewLoop.advanceRecord.advanceId);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.output?.after?.summary.acknowledgedCompleted, 0);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executeNext.executed?.output?.after?.summary.unacknowledgedCompleted, 1);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecuteDryRun.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+
+  const acknowledgeCompletedTerminalOverviewExecutionHistory = await cliJson<{
+    summary: { total: number; dryRun: number; supported: number; executed: number; failed: number };
+    records: Array<{
+      executionId: string;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      command: string[] | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "result_inspection",
+  ]);
+  assert.ok(acknowledgeCompletedTerminalOverviewExecutionHistory.summary.total >= 1);
+  assert.ok(acknowledgeCompletedTerminalOverviewExecutionHistory.summary.dryRun >= 1);
+  assert.ok(acknowledgeCompletedTerminalOverviewExecutionHistory.summary.supported >= 1);
+  assert.ok(acknowledgeCompletedTerminalOverviewExecutionHistory.summary.executed >= 1);
+  assert.equal(acknowledgeCompletedTerminalOverviewExecutionHistory.summary.failed, 0);
+  const acknowledgeCompletedExecutionRecord = acknowledgeCompletedTerminalOverviewExecutionHistory.records.find((record) => record.executionId === acknowledgeCompletedTerminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.equal(acknowledgeCompletedExecutionRecord?.selectedAction?.surfaces[0], "result_inspection");
+  assert.equal(acknowledgeCompletedExecutionRecord?.selectedAction?.command.join(" "), acknowledgeCompletedCommand);
+  assert.equal(acknowledgeCompletedExecutionRecord?.command?.join(" "), acknowledgeCompletedDryRunCommandParts.join(" "));
+  assert.equal(acknowledgeCompletedExecutionRecord?.executed?.command.join(" "), acknowledgeCompletedDryRunCommandParts.join(" "));
+  assert.equal(acknowledgeCompletedExecutionRecord?.executed?.exitCode, 0);
+
   const acknowledgedCompletedResultReviewLoop = await cliJson<{
     ok: true;
     dryRun: boolean;
