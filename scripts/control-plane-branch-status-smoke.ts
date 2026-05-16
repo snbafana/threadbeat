@@ -51,6 +51,7 @@ try {
   const branchTerminalsResumableCommand = `npm run cli -- runs session-control-plane-branch-terminals ${sessionName} --server --status resumable`;
   const terminalOverviewCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server`;
   const branchTerminalOverviewCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch`;
+  const branchTerminalOverviewNextActionCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch --next-action`;
   const branchNativeNextCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server`;
   const branchNativeRecoverDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --dry-run`;
   const branchNativeRecoverConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --confirm`;
@@ -190,6 +191,7 @@ try {
 
   const branchTerminalOverview = await cliJson<{
     commandSurfaces: string[];
+    nextAction: { surfaces: string[]; command: string[] } | null;
     groups: Array<{ surface: string; commands: Array<{ command: string[] }> }>;
   }>(baseUrl, [
     "runs",
@@ -202,6 +204,8 @@ try {
   assert.deepEqual(branchTerminalOverview.commandSurfaces, ["branch"]);
   assert.equal(branchTerminalOverview.groups.length, 1);
   assert.equal(branchTerminalOverview.groups[0]?.surface, "branch");
+  assert.equal(branchTerminalOverview.nextAction?.surfaces[0], "branch");
+  assert.equal(branchTerminalOverview.nextAction?.command.join(" "), resumeBranchCommand);
   assert.ok(branchTerminalOverview.groups[0]?.commands.some((command) => command.command.join(" ") === branchTerminalsCommand));
   assert.ok(branchTerminalOverview.groups[0]?.commands.some((command) => command.command.join(" ") === resumeBranchCommand));
 
@@ -218,7 +222,22 @@ try {
   assert.match(terminalOverviewText, /control_plane_terminal_overview:/);
   assert.match(terminalOverviewText, /command_surfaces: branch/);
   assert.match(terminalOverviewText, new RegExp(`terminal_overview: ${branchTerminalOverviewCommand}`));
+  assert.match(terminalOverviewText, new RegExp(`command: ${resumeBranchCommand}`));
   assert.match(terminalOverviewText, new RegExp(branchTerminalsCommand));
+
+  const terminalOverviewNextActionText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "branch",
+    "--next-action",
+    "--format",
+    "text",
+  ]);
+  assert.match(terminalOverviewNextActionText, new RegExp(`terminal_overview: ${branchTerminalOverviewNextActionCommand}`));
+  assert.match(terminalOverviewNextActionText, new RegExp(`command: ${resumeBranchCommand}`));
 
   const terminalOverviewShell = await cliText(baseUrl, [
     "runs",
@@ -233,6 +252,20 @@ try {
   ]);
   assert.match(terminalOverviewShell, new RegExp(`^${branchTerminalsCommand}$`, "m"));
   assert.match(terminalOverviewShell, new RegExp(`^${resumeBranchCommand}$`, "m"));
+
+  const terminalOverviewNextActionShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "branch",
+    "--next-action",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.equal(terminalOverviewNextActionShell.trim(), resumeBranchCommand);
 
   const branchNativeNext = await cliJson<{
     ok: boolean;
