@@ -58,7 +58,7 @@ assert.match(runtimeCheck.command[2] ?? "", /test -f AGENTS\.md/);
 assert.match(runtimeCheck.command[2] ?? "", /test -f \.pi\/prompts\/heartbeat\.md/);
 assert.match(runtimeCheck.command[2] ?? "", /command -v 'pi'/);
 assert.match(runtimeCheck.command[2] ?? "", /cat > "\$HOME\/\.pi\/agent\/models\.json"/);
-assert.match(runtimeCheck.command[2] ?? "", /pi --list-models 'deepseek' \| grep -F 'deepseek-v4-flash'/);
+assert.match(runtimeCheck.command[2] ?? "", /pi --list-models 'deepseek' 2>&1 \| grep -F 'deepseek-v4-flash'/);
 assert.match(runtimeCheck.command[2] ?? "", /agent runtime ready/);
 
 const customRuntimeCheck = buildAgentRuntimeCheckPlan({
@@ -67,7 +67,7 @@ const customRuntimeCheck = buildAgentRuntimeCheckPlan({
   agentPiModel: "custom-model",
 });
 assert.match(customRuntimeCheck.command[2] ?? "", /command -v 'npx'/);
-assert.match(customRuntimeCheck.command[2] ?? "", /npx --yes @example\/pi --list-models 'custom-provider' \| grep -F 'custom-model'/);
+assert.match(customRuntimeCheck.command[2] ?? "", /npx --yes @example\/pi --list-models 'custom-provider' 2>&1 \| grep -F 'custom-model'/);
 assert.match(customRuntimeCheck.command[2] ?? "", /npx --yes @example\/pi --help/);
 
 console.log("agent boot tests passed");

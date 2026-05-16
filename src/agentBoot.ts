@@ -69,7 +69,7 @@ export const buildAgentRuntimeCheckPlan = (input: { agentPiCommand?: string; age
       "test -d .pi/skills",
       `command -v ${shellQuote(piExecutable)}`,
       installPiModelsJsonScript(),
-      `${piCommand} --list-models ${shellQuote(piProvider)} | grep -F ${shellQuote(piModel)} >/tmp/threadbeat-pi-model-check.txt`,
+      `${piCommand} --list-models ${shellQuote(piProvider)} 2>&1 | grep -F ${shellQuote(piModel)} >/tmp/threadbeat-pi-model-check.txt`,
       `${piCommand} --help >/tmp/threadbeat-pi-help.txt 2>&1 || true`,
       "printf 'agent runtime ready\\n'",
     ].join("\n")],
