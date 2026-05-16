@@ -5649,6 +5649,9 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recordAction && options["until-empty"] !== "1") {
       throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped requires --until-empty");
     }
+    if (options["resume-loop"] && (!recoverNext || options["until-empty"] !== "1")) {
+      throw new Error("runs session-branch-native-next --resume-loop requires --recover-next --until-empty");
+    }
     if (recordAction && dryRun === confirm) {
       throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped requires exactly one of --dry-run or --confirm");
     }
@@ -5707,6 +5710,7 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
         ...(options["until-empty"] === "1"
           ? [
             "--until-empty",
+            ...(options["resume-loop"] ? ["--resume-loop", options["resume-loop"]] : []),
             "--max-steps",
             String(parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps")),
             "--interval-ms",
@@ -14585,6 +14589,8 @@ function workerSessionBranchNativeNext(
     ["npm", "run", "cli", "--", "runs", "session-branch-native-next", summary.session, "--server", "--recover-next", "--until-empty", "--confirm"],
     ...(summary.recovery.recoverNext.incompleteLoops.count > 0 ? [summary.commands.recoverNextIncompleteLoopQueue] : []),
     ...recoverNextLoops.flatMap((loop) => [
+      workerSessionBranchNativeRecoverLoopCommand(summary.session, loop, true),
+      workerSessionBranchNativeRecoverLoopCommand(summary.session, loop, false),
       loop.resumeCommand,
       loop.inspectLastStepCommand,
       loop.inspectHistoryCommand,
@@ -14689,6 +14695,8 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
           `      steps: ${loop.steps}`,
           `      last_step: ${loop.lastStepIndex ?? ""}`,
           `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+          `      branch_native_resume_dry_run: ${formatShellCommand(workerSessionBranchNativeRecoverLoopCommand(response.session, loop, true))}`,
+          `      branch_native_resume_confirm: ${formatShellCommand(workerSessionBranchNativeRecoverLoopCommand(response.session, loop, false))}`,
           `      resume: ${formatShellCommand(loop.resumeCommand)}`,
           `      inspect_last_step: ${formatShellCommand(loop.inspectLastStepCommand)}`,
           `      inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
@@ -14730,6 +14738,20 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     "  command_queue:",
     ...response.commands.map((item) => `    - ${formatShellCommand(item.command)}`),
   ].join("\n"));
+}
+
+function workerSessionBranchNativeRecoverLoopCommand(
+  sessionName: string,
+  loop: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["recoverNext"]["incompleteLoops"]["recent"][number],
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+    "--recover-next", "--until-empty", "--resume-loop", loop.loopAdvanceId,
+    "--max-steps", String(loop.maxSteps ?? 10),
+    "--interval-ms", String(loop.intervalMs ?? 2000),
+    dryRun ? "--dry-run" : "--confirm",
+  ];
 }
 
 function printWorkerSessionBranchNativeNextExecutionText(
@@ -23338,7 +23360,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell] [--recover-next --dry-run|--confirm [--until-empty --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
