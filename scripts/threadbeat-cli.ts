@@ -6813,6 +6813,62 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     }
     return;
   }
+  if (subcommandName === "session-control-plane-result-review-terminals") {
+    const [sessionName, ...optionArgs] = args;
+    const options = parseOptions(optionArgs);
+    const outputFormat = options.format ?? "json";
+    const requiredSessionName = required(sessionName, "runs session-control-plane-result-review-terminals <session> --server");
+    if (options.server !== "1") {
+      throw new Error("runs session-control-plane-result-review-terminals requires --server");
+    }
+    if (outputFormat !== "json" && outputFormat !== "shell" && outputFormat !== "text") {
+      throw new Error("runs session-control-plane-result-review-terminals --format must be json, shell, or text");
+    }
+    if (outputFormat === "shell" && options["commands-only"] !== "1") {
+      throw new Error("runs session-control-plane-result-review-terminals --format shell requires --commands-only");
+    }
+    if (outputFormat === "text" && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-result-review-terminals --format text cannot be combined with --commands-only");
+    }
+    const status = options.status ?? "unacknowledged";
+    if (status !== "unacknowledged" && status !== "acknowledged" && status !== "all") {
+      throw new Error("runs session-control-plane-result-review-terminals --status must be unacknowledged, acknowledged, or all");
+    }
+    const action = options.action;
+    if (action !== undefined && action !== "reviewed" && action !== "skipped") {
+      throw new Error("runs session-control-plane-result-review-terminals --action must be reviewed or skipped");
+    }
+    const actionFilter = action === "reviewed" || action === "skipped" ? action : undefined;
+    const limit = parsePositiveInteger(options.limit ?? "20", "--limit");
+    const advances = await fetchWorkerSessionControlPlaneAdvances(requiredSessionName, {
+      limit: Math.max(limit * 4, 100),
+      detailCommands: ["branch_native_result_review_loop", "acknowledge_branch_native_result_review_loop"],
+    });
+    const history = summarizeResultReviewLoopHistory(requiredSessionName, advances, {
+      action: actionFilter,
+      status: resultReviewTerminalHistoryStatus(status),
+      limit,
+    });
+    const terminals = summarizeResultReviewTerminals(requiredSessionName, history, {
+      status,
+      action: actionFilter,
+      limit,
+    });
+    if (options["commands-only"] === "1") {
+      if (outputFormat === "shell") {
+        printCommandQueueShell(terminals.commands.queue);
+      } else {
+        await printJson({ ...terminals, commands: terminals.commands.queue });
+      }
+      return;
+    }
+    if (outputFormat === "text") {
+      printResultReviewTerminalsText(terminals);
+    } else {
+      await printJson(terminals);
+    }
+    return;
+  }
   if (subcommandName === "start-control-plane-advance-worker") {
     const [sessionName, ...optionArgs] = args;
     const options = parseOptions(optionArgs);
@@ -11572,6 +11628,49 @@ type ResultReviewLoopAcknowledgementResponse = {
   after: ResultReviewLoopHistoryResponse;
 };
 
+type ResultReviewTerminalStatus = "unacknowledged" | "acknowledged" | "all";
+
+type ResultReviewTerminalsResponse = {
+  ok: true;
+  session: string;
+  filter: {
+    status: ResultReviewTerminalStatus;
+    action: "reviewed" | "skipped" | null;
+    limit: number;
+  };
+  count: number;
+  summary: {
+    completed: number;
+    unacknowledged: number;
+    acknowledged: number;
+    processed: number;
+  };
+  commands: {
+    inspectHistory: string[];
+    inspectUnacknowledged: string[];
+    inspectAcknowledged: string[];
+    queue: Array<{ command: string[] }>;
+  };
+  terminalLoops: Array<{
+    loopAdvanceId: string;
+    latestAdvanceId: string;
+    latestObservedAt: string;
+    action: "reviewed" | "skipped";
+    attempts: number;
+    totalProcessed: number;
+    remainingPending: number;
+    stoppedReason: string | null;
+    acknowledged: boolean;
+    acknowledgementAdvanceId: string | null;
+    acknowledgedAt: string | null;
+    commands: {
+      inspectLatest: string[];
+      inspectHistory: string[];
+      acknowledgeCompleted: string[] | null;
+    };
+  }>;
+};
+
 type ContinueDeferredLoopHistoryResumeResponse = {
   ok: boolean;
   session: string;
@@ -12779,6 +12878,72 @@ function resultReviewLoopHistoryCommandQueue(
   ])).map((command) => ({ command }));
 }
 
+function resultReviewTerminalHistoryStatus(status: ResultReviewTerminalStatus): ResultReviewLoopHistoryResponse["filter"]["status"] {
+  if (status === "unacknowledged") return "unacknowledged-completed";
+  if (status === "acknowledged") return "acknowledged-completed";
+  return "completed";
+}
+
+function summarizeResultReviewTerminals(
+  sessionName: string,
+  history: ResultReviewLoopHistoryResponse,
+  options: {
+    status: ResultReviewTerminalStatus;
+    action?: "reviewed" | "skipped";
+    limit: number;
+  },
+): ResultReviewTerminalsResponse {
+  const terminalLoops = history.loops
+    .filter((loop) => loop.status === "completed")
+    .slice(0, options.limit)
+    .map((loop) => ({
+      loopAdvanceId: loop.loopAdvanceId,
+      latestAdvanceId: loop.latestAdvanceId,
+      latestObservedAt: loop.latestObservedAt,
+      action: loop.action,
+      attempts: loop.attempts,
+      totalProcessed: loop.totalProcessed,
+      remainingPending: loop.remainingPending,
+      stoppedReason: loop.stoppedReason,
+      acknowledged: loop.acknowledged,
+      acknowledgementAdvanceId: loop.acknowledgementAdvanceId,
+      acknowledgedAt: loop.acknowledgedAt,
+      commands: {
+        inspectLatest: loop.commands.inspectLatest,
+        inspectHistory: loop.commands.inspectHistory,
+        acknowledgeCompleted: loop.commands.acknowledgeCompleted,
+      },
+    }));
+  const queue = uniqueCommandQueue(terminalLoops.flatMap((loop) => [
+    loop.commands.inspectLatest,
+    loop.commands.inspectHistory,
+    ...(loop.commands.acknowledgeCompleted ? [loop.commands.acknowledgeCompleted] : []),
+  ])).map((command) => ({ command }));
+  return {
+    ok: true,
+    session: sessionName,
+    filter: {
+      status: options.status,
+      action: options.action ?? null,
+      limit: options.limit,
+    },
+    count: terminalLoops.length,
+    summary: {
+      completed: terminalLoops.length,
+      unacknowledged: terminalLoops.filter((loop) => !loop.acknowledged).length,
+      acknowledged: terminalLoops.filter((loop) => loop.acknowledged).length,
+      processed: terminalLoops.reduce((total, loop) => total + loop.totalProcessed, 0),
+    },
+    commands: {
+      inspectHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", sessionName, "--server", "--status", "completed"],
+      inspectUnacknowledged: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-terminals", sessionName, "--server", "--status", "unacknowledged"],
+      inspectAcknowledged: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-terminals", sessionName, "--server", "--status", "acknowledged"],
+      queue,
+    },
+    terminalLoops,
+  };
+}
+
 function resultReviewLoopHistoryResumeCommand(
   sessionName: string,
   loopAdvanceId: string,
@@ -13246,6 +13411,46 @@ function printAcknowledgedRecoverNextResumeHistoryText(response: AcknowledgedRec
 
 function printResultReviewLoopHistoryText(history: ResultReviewLoopHistoryResponse): void {
   console.log(formatResultReviewLoopHistoryText(history).join("\n"));
+}
+
+function printResultReviewTerminalsText(response: ResultReviewTerminalsResponse): void {
+  console.log(formatResultReviewTerminalsText(response).join("\n"));
+}
+
+function formatResultReviewTerminalsText(response: ResultReviewTerminalsResponse): string[] {
+  const lines = [
+    "result_review_terminals:",
+    `  session: ${response.session}`,
+    `  filter: status=${response.filter.status} action=${response.filter.action ?? "*"} limit=${response.filter.limit}`,
+    `  count: ${response.count}`,
+    `  summary: completed=${response.summary.completed} unacknowledged=${response.summary.unacknowledged} acknowledged=${response.summary.acknowledged} processed=${response.summary.processed}`,
+    `  inspect_history: ${formatShellCommand(response.commands.inspectHistory)}`,
+    `  inspect_unacknowledged: ${formatShellCommand(response.commands.inspectUnacknowledged)}`,
+    `  inspect_acknowledged: ${formatShellCommand(response.commands.inspectAcknowledged)}`,
+    "  terminal_loops:",
+  ];
+  if (response.terminalLoops.length === 0) {
+    lines.push("    <empty>");
+    return lines;
+  }
+  for (const loop of response.terminalLoops) {
+    lines.push(
+      `    - loop: ${loop.loopAdvanceId}`,
+      `      latest_advance: ${loop.latestAdvanceId}`,
+      `      action: ${loop.action}`,
+      `      attempts: ${loop.attempts}`,
+      `      total_processed: ${loop.totalProcessed}`,
+      `      remaining_pending: ${loop.remainingPending}`,
+      `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+      `      acknowledged: ${loop.acknowledged}`,
+      `      acknowledgement: ${loop.acknowledgementAdvanceId ?? ""}`,
+      `      acknowledged_at: ${loop.acknowledgedAt ?? ""}`,
+      `      inspect_latest: ${formatShellCommand(loop.commands.inspectLatest)}`,
+      `      inspect_history: ${formatShellCommand(loop.commands.inspectHistory)}`,
+      ...(loop.commands.acknowledgeCompleted ? [`      acknowledge_completed: ${formatShellCommand(loop.commands.acknowledgeCompleted)}`] : []),
+    );
+  }
+  return lines;
 }
 
 function formatResultReviewLoopHistoryText(history: ResultReviewLoopHistoryResponse): string[] {
@@ -15870,6 +16075,9 @@ function workerSessionBranchNativeNext(
       ? [{
           surfaces: ["result_inspection"] as const,
           command: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", summary.session, "--server", "--status", "unacknowledged-completed"],
+        }, {
+          surfaces: ["result_inspection"] as const,
+          command: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-terminals", summary.session, "--server", "--status", "unacknowledged"],
         }]
       : []),
     ...resultReviewLoops.flatMap((loop): WorkerSessionBranchNativeCommandQueueItem[] => [
@@ -25352,6 +25560,7 @@ Commands:
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history|--continue-deferred-loop-history [--execute-resume --confirm]] [--acknowledged-recover-next-resume-history [--advance acknowledgement_or_attempt_or_loop_id]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery] [--status-watch-executions] [--failed-recover-next-resumes] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
   runs session-control-plane-result-review-loops <name> --server [--loop-advance-id loop_advance_id] [--action reviewed|skipped] [--status resumable|completed|unacknowledged-completed|acknowledged-completed|all] [--execute-resume --confirm|--dry-run] [--acknowledge-completed --confirm|--dry-run] [--limit 100] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-result-review-terminals <name> --server [--status unacknowledged|acknowledged|all] [--action reviewed|skipped] [--limit 20] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]

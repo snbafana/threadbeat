@@ -1749,6 +1749,58 @@ try {
   assert.equal(unacknowledgedCompletedBranchNativeNext.unacknowledgedCompletedResultReviewLoops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
   assert.equal(unacknowledgedCompletedBranchNativeNext.unacknowledgedCompletedResultReviewLoops[0]?.acknowledgeCompletedCommand?.join(" "), acknowledgeCompletedCommand);
   assert.ok(unacknowledgedCompletedBranchNativeNext.commands.some((command) => command.command.join(" ") === acknowledgeCompletedCommand));
+  assert.ok(unacknowledgedCompletedBranchNativeNext.commands.some((command) => command.command.join(" ") === `npm run cli -- runs session-control-plane-result-review-terminals ${sessionName} --server --status unacknowledged`));
+
+  const unacknowledgedResultReviewTerminals = await cliJson<{
+    count: number;
+    summary: { completed: number; unacknowledged: number; acknowledged: number; processed: number };
+    terminalLoops: Array<{
+      loopAdvanceId: string;
+      acknowledged: boolean;
+      acknowledgementAdvanceId: string | null;
+      commands: { acknowledgeCompleted: string[] | null };
+    }>;
+    commands: { queue: Array<{ command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(unacknowledgedResultReviewTerminals.count, 1);
+  assert.equal(unacknowledgedResultReviewTerminals.summary.completed, 1);
+  assert.equal(unacknowledgedResultReviewTerminals.summary.unacknowledged, 1);
+  assert.equal(unacknowledgedResultReviewTerminals.summary.acknowledged, 0);
+  assert.equal(unacknowledgedResultReviewTerminals.summary.processed, 0);
+  assert.equal(unacknowledgedResultReviewTerminals.terminalLoops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
+  assert.equal(unacknowledgedResultReviewTerminals.terminalLoops[0]?.acknowledged, false);
+  assert.equal(unacknowledgedResultReviewTerminals.terminalLoops[0]?.acknowledgementAdvanceId, null);
+  assert.equal(unacknowledgedResultReviewTerminals.terminalLoops[0]?.commands.acknowledgeCompleted?.join(" "), acknowledgeCompletedCommand);
+  assert.ok(unacknowledgedResultReviewTerminals.commands.queue.some((command) => command.command.join(" ") === acknowledgeCompletedCommand));
+
+  const unacknowledgedResultReviewTerminalsText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--format",
+    "text",
+  ]);
+  assert.match(unacknowledgedResultReviewTerminalsText, /result_review_terminals:/);
+  assert.match(unacknowledgedResultReviewTerminalsText, /summary: completed=1 unacknowledged=1 acknowledged=0 processed=0/);
+  assert.match(unacknowledgedResultReviewTerminalsText, /acknowledged: false/);
+  assert.match(unacknowledgedResultReviewTerminalsText, new RegExp(`acknowledge_completed: ${acknowledgeCompletedCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+
+  const unacknowledgedResultReviewTerminalsShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.match(unacknowledgedResultReviewTerminalsShell, new RegExp(acknowledgeCompletedCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   const acknowledgedCompletedResultReviewLoop = await cliJson<{
     ok: true;
@@ -1804,6 +1856,47 @@ try {
   assert.equal(acknowledgedCompletedResultReviewLoopHistory.loops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
   assert.equal(acknowledgedCompletedResultReviewLoopHistory.loops[0]?.acknowledged, true);
   assert.equal(acknowledgedCompletedResultReviewLoopHistory.loops[0]?.acknowledgementAdvanceId, acknowledgedCompletedResultReviewLoop.acknowledgement.advanceId);
+
+  const acknowledgedResultReviewTerminals = await cliJson<{
+    count: number;
+    summary: { completed: number; unacknowledged: number; acknowledged: number };
+    terminalLoops: Array<{ loopAdvanceId: string; acknowledged: boolean; acknowledgementAdvanceId: string | null; commands: { acknowledgeCompleted: string[] | null } }>;
+    commands: { queue: Array<{ command: string[] }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "acknowledged",
+  ]);
+  assert.equal(acknowledgedResultReviewTerminals.count, 1);
+  assert.equal(acknowledgedResultReviewTerminals.summary.completed, 1);
+  assert.equal(acknowledgedResultReviewTerminals.summary.unacknowledged, 0);
+  assert.equal(acknowledgedResultReviewTerminals.summary.acknowledged, 1);
+  assert.equal(acknowledgedResultReviewTerminals.terminalLoops[0]?.loopAdvanceId, emptyBranchNativeReviewLoop.loopAdvanceId);
+  assert.equal(acknowledgedResultReviewTerminals.terminalLoops[0]?.acknowledged, true);
+  assert.equal(acknowledgedResultReviewTerminals.terminalLoops[0]?.acknowledgementAdvanceId, acknowledgedCompletedResultReviewLoop.acknowledgement.advanceId);
+  assert.equal(acknowledgedResultReviewTerminals.terminalLoops[0]?.commands.acknowledgeCompleted, null);
+  assert.ok(!acknowledgedResultReviewTerminals.commands.queue.some((command) => command.command.join(" ") === acknowledgeCompletedCommand));
+
+  const emptyUnacknowledgedResultReviewTerminals = await cliJson<{
+    count: number;
+    summary: { completed: number; unacknowledged: number; acknowledged: number };
+    terminalLoops: unknown[];
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--status",
+    "unacknowledged",
+  ]);
+  assert.equal(emptyUnacknowledgedResultReviewTerminals.count, 0);
+  assert.equal(emptyUnacknowledgedResultReviewTerminals.summary.completed, 0);
+  assert.equal(emptyUnacknowledgedResultReviewTerminals.summary.unacknowledged, 0);
+  assert.equal(emptyUnacknowledgedResultReviewTerminals.summary.acknowledged, 0);
+  assert.deepEqual(emptyUnacknowledgedResultReviewTerminals.terminalLoops, []);
 
   const completedResultReviewLoopHistoryText = await cliText(baseUrl, [
     "runs",
