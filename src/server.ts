@@ -295,28 +295,34 @@ type WorkerSessionControlPlaneContinueDeferredHistoryStatus = {
 
 type WorkerSessionControlPlaneOperatorLoopHistoryStatus = WorkerSessionControlPlaneContinueDeferredHistoryStatus;
 
+type WorkerSessionControlPlaneResultReviewLoopSummary = {
+  loopAdvanceId: string;
+  latestAdvanceId: string;
+  attempts: number;
+  totalProcessed: number;
+  dryRun: boolean;
+  action: "reviewed" | "skipped";
+  lastObservedAt: string;
+  lastCompletedAt: string;
+  stoppedReason: string | null;
+  maxResults: number | null;
+  intervalMs: number | null;
+  remainingPending: number | null;
+  resumeCommand: string[];
+  inspectLatestCommand: string[];
+  inspectHistoryCommand: string[];
+  executeResumeCommand: string[];
+};
+
 type WorkerSessionControlPlaneResultReviewLoopHistoryStatus = {
   attempts: ReturnType<typeof summarizeWorkerSessionControlPlaneAdvanceRecords>;
   resumableLoops: {
     count: number;
-    recent: Array<{
-      loopAdvanceId: string;
-      latestAdvanceId: string;
-      attempts: number;
-      totalProcessed: number;
-      dryRun: boolean;
-      action: "reviewed" | "skipped";
-      lastObservedAt: string;
-      lastCompletedAt: string;
-      stoppedReason: string | null;
-      maxResults: number | null;
-      intervalMs: number | null;
-      remainingPending: number | null;
-      resumeCommand: string[];
-      inspectLatestCommand: string[];
-      inspectHistoryCommand: string[];
-      executeResumeCommand: string[];
-    }>;
+    recent: WorkerSessionControlPlaneResultReviewLoopSummary[];
+  };
+  completedLoops: {
+    count: number;
+    recent: WorkerSessionControlPlaneResultReviewLoopSummary[];
   };
 };
 
@@ -5119,13 +5125,12 @@ const summarizeWorkerSessionControlPlaneResultReviewLoopHistory = (
     group.push(record);
     grouped.set(loopAdvanceId, group);
   }
-  const resumableLoops = [...grouped.entries()].flatMap(([loopAdvanceId, loopRecords]) => {
+  const loopSummaries = [...grouped.entries()].flatMap(([loopAdvanceId, loopRecords]) => {
     const sorted = [...loopRecords].sort((left, right) => right.observedAt.localeCompare(left.observedAt));
     const latest = sorted[0];
     if (!latest) return [];
     const recovery = objectRecord(latest.recovery);
     const stoppedReason = stringRecordField(recovery, "stoppedReason");
-    if (stoppedReason === "no_pending_result_commits") return [];
     const action: "reviewed" | "skipped" = stringRecordField(recovery, "action") === "skipped" ? "skipped" : "reviewed";
     const maxResults = numberRecordField(recovery, "maxResults");
     const intervalMs = numberRecordField(recovery, "intervalMs");
@@ -5170,11 +5175,17 @@ const summarizeWorkerSessionControlPlaneResultReviewLoopHistory = (
       executeResumeCommand,
     }];
   }).sort((left, right) => right.lastObservedAt.localeCompare(left.lastObservedAt));
+  const resumableLoops = loopSummaries.filter((loop) => loop.stoppedReason !== "no_pending_result_commits");
+  const completedLoops = loopSummaries.filter((loop) => loop.stoppedReason === "no_pending_result_commits");
   return {
     attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(records),
     resumableLoops: {
       count: resumableLoops.length,
       recent: resumableLoops.slice(0, lines),
+    },
+    completedLoops: {
+      count: completedLoops.length,
+      recent: completedLoops.slice(0, lines),
     },
   };
 };

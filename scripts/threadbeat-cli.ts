@@ -10627,6 +10627,27 @@ type WorkerSessionControlPlaneStatusResponse = {
           executeResumeCommand: string[];
         }>;
       };
+      completedLoops: {
+        count: number;
+        recent: Array<{
+          loopAdvanceId: string;
+          latestAdvanceId: string;
+          attempts: number;
+          totalProcessed: number;
+          dryRun: boolean;
+          action: "reviewed" | "skipped";
+          lastObservedAt: string;
+          lastCompletedAt: string;
+          stoppedReason: string | null;
+          maxResults: number | null;
+          intervalMs: number | null;
+          remainingPending: number | null;
+          resumeCommand: string[];
+          inspectLatestCommand: string[];
+          inspectHistoryCommand: string[];
+          executeResumeCommand: string[];
+        }>;
+      };
     };
     statusWatchExecutions: {
       attempts: { total: number; dryRun: number; executed: number; failed: number; blocked: number; mutating: number };
@@ -13778,7 +13799,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `recover_next_incomplete_loops: ${summary.recovery.recoverNext.incompleteLoops.count}`,
     `continue_deferred_loops: total=${summary.recovery.continueDeferred.attempts.total} dry_run=${summary.recovery.continueDeferred.attempts.dryRun} executed=${summary.recovery.continueDeferred.attempts.executed} failed=${summary.recovery.continueDeferred.attempts.failed} resumable=${summary.recovery.continueDeferred.resumableLoops.count}`,
     `operator_loops: total=${summary.recovery.operatorLoops.attempts.total} dry_run=${summary.recovery.operatorLoops.attempts.dryRun} executed=${summary.recovery.operatorLoops.attempts.executed} failed=${summary.recovery.operatorLoops.attempts.failed} resumable=${summary.recovery.operatorLoops.resumableLoops.count}`,
-    `result_review_loops: total=${summary.recovery.resultReviewLoops.attempts.total} dry_run=${summary.recovery.resultReviewLoops.attempts.dryRun} executed=${summary.recovery.resultReviewLoops.attempts.executed} failed=${summary.recovery.resultReviewLoops.attempts.failed} resumable=${summary.recovery.resultReviewLoops.resumableLoops.count}`,
+    `result_review_loops: total=${summary.recovery.resultReviewLoops.attempts.total} dry_run=${summary.recovery.resultReviewLoops.attempts.dryRun} executed=${summary.recovery.resultReviewLoops.attempts.executed} failed=${summary.recovery.resultReviewLoops.attempts.failed} resumable=${summary.recovery.resultReviewLoops.resumableLoops.count} completed=${summary.recovery.resultReviewLoops.completedLoops.count}`,
     `status_watch_executions: total=${summary.recovery.statusWatchExecutions.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.attempts.executed} failed=${summary.recovery.statusWatchExecutions.attempts.failed}`,
     `status_watch_acknowledgements: total=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.total} dry_run=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.dryRun} executed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.executed} failed=${summary.recovery.statusWatchExecutions.acknowledgements.attempts.failed}`,
     `  inspect: ${formatShellCommand(summary.commands.statusWatchExecutions)}`,
@@ -14269,6 +14290,25 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
         `    inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
         `    inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
         `    execute_resume: ${formatShellCommand(loop.executeResumeCommand)}`,
+      );
+    }
+  }
+  if (summary.recovery.resultReviewLoops.completedLoops.recent.length > 0) {
+    lines.push("completed_result_review_loops:");
+    for (const loop of summary.recovery.resultReviewLoops.completedLoops.recent) {
+      lines.push(
+        `  - loop: ${loop.loopAdvanceId}`,
+        `    latest_advance: ${loop.latestAdvanceId}`,
+        `    attempts: ${loop.attempts}`,
+        `    action: ${loop.action}`,
+        `    total_processed: ${loop.totalProcessed}`,
+        `    remaining_pending: ${loop.remainingPending ?? ""}`,
+        `    dry_run: ${loop.dryRun}`,
+        `    max_results: ${loop.maxResults ?? ""}`,
+        `    interval_ms: ${loop.intervalMs ?? ""}`,
+        `    stopped_reason: ${loop.stoppedReason ?? ""}`,
+        `    inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
+        `    inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
       );
     }
   }
@@ -14953,6 +14993,7 @@ type WorkerSessionBranchNativeNextResponse = {
     failedRecoverNextResumeLoops: number;
     operatorLoops: number;
     resultReviewLoops: number;
+    completedResultReviewLoops: number;
     resultCommits: number;
     resultPending: number;
     resultReviewed: number;
@@ -14965,6 +15006,7 @@ type WorkerSessionBranchNativeNextResponse = {
   failedRecoverNextResumeLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["failedRecoverNextResumeLoops"]["recent"];
   operatorLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["operatorLoops"]["resumableLoops"]["recent"];
   resultReviewLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["resultReviewLoops"]["resumableLoops"]["recent"];
+  completedResultReviewLoops: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["recovery"]["resultReviewLoops"]["completedLoops"]["recent"];
   resultActions: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>["results"]["inspection"]["nextSteps"];
   resultReviewCommands: {
     previewReviewed: string[];
@@ -15042,6 +15084,7 @@ function workerSessionBranchNativeNext(
   const failedRecoverNextResumeLoops = summary.recovery.failedRecoverNextResumeLoops.recent.slice(0, options.limit);
   const operatorLoops = summary.recovery.operatorLoops.resumableLoops.recent.slice(0, options.limit);
   const resultReviewLoops = summary.recovery.resultReviewLoops.resumableLoops.recent.slice(0, options.limit);
+  const completedResultReviewLoops = summary.recovery.resultReviewLoops.completedLoops.recent.slice(0, options.limit);
   const requestedCommandSurfaces = options.commandSurfaces ?? [];
   const commands = filterWorkerSessionBranchNativeCommandQueue(uniqueWorkerSessionBranchNativeCommandQueue([
     { surfaces: ["control"], command: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", summary.session, "--server", "--summary"] },
@@ -15154,6 +15197,7 @@ function workerSessionBranchNativeNext(
       failedRecoverNextResumeLoops: summary.recovery.failedRecoverNextResumeLoops.count,
       operatorLoops: summary.recovery.operatorLoops.resumableLoops.count,
       resultReviewLoops: summary.recovery.resultReviewLoops.resumableLoops.count,
+      completedResultReviewLoops: summary.recovery.resultReviewLoops.completedLoops.count,
       resultCommits: summary.results.counts.resultCommits,
       resultPending: summary.results.counts.pending,
       resultReviewed: summary.results.counts.reviewed,
@@ -15166,6 +15210,7 @@ function workerSessionBranchNativeNext(
     failedRecoverNextResumeLoops,
     operatorLoops,
     resultReviewLoops,
+    completedResultReviewLoops,
     resultActions,
     resultReviewCommands: {
       previewReviewed: summary.commands.branchNativePreviewPendingReviewed,
@@ -15528,6 +15573,7 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
     `  failed_recover_next_resume_loops: ${response.counts.failedRecoverNextResumeLoops}`,
     `  operator_loops: ${response.counts.operatorLoops}`,
     `  result_review_loops: ${response.counts.resultReviewLoops}`,
+    `  completed_result_review_loops: ${response.counts.completedResultReviewLoops}`,
     `  result_commits: ${response.counts.resultCommits}`,
     `  result_pending: ${response.counts.resultPending}`,
     `  result_reviewed: ${response.counts.resultReviewed}`,
@@ -15673,6 +15719,21 @@ function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNat
         ]),
       ]
       : ["  result_review_loops: none"]),
+    ...(response.completedResultReviewLoops.length > 0
+      ? [
+        "  completed_result_review_loops:",
+        ...response.completedResultReviewLoops.flatMap((loop) => [
+          `    - loop: ${loop.loopAdvanceId}`,
+          `      attempts: ${loop.attempts}`,
+          `      action: ${loop.action}`,
+          `      total_processed: ${loop.totalProcessed}`,
+          `      remaining_pending: ${loop.remainingPending ?? ""}`,
+          `      stopped_reason: ${loop.stoppedReason ?? ""}`,
+          `      inspect_latest: ${formatShellCommand(loop.inspectLatestCommand)}`,
+          `      inspect_history: ${formatShellCommand(loop.inspectHistoryCommand)}`,
+        ]),
+      ]
+      : ["  completed_result_review_loops: none"]),
     ...(response.resultActions.length > 0
       ? [
         "  result_actions:",
