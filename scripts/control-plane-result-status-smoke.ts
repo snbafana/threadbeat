@@ -864,6 +864,47 @@ try {
     "--dry-run", "--max-results", "2", "--interval-ms", "1",
   ];
 
+  const executedResultReviewTerminalResume = await cliJson<{
+    ok: boolean;
+    dryRun: boolean;
+    loopAdvanceId: string;
+    command: string[];
+    terminal: { filter: { status: string }; count: number; terminalLoops: Array<{ loopAdvanceId: string; status: string }> };
+    before: { loops: Array<{ attempts: number; totalProcessed: number; commands: { resumeLoop: string[] } }> };
+    executed: { exitCode: number | null; output: { selectedAction: string; resumed: boolean; previousProcessed: number; totalProcessed: number; resultReviewLoop: { processed: number; remainingPending: number; stoppedReason: string } } };
+    after: { loops: Array<{ attempts: number; totalProcessed: number; remainingPending: number; stoppedReason: string }> };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-result-review-terminals",
+    sessionName,
+    "--server",
+    "--loop-advance-id",
+    branchNativeReviewDryRun.loopAdvanceId,
+    "--execute-resume",
+    "--dry-run",
+  ]);
+  assert.equal(executedResultReviewTerminalResume.ok, true);
+  assert.equal(executedResultReviewTerminalResume.dryRun, true);
+  assert.equal(executedResultReviewTerminalResume.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.deepEqual(executedResultReviewTerminalResume.command, latestResultReviewLoopResumeCommand);
+  assert.equal(executedResultReviewTerminalResume.terminal.filter.status, "resumable");
+  assert.equal(executedResultReviewTerminalResume.terminal.count, 1);
+  assert.equal(executedResultReviewTerminalResume.terminal.terminalLoops[0]?.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.equal(executedResultReviewTerminalResume.terminal.terminalLoops[0]?.status, "resumable");
+  assert.equal(executedResultReviewTerminalResume.before.loops[0]?.attempts, 3);
+  assert.equal(executedResultReviewTerminalResume.before.loops[0]?.totalProcessed, 3);
+  assert.deepEqual(executedResultReviewTerminalResume.before.loops[0]?.commands.resumeLoop, latestResultReviewLoopResumeCommand);
+  assert.equal(executedResultReviewTerminalResume.executed.exitCode, 0);
+  assert.equal(executedResultReviewTerminalResume.executed.output.selectedAction, "record_reviewed_results");
+  assert.equal(executedResultReviewTerminalResume.executed.output.resumed, true);
+  assert.equal(executedResultReviewTerminalResume.executed.output.previousProcessed, 3);
+  assert.equal(executedResultReviewTerminalResume.executed.output.totalProcessed, 4);
+  assert.equal(executedResultReviewTerminalResume.executed.output.resultReviewLoop.processed, 1);
+  assert.equal(executedResultReviewTerminalResume.executed.output.resultReviewLoop.remainingPending, 1);
+  assert.equal(executedResultReviewTerminalResume.executed.output.resultReviewLoop.stoppedReason, "dry_run_previewed");
+  assert.equal(executedResultReviewTerminalResume.after.loops[0]?.attempts, 4);
+  assert.equal(executedResultReviewTerminalResume.after.loops[0]?.totalProcessed, 4);
+
   const executedResultReviewLoopHistoryResume = await cliJson<{
     ok: boolean;
     dryRun: boolean;
@@ -888,19 +929,19 @@ try {
   assert.equal(executedResultReviewLoopHistoryResume.dryRun, true);
   assert.equal(executedResultReviewLoopHistoryResume.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
   assert.deepEqual(executedResultReviewLoopHistoryResume.command, latestResultReviewLoopResumeCommand);
-  assert.equal(executedResultReviewLoopHistoryResume.before.loops[0]?.attempts, 3);
-  assert.equal(executedResultReviewLoopHistoryResume.before.loops[0]?.totalProcessed, 3);
+  assert.equal(executedResultReviewLoopHistoryResume.before.loops[0]?.attempts, 4);
+  assert.equal(executedResultReviewLoopHistoryResume.before.loops[0]?.totalProcessed, 4);
   assert.deepEqual(executedResultReviewLoopHistoryResume.before.loops[0]?.commands.resumeLoop, latestResultReviewLoopResumeCommand);
   assert.equal(executedResultReviewLoopHistoryResume.executed.exitCode, 0);
   assert.equal(executedResultReviewLoopHistoryResume.executed.output.selectedAction, "record_reviewed_results");
   assert.equal(executedResultReviewLoopHistoryResume.executed.output.resumed, true);
-  assert.equal(executedResultReviewLoopHistoryResume.executed.output.previousProcessed, 3);
-  assert.equal(executedResultReviewLoopHistoryResume.executed.output.totalProcessed, 4);
+  assert.equal(executedResultReviewLoopHistoryResume.executed.output.previousProcessed, 4);
+  assert.equal(executedResultReviewLoopHistoryResume.executed.output.totalProcessed, 5);
   assert.equal(executedResultReviewLoopHistoryResume.executed.output.resultReviewLoop.processed, 1);
   assert.equal(executedResultReviewLoopHistoryResume.executed.output.resultReviewLoop.remainingPending, 1);
   assert.equal(executedResultReviewLoopHistoryResume.executed.output.resultReviewLoop.stoppedReason, "dry_run_previewed");
-  assert.equal(executedResultReviewLoopHistoryResume.after.loops[0]?.attempts, 4);
-  assert.equal(executedResultReviewLoopHistoryResume.after.loops[0]?.totalProcessed, 4);
+  assert.equal(executedResultReviewLoopHistoryResume.after.loops[0]?.attempts, 5);
+  assert.equal(executedResultReviewLoopHistoryResume.after.loops[0]?.totalProcessed, 5);
   assert.equal(executedResultReviewLoopHistoryResume.after.loops[0]?.remainingPending, 1);
   assert.equal(executedResultReviewLoopHistoryResume.after.loops[0]?.stoppedReason, "dry_run_previewed");
 
