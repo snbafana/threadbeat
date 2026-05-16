@@ -599,6 +599,26 @@ try {
   assert.equal(terminalOverviewUnreplayedNeedsAction.summary.unreplayedNeedsAction, 1);
   assert.equal(terminalOverviewUnreplayedNeedsAction.commands[0]?.command.join(" "), controlStatusSummaryCommand);
 
+  const terminalOverviewUnreplayedNeedsActionPreset = await cliJson<{
+    filter: { replayState: string; statuses: string[] };
+    summary: { total: number; unreplayedNeedsAction: number };
+    commands: Array<{ command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--unreplayed-needs-action",
+    "--surface",
+    "control",
+    "--commands-only",
+  ]);
+  assert.equal(terminalOverviewUnreplayedNeedsActionPreset.filter.replayState, "unreplayed");
+  assert.deepEqual(terminalOverviewUnreplayedNeedsActionPreset.filter.statuses, ["needs-action"]);
+  assert.equal(terminalOverviewUnreplayedNeedsActionPreset.summary.total, 1);
+  assert.equal(terminalOverviewUnreplayedNeedsActionPreset.summary.unreplayedNeedsAction, 1);
+  assert.equal(terminalOverviewUnreplayedNeedsActionPreset.commands[0]?.command.join(" "), controlStatusSummaryCommand);
+
   const terminalOverviewNeedsActionShell = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
@@ -614,6 +634,20 @@ try {
     "shell",
   ]);
   assert.equal(terminalOverviewNeedsActionShell.trim(), controlStatusSummaryCommand);
+
+  const terminalOverviewUnreplayedNeedsActionPresetShell = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--unreplayed-needs-action",
+    "--surface",
+    "control",
+    "--commands-only",
+    "--format",
+    "shell",
+  ]);
+  assert.equal(terminalOverviewUnreplayedNeedsActionPresetShell.trim(), controlStatusSummaryCommand);
 
   const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
     "runs",
