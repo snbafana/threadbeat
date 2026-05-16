@@ -18229,6 +18229,15 @@ function workerSessionBranchNativePostOperatorNext(
       command: overrideBranchNativeOperatorResumeCommand(operatorLoop.resumeCommand, false),
     };
   }
+  const resultReviewLoop = response.resultReviewLoops[0];
+  if (resultReviewLoop) {
+    return {
+      surface: "result_inspection",
+      action: "resume_branch_native_result_review_loop",
+      reason: resultReviewLoop.stoppedReason ?? "branch_native_result_review_loop_resumable",
+      command: resultReviewLoop.executeResumeCommand,
+    };
+  }
   const applyAction = response.applyActionActions[0];
   if (applyAction) {
     return {

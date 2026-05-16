@@ -63,6 +63,8 @@ try {
   const resultCommitTerminalsAllCommand = `npm run cli -- runs session-control-plane-result-commit-terminals ${sessionName} --server --status all`;
   const resultCommitTerminalsPendingCommand = `npm run cli -- runs session-control-plane-result-commit-terminals ${sessionName} --server --status pending`;
   const branchNativeNextCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server`;
+  const resultInspectionTerminalOverviewCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface result_inspection`;
+  const terminalOverviewExecutionHistoryCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --execution-history`;
   const recordNextReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed`;
   const recordNextSkippedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-skipped`;
   const previewPendingReviewedCommand = `npm run cli -- runs session-result-review-next ${sessionName} --server --record-reviewed --until-empty --dry-run`;
@@ -2168,6 +2170,118 @@ try {
   assert.match(completedBranchNativeNextText, /acknowledged: true/);
   assert.match(completedBranchNativeNextText, /stopped_reason: no_pending_result_commits/);
   assert.doesNotMatch(completedBranchNativeNextText, /acknowledge_completed:/);
+
+  const branchNativeBeforeTerminalOverviewResultReview = await cliJson<{
+    resultReviewLoops: Array<{ loopAdvanceId: string; executeResumeCommand: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  const terminalOverviewResultReviewLoop = branchNativeBeforeTerminalOverviewResultReview.resultReviewLoops[0];
+  assert.equal(terminalOverviewResultReviewLoop?.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  const terminalOverviewResultReviewConfirmCommand = terminalOverviewResultReviewLoop?.executeResumeCommand ?? [];
+  const terminalOverviewResultReviewDryRunCommand = [
+    ...terminalOverviewResultReviewConfirmCommand.filter((part) => part !== "--dry-run" && part !== "--confirm"),
+    "--dry-run",
+  ];
+
+  const resultInspectionTerminalOverview = await cliJson<{
+    nextAction: { surfaces: string[]; command: string[] } | null;
+    commands: { inspectTerminalOverview: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "result_inspection",
+  ]);
+  assert.equal(resultInspectionTerminalOverview.commands.inspectTerminalOverview.join(" "), resultInspectionTerminalOverviewCommand);
+  assert.equal(resultInspectionTerminalOverview.nextAction?.surfaces[0], "result_inspection");
+  assert.equal(resultInspectionTerminalOverview.nextAction?.command.join(" "), terminalOverviewResultReviewConfirmCommand.join(" "));
+
+  const resultInspectionTerminalOverviewExecuteDryRun = await cliJson<{
+    executeNext: {
+      dryRun: boolean;
+      confirmed: boolean;
+      supported: boolean;
+      command: string[] | null;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: { command: string[]; exitCode: number | null; output: { selectedAction?: string; resumed?: boolean; resumedLoopAdvanceId?: string | null; loopAdvanceId?: string; resultReviewLoop?: { stoppedReason?: string } } | null } | null;
+    };
+    executionRecord: { executionId: string; inspectHistory: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "result_inspection",
+    "--execute-next",
+    "--dry-run",
+  ]);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.dryRun, true);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.confirmed, false);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.supported, true);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.selectedAction?.surfaces[0], "result_inspection");
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.selectedAction?.command.join(" "), terminalOverviewResultReviewConfirmCommand.join(" "));
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.command?.join(" "), terminalOverviewResultReviewDryRunCommand.join(" "));
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.executed?.command.join(" "), terminalOverviewResultReviewDryRunCommand.join(" "));
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.executed?.exitCode, 0);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.executed?.output?.selectedAction, "record_reviewed_results");
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.executed?.output?.resumed, true);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.executed?.output?.resumedLoopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.executed?.output?.loopAdvanceId, branchNativeReviewDryRun.loopAdvanceId);
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executeNext.executed?.output?.resultReviewLoop?.stoppedReason, "no_pending_result_commits");
+  assert.equal(resultInspectionTerminalOverviewExecuteDryRun.executionRecord.inspectHistory.join(" "), terminalOverviewExecutionHistoryCommand);
+
+  const resultInspectionTerminalOverviewExecutionHistory = await cliJson<{
+    summary: { total: number; dryRun: number; supported: number; executed: number; failed: number };
+    records: Array<{
+      executionId: string;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      command: string[] | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "result_inspection",
+  ]);
+  assert.ok(resultInspectionTerminalOverviewExecutionHistory.summary.total >= 1);
+  assert.ok(resultInspectionTerminalOverviewExecutionHistory.summary.dryRun >= 1);
+  assert.ok(resultInspectionTerminalOverviewExecutionHistory.summary.supported >= 1);
+  assert.ok(resultInspectionTerminalOverviewExecutionHistory.summary.executed >= 1);
+  assert.equal(resultInspectionTerminalOverviewExecutionHistory.summary.failed, 0);
+  const resultInspectionExecutionRecord = resultInspectionTerminalOverviewExecutionHistory.records.find((record) => record.executionId === resultInspectionTerminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.equal(resultInspectionExecutionRecord?.selectedAction?.surfaces[0], "result_inspection");
+  assert.equal(resultInspectionExecutionRecord?.selectedAction?.command.join(" "), terminalOverviewResultReviewConfirmCommand.join(" "));
+  assert.equal(resultInspectionExecutionRecord?.command?.join(" "), terminalOverviewResultReviewDryRunCommand.join(" "));
+  assert.equal(resultInspectionExecutionRecord?.executed?.command.join(" "), terminalOverviewResultReviewDryRunCommand.join(" "));
+  assert.equal(resultInspectionExecutionRecord?.executed?.exitCode, 0);
+
+  const resultInspectionTerminalOverviewExecutionHistoryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "result_inspection",
+    "--format",
+    "text",
+  ]);
+  assert.match(resultInspectionTerminalOverviewExecutionHistoryText, /control_plane_terminal_overview_execution_history:/);
+  assert.match(resultInspectionTerminalOverviewExecutionHistoryText, /command_surfaces: result_inspection/);
+  assert.match(resultInspectionTerminalOverviewExecutionHistoryText, new RegExp(`selected_command: ${terminalOverviewResultReviewConfirmCommand.join(" ")}`));
+  assert.match(resultInspectionTerminalOverviewExecutionHistoryText, new RegExp(`command: ${terminalOverviewResultReviewDryRunCommand.join(" ")}`));
+  assert.match(resultInspectionTerminalOverviewExecutionHistoryText, new RegExp(`^\\s+surface: result_inspection$`, "m"));
 } finally {
   await app.close();
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
@@ -2175,6 +2289,7 @@ try {
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "result-review-attempts", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "result-reviews", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-executions", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 
