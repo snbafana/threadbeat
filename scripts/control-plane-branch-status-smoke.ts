@@ -52,6 +52,7 @@ try {
   const terminalOverviewCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server`;
   const branchTerminalOverviewCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch`;
   const branchTerminalOverviewNextActionCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch --next-action`;
+  const branchTerminalOverviewExecuteDryRunCommand = `npm run cli -- runs session-control-plane-terminal-overview ${sessionName} --server --surface branch --execute-next --dry-run`;
   const branchNativeNextCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server`;
   const branchNativeRecoverDryRunCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --dry-run`;
   const branchNativeRecoverConfirmCommand = `npm run cli -- runs session-branch-native-next ${sessionName} --server --recover-next --confirm`;
@@ -266,6 +267,47 @@ try {
     "shell",
   ]);
   assert.equal(terminalOverviewNextActionShell.trim(), resumeBranchCommand);
+
+  const terminalOverviewExecuteDryRun = await cliJson<{
+    executeNext: {
+      dryRun: boolean;
+      confirmed: boolean;
+      selectedAction: { surfaces: string[]; command: string[] } | null;
+      executed: { command: string[]; exitCode: number | null; stdout: string; stderr: string; output: unknown } | null;
+    };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "branch",
+    "--execute-next",
+    "--dry-run",
+  ]);
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.dryRun, true);
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.confirmed, false);
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.selectedAction?.surfaces[0], "branch");
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.selectedAction?.command.join(" "), resumeBranchCommand);
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.executed?.command.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewExecuteDryRun.executeNext.executed?.exitCode, 0);
+
+  const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--surface",
+    "branch",
+    "--execute-next",
+    "--dry-run",
+    "--format",
+    "text",
+  ]);
+  assert.match(terminalOverviewExecuteDryRunText, /execute_next:/);
+  assert.match(terminalOverviewExecuteDryRunText, new RegExp(`terminal_overview: ${branchTerminalOverviewExecuteDryRunCommand}`));
+  assert.match(terminalOverviewExecuteDryRunText, new RegExp(`selected_command: ${resumeBranchCommand}`));
+  assert.match(terminalOverviewExecuteDryRunText, new RegExp(`executed_command: ${resumeBranchDryRunCommand}`));
 
   const branchNativeNext = await cliJson<{
     ok: boolean;

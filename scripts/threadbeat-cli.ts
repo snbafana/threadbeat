@@ -5917,6 +5917,21 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       throw new Error("runs session-control-plane-terminal-overview --format text cannot be combined with --commands-only");
     }
     const nextActionOnly = options["next-action"] === "1";
+    const executeNext = options["execute-next"] === "1";
+    const dryRun = options["dry-run"] === "1";
+    const confirm = options.confirm === "1";
+    if (executeNext && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-terminal-overview --execute-next cannot be combined with --commands-only");
+    }
+    if (executeNext && outputFormat === "shell") {
+      throw new Error("runs session-control-plane-terminal-overview --execute-next cannot use --format shell");
+    }
+    if ((dryRun || confirm) && !executeNext) {
+      throw new Error("runs session-control-plane-terminal-overview --dry-run/--confirm require --execute-next");
+    }
+    if (executeNext && [dryRun, confirm].filter(Boolean).length !== 1) {
+      throw new Error("runs session-control-plane-terminal-overview --execute-next requires exactly one of --dry-run or --confirm");
+    }
     const commandSurfaces = options.surface
       ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
       : [];
@@ -5930,6 +5945,38 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const overview = summarizeControlPlaneTerminalOverview(branchNativeNext);
     if (nextActionOnly) {
       overview.commands.inspectTerminalOverview.push("--next-action");
+    }
+    if (executeNext) {
+      overview.commands.inspectTerminalOverview.push("--execute-next", dryRun ? "--dry-run" : "--confirm");
+    }
+    if (executeNext) {
+      const selectedAction = overview.nextAction;
+      const command = selectedAction
+        ? controlPlaneTerminalOverviewExecutionCommand(selectedAction.command, { dryRun })
+        : null;
+      const executed = command
+        ? await runCliWorker(cliCommandArgs(command))
+        : null;
+      if (executed?.exitCode !== 0) {
+        process.exitCode = 1;
+      }
+      const response: ControlPlaneTerminalOverviewExecuteNextResponse = {
+        ...overview,
+        executeNext: {
+          dryRun,
+          confirmed: confirm,
+          selectedAction,
+          executed: executed && command
+            ? { command, ...executed, output: parseJsonMaybe(executed.stdout) }
+            : null,
+        },
+      };
+      if (outputFormat === "text") {
+        printControlPlaneTerminalOverviewExecuteNextText(response);
+      } else {
+        await printJson(response);
+      }
+      return;
     }
     if (options["commands-only"] === "1") {
       const commands = nextActionOnly && overview.nextAction
@@ -17004,6 +17051,21 @@ type ControlPlaneTerminalOverviewResponse = {
   }>;
 };
 
+type ControlPlaneTerminalOverviewExecuteNextResponse = ControlPlaneTerminalOverviewResponse & {
+  executeNext: {
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: WorkerSessionBranchNativeCommandQueueItem | null;
+    executed: {
+      command: string[];
+      exitCode: number | null;
+      stdout: string;
+      stderr: string;
+      output: unknown;
+    } | null;
+  };
+};
+
 type RecoverNextTerminalStatus = "failed" | "all";
 
 type ApplyActionTerminalStatus = "actionable" | "failed" | "all";
@@ -17896,8 +17958,37 @@ function selectControlPlaneTerminalOverviewNextAction(
   return queue[0] ?? null;
 }
 
+function controlPlaneTerminalOverviewExecutionCommand(command: string[], options: { dryRun: boolean }): string[] {
+  const withoutMode = command.filter((part) => part !== "--dry-run" && part !== "--confirm");
+  if (isCliCommand(withoutMode, ["runs", "resume-branch"])) {
+    return options.dryRun ? [...withoutMode, "--dry-run"] : withoutMode;
+  }
+  if (!command.includes("--dry-run") && !command.includes("--confirm")) {
+    throw new Error(`terminal overview next action is not execution-gated: ${formatShellCommand(command)}`);
+  }
+  return [...withoutMode, options.dryRun ? "--dry-run" : "--confirm"];
+}
+
+function isCliCommand(command: string[], argsPrefix: string[]): boolean {
+  const cliPrefix = ["npm", "run", "cli", "--"];
+  return [...cliPrefix, ...argsPrefix].every((part, index) => command[index] === part);
+}
+
 function printControlPlaneTerminalOverviewText(response: ControlPlaneTerminalOverviewResponse): void {
   console.log(formatControlPlaneTerminalOverviewText(response).join("\n"));
+}
+
+function printControlPlaneTerminalOverviewExecuteNextText(response: ControlPlaneTerminalOverviewExecuteNextResponse): void {
+  console.log([
+    ...formatControlPlaneTerminalOverviewText(response),
+    "  execute_next:",
+    `    dry_run: ${response.executeNext.dryRun}`,
+    `    confirmed: ${response.executeNext.confirmed}`,
+    `    selected_surface: ${response.executeNext.selectedAction?.surfaces[0] ?? "none"}`,
+    `    selected_command: ${response.executeNext.selectedAction ? formatShellCommand(response.executeNext.selectedAction.command) : "none"}`,
+    `    executed_command: ${response.executeNext.executed ? formatShellCommand(response.executeNext.executed.command) : "none"}`,
+    `    exit_code: ${response.executeNext.executed?.exitCode ?? ""}`,
+  ].join("\n"));
 }
 
 function formatControlPlaneTerminalOverviewText(response: ControlPlaneTerminalOverviewResponse): string[] {
@@ -27573,7 +27664,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]
