@@ -608,6 +608,98 @@ try {
     "5",
   ]);
   assert.equal(replayLoopProgress.count, 0);
+  const statusWithReplayLoopRecovery = await cliJson<{
+    branchNativeNext: { surface: string; action: string; reason: string; command: string[] } | null;
+    recovery: {
+      count: number;
+      actions: Record<string, number>;
+      nextSteps: {
+        terminalOverviewReplayLoopWorkers: Array<{ action: string; reason: string; workerId: string; command: string[]; commands: Record<string, string[]> }>;
+      };
+    };
+    nextRecovery: { surface: string; action: string; reason: string; command: string[]; dryRunCommand: string[] } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; workerId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+  ]);
+  const statusWithReplayLoopRecoverySummary = await cliJson<{
+    nextRecovery: { surface: string; action: string; reason: string; command: string[]; dryRunCommand: string[] } | null;
+    nextActions: Array<{ surface: string; action: string; reason: string; workerId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(statusWithReplayLoopRecovery.recovery.count, 1);
+  assert.equal(statusWithReplayLoopRecovery.recovery.actions.restart_terminal_overview_replay_loop_worker, 1);
+  assert.equal(statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers.length, 1);
+  assert.equal(statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.workerId, replayLoopWorkerId);
+  assert.equal(statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.action, "restart_terminal_overview_replay_loop_worker");
+  assert.deepEqual(
+    statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command,
+    ["npm", "run", "cli", "--", "runs", "restart-terminal-overview-replay-loop-worker", sessionName, "--server", "--worker-id", replayLoopWorkerId, "--include-retired"],
+  );
+  assert.equal(statusWithReplayLoopRecovery.branchNativeNext?.surface, "worker_recovery");
+  assert.equal(statusWithReplayLoopRecovery.branchNativeNext?.action, "restart_terminal_overview_replay_loop_worker");
+  assert.deepEqual(statusWithReplayLoopRecovery.branchNativeNext?.command, statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command);
+  assert.ok(statusWithReplayLoopRecoverySummary.nextActions.some((action) => (
+    action.surface === "worker_recovery"
+    && action.action === "restart_terminal_overview_replay_loop_worker"
+    && action.workerId === replayLoopWorkerId
+  )));
+  assert.equal(statusWithReplayLoopRecoverySummary.nextRecovery?.surface, "worker_recovery");
+  assert.equal(statusWithReplayLoopRecoverySummary.nextRecovery?.action, "reconcile_control_plane_workers");
+  const replayLoopWorkerAlert = await cliJson<{
+    summary: { total: number };
+    alerts: Array<{ surface: string; reason: string; action: string; workerId?: string; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alerts",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--worker",
+    replayLoopWorkerId,
+  ]);
+  assert.equal(replayLoopWorkerAlert.summary.total, 1);
+  assert.equal(replayLoopWorkerAlert.alerts[0]?.surface, "worker_recovery");
+  assert.equal(replayLoopWorkerAlert.alerts[0]?.action, "restart_terminal_overview_replay_loop_worker");
+  assert.equal(replayLoopWorkerAlert.alerts[0]?.workerId, replayLoopWorkerId);
+  assert.deepEqual(replayLoopWorkerAlert.alerts[0]?.command, statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command);
+  const replayLoopWorkerAlertPreview = await cliJson<{
+    details: {
+      kind: string;
+      target: { kind: string; worker: { workerId: string } | null };
+      commands: { inspectWorker: string[] | null; restartWorker: string[]; retireWorker: string[] | null };
+    } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-alert",
+    sessionName,
+    "--server",
+    "--surface",
+    "worker_recovery",
+    "--worker",
+    replayLoopWorkerId,
+  ]);
+  assert.equal(replayLoopWorkerAlertPreview.details?.kind, "worker_recovery");
+  assert.equal(replayLoopWorkerAlertPreview.details?.target.kind, "terminal_overview_replay_loop_worker");
+  assert.equal(replayLoopWorkerAlertPreview.details?.target.worker?.workerId, replayLoopWorkerId);
+  assert.deepEqual(replayLoopWorkerAlertPreview.details?.commands.restartWorker, statusWithReplayLoopRecovery.recovery.nextSteps.terminalOverviewReplayLoopWorkers[0]?.command);
+  assert.deepEqual(
+    replayLoopWorkerAlertPreview.details?.commands.inspectWorker,
+    ["npm", "run", "cli", "--", "runs", "terminal-overview-replay-loop-workers", sessionName, "--server", "--worker-id", replayLoopWorkerId, "--include-retired"],
+  );
+  assert.deepEqual(
+    replayLoopWorkerAlertPreview.details?.commands.retireWorker,
+    ["npm", "run", "cli", "--", "runs", "stop-terminal-overview-replay-loop-workers", sessionName, "--server", "--worker-id", replayLoopWorkerId, "--retire"],
+  );
   await cliJson(baseUrl, [
     "runs",
     "stop-terminal-overview-replay-loop-workers",

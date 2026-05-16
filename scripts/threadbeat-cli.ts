@@ -11893,6 +11893,7 @@ type WorkerSessionControlPlaneStatusResponse = {
       applyActionWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       controlPlaneAdvanceWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
       controlPlaneTickWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
+      terminalOverviewReplayLoopWorkers: WorkerSessionControlPlaneRecoveryNextStep[];
     };
   };
 };
@@ -12079,7 +12080,7 @@ type WorkerSessionControlPlaneAlertPreviewResponse = {
     workerId: string;
     step: WorkerSessionControlPlaneRecoveryNextStep;
     target: {
-      kind: "session_watch_worker" | "drain_worker" | "apply_action_worker" | "control_plane_advance_worker" | "control_plane_tick_worker";
+      kind: "session_watch_worker" | "drain_worker" | "apply_action_worker" | "control_plane_advance_worker" | "control_plane_tick_worker" | "terminal_overview_replay_loop_worker";
       worker: {
         workerId: string;
         stdout: { path: string; lines: string[] };
@@ -19950,6 +19951,7 @@ function selectWorkerSessionControlPlaneNextActions(
     ...status.recovery.nextSteps.applyActionWorkers,
     ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
+    ...status.recovery.nextSteps.terminalOverviewReplayLoopWorkers,
   ][0];
   if (workerRecovery) {
     nextActions.push({

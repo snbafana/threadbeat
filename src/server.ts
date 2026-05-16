@@ -4378,7 +4378,7 @@ const readWorkerSessionControlPlaneStatus = async (
       latest: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord | null;
       recent: WorkerSessionControlPlaneWorkerReconciliationInspectionRecord[];
     };
-    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[] };
+    nextSteps: { watchWorkers: unknown[]; drainWorkers: unknown[]; applyActionWorkers: unknown[]; controlPlaneAdvanceWorkers: unknown[]; controlPlaneTickWorkers: unknown[]; terminalOverviewReplayLoopWorkers: unknown[] };
   };
 }> => {
   const session = await readWorkerSession(settings.projectRoot, name);
@@ -4515,6 +4515,10 @@ const readWorkerSessionControlPlaneStatus = async (
     branchNativeResultReviewLoopAcknowledgementAttempts,
     lines,
   );
+  const terminalOverviewReplayLoopWorkerNextSteps = summarizeTerminalOverviewReplayLoopWorkerNextSteps(
+    name,
+    terminalOverviewReplayLoopWorkers,
+  );
   return {
     ok: true,
     session: name,
@@ -4526,6 +4530,7 @@ const readWorkerSessionControlPlaneStatus = async (
         ...applyActionWorkerNextSteps.nextSteps,
         ...controlPlaneAdvanceWorkerNextSteps.nextSteps,
         ...controlPlaneTickWorkerNextSteps.nextSteps,
+        ...terminalOverviewReplayLoopWorkerNextSteps.nextSteps,
       ],
       recoverNext,
       operatorLoops,
@@ -4576,13 +4581,14 @@ const readWorkerSessionControlPlaneStatus = async (
     },
     staleRuns: staleRunRecovery,
     recovery: {
-      count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneAdvanceWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count,
+      count: watchWorkerNextSteps.count + drainWorkerNextSteps.count + applyActionWorkerNextSteps.count + controlPlaneAdvanceWorkerNextSteps.count + controlPlaneTickWorkerNextSteps.count + terminalOverviewReplayLoopWorkerNextSteps.count,
       actions: {
         ...watchWorkerNextSteps.actions,
         ...drainWorkerNextSteps.actions,
         ...applyActionWorkerNextSteps.actions,
         ...controlPlaneAdvanceWorkerNextSteps.actions,
         ...controlPlaneTickWorkerNextSteps.actions,
+        ...terminalOverviewReplayLoopWorkerNextSteps.actions,
       },
       attempts: summarizeWorkerSessionControlPlaneAdvanceRecords(controlPlaneRecoveryAttempts),
       recentAttempts: controlPlaneRecoveryAttempts
@@ -4624,6 +4630,7 @@ const readWorkerSessionControlPlaneStatus = async (
         applyActionWorkers: applyActionWorkerNextSteps.nextSteps,
         controlPlaneAdvanceWorkers: controlPlaneAdvanceWorkerNextSteps.nextSteps,
         controlPlaneTickWorkers: controlPlaneTickWorkerNextSteps.nextSteps,
+        terminalOverviewReplayLoopWorkers: terminalOverviewReplayLoopWorkerNextSteps.nextSteps,
       },
     },
   };
@@ -5543,7 +5550,8 @@ type WorkerSessionControlPlaneWorkerRecoveryTargetKind =
   | "drain_worker"
   | "apply_action_worker"
   | "control_plane_advance_worker"
-  | "control_plane_tick_worker";
+  | "control_plane_tick_worker"
+  | "terminal_overview_replay_loop_worker";
 type WorkerSessionControlPlaneWorkerRecoveryTarget = {
   kind: WorkerSessionControlPlaneWorkerRecoveryTargetKind;
   worker: {
@@ -5752,6 +5760,7 @@ const readWorkerSessionControlPlaneAlertDetails = async (
       ...status.recovery.nextSteps.applyActionWorkers,
       ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
       ...status.recovery.nextSteps.controlPlaneTickWorkers,
+      ...status.recovery.nextSteps.terminalOverviewReplayLoopWorkers,
     ].filter(isWorkerSessionControlPlaneWorkerRecoveryStep)
       .find((candidate) => (
         candidate.workerId === alert.workerId
@@ -5901,6 +5910,7 @@ const readWorkerSessionControlPlaneAlerts = async (
     ...status.recovery.nextSteps.applyActionWorkers,
     ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
+    ...status.recovery.nextSteps.terminalOverviewReplayLoopWorkers,
   ].filter(isWorkerSessionControlPlaneWorkerRecoveryStep);
   const acknowledgedStatusWatchAdvanceIds = controlPlaneAcknowledgedAdvanceIds(statusWatchAcknowledgementRecords);
   const failedStatusWatchExecutions = statusWatchExecutionRecords
@@ -6485,6 +6495,10 @@ const readWorkerSessionControlPlaneWorkerRecoveryTarget = async (
     const workers = await listWorkerSessionControlPlaneTickWorkers(settings.projectRoot, baseOptions, lines);
     return { kind: "control_plane_tick_worker", worker: workers[0] ?? null };
   }
+  if (step.action === "restart_terminal_overview_replay_loop_worker") {
+    const workers = await listWorkerSessionTerminalOverviewReplayLoopWorkers(settings.projectRoot, baseOptions, lines);
+    return { kind: "terminal_overview_replay_loop_worker", worker: workers[0] ?? null };
+  }
   throw new Error(`unknown worker recovery action: ${step.action}`);
 };
 
@@ -6566,6 +6580,7 @@ const selectWorkerSessionControlPlaneAdvanceAction = (
     ...status.recovery.nextSteps.applyActionWorkers,
     ...status.recovery.nextSteps.controlPlaneAdvanceWorkers,
     ...status.recovery.nextSteps.controlPlaneTickWorkers,
+    ...status.recovery.nextSteps.terminalOverviewReplayLoopWorkers,
   ].find(isWorkerSessionControlPlaneWorkerRecoveryStep);
   if (workerRecovery) {
     return {
@@ -7173,6 +7188,45 @@ const summarizeControlPlaneWorkers = <T extends { alive: boolean; retiredAt?: st
   stopped: workers.filter((worker) => !worker.alive && Boolean(worker.stoppedAt) && !worker.retiredAt).length,
   retired: workers.filter((worker) => Boolean(worker.retiredAt)).length,
 });
+
+const summarizeTerminalOverviewReplayLoopWorkerNextSteps = <T extends { workerId: string; alive: boolean; stoppedAt?: string; retiredAt?: string }>(
+  sessionName: string,
+  workers: T[],
+): {
+  count: number;
+  nextSteps: WorkerSessionControlPlaneWorkerRecoveryStep[];
+  actions: { restart_terminal_overview_replay_loop_worker: number };
+} => {
+  const nextSteps = workers
+    .filter((worker) => !worker.alive && Boolean(worker.stoppedAt) && !worker.retiredAt)
+    .map((worker) => ({
+      action: "restart_terminal_overview_replay_loop_worker",
+      reason: "worker_stopped",
+      workerId: worker.workerId,
+      command: [
+        "npm", "run", "cli", "--", "runs", "restart-terminal-overview-replay-loop-worker", sessionName, "--server",
+        "--worker-id", worker.workerId,
+        "--include-retired",
+      ],
+      commands: {
+        inspectWorker: [
+          "npm", "run", "cli", "--", "runs", "terminal-overview-replay-loop-workers", sessionName, "--server",
+          "--worker-id", worker.workerId,
+          "--include-retired",
+        ],
+        retireWorker: [
+          "npm", "run", "cli", "--", "runs", "stop-terminal-overview-replay-loop-workers", sessionName, "--server",
+          "--worker-id", worker.workerId,
+          "--retire",
+        ],
+      },
+    }));
+  return {
+    count: nextSteps.length,
+    nextSteps,
+    actions: { restart_terminal_overview_replay_loop_worker: nextSteps.length },
+  };
+};
 
 const summarizeControlPlaneCompletedWorkers = <T extends { alive: boolean; retiredAt?: string; stoppedAt?: string; completedAt?: string }>(workers: T[]): {
   total: number;
