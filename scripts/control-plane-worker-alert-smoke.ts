@@ -1473,8 +1473,11 @@ try {
       action: string;
       reason: string;
       command: string[];
+      branchNativeCommand: string[];
       dryRunCommand: string[] | null;
       confirmCommand: string[] | null;
+      branchNativeDryRunCommand: string[] | null;
+      branchNativeConfirmCommand: string[] | null;
       timelineCommand: string[] | null;
       statusCommand: string[] | null;
     };
@@ -1491,7 +1494,14 @@ try {
   assert.equal(operatorNext.operatorRun?.summary.needsActionAfter, true);
   assert.equal(operatorNext.selected.action, "confirm_operator_run");
   assert.equal(operatorNext.selected.reason, "dry_run_needs_confirmation");
-  assert.deepEqual(operatorNext.selected.command, operatorRuns.records[0]?.commands.confirm);
+  assert.equal(operatorNext.selected.command[5], "session-branch-native-next");
+  assert.equal(operatorNext.selected.command[8], "--operate");
+  assert.equal(operatorNext.selected.command[9], "--confirm");
+  assert.deepEqual(operatorNext.selected.branchNativeCommand, operatorNext.selected.command);
+  assert.deepEqual(operatorNext.selected.branchNativeDryRunCommand?.slice(0, 8), [
+    "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+  ]);
+  assert.ok(operatorNext.selected.branchNativeConfirmCommand?.includes("--confirm"));
   assert.deepEqual(operatorNext.selected.dryRunCommand, operatorRuns.records[0]?.commands.dryRun);
   assert.deepEqual(operatorNext.selected.confirmCommand, operatorRuns.records[0]?.commands.confirm);
   assert.deepEqual(operatorNext.selected.timelineCommand, operatedDryRun.commands.inspectOperatorRunTimeline);
@@ -1509,6 +1519,8 @@ try {
   assert.match(operatorNextText, /control_plane_operator_next:/);
   assert.match(operatorNextText, /action: confirm_operator_run/);
   assert.match(operatorNextText, /reason: dry_run_needs_confirmation/);
+  assert.match(operatorNextText, /branch_native_command: npm run cli -- runs session-branch-native-next/);
+  assert.match(operatorNextText, /branch_native_confirm: npm run cli -- runs session-branch-native-next/);
 
   const operatorNextShell = await cliText(baseUrl, [
     "runs",
@@ -1520,6 +1532,7 @@ try {
     "--format",
     "shell",
   ]);
+  assert.match(operatorNextShell, /session-branch-native-next/);
   assert.match(operatorNextShell, /session-control-plane-operate/);
   assert.match(operatorNextShell, /--confirm/);
 

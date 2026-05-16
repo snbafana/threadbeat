@@ -10644,8 +10644,11 @@ type WorkerSessionControlPlaneOperatorRunNextResponse = {
     action: "confirm_operator_run" | "continue_operator_run" | "inspect_failed_operator_run" | "inspect_status" | "start_operator_run";
     reason: "dry_run_needs_confirmation" | "max_cycles_needs_continue" | "action_failed" | "no_action_needed" | "no_operator_runs";
     command: string[];
+    branchNativeCommand: string[];
     dryRunCommand: string[] | null;
     confirmCommand: string[] | null;
+    branchNativeDryRunCommand: string[] | null;
+    branchNativeConfirmCommand: string[] | null;
     timelineCommand: string[] | null;
     statusCommand: string[] | null;
   };
@@ -13232,26 +13235,36 @@ function workerSessionControlPlaneOperatorRunNextStep(
       "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
       "--dry-run",
     ];
+    const branchNativeDryRunCommand = workerSessionBranchNativeOperatorCommand(sessionName, true);
+    const branchNativeConfirmCommand = workerSessionBranchNativeOperatorCommand(sessionName, false);
     return {
       action: "start_operator_run",
       reason: "no_operator_runs",
-      command,
+      command: branchNativeDryRunCommand,
+      branchNativeCommand: branchNativeDryRunCommand,
       dryRunCommand: command,
+      branchNativeDryRunCommand,
       confirmCommand: [
         "npm", "run", "cli", "--", "runs", "session-control-plane-operate", sessionName, "--server",
         "--confirm",
       ],
+      branchNativeConfirmCommand,
       timelineCommand: null,
       statusCommand: ["npm", "run", "cli", "--", "runs", "session-control-plane-status", sessionName, "--server", "--summary"],
     };
   }
+  const branchNativeDryRunCommand = workerSessionBranchNativeOperatorRunCommand(sessionName, operatorRun, true);
+  const branchNativeConfirmCommand = workerSessionBranchNativeOperatorRunCommand(sessionName, operatorRun, false);
   if (operatorRun.status === "failed") {
     return {
       action: "inspect_failed_operator_run",
       reason: "action_failed",
       command: operatorRun.commands.timeline,
+      branchNativeCommand: operatorRun.commands.timeline,
       dryRunCommand: null,
       confirmCommand: operatorRun.commands.confirm,
+      branchNativeDryRunCommand,
+      branchNativeConfirmCommand,
       timelineCommand: operatorRun.commands.timeline,
       statusCommand: operatorRun.commands.status,
     };
@@ -13261,9 +13274,12 @@ function workerSessionControlPlaneOperatorRunNextStep(
     return {
       action: dryRunNeedsConfirmation ? "confirm_operator_run" : "continue_operator_run",
       reason: dryRunNeedsConfirmation ? "dry_run_needs_confirmation" : "max_cycles_needs_continue",
-      command: operatorRun.commands.confirm,
+      command: branchNativeConfirmCommand,
+      branchNativeCommand: branchNativeConfirmCommand,
       dryRunCommand: operatorRun.commands.dryRun,
       confirmCommand: operatorRun.commands.confirm,
+      branchNativeDryRunCommand,
+      branchNativeConfirmCommand,
       timelineCommand: operatorRun.commands.timeline,
       statusCommand: operatorRun.commands.status,
     };
@@ -13272,8 +13288,11 @@ function workerSessionControlPlaneOperatorRunNextStep(
     action: "inspect_status",
     reason: "no_action_needed",
     command: operatorRun.commands.status,
+    branchNativeCommand: operatorRun.commands.status,
     dryRunCommand: operatorRun.commands.dryRun,
     confirmCommand: operatorRun.commands.confirm,
+    branchNativeDryRunCommand,
+    branchNativeConfirmCommand,
     timelineCommand: operatorRun.commands.timeline,
     statusCommand: operatorRun.commands.status,
   };
@@ -13284,6 +13303,9 @@ function workerSessionControlPlaneOperatorRunNextCommandQueue(
 ): CommandQueueOutput["commands"] {
   return uniqueCommandQueue([
     response.selected.command,
+    response.selected.branchNativeCommand,
+    ...(response.selected.branchNativeDryRunCommand ? [response.selected.branchNativeDryRunCommand] : []),
+    ...(response.selected.branchNativeConfirmCommand ? [response.selected.branchNativeConfirmCommand] : []),
     ...(response.selected.dryRunCommand ? [response.selected.dryRunCommand] : []),
     ...(response.selected.confirmCommand ? [response.selected.confirmCommand] : []),
     ...(response.selected.timelineCommand ? [response.selected.timelineCommand] : []),
@@ -13306,6 +13328,9 @@ function printWorkerSessionControlPlaneOperatorRunNextText(
     `  action: ${response.selected.action}`,
     `  reason: ${response.selected.reason}`,
     `  command: ${formatShellCommand(response.selected.command)}`,
+    `  branch_native_command: ${formatShellCommand(response.selected.branchNativeCommand)}`,
+    `  branch_native_dry_run: ${formatShellCommand(response.selected.branchNativeDryRunCommand ?? [])}`,
+    `  branch_native_confirm: ${formatShellCommand(response.selected.branchNativeConfirmCommand ?? [])}`,
     `  dry_run: ${formatShellCommand(response.selected.dryRunCommand ?? [])}`,
     `  confirm: ${formatShellCommand(response.selected.confirmCommand ?? [])}`,
     `  timeline: ${formatShellCommand(response.selected.timelineCommand ?? [])}`,
@@ -14782,6 +14807,22 @@ function workerSessionBranchNativeOperatorCommand(sessionName: string, dryRun: b
     dryRun ? "--dry-run" : "--confirm",
     "--max-cycles", "1",
     "--cycle-interval-ms", "2000",
+  ];
+}
+
+function workerSessionBranchNativeOperatorRunCommand(
+  sessionName: string,
+  operatorRun: Pick<WorkerSessionControlPlaneOperatorRunInspectionRecord, "bounds">,
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+    "--operate",
+    dryRun ? "--dry-run" : "--confirm",
+    "--max-cycles", String(operatorRun.bounds.maxCycles),
+    "--cycle-interval-ms", String(operatorRun.bounds.cycleIntervalMs),
+    "--lines", String(operatorRun.bounds.lines),
+    ...(operatorRun.bounds.recoverWorkerBundles === true ? ["--recover-worker-bundles"] : []),
   ];
 }
 
