@@ -6727,6 +6727,19 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (outputFormat === "text" && options["commands-only"] === "1") {
       throw new Error("runs session-control-plane-result-review-loops --format text cannot be combined with --commands-only");
     }
+    const executeResume = options["execute-resume"] === "1";
+    if (executeResume && outputFormat !== "json") {
+      throw new Error("runs session-control-plane-result-review-loops --execute-resume requires json output");
+    }
+    if (executeResume && options["commands-only"] === "1") {
+      throw new Error("runs session-control-plane-result-review-loops --execute-resume cannot be combined with --commands-only");
+    }
+    if (executeResume && !options["loop-advance-id"]) {
+      throw new Error("runs session-control-plane-result-review-loops --execute-resume requires --loop-advance-id");
+    }
+    if (executeResume && options.confirm !== "1" && options["dry-run"] !== "1") {
+      throw new Error("runs session-control-plane-result-review-loops --execute-resume requires --confirm or --dry-run");
+    }
     const action = options.action;
     if (action !== undefined && action !== "reviewed" && action !== "skipped") {
       throw new Error("runs session-control-plane-result-review-loops --action must be reviewed or skipped");
@@ -6749,6 +6762,17 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       loopAdvanceId: options["loop-advance-id"],
       limit,
     });
+    if (executeResume) {
+      const response = await executeResultReviewLoopHistoryResume(requiredSessionName, history, {
+        dryRun: options["dry-run"] === "1",
+        limit,
+      });
+      if (response.executed.exitCode !== undefined && response.executed.exitCode !== null && response.executed.exitCode !== 0) {
+        process.exitCode = 1;
+      }
+      await printJson(response);
+      return;
+    }
     if (options["commands-only"] === "1") {
       const commands = resultReviewLoopHistoryCommandQueue(history);
       if (outputFormat === "shell") {
@@ -11406,9 +11430,28 @@ type ResultReviewLoopHistoryResponse = {
       inspectLatest: string[];
       inspectHistory: string[];
       inspectRawHistory: string[];
+      resumeLoop: string[] | null;
+      executeResume: string[] | null;
     };
     attemptsHistory: ResultReviewLoopHistoryRecord[];
   }>;
+};
+
+type ResultReviewLoopHistoryResumeResponse = {
+  ok: boolean;
+  session: string;
+  loopAdvanceId: string;
+  dryRun: boolean;
+  command: string[];
+  before: ResultReviewLoopHistoryResponse;
+  executed: {
+    command: string[];
+    exitCode: number | null;
+    stdout: string;
+    stderr: string;
+    output: unknown;
+  };
+  after: ResultReviewLoopHistoryResponse;
 };
 
 type ContinueDeferredLoopHistoryResumeResponse = {
@@ -12495,6 +12538,12 @@ function summarizeResultReviewLoopHistory(
       const reviewIds = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.reviewId)));
       const runIds = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.runId)));
       const resultCommits = uniqueNonNullStrings(attemptsHistory.flatMap((attempt) => attempt.records.map((record) => record.resultCommit)));
+      const resumeLoop = status === "resumable"
+        ? resultReviewLoopHistoryResumeCommand(sessionName, loopAdvanceId, latest, latest.dryRun)
+        : null;
+      const executeResume = status === "resumable"
+        ? resultReviewLoopHistoryResumeCommand(sessionName, loopAdvanceId, latest, false)
+        : null;
       return {
         loopAdvanceId,
         status,
@@ -12514,6 +12563,8 @@ function summarizeResultReviewLoopHistory(
           inspectLatest: latest.inspectCommand,
           inspectHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-result-review-loops", sessionName, "--server", "--loop-advance-id", loopAdvanceId],
           inspectRawHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "branch_native_result_review_loop"],
+          resumeLoop,
+          executeResume,
         },
         attemptsHistory,
       };
@@ -12557,7 +12608,72 @@ function resultReviewLoopHistoryCommandQueue(
     loop.commands.inspectLatest,
     loop.commands.inspectHistory,
     loop.commands.inspectRawHistory,
+    ...(loop.commands.resumeLoop ? [loop.commands.resumeLoop] : []),
+    ...(loop.commands.executeResume ? [loop.commands.executeResume] : []),
   ])).map((command) => ({ command }));
+}
+
+function resultReviewLoopHistoryResumeCommand(
+  sessionName: string,
+  loopAdvanceId: string,
+  latest: ResultReviewLoopHistoryRecord,
+  dryRun: boolean,
+): string[] {
+  return [
+    "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+    latest.action === "skipped" ? "--record-skipped" : "--record-reviewed",
+    "--until-empty",
+    "--resume-loop",
+    loopAdvanceId,
+    dryRun ? "--dry-run" : "--confirm",
+    "--max-results",
+    String(latest.maxResults ?? 10),
+    "--interval-ms",
+    String(latest.intervalMs ?? 1),
+  ];
+}
+
+async function executeResultReviewLoopHistoryResume(
+  sessionName: string,
+  history: ResultReviewLoopHistoryResponse,
+  options: { dryRun: boolean; limit: number },
+): Promise<ResultReviewLoopHistoryResumeResponse> {
+  const loop = history.loops[0];
+  if (!loop) {
+    throw new Error("result-review loop history has no selected loop to resume");
+  }
+  const command = options.dryRun ? loop.commands.resumeLoop : loop.commands.executeResume;
+  if (!command) {
+    throw new Error(`result-review loop ${loop.loopAdvanceId} has no resume command`);
+  }
+  const executed = await runCliWorker(cliCommandArgs(command));
+  const afterAdvances = await fetchWorkerSessionControlPlaneAdvances(sessionName, {
+    limit: options.limit,
+    detailCommand: "branch_native_result_review_loop",
+    loopAdvanceId: loop.loopAdvanceId,
+  });
+  const after = summarizeResultReviewLoopHistory(sessionName, afterAdvances, {
+    action: loop.action,
+    status: "all",
+    loopAdvanceId: loop.loopAdvanceId,
+    limit: options.limit,
+  });
+  return {
+    ok: executed.exitCode === 0,
+    session: sessionName,
+    loopAdvanceId: loop.loopAdvanceId,
+    dryRun: options.dryRun,
+    command,
+    before: history,
+    executed: {
+      command,
+      exitCode: executed.exitCode,
+      stdout: executed.stdout,
+      stderr: executed.stderr,
+      output: parseJsonMaybe(executed.stdout),
+    },
+    after,
+  };
 }
 
 function summarizeRecoverNextLoopHistory(
@@ -12884,6 +13000,8 @@ function formatResultReviewLoopHistoryText(history: ResultReviewLoopHistoryRespo
       `      inspect_latest: ${formatShellCommand(loop.commands.inspectLatest)}`,
       `      inspect_history: ${formatShellCommand(loop.commands.inspectHistory)}`,
       `      inspect_raw_history: ${formatShellCommand(loop.commands.inspectRawHistory)}`,
+      ...(loop.commands.resumeLoop ? [`      resume: ${formatShellCommand(loop.commands.resumeLoop)}`] : []),
+      ...(loop.commands.executeResume ? [`      execute_resume: ${formatShellCommand(loop.commands.executeResume)}`] : []),
     );
   }
   return lines;
@@ -24908,7 +25026,7 @@ Commands:
   runs session-control-plane-advance <name> --server [--dry-run] [--lines 5]
   runs session-control-plane-advance-loop <name> --server [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5]
   runs session-control-plane-advances <name> --server [--advance advance_id] [--loop-advance-id loop_advance_id --recover-next-loop-history|--continue-deferred-loop-history [--execute-resume --confirm]] [--acknowledged-recover-next-resume-history [--advance acknowledgement_or_attempt_or_loop_id]] [--blocked] [--mutating] [--alert-surface worker_recovery] [--selected-surface worker_recovery] [--selected-action reconcile_control_plane_workers] [--detail-command restart_worker_recovery] [--status-watch-executions] [--failed-recover-next-resumes] [--confirmation-queue] [--execute-confirmation --advance-id id --confirm] [--execute-next-confirmation --confirm] [--drain-confirmations --confirm --max-confirmations 3] [--until-empty --max-steps 10 --interval-ms 2000] [--dry-run] [--limit 20] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-result-review-loops <name> --server [--loop-advance-id loop_advance_id] [--action reviewed|skipped] [--status resumable|completed|all] [--limit 100] [--commands-only] [--format json|shell|text]
+  runs session-control-plane-result-review-loops <name> --server [--loop-advance-id loop_advance_id] [--action reviewed|skipped] [--status resumable|completed|all] [--execute-resume --confirm|--dry-run] [--limit 100] [--commands-only] [--format json|shell|text]
   runs start-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 5] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs ensure-control-plane-advance-worker <name> --server [--worker-id id] [--dry-run] [--max-steps 10] [--interval-ms 2000] [--lines 20] [--drain-confirmations --confirm --max-confirmations 3 --until-empty]
   runs start-control-plane-topology-worker <name> --server (--confirm|--dry-run) [--worker-id id] [--include-mutation-workers] [--max-iterations 60] [--loop-interval-ms 2000] [--lines 20]
