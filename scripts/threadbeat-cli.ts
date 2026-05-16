@@ -5658,8 +5658,11 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     if (recordAction && options["until-empty"] !== "1") {
       throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped requires --until-empty");
     }
-    if (options["resume-loop"] && (!recoverNext || options["until-empty"] !== "1")) {
-      throw new Error("runs session-branch-native-next --resume-loop requires --recover-next --until-empty");
+    if (options["resume-loop"] && options["until-empty"] !== "1") {
+      throw new Error("runs session-branch-native-next --resume-loop requires --until-empty");
+    }
+    if (options["resume-loop"] && !recoverNext && !operate) {
+      throw new Error("runs session-branch-native-next --resume-loop requires --recover-next or --operate");
     }
     if (recordAction && dryRun === confirm) {
       throw new Error("runs session-branch-native-next --record-reviewed|--record-skipped requires exactly one of --dry-run or --confirm");
@@ -5696,21 +5699,44 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       commandSurfaces,
     });
     if (operate) {
-      if (options["resume-loop"]) {
-        throw new Error("runs session-branch-native-next --operate cannot be combined with --resume-loop");
-      }
       const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
       if (options["until-empty"] === "1") {
+        const resumedLoopAdvanceId = options["resume-loop"] ?? null;
+        if (resumedLoopAdvanceId && !/^[A-Za-z0-9._-]+$/.test(resumedLoopAdvanceId)) {
+          throw new Error(`unsafe --resume-loop value: ${resumedLoopAdvanceId}`);
+        }
+        const resumedLoopHistory = resumedLoopAdvanceId
+          ? await fetchWorkerSessionControlPlaneAdvances(requiredSessionName, {
+              limit: 100,
+              loopAdvanceId: resumedLoopAdvanceId,
+              detailCommand: "branch_native_operator_loop",
+            })
+          : null;
+        const latestResumedLoop = resumedLoopHistory?.advances[0] ?? null;
+        const latestResumedRecovery = latestResumedLoop
+          ? unknownRecord((latestResumedLoop as { recovery?: unknown }).recovery)
+          : null;
+        if (resumedLoopAdvanceId && !latestResumedLoop) {
+          throw new Error(`runs session-branch-native-next --operate --resume-loop ${resumedLoopAdvanceId} has no branch-native operator loop record`);
+        }
+        const loopLines = parsePositiveInteger(options.lines ?? String(numberRecordField(latestResumedRecovery, "lines") ?? 5), "--lines");
         const loopResponse = await operateWorkerSessionBranchNativeNextLoop(requiredSessionName, options, response, {
           dryRun,
           confirm,
-          lines,
-          maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
-          intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
-          maxCycles: parsePositiveInteger(options["max-cycles"] ?? "1", "--max-cycles"),
-          cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "2000", "--cycle-interval-ms"),
+          lines: loopLines,
+          maxSteps: parsePositiveInteger(options["max-steps"] ?? String(numberRecordField(latestResumedRecovery, "maxSteps") ?? 10), "--max-steps"),
+          intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? String(numberRecordField(latestResumedRecovery, "intervalMs") ?? 2000), "--interval-ms"),
+          maxCycles: parsePositiveInteger(options["max-cycles"] ?? String(numberRecordField(latestResumedRecovery, "maxCycles") ?? 1), "--max-cycles"),
+          cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? String(numberRecordField(latestResumedRecovery, "cycleIntervalMs") ?? 2000), "--cycle-interval-ms"),
           recoverWorkerBundles: options["recover-worker-bundles"] === "1",
           limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
+          resumedLoopAdvanceId,
+          resumeSourceAdvanceId: latestResumedLoop?.advanceId ?? null,
+          previousSteps: resumedLoopHistory?.advances.reduce((total, advance) => {
+            const recovery = unknownRecord((advance as { recovery?: unknown }).recovery);
+            const steps = recovery?.steps;
+            return total + (Array.isArray(steps) ? steps.length : 0);
+          }, 0) ?? 0,
         });
         if (!loopResponse.ok) {
           process.exitCode = 1;
@@ -14707,6 +14733,11 @@ type WorkerSessionBranchNativeOperatorLoopResponse = Omit<WorkerSessionBranchNat
   loopAdvanceId: string;
   advanceId: string;
   advancePath: string;
+  resumed: boolean;
+  resumedLoopAdvanceId: string | null;
+  resumeSourceAdvanceId: string | null;
+  previousSteps: number;
+  totalSteps: number;
   maxSteps: number;
   intervalMs: number;
   maxCycles: number;
@@ -14731,6 +14762,7 @@ type WorkerSessionBranchNativeOperatorLoopResponse = Omit<WorkerSessionBranchNat
     inspectLoopRecord: string[];
     inspectLoopHistory: string[];
     listOperatorLoops: string[];
+    resumeLoop: string[];
   };
 };
 
@@ -15011,10 +15043,16 @@ async function operateWorkerSessionBranchNativeNextLoop(
     cycleIntervalMs: number;
     recoverWorkerBundles: boolean;
     limit: number;
+    resumedLoopAdvanceId: string | null;
+    resumeSourceAdvanceId: string | null;
+    previousSteps: number;
   },
 ): Promise<WorkerSessionBranchNativeOperatorLoopResponse> {
   const startedAt = new Date().toISOString();
-  const loopAdvanceId = createBranchNativeOperatorLoopAdvanceId(startedAt);
+  const loopAdvanceId = execution.resumedLoopAdvanceId ?? createBranchNativeOperatorLoopAdvanceId(startedAt);
+  const advanceId = execution.resumedLoopAdvanceId
+    ? createBranchNativeOperatorLoopResumeAdvanceId(startedAt)
+    : loopAdvanceId;
   const steps: WorkerSessionBranchNativeOperatorLoopResponse["steps"] = [];
   let stoppedReason: WorkerSessionBranchNativeOperatorLoopResponse["stoppedReason"] = "max_steps";
   let after: WorkerSessionBranchNativeNextResponse | null = null;
@@ -15066,7 +15104,7 @@ async function operateWorkerSessionBranchNativeNextLoop(
   }
   const completedAt = new Date().toISOString();
   const writtenLoopRecord = await writeWorkerSessionControlPlaneAdvanceRecord(process.cwd(), {
-    advanceId: loopAdvanceId,
+    advanceId,
     session: sessionName,
     observedAt: startedAt,
     completedAt,
@@ -15083,12 +15121,17 @@ async function operateWorkerSessionBranchNativeNextLoop(
     detailCommand: "branch_native_operator_loop",
     recovery: {
       untilEmpty: true,
+      resumed: Boolean(execution.resumedLoopAdvanceId),
+      resumedLoopAdvanceId: execution.resumedLoopAdvanceId,
+      resumeSourceAdvanceId: execution.resumeSourceAdvanceId,
       loopAdvanceId,
       maxSteps: execution.maxSteps,
       intervalMs: execution.intervalMs,
       maxCycles: execution.maxCycles,
       cycleIntervalMs: execution.cycleIntervalMs,
       lines: execution.lines,
+      previousSteps: execution.previousSteps,
+      totalSteps: execution.previousSteps + steps.length,
       stoppedReason,
       steps,
       afterNext,
@@ -15106,6 +15149,11 @@ async function operateWorkerSessionBranchNativeNextLoop(
     loopAdvanceId,
     advanceId: writtenLoopRecord.record.advanceId,
     advancePath: writtenLoopRecord.path,
+    resumed: Boolean(execution.resumedLoopAdvanceId),
+    resumedLoopAdvanceId: execution.resumedLoopAdvanceId,
+    resumeSourceAdvanceId: execution.resumeSourceAdvanceId,
+    previousSteps: execution.previousSteps,
+    totalSteps: execution.previousSteps + steps.length,
     maxSteps: execution.maxSteps,
     intervalMs: execution.intervalMs,
     maxCycles: execution.maxCycles,
@@ -15124,6 +15172,18 @@ async function operateWorkerSessionBranchNativeNextLoop(
       inspectLoopRecord: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--advance", writtenLoopRecord.record.advanceId],
       inspectLoopHistory: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--loop-advance-id", loopAdvanceId, "--detail-command", "branch_native_operator_loop"],
       listOperatorLoops: ["npm", "run", "cli", "--", "runs", "session-control-plane-advances", sessionName, "--server", "--detail-command", "branch_native_operator_loop"],
+      resumeLoop: [
+        "npm", "run", "cli", "--", "runs", "session-branch-native-next", sessionName, "--server",
+        "--operate",
+        execution.dryRun ? "--dry-run" : "--confirm",
+        "--until-empty",
+        "--resume-loop", loopAdvanceId,
+        "--max-steps", String(execution.maxSteps),
+        "--interval-ms", String(execution.intervalMs),
+        "--max-cycles", String(execution.maxCycles),
+        "--cycle-interval-ms", String(execution.cycleIntervalMs),
+        "--lines", String(execution.lines),
+      ],
     },
   };
 }
@@ -15354,8 +15414,13 @@ function printWorkerSessionBranchNativeNextOperatorLoopText(
     `  action: ${response.selectedAction}`,
     `  loop: ${response.loopAdvanceId}`,
     `  advance: ${response.advanceId}`,
+    `  resumed: ${response.resumed}`,
+    `  resumed_loop: ${response.resumedLoopAdvanceId ?? ""}`,
+    `  resume_source: ${response.resumeSourceAdvanceId ?? ""}`,
     `  stopped_reason: ${response.stoppedReason}`,
+    `  previous_steps: ${response.previousSteps}`,
     `  executed_steps: ${response.executedSteps}`,
+    `  total_steps: ${response.totalSteps}`,
     `  max_steps: ${response.maxSteps}`,
     `  max_cycles: ${response.maxCycles}`,
     `  after_worker_recovery: ${response.after?.counts.workerRecovery ?? ""}`,
@@ -15366,6 +15431,7 @@ function printWorkerSessionBranchNativeNextOperatorLoopText(
     `  after_next_command: ${formatShellCommand(response.afterNext?.command ?? [])}`,
     `  inspect_loop: ${formatShellCommand(response.loopCommands.inspectLoopRecord)}`,
     `  inspect_history: ${formatShellCommand(response.loopCommands.inspectLoopHistory)}`,
+    `  resume_loop: ${formatShellCommand(response.loopCommands.resumeLoop)}`,
     `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
     ...response.steps.flatMap((step) => [
       `  - step: ${step.step}`,
@@ -21118,6 +21184,10 @@ function createBranchNativeOperatorLoopAdvanceId(observedAt: string): string {
   return `branch-native-operator-loop-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+function createBranchNativeOperatorLoopResumeAdvanceId(observedAt: string): string {
+  return `branch-native-operator-loop-resume-${observedAt.replace(/[^0-9A-Za-z]/g, "")}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 function recoverNextLoopStepLoopId(record: { recovery?: unknown }): string | null {
   const recovery = record.recovery;
   if (!recovery || typeof recovery !== "object" || Array.isArray(recovery)) return null;
@@ -23963,7 +24033,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm [--until-empty --max-steps 10 --interval-ms 2000] --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000] --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
