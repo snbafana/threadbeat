@@ -1278,6 +1278,66 @@ try {
   assert.match(branchNativeOperatorDryRunText, /action: operate/);
   assert.match(branchNativeOperatorDryRunText, /operator_status: dry_run/);
   assert.match(branchNativeOperatorDryRunText, /inspect_operator_run: npm run cli -- runs session-control-plane-operator-runs/);
+  const branchNativeOperatorLoopDryRun = await cliJson<{
+    dryRun: boolean;
+    confirmed: boolean;
+    selectedAction: string;
+    stoppedReason: string;
+    executedSteps: number;
+    steps: Array<{ operatorStatus: string; operatorStoppedReason: string; cycles: number; afterNext: null }>;
+    after: null;
+    afterNext: null;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--until-empty",
+    "--dry-run",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "0",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+  ]);
+  assert.equal(branchNativeOperatorLoopDryRun.dryRun, true);
+  assert.equal(branchNativeOperatorLoopDryRun.confirmed, false);
+  assert.equal(branchNativeOperatorLoopDryRun.selectedAction, "operate_until_empty");
+  assert.equal(branchNativeOperatorLoopDryRun.stoppedReason, "dry_run");
+  assert.equal(branchNativeOperatorLoopDryRun.executedSteps, 1);
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.operatorStatus, "dry_run");
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.operatorStoppedReason, "max_cycles");
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.cycles, 1);
+  assert.equal(branchNativeOperatorLoopDryRun.steps[0]?.afterNext, null);
+  assert.equal(branchNativeOperatorLoopDryRun.after, null);
+  assert.equal(branchNativeOperatorLoopDryRun.afterNext, null);
+  const branchNativeOperatorLoopDryRunText = await cliText(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+    "--operate",
+    "--until-empty",
+    "--dry-run",
+    "--max-steps",
+    "2",
+    "--interval-ms",
+    "0",
+    "--max-cycles",
+    "1",
+    "--cycle-interval-ms",
+    "0",
+    "--format",
+    "text",
+  ]);
+  assert.match(branchNativeOperatorLoopDryRunText, /branch_native_next_operator_loop:/);
+  assert.match(branchNativeOperatorLoopDryRunText, /action: operate_until_empty/);
+  assert.match(branchNativeOperatorLoopDryRunText, /stopped_reason: dry_run/);
+  assert.match(branchNativeOperatorLoopDryRunText, /operator_status: dry_run/);
   const branchNativeWorkerCommands = await cliText(baseUrl, [
     "runs",
     "session-branch-native-next",

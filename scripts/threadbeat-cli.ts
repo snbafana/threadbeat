@@ -5696,10 +5696,32 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
       commandSurfaces,
     });
     if (operate) {
-      if (options["until-empty"] === "1" || options["resume-loop"]) {
-        throw new Error("runs session-branch-native-next --operate cannot be combined with --until-empty or --resume-loop");
+      if (options["resume-loop"]) {
+        throw new Error("runs session-branch-native-next --operate cannot be combined with --resume-loop");
       }
       const lines = parsePositiveInteger(options.lines ?? "5", "--lines");
+      if (options["until-empty"] === "1") {
+        const loopResponse = await operateWorkerSessionBranchNativeNextLoop(requiredSessionName, options, response, {
+          dryRun,
+          confirm,
+          lines,
+          maxSteps: parsePositiveInteger(options["max-steps"] ?? "10", "--max-steps"),
+          intervalMs: parseNonNegativeInteger(options["interval-ms"] ?? "2000", "--interval-ms"),
+          maxCycles: parsePositiveInteger(options["max-cycles"] ?? "1", "--max-cycles"),
+          cycleIntervalMs: parseNonNegativeInteger(options["cycle-interval-ms"] ?? "2000", "--cycle-interval-ms"),
+          recoverWorkerBundles: options["recover-worker-bundles"] === "1",
+          limit: options.limit ? parsePositiveInteger(options.limit, "--limit") : 5,
+        });
+        if (!loopResponse.ok) {
+          process.exitCode = 1;
+        }
+        if (outputFormat === "text") {
+          printWorkerSessionBranchNativeNextOperatorLoopText(loopResponse);
+        } else {
+          await printJson(loopResponse);
+        }
+        return;
+      }
       const operator = await operateWorkerSessionControlPlane(requiredSessionName, options, {
         dryRun,
         confirm,
@@ -14677,6 +14699,33 @@ type WorkerSessionBranchNativePostOperatorNext = {
   command: string[];
 };
 
+type WorkerSessionBranchNativeOperatorLoopResponse = Omit<WorkerSessionBranchNativeNextResponse, "ok"> & {
+  ok: boolean;
+  dryRun: boolean;
+  confirmed: boolean;
+  selectedAction: "operate_until_empty";
+  maxSteps: number;
+  intervalMs: number;
+  maxCycles: number;
+  cycleIntervalMs: number;
+  executedSteps: number;
+  stoppedReason: "idle" | "dry_run" | "operator_failed" | "max_steps";
+  steps: Array<{
+    step: number;
+    operatorRunId: string;
+    operatorStatus: WorkerSessionControlPlaneOperatorRunRecord["status"];
+    operatorStoppedReason: Awaited<ReturnType<typeof operateWorkerSessionControlPlane>>["stoppedReason"];
+    cycles: number;
+    afterNext: WorkerSessionBranchNativePostOperatorNext | null;
+    commands: {
+      inspectOperatorRun: string[];
+      inspectOperatorTimeline: string[];
+    };
+  }>;
+  after: WorkerSessionBranchNativeNextResponse | null;
+  afterNext: WorkerSessionBranchNativePostOperatorNext | null;
+};
+
 function workerSessionBranchNativeNext(
   summary: ReturnType<typeof summarizeWorkerSessionControlPlaneStatus>,
   options: { limit: number; commandSurfaces?: WorkerSessionBranchNativeCommandSurface[] },
@@ -14931,6 +14980,89 @@ function workerSessionBranchNativePostOperatorNext(
   };
 }
 
+async function operateWorkerSessionBranchNativeNextLoop(
+  sessionName: string,
+  options: Record<string, string>,
+  before: WorkerSessionBranchNativeNextResponse,
+  execution: {
+    dryRun: boolean;
+    confirm: boolean;
+    lines: number;
+    maxSteps: number;
+    intervalMs: number;
+    maxCycles: number;
+    cycleIntervalMs: number;
+    recoverWorkerBundles: boolean;
+    limit: number;
+  },
+): Promise<WorkerSessionBranchNativeOperatorLoopResponse> {
+  const steps: WorkerSessionBranchNativeOperatorLoopResponse["steps"] = [];
+  let stoppedReason: WorkerSessionBranchNativeOperatorLoopResponse["stoppedReason"] = "max_steps";
+  let after: WorkerSessionBranchNativeNextResponse | null = null;
+  let afterNext: WorkerSessionBranchNativePostOperatorNext | null = null;
+  for (let step = 1; step <= execution.maxSteps; step += 1) {
+    const operator = await operateWorkerSessionControlPlane(sessionName, options, {
+      dryRun: execution.dryRun,
+      confirm: execution.confirm,
+      lines: execution.lines,
+      maxCycles: execution.maxCycles,
+      cycleIntervalMs: execution.cycleIntervalMs,
+      reconcileWorkers: true,
+      recoverWorkerBundles: execution.recoverWorkerBundles && step === 1,
+    });
+    if (execution.confirm) {
+      after = workerSessionBranchNativeNext(
+        summarizeWorkerSessionControlPlaneStatus(await fetchWorkerSessionControlPlaneStatus(sessionName, { lines: execution.lines })),
+        { limit: execution.limit },
+      );
+      afterNext = workerSessionBranchNativePostOperatorNext(after);
+    }
+    steps.push({
+      step,
+      operatorRunId: operator.operatorRunRecord.operatorRunId,
+      operatorStatus: operator.operatorRunRecord.status,
+      operatorStoppedReason: operator.stoppedReason,
+      cycles: operator.cycles.length,
+      afterNext,
+      commands: {
+        inspectOperatorRun: operator.commands.inspectOperatorRuns,
+        inspectOperatorTimeline: operator.commands.inspectOperatorRunTimeline,
+      },
+    });
+    if (!operator.ok) {
+      stoppedReason = "operator_failed";
+      break;
+    }
+    if (execution.dryRun) {
+      stoppedReason = "dry_run";
+      break;
+    }
+    if (operator.stoppedReason === "idle") {
+      stoppedReason = "idle";
+      break;
+    }
+    if (step < execution.maxSteps) {
+      await sleep(execution.intervalMs);
+    }
+  }
+  return {
+    ...before,
+    ok: stoppedReason !== "operator_failed",
+    dryRun: execution.dryRun,
+    confirmed: execution.confirm,
+    selectedAction: "operate_until_empty",
+    maxSteps: execution.maxSteps,
+    intervalMs: execution.intervalMs,
+    maxCycles: execution.maxCycles,
+    cycleIntervalMs: execution.cycleIntervalMs,
+    executedSteps: steps.length,
+    stoppedReason,
+    steps,
+    after,
+    afterNext,
+  };
+}
+
 function printWorkerSessionBranchNativeNextText(response: WorkerSessionBranchNativeNextResponse): void {
   console.log([
     "branch_native_next:",
@@ -15137,6 +15269,39 @@ function printWorkerSessionBranchNativeNextOperatorExecutionText(
     `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
     `  inspect_operator_run: ${formatShellCommand(response.operator.commands.inspectOperatorRuns)}`,
     `  inspect_operator_timeline: ${formatShellCommand(response.operator.commands.inspectOperatorRunTimeline)}`,
+  ].join("\n"));
+}
+
+function printWorkerSessionBranchNativeNextOperatorLoopText(
+  response: WorkerSessionBranchNativeOperatorLoopResponse,
+): void {
+  console.log([
+    "branch_native_next_operator_loop:",
+    `  session: ${response.session}`,
+    `  dry_run: ${response.dryRun}`,
+    `  confirmed: ${response.confirmed}`,
+    `  action: ${response.selectedAction}`,
+    `  stopped_reason: ${response.stoppedReason}`,
+    `  executed_steps: ${response.executedSteps}`,
+    `  max_steps: ${response.maxSteps}`,
+    `  max_cycles: ${response.maxCycles}`,
+    `  after_worker_recovery: ${response.after?.counts.workerRecovery ?? ""}`,
+    `  after_result_pending: ${response.after?.counts.resultPending ?? ""}`,
+    `  after_next_surface: ${response.afterNext?.surface ?? ""}`,
+    `  after_next_action: ${response.afterNext?.action ?? ""}`,
+    `  after_next_reason: ${response.afterNext?.reason ?? ""}`,
+    `  after_next_command: ${formatShellCommand(response.afterNext?.command ?? [])}`,
+    `  inspect_next: ${formatShellCommand(["npm", "run", "cli", "--", "runs", "session-branch-native-next", response.session, "--server"])}`,
+    ...response.steps.flatMap((step) => [
+      `  - step: ${step.step}`,
+      `    operator_run: ${step.operatorRunId}`,
+      `    operator_status: ${step.operatorStatus}`,
+      `    operator_stopped_reason: ${step.operatorStoppedReason}`,
+      `    cycles: ${step.cycles}`,
+      `    next: ${step.afterNext ? `${step.afterNext.surface}:${step.afterNext.action}` : ""}`,
+      `    inspect_operator_run: ${formatShellCommand(step.commands.inspectOperatorRun)}`,
+      `    inspect_operator_timeline: ${formatShellCommand(step.commands.inspectOperatorTimeline)}`,
+    ]),
   ].join("\n"));
 }
 
@@ -23719,7 +23884,7 @@ Commands:
   runs session-result-reviews <name> --server [--run run_id] [--review review_id] [--action reviewed,skipped] [--latest] [--record-reviewed|--record-skipped] [--result-commit sha] [--dry-run] [--reviewed-by worker] [--note text] [--limit 20] [--format json|text]
   runs session-result-review-next <name> --server [--run run_id] [--result-commit sha] [--record-reviewed|--record-skipped] [--until-empty --max-results 10 --interval-ms 1] [--dry-run] [--reviewed-by name] [--note text] [--commands-only] [--format json|text|shell]
   runs session-result-inspections <name> --server [--run run_id] [--review-state pending,reviewed,skipped] [--next] [--result-commits] [--commands-only] [--format json|text|shell] [--limit 20]
-  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
+  runs session-branch-native-next <name> --server [--limit 5] [--lines 5] [--surface control,recover_next,worker_recovery,operator,branch,result_inspection] [--commands-only] [--format json|text|shell] [--operate --dry-run|--confirm [--until-empty --max-steps 10 --interval-ms 2000] --max-cycles 1 --cycle-interval-ms 2000] [--recover-next --dry-run|--confirm [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 2000]] [--record-reviewed|--record-skipped --until-empty --dry-run|--confirm --max-results 10 --interval-ms 1]
   runs session-control-plane-recover-next <name> --server [--inspect [--commands-only --format shell]|--confirm|--dry-run] [--until-empty --max-steps 10 --interval-ms 2000 --resume-loop loop_advance_id] [--lines 5]
   runs session-control-plane-alerts <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--limit 20] [--lines 5] [--commands-only] [--format json|shell]
   runs session-control-plane-alert <name> --server [--severity error,warning] [--surface branch,stale_run,status_watch,apply_action,drain_continuation,worker_recovery,recover_next] [--reason running_sandbox_present] [--run run_id] [--worker worker_id] [--apply apply_id] [--execution execution_id] [--continuation continuation_id] [--action inspect_run] [--lines 5] [--commands-only] [--format json|shell|text]
