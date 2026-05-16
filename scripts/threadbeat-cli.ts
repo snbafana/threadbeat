@@ -11305,6 +11305,7 @@ type WorkerSessionControlPlaneStatusResponse = {
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
+    terminalOverviewReplayLoop: { total: number; alive: number; stopped: number; retired: number };
     controlPlaneAdvance: {
       total: number;
       alive: number;
@@ -15891,6 +15892,7 @@ function formatWorkerSessionControlPlaneStatusSummaryText(
     `  watch: ${formatBasicControlPlaneWorkerHealth(summary.workers.watch)}`,
     `  drain: ${formatBasicControlPlaneWorkerHealth(summary.workers.drain)}`,
     `  apply_action: ${formatBasicControlPlaneWorkerHealth(summary.workers.applyAction)}`,
+    `  terminal_overview_replay_loop: ${formatBasicControlPlaneWorkerHealth(summary.workers.terminalOverviewReplayLoop)}`,
     `  control_plane_advance: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance)}`,
     `  advance_loop: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.advance_loop)}`,
     `  confirmation_drain: ${formatCompletedControlPlaneWorkerHealth(summary.workers.controlPlaneAdvance.modes.confirmation_drain)}`,
@@ -21310,7 +21312,7 @@ async function fetchWorkerSessionControlPlaneTickWorkerNextSteps(
   };
 }
 
-type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_bundle_recovery" | "control_plane_operator" | "control_plane_tick" | "apply_action" | "drain";
+type ControlPlaneWorkerKind = "control_plane_advance" | "control_plane_topology" | "result_review" | "control_plane_bundle_recovery" | "control_plane_operator" | "control_plane_tick" | "apply_action" | "drain" | "terminal_overview_replay_loop";
 type ControlPlaneAdvanceWorkerMode = "advance_loop" | "confirmation_drain" | "topology_loop" | "result_review_loop" | "bundle_recovery_loop" | "operator_loop";
 
 type ControlPlaneWorkerSummary = {
@@ -21448,6 +21450,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     tick: ControlPlaneWorkerSummary;
     applyAction: ControlPlaneWorkerSummary;
     drain: ControlPlaneWorkerSummary;
+    terminalOverviewReplayLoop: ControlPlaneWorkerSummary;
   };
   workers: Array<Record<string, unknown> & {
     kind: ControlPlaneWorkerKind;
@@ -21473,6 +21476,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     inspectTickWorkers: string[];
     inspectApplyActionWorkers: string[];
     inspectDrainWorkers: string[];
+    inspectTerminalOverviewReplayLoopWorkers: string[];
     inspectProgress: string[];
     reconcileDryRun: string[];
     reconcileConfirm: string[];
@@ -21480,11 +21484,12 @@ async function fetchWorkerSessionControlPlaneWorkers(
     restartNext: string[] | null;
   };
 }> {
-  const [advanceWorkers, tickWorkers, applyActionWorkers, drainWorkers, advanceNextSteps, tickNextSteps, applyActionNextSteps, drainNextSteps] = await Promise.all([
+  const [advanceWorkers, tickWorkers, applyActionWorkers, drainWorkers, terminalOverviewReplayLoopWorkers, advanceNextSteps, tickNextSteps, applyActionNextSteps, drainNextSteps] = await Promise.all([
     fetchWorkerSessionControlPlaneAdvanceWorkers(sessionName, options),
     fetchWorkerSessionControlPlaneTickWorkers(sessionName, options),
     fetchWorkerSessionApplyActionWorkers(sessionName, options),
     fetchWorkerSessionDrainWorkers(sessionName, options),
+    fetchTerminalOverviewReplayLoopWorkers(sessionName, options),
     fetchWorkerSessionControlPlaneAdvanceWorkerNextSteps(sessionName, { workerId: options.workerId }),
     fetchWorkerSessionControlPlaneTickWorkerNextSteps(sessionName, { workerId: options.workerId }),
     fetchWorkerSessionApplyActionWorkerNextSteps(sessionName),
@@ -21495,6 +21500,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
     ...tickWorkers.workers.map((worker) => normalizeControlPlaneWorker("control_plane_tick", sessionName, worker, options.includeRetired)),
     ...applyActionWorkers.workers.map((worker) => normalizeControlPlaneWorker("apply_action", sessionName, worker, options.includeRetired)),
     ...drainWorkers.workers.map((worker) => normalizeControlPlaneWorker("drain", sessionName, worker, options.includeRetired)),
+    ...terminalOverviewReplayLoopWorkers.workers.map((worker) => normalizeControlPlaneWorker("terminal_overview_replay_loop", sessionName, worker, options.includeRetired)),
   ];
   const bundleProfile = await readControlPlaneWorkerBundleProfile(sessionName);
   const desiredOperatorCommand = bundleProfile?.desired.includeOperatorWorker
@@ -21509,6 +21515,15 @@ async function fetchWorkerSessionControlPlaneWorkers(
     ...tickNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("control_plane_tick", step)),
     ...applyActionNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("apply_action", step)),
     ...drainNextSteps.nextSteps.map((step) => normalizeControlPlaneWorkerNextStep("drain", step)),
+    ...workers
+      .filter((worker) => worker.kind === "terminal_overview_replay_loop" && worker.restartable && worker.workerId)
+      .map((worker) => ({
+        kind: "terminal_overview_replay_loop" as const,
+        action: "restart_terminal_overview_replay_loop_worker",
+        reason: worker.reason ?? "worker_stopped",
+        workerId: worker.workerId,
+        command: worker.commands?.restart ?? [],
+      })),
   ];
   const nextSteps = options.workerId
     ? allNextSteps.filter((step) => step.workerId === options.workerId)
@@ -21521,6 +21536,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
   const tickSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "control_plane_tick"));
   const applyActionSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "apply_action"));
   const drainSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "drain"));
+  const terminalOverviewReplayLoopSummary = summarizeControlPlaneWorkers(workers.filter((worker) => worker.kind === "terminal_overview_replay_loop"));
   const allSummary = summarizeControlPlaneWorkers(workers);
   return {
     ok: true,
@@ -21540,6 +21556,7 @@ async function fetchWorkerSessionControlPlaneWorkers(
       tick: tickSummary,
       applyAction: applyActionSummary,
       drain: drainSummary,
+      terminalOverviewReplayLoop: terminalOverviewReplayLoopSummary,
     },
     workers,
     nextSteps,
@@ -21588,6 +21605,12 @@ async function fetchWorkerSessionControlPlaneWorkers(
       ],
       inspectDrainWorkers: [
         "npm", "run", "cli", "--", "runs", "session-drain-workers", sessionName, "--server",
+        ...(options.workerId ? ["--worker-id", options.workerId] : []),
+        ...(options.includeRetired ? ["--include-retired"] : []),
+        "--lines", String(options.lines),
+      ],
+      inspectTerminalOverviewReplayLoopWorkers: [
+        "npm", "run", "cli", "--", "runs", "terminal-overview-replay-loop-workers", sessionName, "--server",
         ...(options.workerId ? ["--worker-id", options.workerId] : []),
         ...(options.includeRetired ? ["--include-retired"] : []),
         "--lines", String(options.lines),
@@ -21779,6 +21802,7 @@ function emptyControlPlaneWorkerKindCounts(): Record<ControlPlaneWorkerKind, num
     control_plane_tick: 0,
     apply_action: 0,
     drain: 0,
+    terminal_overview_replay_loop: 0,
   };
 }
 
@@ -21911,6 +21935,7 @@ function formatWorkerSessionControlPlaneWorkersText(
     `  tick: ${formatControlPlaneWorkerSummary(response.summary.tick)}`,
     `  apply_action: ${formatControlPlaneWorkerSummary(response.summary.applyAction)}`,
     `  drain: ${formatControlPlaneWorkerSummary(response.summary.drain)}`,
+    `  terminal_overview_replay_loop: ${formatControlPlaneWorkerSummary(response.summary.terminalOverviewReplayLoop)}`,
     "  commands:",
     `    inspect_advance: ${formatShellCommand(response.commands.inspectAdvanceWorkers)}`,
     `    inspect_topology: ${formatShellCommand(response.commands.inspectTopologyWorkers)}`,
@@ -21920,6 +21945,7 @@ function formatWorkerSessionControlPlaneWorkersText(
     `    inspect_tick: ${formatShellCommand(response.commands.inspectTickWorkers)}`,
     `    inspect_apply_action: ${formatShellCommand(response.commands.inspectApplyActionWorkers)}`,
     `    inspect_drain: ${formatShellCommand(response.commands.inspectDrainWorkers)}`,
+    `    inspect_terminal_overview_replay_loop: ${formatShellCommand(response.commands.inspectTerminalOverviewReplayLoopWorkers)}`,
     `    inspect_progress: ${formatShellCommand(response.commands.inspectProgress)}`,
     `    reconcile_dry_run: ${formatShellCommand(response.commands.reconcileDryRun)}`,
     `    reconcile_confirm: ${formatShellCommand(response.commands.reconcileConfirm)}`,
@@ -22443,6 +22469,53 @@ function controlPlaneWorkerCommands(
       ],
     };
   }
+  if (kind === "terminal_overview_replay_loop") {
+    return {
+      inspect: [
+        "npm", "run", "cli", "--", "runs", "terminal-overview-replay-loop-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      restart: [
+        "npm", "run", "cli", "--", "runs", "restart-terminal-overview-replay-loop-worker", sessionName, "--server",
+        "--worker-id", workerId,
+        ...(includeRetired ? ["--include-retired"] : []),
+      ],
+      stop: [
+        "npm", "run", "cli", "--", "runs", "stop-terminal-overview-replay-loop-workers", sessionName, "--server",
+        "--worker-id", workerId,
+      ],
+      retire: [
+        "npm", "run", "cli", "--", "runs", "stop-terminal-overview-replay-loop-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--retire",
+      ],
+      reconcileDryRun: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--dry-run",
+      ],
+      reconcileConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--confirm",
+      ],
+      reconcileUntilEmptyConfirm: [
+        "npm", "run", "cli", "--", "runs", "session-control-plane-reconcile-workers", sessionName, "--server",
+        "--worker-id", workerId,
+        "--kind", controlPlaneWorkerKindFlag(kind),
+        ...(includeRetired ? ["--include-retired"] : []),
+        "--until-empty",
+        "--max-steps", "10",
+        "--interval-ms", "2000",
+        "--confirm",
+      ],
+    };
+  }
   const nouns = controlPlaneWorkerCommandNouns(kind);
   return {
     inspect: [
@@ -22495,6 +22568,7 @@ function controlPlaneWorkerCommandNouns(kind: ControlPlaneWorkerKind): string {
   if (kind === "control_plane_advance") return "control-plane-advance-workers";
   if (kind === "control_plane_tick") return "control-plane-tick-workers";
   if (kind === "apply_action") return "apply-action-workers";
+  if (kind === "terminal_overview_replay_loop") return "terminal-overview-replay-loop-workers";
   return "drain-workers";
 }
 
@@ -22507,6 +22581,7 @@ function parseControlPlaneWorkerKind(value: string): ControlPlaneWorkerKind {
   if (value === "control-plane-tick" || value === "control_plane_tick" || value === "tick") return "control_plane_tick";
   if (value === "apply-action" || value === "apply_action") return "apply_action";
   if (value === "drain") return "drain";
+  if (value === "terminal-overview-replay-loop" || value === "terminal_overview_replay_loop" || value === "replay-loop" || value === "replay_loop") return "terminal_overview_replay_loop";
   throw new Error(`Unsupported control-plane worker kind: ${value}`);
 }
 
@@ -22563,6 +22638,7 @@ function controlPlaneWorkerKindFlag(kind: ControlPlaneWorkerKind): string {
   if (kind === "control_plane_operator") return "control-plane-operator";
   if (kind === "control_plane_tick") return "control-plane-tick";
   if (kind === "apply_action") return "apply-action";
+  if (kind === "terminal_overview_replay_loop") return "terminal-overview-replay-loop";
   return "drain";
 }
 
@@ -25200,6 +25276,9 @@ async function stopControlPlaneWorkerForDrill(
   if (options.kind === "apply_action") {
     return await stopWorkerSessionApplyActionWorkersViaServer(sessionName, { workerId: options.workerId, retire: false, lines: options.lines });
   }
+  if (options.kind === "terminal_overview_replay_loop") {
+    return await stopTerminalOverviewReplayLoopWorkersViaServer(sessionName, { workerId: options.workerId, retire: false, lines: options.lines });
+  }
   return await stopWorkerSessionDrainWorkersViaServer(sessionName, { workerId: options.workerId, retire: false, lines: options.lines });
 }
 
@@ -25255,6 +25334,13 @@ async function restartControlPlaneWorkerForDrill(
   }
   if (options.kind === "apply_action") {
     return await restartWorkerSessionApplyActionWorkerViaServer(sessionName, {
+      workerId: options.workerId,
+      includeRetired: options.includeRetired,
+      lines: options.lines,
+    });
+  }
+  if (options.kind === "terminal_overview_replay_loop") {
+    return await restartTerminalOverviewReplayLoopWorkerViaServer(sessionName, {
       workerId: options.workerId,
       includeRetired: options.includeRetired,
       lines: options.lines,
@@ -28861,7 +28947,7 @@ Commands:
   runs session-apply-action-workers [name] [--server] [--worker-id id] [--include-retired] [--lines 20]
   runs session-apply-action-workers-next <name> --server
   runs ensure-apply-action-worker <name> --server [--worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--interval-ms n] [--lines 20]
-  runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-status <name> --server [--summary] [--watch] [--until-action] [--execute-action --dry-run|--confirm] [--reconcile-workers --dry-run|--confirm] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain|terminal-overview-replay-loop] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--max-polls n] [--interval-ms ms] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
@@ -28927,10 +29013,10 @@ Commands:
   runs session-control-plane-advance-workers <name> --server [--worker-id id] [--include-retired] [--lines 20]
   runs session-control-plane-workers <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--format json|text|shell]
   runs session-control-plane-worker-restart-queue <name> --server [--worker-id id] [--include-retired] [--lines 20] [--commands-only] [--dry-run|--confirm] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--format json|text|shell]
-  runs session-control-plane-worker-terminals <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--status restartable|stopped|all] [--include-retired] [--limit 20] [--lines 5] [--commands-only] [--format json|text|shell]
-  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--include-retired] [--limit 5] [--format json|text]
-  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
-  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
+  runs session-control-plane-worker-terminals <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain|terminal-overview-replay-loop] [--status restartable|stopped|all] [--include-retired] [--limit 20] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-worker-progress <name> --server [--worker-id id] [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain|terminal-overview-replay-loop] [--include-retired] [--limit 5] [--format json|text]
+  runs session-control-plane-worker-drill <name> --server --kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain|terminal-overview-replay-loop --worker-id id (--confirm|--dry-run) [--include-retired] [--lines 20]
+  runs session-control-plane-reconcile-workers <name> --server (--confirm|--dry-run) [--kind control-plane-advance|control-plane-topology|result-review|bundle-recovery|control-plane-operator|control-plane-tick|apply-action|drain|terminal-overview-replay-loop] [--worker-id id] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 20] [--format json|text]
   runs session-control-plane-worker-reconciliations <name> --server [--latest] [--reconciliation id] [--limit 20] [--commands-only] [--format json|text|shell]
   runs ensure-control-plane-core-workers <name> --server (--confirm|--dry-run) [--advance-worker-id id] [--tick-worker-id id] [--worker-dry-run 1] [--max-steps 10] [--max-ticks 10] [--interval-ms 2000] [--lines 20]
   runs ensure-control-plane-mutation-workers <name> --server (--confirm|--dry-run) [--apply-worker-id id] [--drain-worker-id id] [--apply-id id] [--source source] [--apply-action action] [--limit n] [--max-actions n] [--continue-on-failure] [--until-empty] [--max-polls n] [--apply-interval-ms n] [--max-continuations n] [--lines 20]

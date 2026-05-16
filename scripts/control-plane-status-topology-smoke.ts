@@ -102,6 +102,7 @@ try {
   assert.match(text, new RegExp(`inspect_progress: .*session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
   assert.match(text, /^worker_health:$/m);
   assert.match(text, /watch: total=0 alive=0 stopped=0 retired=0/);
+  assert.match(text, /terminal_overview_replay_loop: total=0 alive=0 stopped=0 retired=0/);
   assert.match(text, /topology_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
   assert.match(text, /result_review_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
   assert.match(text, /bundle_recovery_loop: total=0 alive=0 stopped=0 retired=0 completed=0/);
@@ -498,6 +499,126 @@ try {
   assert.match(aggregateTextBeforeStop, /topology: total=1 alive=0 stopped=0 completed=1 retired=0 exited_unrecorded=0 restartable=0 command_drift=0 latest_results=count=1,recorded=1,progress=0,recent_progress=1,iterations=1,core=0,mutation=0/);
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_topology: npm run cli -- runs session-control-plane-topology-workers ${sessionName} --server --include-retired --lines 1`));
   assert.match(aggregateTextBeforeStop, new RegExp(`inspect_progress: npm run cli -- runs session-control-plane-worker-progress ${sessionName} --server --include-retired --limit 5`));
+
+  const replayLoopWorkerId = "status-replay-loop-worker";
+  const startedReplayLoop = await cliJson<{ worker: { workerId: string; dryRun: boolean; command: string[] } }>(baseUrl, [
+    "runs",
+    "start-terminal-overview-replay-loop-worker",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--dry-run",
+    "--max-steps",
+    "1",
+  ]);
+  assert.equal(startedReplayLoop.worker.workerId, replayLoopWorkerId);
+  assert.equal(startedReplayLoop.worker.dryRun, true);
+  assert.deepEqual(startedReplayLoop.worker.command, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--replay-unreplayed-needs-action-loop",
+    "--dry-run",
+    "--max-steps",
+    "1",
+  ]);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--lines",
+    "1",
+  ]);
+  const aggregateWithReplayLoop = await cliJson<{
+    summary: { terminalOverviewReplayLoop: { total: number; stopped: number; restartable: number } };
+    workers: Array<{ kind: string; workerId: string | null; commands: { restart: string[] } | null }>;
+    commands: { inspectTerminalOverviewReplayLoopWorkers: string[] };
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+  ]);
+  assert.equal(aggregateWithReplayLoop.summary.terminalOverviewReplayLoop.total, 1);
+  assert.equal(aggregateWithReplayLoop.summary.terminalOverviewReplayLoop.stopped, 1);
+  assert.equal(aggregateWithReplayLoop.summary.terminalOverviewReplayLoop.restartable, 1);
+  const replayLoopWorker = aggregateWithReplayLoop.workers.find((worker) => worker.workerId === replayLoopWorkerId);
+  assert.equal(replayLoopWorker?.kind, "terminal_overview_replay_loop");
+  assert.equal(
+    replayLoopWorker?.commands?.restart.join(" "),
+    `npm run cli -- runs restart-terminal-overview-replay-loop-worker ${sessionName} --server --worker-id ${replayLoopWorkerId} --include-retired`,
+  );
+  assert.equal(
+    aggregateWithReplayLoop.commands.inspectTerminalOverviewReplayLoopWorkers.join(" "),
+    `npm run cli -- runs terminal-overview-replay-loop-workers ${sessionName} --server --include-retired --lines 1`,
+  );
+  const aggregateTextWithReplayLoop = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-workers",
+    sessionName,
+    "--server",
+    "--include-retired",
+    "--lines",
+    "1",
+    "--format",
+    "text",
+  ]);
+  assert.match(aggregateTextWithReplayLoop, /terminal_overview_replay_loop: total=1 alive=0 stopped=1 completed=0 retired=0 exited_unrecorded=0 restartable=1 command_drift=0/);
+  assert.match(aggregateTextWithReplayLoop, new RegExp(`inspect_terminal_overview_replay_loop: npm run cli -- runs terminal-overview-replay-loop-workers ${sessionName} --server --include-retired --lines 1`));
+  const replayLoopTerminals = await cliJson<{
+    count: number;
+    workers: Array<{ kind: string; workerId: string | null; commands: { restart: string[] } }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-terminals",
+    sessionName,
+    "--server",
+    "--kind",
+    "terminal-overview-replay-loop",
+    "--status",
+    "restartable",
+    "--include-retired",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(replayLoopTerminals.count, 1);
+  assert.equal(replayLoopTerminals.workers[0]?.kind, "terminal_overview_replay_loop");
+  assert.equal(replayLoopTerminals.workers[0]?.workerId, replayLoopWorkerId);
+  assert.equal(
+    replayLoopTerminals.workers[0]?.commands.restart.join(" "),
+    `npm run cli -- runs restart-terminal-overview-replay-loop-worker ${sessionName} --server --worker-id ${replayLoopWorkerId} --include-retired`,
+  );
+  const replayLoopProgress = await cliJson<{ count: number }>(baseUrl, [
+    "runs",
+    "session-control-plane-worker-progress",
+    sessionName,
+    "--server",
+    "--kind",
+    "terminal-overview-replay-loop",
+    "--include-retired",
+    "--limit",
+    "5",
+  ]);
+  assert.equal(replayLoopProgress.count, 0);
+  await cliJson(baseUrl, [
+    "runs",
+    "stop-terminal-overview-replay-loop-workers",
+    sessionName,
+    "--server",
+    "--worker-id",
+    replayLoopWorkerId,
+    "--retire",
+    "--lines",
+    "1",
+  ]);
 
   await cliJson(baseUrl, [
     "runs",
@@ -1750,6 +1871,7 @@ try {
   await fs.rm(path.join(".threadbeat", "worker-sessions", `${sessionName}.json`), { force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advance-workers", sessionName), { recursive: true, force: true });
   await fs.rm(path.join(".threadbeat", "worker-sessions", "control-plane-advances", sessionName), { recursive: true, force: true });
+  await fs.rm(path.join(".threadbeat", "worker-sessions", "terminal-overview-replay-loop-workers", sessionName), { recursive: true, force: true });
   await fs.rm(tempRoot, { recursive: true, force: true });
 }
 

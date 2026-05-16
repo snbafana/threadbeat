@@ -4300,6 +4300,7 @@ const readWorkerSessionControlPlaneStatus = async (
     watch: { total: number; alive: number; stopped: number; retired: number };
     drain: { total: number; alive: number; stopped: number; retired: number };
     applyAction: { total: number; alive: number; stopped: number; retired: number };
+    terminalOverviewReplayLoop: { total: number; alive: number; stopped: number; retired: number };
     controlPlaneAdvance: {
       total: number;
       alive: number;
@@ -4389,6 +4390,7 @@ const readWorkerSessionControlPlaneStatus = async (
     drainWorkers,
     drainWorkerNextSteps,
     applyActionWorkers,
+    terminalOverviewReplayLoopWorkers,
     applyActionWorkerNextSteps,
     controlPlaneAdvanceWorkers,
     controlPlaneAdvanceWorkerNextSteps,
@@ -4421,6 +4423,7 @@ const readWorkerSessionControlPlaneStatus = async (
     listWorkerSessionDrainWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionDrainWorkerNextSteps(settings.projectRoot, name),
     listWorkerSessionApplyActionWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
+    listWorkerSessionTerminalOverviewReplayLoopWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionApplyActionWorkerNextSteps(settings.projectRoot, name),
     listWorkerSessionControlPlaneAdvanceWorkers(settings.projectRoot, { sessionName: name, includeRetired: true }, lines),
     listWorkerSessionControlPlaneAdvanceWorkerNextSteps(settings.projectRoot, name),
@@ -4534,6 +4537,7 @@ const readWorkerSessionControlPlaneStatus = async (
       watch: summarizeControlPlaneWorkers(watchWorkers),
       drain: summarizeControlPlaneWorkers(drainWorkers),
       applyAction: summarizeControlPlaneWorkers(applyActionWorkers),
+      terminalOverviewReplayLoop: summarizeControlPlaneWorkers(terminalOverviewReplayLoopWorkers),
       controlPlaneAdvance: summarizeControlPlaneAdvanceWorkers(controlPlaneAdvanceWorkers),
       controlPlaneTick: summarizeControlPlaneTickWorkers(controlPlaneTickWorkers),
     },
