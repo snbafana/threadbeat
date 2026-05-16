@@ -1435,6 +1435,98 @@ try {
   assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.recovery.resumedLoopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
   assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.recovery.previousSteps, 1);
   assert.equal(branchNativeOperatorLoopHistoryAfterResume.advances[0]?.recovery.totalSteps, 2);
+  const operatorLoopStatusSummary = await cliJson<{
+    recovery: {
+      operatorLoops: {
+        attempts: { total: number; dryRun: number; executed: number; failed: number };
+        resumableLoops: {
+          count: number;
+          recent: Array<{
+            loopAdvanceId: string;
+            latestAdvanceId: string;
+            attempts: number;
+            totalSteps: number;
+            stoppedReason: string | null;
+            resumeCommand: string[];
+            inspectLatestCommand: string[];
+            inspectHistoryCommand: string[];
+            executeResumeCommand: string[];
+          }>;
+        };
+      };
+    };
+    commands: {
+      operatorLoops: string[];
+      operatorLoopNextInspect: string[] | null;
+      operatorLoopNextResume: string[] | null;
+    };
+    nextActions: Array<{ surface: string; action: string; loopAdvanceId?: string; command: string[] }>;
+    nextRecovery: { surface?: string; action: string; command: string[]; dryRunCommand: string[] } | null;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+  ]);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.total, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.dryRun, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.executed, 0);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.attempts.failed, 0);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.count, 1);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.latestAdvanceId, branchNativeOperatorLoopResumeDryRun.advanceId);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.attempts, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.totalSteps, 2);
+  assert.equal(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.stoppedReason, "dry_run");
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand.includes("--resume-loop"));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand.includes(branchNativeOperatorLoopDryRun.loopAdvanceId));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.inspectLatestCommand.includes(branchNativeOperatorLoopResumeDryRun.advanceId));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.inspectHistoryCommand.includes("branch_native_operator_loop"));
+  assert.ok(operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.executeResumeCommand.includes("--confirm"));
+  assert.equal(operatorLoopStatusSummary.commands.operatorLoops.join(" "), `npm run cli -- runs session-control-plane-advances ${sessionName} --server --detail-command branch_native_operator_loop`);
+  assert.deepEqual(operatorLoopStatusSummary.commands.operatorLoopNextInspect, operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.inspectLatestCommand);
+  assert.deepEqual(operatorLoopStatusSummary.commands.operatorLoopNextResume, operatorLoopStatusSummary.recovery.operatorLoops.resumableLoops.recent[0]?.resumeCommand);
+  assert.equal(operatorLoopStatusSummary.nextActions[0]?.surface, "operator");
+  assert.equal(operatorLoopStatusSummary.nextActions[0]?.action, "resume_branch_native_operator_loop");
+  assert.equal(operatorLoopStatusSummary.nextActions[0]?.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(operatorLoopStatusSummary.nextRecovery?.surface, "operator");
+  assert.equal(operatorLoopStatusSummary.nextRecovery?.action, "resume_branch_native_operator_loop");
+  assert.ok(operatorLoopStatusSummary.nextRecovery?.command.includes("--confirm"));
+  assert.ok(operatorLoopStatusSummary.nextRecovery?.dryRunCommand.includes("--dry-run"));
+  const operatorLoopStatusSummaryText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-status",
+    sessionName,
+    "--server",
+    "--summary",
+    "--format",
+    "text",
+  ]);
+  assert.match(operatorLoopStatusSummaryText, /operator_loops: total=2 dry_run=2 executed=0 failed=0 resumable=1/);
+  assert.match(operatorLoopStatusSummaryText, /operator_loop_queue: npm run cli -- runs session-control-plane-advances/);
+  assert.match(operatorLoopStatusSummaryText, /operator_loop_next_resume: npm run cli -- runs session-branch-native-next/);
+  assert.match(operatorLoopStatusSummaryText, /resumable_operator_loops:/);
+  const operatorLoopBranchNativeNext = await cliJson<{
+    counts: { operatorLoops: number };
+    operatorLoops: Array<{ loopAdvanceId: string; latestAdvanceId: string; totalSteps: number; resumeCommand: string[] }>;
+    commands: Array<{ surfaces: string[]; command: string[] }>;
+  }>(baseUrl, [
+    "runs",
+    "session-branch-native-next",
+    sessionName,
+    "--server",
+  ]);
+  assert.equal(operatorLoopBranchNativeNext.counts.operatorLoops, 1);
+  assert.equal(operatorLoopBranchNativeNext.operatorLoops[0]?.loopAdvanceId, branchNativeOperatorLoopDryRun.loopAdvanceId);
+  assert.equal(operatorLoopBranchNativeNext.operatorLoops[0]?.latestAdvanceId, branchNativeOperatorLoopResumeDryRun.advanceId);
+  assert.equal(operatorLoopBranchNativeNext.operatorLoops[0]?.totalSteps, 2);
+  assert.ok(operatorLoopBranchNativeNext.operatorLoops[0]?.resumeCommand.includes("--resume-loop"));
+  assert.ok(operatorLoopBranchNativeNext.commands.some((command) => (
+    command.surfaces.includes("operator")
+    && command.command.includes("--resume-loop")
+    && command.command.includes(branchNativeOperatorLoopDryRun.loopAdvanceId)
+  )));
   const branchNativeOperatorLoopDryRunText = await cliText(baseUrl, [
     "runs",
     "session-branch-native-next",
