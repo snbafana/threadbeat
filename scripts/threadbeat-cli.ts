@@ -5942,12 +5942,24 @@ async function runs(subcommandName?: string, args: string[] = []): Promise<void>
     const commandSurfaces = options.surface
       ? parseWorkerSessionBranchNativeCommandSurfaces(options.surface)
       : [];
+    const executionHistoryStatuses = options.status
+      ? parseControlPlaneTerminalOverviewExecutionHistoryStatuses(options.status)
+      : [];
+    const executionHistoryActions = options.action
+      ? parseList(options.action)
+      : [];
     if (executionHistory) {
       const history = await listControlPlaneTerminalOverviewExecutionRecords(requiredSessionName, {
         limit: parsePositiveInteger(options.limit ?? "20", "--limit"),
         commandSurfaces,
+        statuses: executionHistoryStatuses,
+        actions: executionHistoryActions,
       });
-      const response = summarizeControlPlaneTerminalOverviewExecutionHistory(requiredSessionName, history, commandSurfaces);
+      const response = summarizeControlPlaneTerminalOverviewExecutionHistory(requiredSessionName, history, {
+        commandSurfaces,
+        statuses: executionHistoryStatuses,
+        actions: executionHistoryActions,
+      });
       if (outputFormat === "text") {
         printControlPlaneTerminalOverviewExecutionHistoryText(response);
       } else {
@@ -17074,6 +17086,8 @@ type WorkerSessionBranchNativeCommandSurface = typeof workerSessionBranchNativeC
 type WorkerSessionBranchNativeCommandQueueItem = {
   surfaces: readonly WorkerSessionBranchNativeCommandSurface[];
   command: string[];
+  action?: string;
+  reason?: string;
 };
 
 type ControlPlaneTerminalOverviewResponse = {
@@ -17146,10 +17160,16 @@ type ControlPlaneTerminalOverviewExecutionRecord = {
   } | null;
 };
 
+type ControlPlaneTerminalOverviewExecutionHistoryStatus = "executed" | "failed" | "blocked" | "needs-action";
+
 type ControlPlaneTerminalOverviewExecutionHistoryResponse = {
   ok: true;
   session: string;
   commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+  filter: {
+    statuses: ControlPlaneTerminalOverviewExecutionHistoryStatus[];
+    actions: string[];
+  };
   summary: {
     total: number;
     dryRun: number;
@@ -18049,6 +18069,8 @@ function selectControlPlaneTerminalOverviewNextAction(
     return {
       surfaces: [next.surface],
       command: next.command,
+      action: next.action,
+      reason: next.reason,
     };
   }
   return queue[0] ?? null;
@@ -18078,6 +18100,18 @@ function controlPlaneTerminalOverviewExecutionPlan(
     command: [...withoutMode, options.dryRun ? "--dry-run" : "--confirm"],
     unsupportedReason: null,
   };
+}
+
+function parseControlPlaneTerminalOverviewExecutionHistoryStatuses(
+  value: string,
+): ControlPlaneTerminalOverviewExecutionHistoryStatus[] {
+  const allowed = new Set<ControlPlaneTerminalOverviewExecutionHistoryStatus>(["executed", "failed", "blocked", "needs-action"]);
+  return parseList(value).map((status) => {
+    if (!allowed.has(status as ControlPlaneTerminalOverviewExecutionHistoryStatus)) {
+      throw new Error("runs session-control-plane-terminal-overview --execution-history --status must be executed, failed, blocked, or needs-action");
+    }
+    return status as ControlPlaneTerminalOverviewExecutionHistoryStatus;
+  });
 }
 
 function isCliCommand(command: string[], argsPrefix: string[]): boolean {
@@ -18112,12 +18146,20 @@ function printControlPlaneTerminalOverviewExecuteNextText(response: ControlPlane
 function summarizeControlPlaneTerminalOverviewExecutionHistory(
   sessionName: string,
   records: ControlPlaneTerminalOverviewExecutionRecord[],
-  commandSurfaces: WorkerSessionBranchNativeCommandSurface[],
+  filter: {
+    commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+    statuses: ControlPlaneTerminalOverviewExecutionHistoryStatus[];
+    actions: string[];
+  },
 ): ControlPlaneTerminalOverviewExecutionHistoryResponse {
   return {
     ok: true,
     session: sessionName,
-    commandSurfaces,
+    commandSurfaces: filter.commandSurfaces,
+    filter: {
+      statuses: filter.statuses,
+      actions: filter.actions,
+    },
     summary: {
       total: records.length,
       dryRun: records.filter((record) => record.dryRun).length,
@@ -18136,6 +18178,8 @@ function printControlPlaneTerminalOverviewExecutionHistoryText(response: Control
     "control_plane_terminal_overview_execution_history:",
     `  session: ${response.session}`,
     `  command_surfaces: ${response.commandSurfaces.join(",") || "all"}`,
+    `  statuses: ${response.filter.statuses.join(",") || "all"}`,
+    `  actions: ${response.filter.actions.join(",") || "all"}`,
     `  summary: total=${response.summary.total} dry_run=${response.summary.dryRun} confirmed=${response.summary.confirmed} supported=${response.summary.supported} blocked=${response.summary.blocked} executed=${response.summary.executed} failed=${response.summary.failed}`,
     "  records:",
     ...(response.records.length > 0
@@ -18143,6 +18187,9 @@ function printControlPlaneTerminalOverviewExecutionHistoryText(response: Control
         `    - execution: ${record.executionId}`,
         `      completed_at: ${record.completedAt}`,
         `      surface: ${record.selectedAction?.surfaces[0] ?? "none"}`,
+        `      action: ${record.selectedAction?.action ?? "none"}`,
+        `      reason: ${record.selectedAction?.reason ?? ""}`,
+        `      status: ${controlPlaneTerminalOverviewExecutionRecordStatuses(record).join(",") || "selected"}`,
         `      selected_command: ${record.selectedAction ? formatShellCommand(record.selectedAction.command) : "none"}`,
         `      command: ${record.command ? formatShellCommand(record.command) : "none"}`,
         `      supported: ${record.supported}`,
@@ -24994,7 +25041,12 @@ async function writeWorkerSessionDrainContinuationRecord(
 
 async function listControlPlaneTerminalOverviewExecutionRecords(
   sessionName: string,
-  options: { limit: number; commandSurfaces: WorkerSessionBranchNativeCommandSurface[] },
+  options: {
+    limit: number;
+    commandSurfaces: WorkerSessionBranchNativeCommandSurface[];
+    statuses: ControlPlaneTerminalOverviewExecutionHistoryStatus[];
+    actions: string[];
+  },
 ): Promise<ControlPlaneTerminalOverviewExecutionRecord[]> {
   assertSafeSessionName(sessionName);
   const executionDir = controlPlaneTerminalOverviewExecutionDir(sessionName);
@@ -25007,14 +25059,30 @@ async function listControlPlaneTerminalOverviewExecutionRecords(
         return JSON.parse(text) as ControlPlaneTerminalOverviewExecutionRecord;
       }));
     const requested = new Set(options.commandSurfaces);
+    const requestedStatuses = new Set(options.statuses);
+    const requestedActions = new Set(options.actions);
     return records
       .filter((record) => requested.size === 0 || record.selectedAction?.surfaces.some((surface) => requested.has(surface)))
+      .filter((record) => requestedStatuses.size === 0 || controlPlaneTerminalOverviewExecutionRecordStatuses(record).some((status) => requestedStatuses.has(status)))
+      .filter((record) => requestedActions.size === 0 || (record.selectedAction?.action ? requestedActions.has(record.selectedAction.action) : false))
       .sort((left, right) => right.completedAt.localeCompare(left.completedAt))
       .slice(0, options.limit);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw error;
   }
+}
+
+function controlPlaneTerminalOverviewExecutionRecordStatuses(
+  record: ControlPlaneTerminalOverviewExecutionRecord,
+): ControlPlaneTerminalOverviewExecutionHistoryStatus[] {
+  const statuses: ControlPlaneTerminalOverviewExecutionHistoryStatus[] = [];
+  if (record.executed) statuses.push("executed");
+  if (!record.supported) statuses.push("blocked", "needs-action");
+  if (record.executed?.exitCode !== undefined && record.executed.exitCode !== 0) {
+    statuses.push("failed", "needs-action");
+  }
+  return statuses;
 }
 
 async function writeControlPlaneTerminalOverviewExecutionRecord(
@@ -27892,7 +27960,7 @@ Commands:
   runs session-control-plane-recover-next-terminals <name> --server [--status failed|all] [--loop-advance-id loop_advance_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-apply-action-terminals <name> --server [--status failed|actionable|all] [--apply-id apply_id] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
   runs session-control-plane-drain-terminals <name> --server [--status failed|running|queued|all] [--continuation continuation_id[,id]] [--older-than-ms 600000] [--limit 20] [--lines 5] [--commands-only] [--format json|shell|text]
-  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
+  runs session-control-plane-terminal-overview <name> --server [--surface control,recover_next,worker_recovery,operator,branch,result_inspection,apply_action,drain_continuation] [--next-action] [--execute-next --dry-run|--confirm] [--execution-history [--status executed,failed,blocked,needs-action] [--action selected_action]] [--limit 5] [--lines 5] [--commands-only] [--format json|text|shell]
   runs session-control-plane-operate <name> --server (--dry-run|--confirm) [--recover-worker-bundles] [--max-cycles 1] [--cycle-interval-ms 2000] [--reconcile-workers] [--include-retired] [--limit n] [--until-empty --max-steps 10 --interval-ms 2000] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred <name> --server (--dry-run|--confirm) [--until-empty --resume-loop loop_advance_id --max-steps 10 --interval-ms 0] [--max-cycles 2] [--cycle-interval-ms 0] [--lines 5] [--format json|text]
   runs session-control-plane-continue-deferred-next <name> --server [--inspect [--commands-only --format shell]|--dry-run|--confirm] [--resume-confirm] [--lines 5] [--format json|text|shell]

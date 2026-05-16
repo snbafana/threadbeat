@@ -362,6 +362,91 @@ try {
   assert.equal(branchExecutionRecord?.executed?.command.join(" "), resumeBranchDryRunCommand);
   assert.equal(branchExecutionRecord?.executed?.exitCode, 0);
 
+  const terminalOverviewBlockedHistory = await cliJson<{
+    filter: { statuses: string[]; actions: string[] };
+    summary: { total: number; blocked: number; executed: number; failed: number };
+    records: Array<{
+      selectedAction: { surfaces: string[]; command: string[]; action?: string } | null;
+      supported: boolean;
+      command: string[] | null;
+      executed: { exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "control",
+    "--status",
+    "blocked",
+  ]);
+  assert.deepEqual(terminalOverviewBlockedHistory.filter.statuses, ["blocked"]);
+  assert.deepEqual(terminalOverviewBlockedHistory.filter.actions, []);
+  assert.equal(terminalOverviewBlockedHistory.summary.total, 1);
+  assert.equal(terminalOverviewBlockedHistory.summary.blocked, 1);
+  assert.equal(terminalOverviewBlockedHistory.summary.executed, 0);
+  assert.equal(terminalOverviewBlockedHistory.summary.failed, 0);
+  assert.equal(terminalOverviewBlockedHistory.records[0]?.selectedAction?.surfaces[0], "control");
+  assert.equal(terminalOverviewBlockedHistory.records[0]?.selectedAction?.command.join(" "), controlStatusSummaryCommand);
+  assert.equal(terminalOverviewBlockedHistory.records[0]?.selectedAction?.action, undefined);
+  assert.equal(terminalOverviewBlockedHistory.records[0]?.supported, false);
+  assert.equal(terminalOverviewBlockedHistory.records[0]?.command, null);
+  assert.equal(terminalOverviewBlockedHistory.records[0]?.executed, null);
+
+  const terminalOverviewBranchActionHistory = await cliJson<{
+    filter: { statuses: string[]; actions: string[] };
+    summary: { total: number; blocked: number; executed: number; failed: number };
+    records: Array<{
+      executionId: string;
+      selectedAction: { surfaces: string[]; command: string[]; action?: string; reason?: string } | null;
+      command: string[] | null;
+      executed: { command: string[]; exitCode: number | null } | null;
+    }>;
+  }>(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--surface",
+    "branch",
+    "--status",
+    "executed",
+    "--action",
+    "resume_branch",
+  ]);
+  assert.deepEqual(terminalOverviewBranchActionHistory.filter.statuses, ["executed"]);
+  assert.deepEqual(terminalOverviewBranchActionHistory.filter.actions, ["resume_branch"]);
+  assert.equal(terminalOverviewBranchActionHistory.summary.total, 1);
+  assert.equal(terminalOverviewBranchActionHistory.summary.blocked, 0);
+  assert.equal(terminalOverviewBranchActionHistory.summary.executed, 1);
+  assert.equal(terminalOverviewBranchActionHistory.summary.failed, 0);
+  assert.equal(terminalOverviewBranchActionHistory.records[0]?.executionId, terminalOverviewExecuteDryRun.executionRecord.executionId);
+  assert.equal(terminalOverviewBranchActionHistory.records[0]?.selectedAction?.surfaces[0], "branch");
+  assert.equal(terminalOverviewBranchActionHistory.records[0]?.selectedAction?.action, "resume_branch");
+  assert.ok(terminalOverviewBranchActionHistory.records[0]?.selectedAction?.reason);
+  assert.equal(terminalOverviewBranchActionHistory.records[0]?.selectedAction?.command.join(" "), resumeBranchCommand);
+  assert.equal(terminalOverviewBranchActionHistory.records[0]?.command?.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewBranchActionHistory.records[0]?.executed?.command.join(" "), resumeBranchDryRunCommand);
+  assert.equal(terminalOverviewBranchActionHistory.records[0]?.executed?.exitCode, 0);
+
+  const terminalOverviewNeedsActionText = await cliText(baseUrl, [
+    "runs",
+    "session-control-plane-terminal-overview",
+    sessionName,
+    "--server",
+    "--execution-history",
+    "--status",
+    "needs-action",
+    "--format",
+    "text",
+  ]);
+  assert.match(terminalOverviewNeedsActionText, /statuses: needs-action/);
+  assert.match(terminalOverviewNeedsActionText, /status: blocked,needs-action/);
+  assert.match(terminalOverviewNeedsActionText, new RegExp(`selected_command: ${controlStatusSummaryCommand}`));
+
   const terminalOverviewExecuteDryRunText = await cliText(baseUrl, [
     "runs",
     "session-control-plane-terminal-overview",
