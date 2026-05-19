@@ -50,8 +50,8 @@ async function testDrainAndEvents(taskId: string) {
   assert.ok(events.json.events.length > 0, "expected at least one event");
 
   const types = events.json.events.map((e: { type: string }) => e.type);
-  assert.ok(types.includes("task_created"));
-  assert.ok(types.includes("run_started"));
+  assert.ok(types.includes("task.created"));
+  assert.ok(types.includes("task.started"));
 
   console.log(`  drain + events: ok (${events.json.events.length} events, task ${task.json.task.status})`);
 }

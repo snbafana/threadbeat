@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 
+import { eventType } from "../drizzle/schema.js";
 import * as db from "./db.js";
 import * as worker from "./worker.js";
 
@@ -16,7 +17,7 @@ export function createApp() {
         return { ok: false, error: "spec.main is required" };
       }
       const task = await db.createTask(spec);
-      await db.appendEvent(task.id, "task_created", "api");
+      await db.appendEvent(task.id, eventType.taskCreated, "api", { spec });
       return { ok: true, task };
     } catch (error) {
       reply.code(400);
@@ -35,28 +36,23 @@ export function createApp() {
     return { ok: true, task };
   });
 
-  app.get("/api/runs", async () => ({ ok: true, runs: await db.listRuns() }));
-
-  app.get<{ Params: { id: string } }>("/api/runs/:id", async (request, reply) => {
-    const run = await db.getRun(request.params.id);
-    if (!run) {
-      reply.code(404);
-      return { ok: false, error: "run not found" };
-    }
-    return { ok: true, run };
-  });
-
   app.get<{
-    Querystring: { taskId?: string; runId?: string; after?: string; limit?: string };
-  }>("/api/events", async (request) => ({
-    ok: true,
-    events: await db.listEvents({
-      taskId: request.query.taskId,
-      runId: request.query.runId,
-      after: request.query.after ? Number.parseInt(request.query.after, 10) : undefined,
-      limit: request.query.limit ? Number.parseInt(request.query.limit, 10) : undefined,
-    }),
-  }));
+    Querystring: { taskId?: string; after?: string; limit?: string };
+  }>("/api/events", async (request, reply) => {
+    try {
+      return {
+        ok: true,
+        events: await db.listEvents({
+          taskId: request.query.taskId,
+          after: queryInteger(request.query.after, "after"),
+          limit: queryInteger(request.query.limit, "limit"),
+        }),
+      };
+    } catch (error) {
+      reply.code(400);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
 
   app.post<{ Body: { limit?: number } }>("/api/worker/drain-once", async (request) => ({
     ok: true,
@@ -64,4 +60,11 @@ export function createApp() {
   }));
 
   return app;
+}
+
+function queryInteger(value: string | undefined, name: string) {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) throw new Error(`${name} must be a non-negative integer`);
+  const number = Number(value);
+  return number;
 }

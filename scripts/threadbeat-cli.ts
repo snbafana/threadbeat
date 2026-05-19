@@ -35,7 +35,7 @@ async function followEvents(args: string[]): Promise<void> {
   let after = 0;
   let emptyPolls = 0;
   while (emptyPolls < 30) {
-    const response = await request<{ events: Array<{ seq: number; type: string; source: string; message?: string }> }>(
+    const response = await request<{ events: Array<{ seq: number; type: string; source: string; data?: unknown }> }>(
       "GET",
       `/api/events?taskId=${encodeURIComponent(taskId)}&after=${after}&limit=100`,
     );
@@ -47,7 +47,8 @@ async function followEvents(args: string[]): Promise<void> {
     emptyPolls = 0;
     for (const event of response.events) {
       after = Math.max(after, event.seq);
-      console.log(`[${event.seq}] ${event.source}:${event.type} ${event.message ?? ""}`);
+      const data = event.data === undefined ? "" : ` ${JSON.stringify(event.data)}`;
+      console.log(`[${event.seq}] ${event.source}:${event.type}${data}`);
     }
   }
 }

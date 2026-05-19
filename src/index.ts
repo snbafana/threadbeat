@@ -2,8 +2,6 @@ import { config } from "./config.js";
 import * as db from "./db.js";
 import { createApp } from "./server.js";
 
-await db.bootstrap();
-
 const app = createApp();
 
 process.on("SIGINT", () => void app.close().then(() => db.close()).then(() => process.exit(0)));

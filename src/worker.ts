@@ -1,9 +1,19 @@
+import { eventType, taskStatus } from "../drizzle/schema.js";
 import { config } from "./config.js";
 import * as sandbox from "./daytonaProvider.js";
 import * as db from "./db.js";
 
 const WORKSPACE_DIR = "workspace";
 const REPO_DIR = "workspace/repo";
+
+type CommandSpec = { cmd: string; cwd?: string; timeoutSeconds?: number };
+type TaskSpec = {
+  repo?: { url: string; branch?: string; commit?: string };
+  setup?: CommandSpec[];
+  main: CommandSpec;
+  verify?: CommandSpec[];
+};
+type ClaimedTask = { id: string; spec: Record<string, unknown> };
 
 export async function drainOnce(limit = config.maxSandboxes) {
   const processed: string[] = [];
@@ -17,46 +27,42 @@ export async function drainOnce(limit = config.maxSandboxes) {
   return { processed: processed.length, taskIds: processed };
 }
 
-async function runTask(task: { id: string; spec: Record<string, unknown> }) {
-  const run = await db.createRun(task.id);
+async function runTask(task: ClaimedTask) {
   let sandboxId: string | undefined;
-  const spec = task.spec as { repo?: { url: string; branch?: string; commit?: string }; setup?: { cmd: string; cwd?: string; timeoutSeconds?: number }[]; main: { cmd: string; cwd?: string; timeoutSeconds?: number }; verify?: { cmd: string; cwd?: string; timeoutSeconds?: number }[] };
+  const spec = task.spec as TaskSpec;
   const defaultCwd = spec.repo ? REPO_DIR : WORKSPACE_DIR;
   const env = sandboxEnv();
 
   try {
-    await db.updateTaskStatus(task.id, "running");
-    await db.appendEvent(task.id, "run_started", "worker", run.id, "Run started");
+    await db.updateTaskStatus(task.id, taskStatus.running);
+    await db.appendEvent(task.id, eventType.taskStarted, "worker");
 
     sandboxId = await sandbox.createSandbox(env);
-    await db.updateRun(run.id, { sandboxId });
-    await db.appendEvent(task.id, "sandbox_created", "daytona", run.id, "Sandbox created", { sandboxId });
+    await db.appendEvent(task.id, eventType.sandboxCreated, sandboxId, { sandboxId });
 
     if (spec.repo) {
       await sandbox.cloneRepo(sandboxId, spec.repo.url, spec.repo.branch, spec.repo.commit);
-      await db.appendEvent(task.id, "repo_cloned", "daytona", run.id, "Repository cloned");
+      await db.appendEvent(task.id, eventType.repoCloned, sandboxId, { repo: spec.repo });
     }
 
-    for (const cmd of spec.setup ?? []) await runCommand(task.id, run.id, sandboxId, cmd, defaultCwd, env);
-    await runCommand(task.id, run.id, sandboxId, spec.main, defaultCwd, env);
-    for (const cmd of spec.verify ?? []) await runCommand(task.id, run.id, sandboxId, cmd, defaultCwd, env);
+    for (const cmd of spec.setup ?? []) await runCommand(task.id, sandboxId, cmd, defaultCwd, env);
+    await runCommand(task.id, sandboxId, spec.main, defaultCwd, env);
+    for (const cmd of spec.verify ?? []) await runCommand(task.id, sandboxId, cmd, defaultCwd, env);
 
-    await db.updateRun(run.id, { status: "succeeded" });
-    await db.updateTaskStatus(task.id, "succeeded");
-    await db.appendEvent(task.id, "run_succeeded", "worker", run.id, "Run succeeded");
+    await db.updateTaskStatus(task.id, taskStatus.succeeded);
+    await db.appendEvent(task.id, eventType.taskCompleted, "worker", { status: taskStatus.succeeded });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await db.updateRun(run.id, { status: "failed", error: message });
-    await db.updateTaskStatus(task.id, "failed", message);
-    await db.appendEvent(task.id, "run_failed", "worker", run.id, message);
+    await db.updateTaskStatus(task.id, taskStatus.failed, message);
+    await db.appendEvent(task.id, eventType.taskFailed, "worker", { error: message });
   } finally {
     if (sandboxId) {
       try {
         await sandbox.deleteSandbox(sandboxId);
-        await db.appendEvent(task.id, "sandbox_deleted", "daytona", run.id, "Sandbox deleted");
+        await db.appendEvent(task.id, eventType.sandboxDeleted, sandboxId, { sandboxId });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await db.appendEvent(task.id, "sandbox_delete_failed", "daytona", run.id, message);
+        await db.appendEvent(task.id, eventType.sandboxDeleteFailed, sandboxId, { error: message, sandboxId });
       }
     }
   }
@@ -64,20 +70,19 @@ async function runTask(task: { id: string; spec: Record<string, unknown> }) {
 
 async function runCommand(
   taskId: string,
-  runId: string,
   sandboxId: string,
-  cmd: { cmd: string; cwd?: string; timeoutSeconds?: number },
+  cmd: CommandSpec,
   defaultCwd: string,
   env: Record<string, string>,
 ) {
   const cwd = cmd.cwd ?? defaultCwd;
   const timeout = cmd.timeoutSeconds ?? config.commandTimeoutSeconds;
-  await db.appendEvent(taskId, "command_started", "command", runId, cmd.cmd, { cwd, timeout });
+  await db.appendEvent(taskId, eventType.commandStarted, sandboxId, { cmd: cmd.cmd, cwd, timeout });
   const result = await sandbox.runCommand(sandboxId, cmd.cmd, cwd, env, timeout);
   if (result.stdout) {
-    await db.appendEvent(taskId, "command_stdout", "command", runId, result.stdout);
+    await db.appendEvent(taskId, eventType.commandStdout, sandboxId, { stdout: result.stdout });
   }
-  await db.appendEvent(taskId, "command_finished", "command", runId, `exit ${result.exitCode}`, { exitCode: result.exitCode });
+  await db.appendEvent(taskId, eventType.commandCompleted, sandboxId, { exitCode: result.exitCode });
   if (result.exitCode !== 0) throw new Error(`command failed with exit code ${result.exitCode}: ${cmd.cmd}`);
 }
 
