@@ -1,49 +1,40 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 
-import path from "node:path";
+import { csvEnv, intEnv, requiredEnv } from "./env.js";
 
-import { boolEnv, intEnv } from "./env.js";
-
-const projectRoot = process.cwd();
+dotenv.config();
 
 export type Settings = {
-  projectRoot: string;
-  repoRoot: string;
-  dbUrl: string;
-  dbAuthToken?: string;
-  pollSeconds: number;
-  maxDuePerPoll: number;
-  runTimeoutMs: number;
-  piDryRun: boolean;
-  piDryRunDelayMs: number;
-  piProvider: string;
-  piModel: string;
-  piThinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  deepseekApiKey?: string;
-  logRequests: boolean;
+  host: string;
   port: number;
+  databaseUrl: string;
+  daytonaApiKey?: string;
+  daytonaApiUrl?: string;
+  daytonaTarget?: string;
+  maxSandboxes: number;
+  runTimeoutSeconds: number;
+  commandTimeoutSeconds: number;
+  sandboxEnvAllowlist: string[];
 };
 
-export const loadSettings = (): Settings => {
-  const repoRoot = path.resolve(process.env.THREADBEAT_REPO_ROOT ?? projectRoot);
-  return {
-    projectRoot,
-    repoRoot,
-    dbUrl:
-      process.env.THREADBEAT_DB_URL ??
-      process.env.TURSO_DATABASE_URL ??
-      `file:${path.join(repoRoot, ".threadbeat", "threadbeat.db")}`,
-    dbAuthToken: process.env.THREADBEAT_DB_AUTH_TOKEN ?? process.env.TURSO_AUTH_TOKEN,
-    pollSeconds: intEnv("THREADBEAT_POLL_SECONDS", 10),
-    maxDuePerPoll: intEnv("THREADBEAT_MAX_DUE_PER_POLL", 5),
-    runTimeoutMs: intEnv("THREADBEAT_RUN_TIMEOUT_SECONDS", 300) * 1000,
-    piDryRun: boolEnv("THREADBEAT_PI_DRY_RUN", false),
-    piDryRunDelayMs: intEnv("THREADBEAT_PI_DRY_RUN_DELAY_MS", 0),
-    piProvider: process.env.THREADBEAT_PI_PROVIDER ?? "deepseek",
-    piModel: process.env.THREADBEAT_PI_MODEL ?? "deepseek-v4-flash",
-    piThinking: (process.env.THREADBEAT_PI_THINKING ?? "off") as Settings["piThinking"],
-    deepseekApiKey: process.env.DEEPSEEK_API_KEY,
-    logRequests: boolEnv("THREADBEAT_LOG_REQUESTS", true),
-    port: intEnv("PORT", 8000),
-  };
+export const loadSettings = (): Settings => ({
+  host: process.env.THREADBEAT_HOST ?? "127.0.0.1",
+  port: intEnv("THREADBEAT_PORT", 8000),
+  databaseUrl: requiredEnv("DATABASE_URL"),
+  daytonaApiKey: process.env.DAYTONA_API_KEY,
+  daytonaApiUrl: process.env.DAYTONA_API_URL,
+  daytonaTarget: process.env.DAYTONA_TARGET,
+  maxSandboxes: intEnv("THREADBEAT_MAX_SANDBOXES", 1),
+  runTimeoutSeconds: intEnv("THREADBEAT_RUN_TIMEOUT_SECONDS", 600),
+  commandTimeoutSeconds: intEnv("THREADBEAT_COMMAND_TIMEOUT_SECONDS", 120),
+  sandboxEnvAllowlist: csvEnv("THREADBEAT_SANDBOX_ENV_ALLOWLIST"),
+});
+
+export const sandboxEnvFromAllowlist = (allowlist: string[]): Record<string, string> => {
+  const env: Record<string, string> = {};
+  for (const name of allowlist) {
+    const value = process.env[name];
+    if (value !== undefined) env[name] = value;
+  }
+  return env;
 };

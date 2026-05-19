@@ -1,12 +1,19 @@
-export const boolEnv = (name: string, fallback = false): boolean => {
-  const value = process.env[name];
-  if (value === undefined) return fallback;
-  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+export const intEnv = (name: string, fallback: number): number => {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) throw new Error(`${name} must be an integer`);
+  return parsed;
 };
 
-export const intEnv = (name: string, fallback: number): number => {
+export const csvEnv = (name: string): string[] =>
+  (process.env[name] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+export const requiredEnv = (name: string): string => {
   const value = process.env[name];
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (!value) throw new Error(`${name} is required`);
+  return value;
 };

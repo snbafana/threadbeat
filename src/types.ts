@@ -1,51 +1,88 @@
-export type HeartbeatStatus = "active" | "inactive";
-export type RunStatus = "succeeded" | "failed" | "skipped";
+export type TaskStatus = "queued" | "claimed" | "running" | "succeeded" | "failed" | "cancelled";
 
-export type SessionRow = {
-  id: string;
-  name: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
+export type RunStatus = "running" | "succeeded" | "failed";
+
+export type EventSource = "api" | "worker" | "daytona" | "command";
+
+export type EventType =
+  | "task_created"
+  | "task_claimed"
+  | "run_started"
+  | "sandbox_created"
+  | "repo_clone_started"
+  | "repo_clone_finished"
+  | "phase_started"
+  | "command_started"
+  | "command_stdout"
+  | "command_finished"
+  | "run_succeeded"
+  | "run_failed"
+  | "sandbox_deleted";
+
+export type TaskSpec = {
+  repo?: RepoSpec;
+  setup?: CommandSpec[];
+  main: CommandSpec;
+  verify?: CommandSpec[];
 };
 
-export type HeartbeatRow = {
-  id: string;
-  session_id: string;
-  title: string;
-  cadence: number;
-  contents: string;
-  provider: string;
-  model: string;
-  last_tick: string | null;
-  next_tick: string | null;
-  status: HeartbeatStatus;
-  created_at: string;
-  updated_at: string;
+export type RepoSpec = {
+  url: string;
+  branch?: string;
+  commit?: string;
 };
 
-export type HeartbeatRunRow = {
+export type CommandSpec = {
+  cmd: string;
+  cwd?: string;
+  timeoutSeconds?: number;
+};
+
+export type TaskRow = {
   id: string;
-  heartbeat_id: string;
-  session_id: string;
-  executor: string;
-  model: string | null;
-  status: RunStatus;
-  prompt_snapshot: string;
-  output: string | null;
+  status: TaskStatus;
+  spec: TaskSpec;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
   error: string | null;
-  created_at: string;
-  completed_at: string | null;
 };
 
-export type HeartbeatEventRow = {
+export type RunRow = {
   id: string;
-  heartbeat_id: string | null;
-  run_id: string | null;
-  session_id: string | null;
-  source: string;
-  type: string;
-  message: string | null;
-  data: string | null;
-  created_at: string;
+  taskId: string;
+  status: RunStatus;
+  sandboxId: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
 };
+
+export type EventRow = {
+  id: string;
+  seq: number;
+  taskId: string;
+  runId: string | null;
+  type: EventType;
+  source: EventSource;
+  message: string | null;
+  data: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type CreateTaskInput = {
+  spec: TaskSpec;
+};
+
+export type AppendEventInput = {
+  taskId: string;
+  runId?: string | null;
+  type: EventType;
+  source: EventSource;
+  message?: string | null;
+  data?: Record<string, unknown> | null;
+};
+
+export const WORKSPACE_DIR = "workspace";
+export const REPO_DIR = "workspace/repo";

@@ -1,22 +1,46 @@
 # Threadbeat Agent Notes
 
-Threadbeat is moving toward a durable, branch-native, CLI-driven control plane.
+Threadbeat is currently a minimal Daytona task substrate.
 
-Use the repo-local skill at `.agents/skills/threadbeat-cli/SKILL.md` before
-operating or editing the control-plane CLI. Keep that skill and
-`docs/control-plane-cli-cleanup-plan.md` current when command names or generated
-operator commands change.
+Stay inside the V1 boundary:
 
-Default operator path:
+- no agents
+- no Pi
+- no heartbeat scheduler
+- no TUI
+- no replay/action-trace system
+- no extra provider abstraction beyond the narrow Daytona adapter
 
-- `npm run cli -- runs cp-status <session> --format text`
-- `npm run cli -- runs cp-next <session> --format text`
-- `npm run cli -- runs cp-operate <session> --format text`
-- `npm run cli -- runs cp-workers <session> --format text`
+The core files that should matter are:
 
-The `cp-*` commands imply routine defaults: server mode, status summary,
-worker reconciliation for `cp-operate`, dry-run unless `--confirm`, and retired
-worker visibility where recovery state matters.
+- `schema/bootstrap.sql`
+- `src/types.ts`
+- `src/taskSpec.ts`
+- `src/db.ts`
+- `src/sandboxProvider.ts`
+- `src/daytonaProvider.ts`
+- `src/worker.ts`
+- `src/server.ts`
+- `scripts/threadbeat-cli.ts`
+- `test/smoke.ts`
+- `test/fixtures/repo-matrix.json`
 
-Keep normal results branch-native. Promotion, PR creation, and merging are
-explicit follow-up actions, not default run completion.
+Use tests and smokes as the design loop. If a smoke exposes an awkward API or
+schema shape, simplify it immediately instead of adding compatibility layers.
+
+Run the cheap checks before handing off:
+
+```bash
+npm test
+npm run smoke:api
+npm run typecheck
+npm run lint
+npm run build
+```
+
+Run live Daytona checks when credentials are available:
+
+```bash
+npm run smoke:daytona
+npm run smoke:live
+```

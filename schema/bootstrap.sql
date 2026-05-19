@@ -1,78 +1,47 @@
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS heartbeats (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  title TEXT NOT NULL DEFAULT 'heartbeat',
-  cadence INTEGER NOT NULL DEFAULT 60,
-  contents TEXT NOT NULL,
-  provider TEXT NOT NULL DEFAULT 'deepseek',
-  model TEXT NOT NULL DEFAULT 'deepseek-v4-flash',
-  last_tick TEXT,
-  next_tick TEXT,
-  status TEXT NOT NULL DEFAULT 'active',
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_heartbeats_session_id
-  ON heartbeats(session_id);
-
-CREATE INDEX IF NOT EXISTS idx_heartbeats_due
-  ON heartbeats(status, next_tick, created_at);
-
-CREATE TABLE IF NOT EXISTS heartbeat_runs (
-  id TEXT PRIMARY KEY,
-  heartbeat_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  executor TEXT NOT NULL,
-  model TEXT,
   status TEXT NOT NULL,
-  prompt_snapshot TEXT NOT NULL,
-  output TEXT,
-  error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  completed_at TEXT,
-  FOREIGN KEY (heartbeat_id) REFERENCES heartbeats(id) ON DELETE CASCADE,
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  spec_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_heartbeat_id
-  ON heartbeat_runs(heartbeat_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at
+  ON tasks(status, created_at);
 
-CREATE INDEX IF NOT EXISTS idx_heartbeat_runs_session_id
-  ON heartbeat_runs(session_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS heartbeat_events (
+CREATE TABLE IF NOT EXISTS runs (
   id TEXT PRIMARY KEY,
-  heartbeat_id TEXT,
-  run_id TEXT,
-  session_id TEXT,
-  source TEXT NOT NULL,
-  type TEXT NOT NULL,
-  message TEXT,
-  data TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (heartbeat_id) REFERENCES heartbeats(id) ON DELETE CASCADE,
-  FOREIGN KEY (run_id) REFERENCES heartbeat_runs(id) ON DELETE SET NULL,
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  sandbox_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  error TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_heartbeat_events_heartbeat_id
-  ON heartbeat_events(heartbeat_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_task_id_created_at
+  ON runs(task_id, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_heartbeat_events_run_id
-  ON heartbeat_events(run_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_status_created_at
+  ON runs(status, created_at);
 
-CREATE INDEX IF NOT EXISTS idx_heartbeat_events_session_id
-  ON heartbeat_events(session_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS events (
+  id TEXT PRIMARY KEY,
+  seq BIGSERIAL UNIQUE,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  source TEXT NOT NULL,
+  message TEXT,
+  data_json JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-CREATE INDEX IF NOT EXISTS idx_heartbeat_events_created_at
-  ON heartbeat_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_events_task_seq
+  ON events(task_id, seq);
+
+CREATE INDEX IF NOT EXISTS idx_events_run_seq
+  ON events(run_id, seq);

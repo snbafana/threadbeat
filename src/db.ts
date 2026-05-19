@@ -1,384 +1,378 @@
-import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
-import { createClient, type Client } from "@libsql/client";
+import { fileURLToPath } from "node:url";
 
-import { nextTickIso, nowIso } from "./time.js";
-import type {
-  HeartbeatEventRow,
-  HeartbeatRow,
-  HeartbeatRunRow,
-  HeartbeatStatus,
-  RunStatus,
-  SessionRow,
-} from "./types.js";
+import pg from "pg";
 
-type SqlValue = string | number | null;
+import type { AppendEventInput, CreateTaskInput, EventRow, RunRow, TaskRow, TaskSpec, TaskStatus } from "./types.js";
 
-export type HeartbeatUpdateInput = {
-  title: string;
-  cadence: number;
-  contents: string;
-  provider: string;
-  model: string;
-  status: HeartbeatStatus;
+const { Pool } = pg;
+
+export interface TaskRepository {
+  createTask(input: CreateTaskInput): Promise<TaskRow>;
+  listTasks(): Promise<TaskRow[]>;
+  getTask(id: string): Promise<TaskRow | null>;
+  claimNextTask(): Promise<TaskRow | null>;
+  markTaskRunning(id: string): Promise<void>;
+  markTaskSucceeded(id: string): Promise<void>;
+  markTaskFailed(id: string, error: string): Promise<void>;
+  createRun(taskId: string): Promise<RunRow>;
+  setRunSandbox(runId: string, sandboxId: string): Promise<void>;
+  markRunSucceeded(runId: string): Promise<void>;
+  markRunFailed(runId: string, error: string): Promise<void>;
+  listRuns(): Promise<RunRow[]>;
+  getRun(id: string): Promise<RunRow | null>;
+  appendEvent(input: AppendEventInput): Promise<EventRow>;
+  listEvents(filter: EventFilter): Promise<EventRow[]>;
+  close(): Promise<void>;
+}
+
+export type EventFilter = {
+  taskId?: string;
+  runId?: string;
+  after?: number;
+  limit?: number;
 };
 
-export class Database {
-  private readonly client: Client;
+type PgTaskRecord = {
+  id: string;
+  status: TaskStatus;
+  spec_json: TaskSpec;
+  created_at: Date;
+  started_at: Date | null;
+  completed_at: Date | null;
+  error: string | null;
+};
 
-  constructor(
-    private readonly dbUrl: string,
-    private readonly schemaPath: string,
-    authToken?: string,
-  ) {
-    if (dbUrl.startsWith("file:")) {
-      const filePath = dbUrl.slice("file:".length);
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+type PgRunRecord = {
+  id: string;
+  task_id: string;
+  status: RunRow["status"];
+  sandbox_id: string | null;
+  created_at: Date;
+  started_at: Date | null;
+  completed_at: Date | null;
+  error: string | null;
+};
+
+type PgEventRecord = {
+  id: string;
+  seq: string | number;
+  task_id: string;
+  run_id: string | null;
+  type: EventRow["type"];
+  source: EventRow["source"];
+  message: string | null;
+  data_json: Record<string, unknown> | null;
+  created_at: Date;
+};
+
+export class PostgresTaskRepository implements TaskRepository {
+  private readonly pool: pg.Pool;
+
+  constructor(databaseUrl: string) {
+    this.pool = new Pool({ connectionString: databaseUrl });
+  }
+
+  async bootstrap(): Promise<void> {
+    const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../schema/bootstrap.sql");
+    await this.pool.query(await fs.readFile(schemaPath, "utf8"));
+  }
+
+  async createTask(input: CreateTaskInput): Promise<TaskRow> {
+    const id = randomUUID();
+    const result = await this.pool.query<PgTaskRecord>(
+      "INSERT INTO tasks (id, status, spec_json) VALUES ($1, 'queued', $2) RETURNING *",
+      [id, input.spec],
+    );
+    return taskFromRecord(result.rows[0]);
+  }
+
+  async listTasks(): Promise<TaskRow[]> {
+    const result = await this.pool.query<PgTaskRecord>("SELECT * FROM tasks ORDER BY created_at DESC");
+    return result.rows.map(taskFromRecord);
+  }
+
+  async getTask(id: string): Promise<TaskRow | null> {
+    const result = await this.pool.query<PgTaskRecord>("SELECT * FROM tasks WHERE id = $1", [id]);
+    return result.rows[0] ? taskFromRecord(result.rows[0]) : null;
+  }
+
+  async claimNextTask(): Promise<TaskRow | null> {
+    const result = await this.pool.query<PgTaskRecord>(
+      [
+        "UPDATE tasks",
+        "SET status = 'claimed'",
+        "WHERE id = (",
+        "  SELECT id FROM tasks",
+        "  WHERE status = 'queued'",
+        "  ORDER BY created_at ASC",
+        "  LIMIT 1",
+        ")",
+        "RETURNING *",
+      ].join("\n"),
+    );
+    return result.rows[0] ? taskFromRecord(result.rows[0]) : null;
+  }
+
+  async markTaskRunning(id: string): Promise<void> {
+    await this.pool.query("UPDATE tasks SET status = 'running', started_at = COALESCE(started_at, now()) WHERE id = $1", [id]);
+  }
+
+  async markTaskSucceeded(id: string): Promise<void> {
+    await this.pool.query("UPDATE tasks SET status = 'succeeded', completed_at = now(), error = NULL WHERE id = $1", [id]);
+  }
+
+  async markTaskFailed(id: string, error: string): Promise<void> {
+    await this.pool.query("UPDATE tasks SET status = 'failed', completed_at = now(), error = $2 WHERE id = $1", [id, error]);
+  }
+
+  async createRun(taskId: string): Promise<RunRow> {
+    const id = randomUUID();
+    const result = await this.pool.query<PgRunRecord>(
+      "INSERT INTO runs (id, task_id, status, started_at) VALUES ($1, $2, 'running', now()) RETURNING *",
+      [id, taskId],
+    );
+    return runFromRecord(result.rows[0]);
+  }
+
+  async setRunSandbox(runId: string, sandboxId: string): Promise<void> {
+    await this.pool.query("UPDATE runs SET sandbox_id = $2 WHERE id = $1", [runId, sandboxId]);
+  }
+
+  async markRunSucceeded(runId: string): Promise<void> {
+    await this.pool.query("UPDATE runs SET status = 'succeeded', completed_at = now(), error = NULL WHERE id = $1", [runId]);
+  }
+
+  async markRunFailed(runId: string, error: string): Promise<void> {
+    await this.pool.query("UPDATE runs SET status = 'failed', completed_at = now(), error = $2 WHERE id = $1", [runId, error]);
+  }
+
+  async listRuns(): Promise<RunRow[]> {
+    const result = await this.pool.query<PgRunRecord>("SELECT * FROM runs ORDER BY created_at DESC");
+    return result.rows.map(runFromRecord);
+  }
+
+  async getRun(id: string): Promise<RunRow | null> {
+    const result = await this.pool.query<PgRunRecord>("SELECT * FROM runs WHERE id = $1", [id]);
+    return result.rows[0] ? runFromRecord(result.rows[0]) : null;
+  }
+
+  async appendEvent(input: AppendEventInput): Promise<EventRow> {
+    const result = await this.pool.query<PgEventRecord>(
+      [
+        "INSERT INTO events (id, task_id, run_id, type, source, message, data_json)",
+        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        "RETURNING *",
+      ].join(" "),
+      [
+        randomUUID(),
+        input.taskId,
+        input.runId ?? null,
+        input.type,
+        input.source,
+        input.message ?? null,
+        input.data ?? null,
+      ],
+    );
+    return eventFromRecord(result.rows[0]);
+  }
+
+  async listEvents(filter: EventFilter): Promise<EventRow[]> {
+    const where: string[] = [];
+    const values: unknown[] = [];
+    if (filter.taskId) {
+      values.push(filter.taskId);
+      where.push(`task_id = $${values.length}`);
     }
-    this.client = createClient({ url: dbUrl, authToken });
+    if (filter.runId) {
+      values.push(filter.runId);
+      where.push(`run_id = $${values.length}`);
+    }
+    if (filter.after !== undefined) {
+      values.push(filter.after);
+      where.push(`seq > $${values.length}`);
+    }
+    values.push(Math.min(filter.limit ?? 100, 500));
+    const sql = [
+      "SELECT * FROM events",
+      where.length ? `WHERE ${where.join(" AND ")}` : "",
+      "ORDER BY seq ASC",
+      `LIMIT $${values.length}`,
+    ].join(" ");
+    const result = await this.pool.query<PgEventRecord>(sql, values);
+    return result.rows.map(eventFromRecord);
   }
 
   async close(): Promise<void> {
-    this.client.close();
-  }
-
-  async initSchema(): Promise<void> {
-    const schema = fs.readFileSync(this.schemaPath, "utf8");
-    for (const statement of splitSql(schema)) {
-      await this.client.execute(statement);
-    }
-    await this.ensureHeartbeatColumns();
-  }
-
-  async createSession(name: string): Promise<SessionRow> {
-    const id = randomId("ses");
-    await this.client.execute({
-      sql: "INSERT INTO sessions (id, name, status) VALUES (?, ?, 'active')",
-      args: [id, name],
-    });
-    const row = await this.getSession(id);
-    if (!row) throw new Error("created session could not be loaded");
-    return row;
-  }
-
-  async getSession(id: string): Promise<SessionRow | null> {
-    return this.first<SessionRow>(
-      "SELECT id, name, status, created_at, updated_at FROM sessions WHERE id = ?",
-      [id],
-    );
-  }
-
-  async listSessions(): Promise<SessionRow[]> {
-    return this.all<SessionRow>(
-      "SELECT id, name, status, created_at, updated_at FROM sessions ORDER BY created_at DESC",
-    );
-  }
-
-  async createHeartbeat(input: {
-    sessionId: string;
-    title: string;
-    cadence: number;
-    contents: string;
-    provider: string;
-    model: string;
-    status: HeartbeatStatus;
-  }): Promise<HeartbeatRow> {
-    const id = randomId("hb");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeats (
-          id, session_id, title, cadence, contents, provider, model, last_tick, next_tick, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.sessionId,
-        input.title,
-        input.cadence,
-        input.contents,
-        input.provider,
-        input.model,
-        null,
-        nextTickIso(input.cadence, input.status),
-        input.status,
-      ],
-    });
-    const row = await this.getHeartbeat(id);
-    if (!row) throw new Error("created heartbeat could not be loaded");
-    return row;
-  }
-
-  async getHeartbeat(id: string): Promise<HeartbeatRow | null> {
-    return this.first<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listHeartbeats(sessionId?: string): Promise<HeartbeatRow[]> {
-    if (sessionId) {
-      return this.all<HeartbeatRow>(
-        `
-          SELECT id, session_id, title, cadence, contents, last_tick, next_tick,
-                 provider, model, status, created_at, updated_at
-          FROM heartbeats
-          WHERE session_id = ?
-          ORDER BY created_at DESC
-        `,
-        [sessionId],
-      );
-    }
-    return this.all<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        ORDER BY created_at DESC
-      `,
-    );
-  }
-
-  async updateHeartbeat(
-    id: string,
-    input: HeartbeatUpdateInput,
-  ): Promise<HeartbeatRow | null> {
-    await this.client.execute({
-      sql: `
-        UPDATE heartbeats
-        SET title = ?, cadence = ?, contents = ?, provider = ?, model = ?, next_tick = ?,
-            status = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [
-        input.title,
-        input.cadence,
-        input.contents,
-        input.provider,
-        input.model,
-        nextTickIso(input.cadence, input.status),
-        input.status,
-        id,
-      ],
-    });
-    return this.getHeartbeat(id);
-  }
-
-  async tickHeartbeat(id: string): Promise<HeartbeatRow | null> {
-    const heartbeat = await this.getHeartbeat(id);
-    if (!heartbeat) return null;
-    await this.client.execute({
-      sql: `
-        UPDATE heartbeats
-        SET last_tick = ?, next_tick = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [nowIso(), nextTickIso(heartbeat.cadence, heartbeat.status), id],
-    });
-    return this.getHeartbeat(id);
-  }
-
-  async listDueHeartbeats(limit: number): Promise<HeartbeatRow[]> {
-    return this.all<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        WHERE status = 'active'
-          AND (next_tick IS NULL OR next_tick <= ?)
-        ORDER BY COALESCE(next_tick, created_at) ASC, created_at ASC
-        LIMIT ?
-      `,
-      [nowIso(), limit],
-    );
-  }
-
-  async createRun(input: {
-    heartbeatId: string;
-    sessionId: string;
-    executor: string;
-    model: string | null;
-    status: RunStatus;
-    promptSnapshot: string;
-    output: string | null;
-    error: string | null;
-  }): Promise<HeartbeatRunRow> {
-    const id = randomId("run");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeat_runs (
-          id, heartbeat_id, session_id, executor, model, status,
-          prompt_snapshot, output, error, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.heartbeatId,
-        input.sessionId,
-        input.executor,
-        input.model,
-        input.status,
-        input.promptSnapshot,
-        input.output,
-        input.error,
-        nowIso(),
-      ],
-    });
-    const row = await this.getRun(id);
-    if (!row) throw new Error("created run could not be loaded");
-    return row;
-  }
-
-  async createEvent(input: {
-    heartbeatId?: string | null;
-    runId?: string | null;
-    sessionId?: string | null;
-    source: string;
-    type: string;
-    message?: string | null;
-    data?: unknown;
-  }): Promise<HeartbeatEventRow> {
-    const id = randomId("evt");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeat_events (
-          id, heartbeat_id, run_id, session_id, source, type, message, data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.heartbeatId ?? null,
-        input.runId ?? null,
-        input.sessionId ?? null,
-        input.source,
-        input.type,
-        input.message ?? null,
-        input.data === undefined ? null : JSON.stringify(input.data),
-      ],
-    });
-    const row = await this.getEvent(id);
-    if (!row) throw new Error("created event could not be loaded");
-    return row;
-  }
-
-  async getEvent(id: string): Promise<HeartbeatEventRow | null> {
-    return this.first<HeartbeatEventRow>(
-      `
-        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
-        FROM heartbeat_events
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listEvents(filters: {
-    heartbeatId?: string;
-    runId?: string;
-    sessionId?: string;
-    limit?: number;
-  }): Promise<HeartbeatEventRow[]> {
-    const conditions: string[] = [];
-    const args: SqlValue[] = [];
-    if (filters.heartbeatId) {
-      conditions.push("heartbeat_id = ?");
-      args.push(filters.heartbeatId);
-    }
-    if (filters.runId) {
-      conditions.push("run_id = ?");
-      args.push(filters.runId);
-    }
-    if (filters.sessionId) {
-      conditions.push("session_id = ?");
-      args.push(filters.sessionId);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    args.push(filters.limit ?? 100);
-    return this.all<HeartbeatEventRow>(
-      `
-        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
-        FROM heartbeat_events
-        ${where}
-        ORDER BY created_at DESC
-        LIMIT ?
-      `,
-      args,
-    );
-  }
-
-  async getRun(id: string): Promise<HeartbeatRunRow | null> {
-    return this.first<HeartbeatRunRow>(
-      `
-        SELECT id, heartbeat_id, session_id, executor, model, status,
-               prompt_snapshot, output, error, created_at, completed_at
-        FROM heartbeat_runs
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listRuns(filters: {
-    heartbeatId?: string;
-    sessionId?: string;
-  }): Promise<HeartbeatRunRow[]> {
-    const conditions: string[] = [];
-    const args: SqlValue[] = [];
-    if (filters.heartbeatId) {
-      conditions.push("heartbeat_id = ?");
-      args.push(filters.heartbeatId);
-    }
-    if (filters.sessionId) {
-      conditions.push("session_id = ?");
-      args.push(filters.sessionId);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    return this.all<HeartbeatRunRow>(
-      `
-        SELECT id, heartbeat_id, session_id, executor, model, status,
-               prompt_snapshot, output, error, created_at, completed_at
-        FROM heartbeat_runs
-        ${where}
-        ORDER BY created_at DESC
-      `,
-      args,
-    );
-  }
-
-  private async first<T>(sql: string, args: SqlValue[] = []): Promise<T | null> {
-    const result = await this.client.execute({ sql, args });
-    return (result.rows[0] as T | undefined) ?? null;
-  }
-
-  private async all<T>(sql: string, args: SqlValue[] = []): Promise<T[]> {
-    const result = await this.client.execute({ sql, args });
-    return result.rows as T[];
-  }
-
-  private async ensureHeartbeatColumns(): Promise<void> {
-    const columns = await this.all<{ name: string }>("PRAGMA table_info(heartbeats)");
-    const names = new Set(columns.map((column) => column.name));
-    if (!names.has("provider")) {
-      await this.client.execute(
-        "ALTER TABLE heartbeats ADD COLUMN provider TEXT NOT NULL DEFAULT 'deepseek'",
-      );
-    }
-    if (!names.has("model")) {
-      await this.client.execute(
-        "ALTER TABLE heartbeats ADD COLUMN model TEXT NOT NULL DEFAULT 'deepseek-v4-flash'",
-      );
-    }
+    await this.pool.end();
   }
 }
 
-const randomId = (prefix: string): string => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
+export class MemoryTaskRepository implements TaskRepository {
+  private readonly tasks: TaskRow[] = [];
+  private readonly runs: RunRow[] = [];
+  private readonly events: EventRow[] = [];
+  private nextSeq = 1;
 
-const splitSql = (schema: string): string[] =>
-  schema
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter(Boolean);
+  async createTask(input: CreateTaskInput): Promise<TaskRow> {
+    const task: TaskRow = {
+      id: randomUUID(),
+      status: "queued",
+      spec: structuredClone(input.spec),
+      createdAt: nowIso(),
+      startedAt: null,
+      completedAt: null,
+      error: null,
+    };
+    this.tasks.push(task);
+    return structuredClone(task);
+  }
+
+  async listTasks(): Promise<TaskRow[]> {
+    return this.tasks.slice().reverse().map((task) => structuredClone(task));
+  }
+
+  async getTask(id: string): Promise<TaskRow | null> {
+    const task = this.tasks.find((row) => row.id === id);
+    return task ? structuredClone(task) : null;
+  }
+
+  async claimNextTask(): Promise<TaskRow | null> {
+    const task = this.tasks.find((row) => row.status === "queued");
+    if (!task) return null;
+    task.status = "claimed";
+    return structuredClone(task);
+  }
+
+  async markTaskRunning(id: string): Promise<void> {
+    const task = mustFind(this.tasks, id);
+    task.status = "running";
+    task.startedAt ??= nowIso();
+  }
+
+  async markTaskSucceeded(id: string): Promise<void> {
+    const task = mustFind(this.tasks, id);
+    task.status = "succeeded";
+    task.completedAt = nowIso();
+    task.error = null;
+  }
+
+  async markTaskFailed(id: string, error: string): Promise<void> {
+    const task = mustFind(this.tasks, id);
+    task.status = "failed";
+    task.completedAt = nowIso();
+    task.error = error;
+  }
+
+  async createRun(taskId: string): Promise<RunRow> {
+    const run: RunRow = {
+      id: randomUUID(),
+      taskId,
+      status: "running",
+      sandboxId: null,
+      createdAt: nowIso(),
+      startedAt: nowIso(),
+      completedAt: null,
+      error: null,
+    };
+    this.runs.push(run);
+    return structuredClone(run);
+  }
+
+  async setRunSandbox(runId: string, sandboxId: string): Promise<void> {
+    mustFind(this.runs, runId).sandboxId = sandboxId;
+  }
+
+  async markRunSucceeded(runId: string): Promise<void> {
+    const run = mustFind(this.runs, runId);
+    run.status = "succeeded";
+    run.completedAt = nowIso();
+    run.error = null;
+  }
+
+  async markRunFailed(runId: string, error: string): Promise<void> {
+    const run = mustFind(this.runs, runId);
+    run.status = "failed";
+    run.completedAt = nowIso();
+    run.error = error;
+  }
+
+  async listRuns(): Promise<RunRow[]> {
+    return this.runs.slice().reverse().map((run) => structuredClone(run));
+  }
+
+  async getRun(id: string): Promise<RunRow | null> {
+    const run = this.runs.find((row) => row.id === id);
+    return run ? structuredClone(run) : null;
+  }
+
+  async appendEvent(input: AppendEventInput): Promise<EventRow> {
+    const event: EventRow = {
+      id: randomUUID(),
+      seq: this.nextSeq++,
+      taskId: input.taskId,
+      runId: input.runId ?? null,
+      type: input.type,
+      source: input.source,
+      message: input.message ?? null,
+      data: input.data ?? null,
+      createdAt: nowIso(),
+    };
+    this.events.push(event);
+    return structuredClone(event);
+  }
+
+  async listEvents(filter: EventFilter): Promise<EventRow[]> {
+    return this.events
+      .filter((event) => !filter.taskId || event.taskId === filter.taskId)
+      .filter((event) => !filter.runId || event.runId === filter.runId)
+      .filter((event) => filter.after === undefined || event.seq > filter.after)
+      .slice(0, Math.min(filter.limit ?? 100, 500))
+      .map((event) => structuredClone(event));
+  }
+
+  async close(): Promise<void> {}
+}
+
+const taskFromRecord = (row: PgTaskRecord): TaskRow => ({
+  id: row.id,
+  status: row.status,
+  spec: row.spec_json,
+  createdAt: row.created_at.toISOString(),
+  startedAt: row.started_at?.toISOString() ?? null,
+  completedAt: row.completed_at?.toISOString() ?? null,
+  error: row.error,
+});
+
+const runFromRecord = (row: PgRunRecord): RunRow => ({
+  id: row.id,
+  taskId: row.task_id,
+  status: row.status,
+  sandboxId: row.sandbox_id,
+  createdAt: row.created_at.toISOString(),
+  startedAt: row.started_at?.toISOString() ?? null,
+  completedAt: row.completed_at?.toISOString() ?? null,
+  error: row.error,
+});
+
+const eventFromRecord = (row: PgEventRecord): EventRow => ({
+  id: row.id,
+  seq: Number(row.seq),
+  taskId: row.task_id,
+  runId: row.run_id,
+  type: row.type,
+  source: row.source,
+  message: row.message,
+  data: row.data_json,
+  createdAt: row.created_at.toISOString(),
+});
+
+const nowIso = (): string => new Date().toISOString();
+
+const mustFind = <T extends { id: string }>(rows: T[], id: string): T => {
+  const row = rows.find((candidate) => candidate.id === id);
+  if (!row) throw new Error(`row not found: ${id}`);
+  return row;
+};
