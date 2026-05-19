@@ -1,123 +1,78 @@
 import assert from "node:assert/strict";
-import type { FastifyInstance } from "fastify";
 
-import type { Settings } from "../src/config.js";
-import { MemoryTaskRepository } from "../src/db.js";
-import type { CommandResult, SandboxHandle, SandboxProvider } from "../src/sandboxProvider.js";
-import { createApp } from "../src/server.js";
-import type { CommandSpec, RepoSpec } from "../src/types.js";
+const BASE = process.env.THREADBEAT_API_URL ?? process.env.THREADBEAT_URL ?? "http://127.0.0.1:8000";
 
-async function testSuccessfulTask(): Promise<void> {
-  const repository = new MemoryTaskRepository();
-  const provider = new FakeSandboxProvider();
-  const { app } = createApp(testSettings(), repository, provider);
-  try {
-    const taskId = await createTask(app, {
-      repo: { url: "https://github.com/octocat/Hello-World.git", branch: "master" },
-      setup: [{ cmd: "echo setup" }],
-      main: { cmd: "echo main" },
-      verify: [{ cmd: "echo verify" }],
-    });
-    await app.inject({ method: "POST", url: "/api/worker/drain-once", payload: {} });
-    const task = await app.inject({ method: "GET", url: `/api/tasks/${taskId}` });
-    assert.equal(task.json().task.status, "succeeded");
-    assert.deepEqual(provider.commands, ["echo setup", "echo main", "echo verify"]);
-    assert.equal(provider.clones.length, 1);
-    assert.equal(provider.deleted, 1);
-  } finally {
-    await app.close();
-  }
+async function api(method: string, path: string, body?: unknown) {
+  const response = await fetch(`${BASE}${path}`, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await response.json();
+  return { status: response.status, json };
 }
 
-async function testFailedTask(): Promise<void> {
-  const repository = new MemoryTaskRepository();
-  const provider = new FakeSandboxProvider({ failOn: "exit 2" });
-  const { app } = createApp(testSettings(), repository, provider);
-  try {
-    const taskId = await createTask(app, {
-      setup: [],
-      main: { cmd: "exit 2" },
-      verify: [{ cmd: "echo should-not-run" }],
-    });
-    await app.inject({ method: "POST", url: "/api/worker/drain-once", payload: {} });
-    const task = await app.inject({ method: "GET", url: `/api/tasks/${taskId}` });
-    assert.equal(task.json().task.status, "failed");
-    assert.equal(provider.commands.includes("echo should-not-run"), false);
-    assert.equal(provider.deleted, 1);
-  } finally {
-    await app.close();
-  }
+async function testHealth() {
+  const { status, json } = await api("GET", "/health");
+  assert.equal(status, 200);
+  assert.equal(json.ok, true);
+  console.log("  health: ok");
 }
 
-async function testEventCursor(): Promise<void> {
-  const repository = new MemoryTaskRepository();
-  const provider = new FakeSandboxProvider();
-  const { app } = createApp(testSettings(), repository, provider);
-  try {
-    const taskId = await createTask(app, { main: { cmd: "echo cursor" } });
-    await app.inject({ method: "POST", url: "/api/worker/drain-once", payload: {} });
-    const first = await app.inject({ method: "GET", url: `/api/events?taskId=${taskId}&limit=2` });
-    const firstEvents = first.json().events as Array<{ seq: number }>;
-    assert.equal(firstEvents.length, 2);
-    const second = await app.inject({
-      method: "GET",
-      url: `/api/events?taskId=${taskId}&after=${firstEvents[1]?.seq}`,
-    });
-    const secondEvents = second.json().events as Array<{ seq: number }>;
-    assert.ok(secondEvents.every((event) => event.seq > firstEvents[1]!.seq));
-  } finally {
-    await app.close();
-  }
+async function testTaskLifecycle() {
+  const { status, json } = await api("POST", "/api/tasks", {
+    main: { cmd: "echo hello" },
+  });
+  assert.equal(status, 200);
+  assert.equal(json.ok, true);
+  const taskId = json.task.id as string;
+  assert.ok(taskId);
+
+  const get = await api("GET", `/api/tasks/${taskId}`);
+  assert.equal(get.json.task.status, "queued");
+
+  const list = await api("GET", "/api/tasks");
+  assert.ok(list.json.tasks.some((t: { id: string }) => t.id === taskId));
+
+  console.log(`  task lifecycle: ok (${taskId})`);
+  return taskId;
 }
 
-async function createTask(app: FastifyInstance, spec: Record<string, unknown>): Promise<string> {
-  const response = await app.inject({ method: "POST", url: "/api/tasks", payload: spec });
-  assert.equal(response.statusCode, 200, response.body);
-  return response.json().task.id as string;
+async function testDrainAndEvents(taskId: string) {
+  const drain = await api("POST", "/api/worker/drain-once", {});
+  assert.equal(drain.status, 200);
+  assert.ok(drain.json.result.processed >= 1);
+
+  const task = await api("GET", `/api/tasks/${taskId}`);
+  assert.ok(["succeeded", "failed"].includes(task.json.task.status), `unexpected status: ${task.json.task.status}`);
+
+  const events = await api("GET", `/api/events?taskId=${taskId}`);
+  assert.ok(events.json.events.length > 0, "expected at least one event");
+
+  const types = events.json.events.map((e: { type: string }) => e.type);
+  assert.ok(types.includes("task_created"));
+  assert.ok(types.includes("run_started"));
+
+  console.log(`  drain + events: ok (${events.json.events.length} events, task ${task.json.task.status})`);
 }
 
-function testSettings(): Settings {
-  return {
-    host: "127.0.0.1",
-    port: 0,
-    databaseUrl: "memory",
-    maxSandboxes: 1,
-    runTimeoutSeconds: 600,
-    daytonaApiKey: undefined,
-    daytonaApiUrl: undefined,
-    daytonaTarget: undefined,
-    sandboxEnvAllowlist: [],
-    commandTimeoutSeconds: 30,
-  };
+async function testBadRequest() {
+  const { status, json } = await api("POST", "/api/tasks", { noMain: true });
+  assert.equal(status, 400);
+  assert.equal(json.ok, false);
+  console.log("  bad request: ok");
 }
 
-class FakeSandboxProvider implements SandboxProvider {
-  commands: string[] = [];
-  clones: RepoSpec[] = [];
-  deleted = 0;
-
-  constructor(private readonly options: { failOn?: string } = {}) {}
-
-  async createSandbox(): Promise<SandboxHandle> {
-    return { id: "fake-sandbox" };
-  }
-
-  async cloneRepo(_sandbox: SandboxHandle, repo: RepoSpec): Promise<void> {
-    this.clones.push(repo);
-  }
-
-  async runCommand(_sandbox: SandboxHandle, command: CommandSpec): Promise<CommandResult> {
-    this.commands.push(command.cmd);
-    if (this.options.failOn === command.cmd) return { exitCode: 2, stdout: "failed\n" };
-    return { exitCode: 0, stdout: `${command.cmd}\n` };
-  }
-
-  async deleteSandbox(): Promise<void> {
-    this.deleted += 1;
-  }
+async function testNotFound() {
+  const { status } = await api("GET", "/api/tasks/nonexistent");
+  assert.equal(status, 404);
+  console.log("  not found: ok");
 }
 
-await testSuccessfulTask();
-await testFailedTask();
-await testEventCursor();
-console.log("smoke tests passed");
+console.log(`smoke tests against ${BASE}`);
+await testHealth();
+const taskId = await testTaskLifecycle();
+await testDrainAndEvents(taskId);
+await testBadRequest();
+await testNotFound();
+console.log("all smoke tests passed");

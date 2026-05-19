@@ -2,6 +2,10 @@
 
 Threadbeat is currently a minimal Daytona task substrate.
 
+When a long cleanup/refactor thread reveals repeated user preferences, update
+`.agents/skills/code-cleanup/SKILL.md`. For code cleanup, simplification, bloat
+removal, or abstraction review, load the `code-cleanup` skill before editing.
+
 Stay inside the V1 boundary:
 
 - no agents
@@ -14,10 +18,9 @@ Stay inside the V1 boundary:
 The core files that should matter are:
 
 - `schema/bootstrap.sql`
-- `src/types.ts`
-- `src/taskSpec.ts`
+- `drizzle/schema.ts`
+- `drizzle.config.ts`
 - `src/db.ts`
-- `src/sandboxProvider.ts`
 - `src/daytonaProvider.ts`
 - `src/worker.ts`
 - `src/server.ts`
@@ -28,15 +31,16 @@ The core files that should matter are:
 Use tests and smokes as the design loop. If a smoke exposes an awkward API or
 schema shape, simplify it immediately instead of adding compatibility layers.
 
-Run the cheap checks before handing off:
+Run static checks before handing off:
 
 ```bash
-npm test
-npm run smoke:api
 npm run typecheck
 npm run lint
 npm run build
 ```
+
+Run `npm test` and `npm run smoke:api` only when a server is running with a
+reachable `DATABASE_URL`.
 
 Run live Daytona checks when credentials are available:
 

@@ -3,376 +3,165 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import pg from "pg";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
-import type { AppendEventInput, CreateTaskInput, EventRow, RunRow, TaskRow, TaskSpec, TaskStatus } from "./types.js";
+import { events, runs, tasks } from "../drizzle/schema.js";
+import { config } from "./config.js";
 
-const { Pool } = pg;
+const client = postgres(config.databaseUrl, { prepare: false });
+const db = drizzle(client);
 
-export interface TaskRepository {
-  createTask(input: CreateTaskInput): Promise<TaskRow>;
-  listTasks(): Promise<TaskRow[]>;
-  getTask(id: string): Promise<TaskRow | null>;
-  claimNextTask(): Promise<TaskRow | null>;
-  markTaskRunning(id: string): Promise<void>;
-  markTaskSucceeded(id: string): Promise<void>;
-  markTaskFailed(id: string, error: string): Promise<void>;
-  createRun(taskId: string): Promise<RunRow>;
-  setRunSandbox(runId: string, sandboxId: string): Promise<void>;
-  markRunSucceeded(runId: string): Promise<void>;
-  markRunFailed(runId: string, error: string): Promise<void>;
-  listRuns(): Promise<RunRow[]>;
-  getRun(id: string): Promise<RunRow | null>;
-  appendEvent(input: AppendEventInput): Promise<EventRow>;
-  listEvents(filter: EventFilter): Promise<EventRow[]>;
-  close(): Promise<void>;
+export async function bootstrap() {
+  const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../schema/bootstrap.sql");
+  await client.unsafe(await fs.readFile(schemaPath, "utf8"));
 }
 
-export type EventFilter = {
-  taskId?: string;
-  runId?: string;
-  after?: number;
-  limit?: number;
-};
+export async function createTask(spec: Record<string, unknown>) {
+  const [task] = await db.insert(tasks).values({
+    id: randomUUID(),
+    status: "queued",
+    specJson: spec,
+  }).returning();
+  return taskFromRow(task);
+}
 
-type PgTaskRecord = {
-  id: string;
-  status: TaskStatus;
-  spec_json: TaskSpec;
-  created_at: Date;
-  started_at: Date | null;
-  completed_at: Date | null;
-  error: string | null;
-};
+export async function listTasks() {
+  return (await db.select().from(tasks).orderBy(desc(tasks.createdAt))).map(taskFromRow);
+}
 
-type PgRunRecord = {
-  id: string;
-  task_id: string;
-  status: RunRow["status"];
-  sandbox_id: string | null;
-  created_at: Date;
-  started_at: Date | null;
-  completed_at: Date | null;
-  error: string | null;
-};
+export async function getTask(id: string) {
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
+  return task ? taskFromRow(task) : null;
+}
 
-type PgEventRecord = {
-  id: string;
-  seq: string | number;
-  task_id: string;
-  run_id: string | null;
-  type: EventRow["type"];
-  source: EventRow["source"];
-  message: string | null;
-  data_json: Record<string, unknown> | null;
-  created_at: Date;
-};
+export async function claimNextTask() {
+  const [task] = await db.select().from(tasks).where(eq(tasks.status, "queued")).orderBy(asc(tasks.createdAt)).limit(1);
+  if (!task) return null;
+  const [claimed] = await db.update(tasks).set({ status: "claimed" }).where(eq(tasks.id, task.id)).returning();
+  return claimed ? taskFromRow(claimed) : null;
+}
 
-export class PostgresTaskRepository implements TaskRepository {
-  private readonly pool: pg.Pool;
-
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl });
-  }
-
-  async bootstrap(): Promise<void> {
-    const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../schema/bootstrap.sql");
-    await this.pool.query(await fs.readFile(schemaPath, "utf8"));
-  }
-
-  async createTask(input: CreateTaskInput): Promise<TaskRow> {
-    const id = randomUUID();
-    const result = await this.pool.query<PgTaskRecord>(
-      "INSERT INTO tasks (id, status, spec_json) VALUES ($1, 'queued', $2) RETURNING *",
-      [id, input.spec],
-    );
-    return taskFromRecord(result.rows[0]);
-  }
-
-  async listTasks(): Promise<TaskRow[]> {
-    const result = await this.pool.query<PgTaskRecord>("SELECT * FROM tasks ORDER BY created_at DESC");
-    return result.rows.map(taskFromRecord);
-  }
-
-  async getTask(id: string): Promise<TaskRow | null> {
-    const result = await this.pool.query<PgTaskRecord>("SELECT * FROM tasks WHERE id = $1", [id]);
-    return result.rows[0] ? taskFromRecord(result.rows[0]) : null;
-  }
-
-  async claimNextTask(): Promise<TaskRow | null> {
-    const result = await this.pool.query<PgTaskRecord>(
-      [
-        "UPDATE tasks",
-        "SET status = 'claimed'",
-        "WHERE id = (",
-        "  SELECT id FROM tasks",
-        "  WHERE status = 'queued'",
-        "  ORDER BY created_at ASC",
-        "  LIMIT 1",
-        ")",
-        "RETURNING *",
-      ].join("\n"),
-    );
-    return result.rows[0] ? taskFromRecord(result.rows[0]) : null;
-  }
-
-  async markTaskRunning(id: string): Promise<void> {
-    await this.pool.query("UPDATE tasks SET status = 'running', started_at = COALESCE(started_at, now()) WHERE id = $1", [id]);
-  }
-
-  async markTaskSucceeded(id: string): Promise<void> {
-    await this.pool.query("UPDATE tasks SET status = 'succeeded', completed_at = now(), error = NULL WHERE id = $1", [id]);
-  }
-
-  async markTaskFailed(id: string, error: string): Promise<void> {
-    await this.pool.query("UPDATE tasks SET status = 'failed', completed_at = now(), error = $2 WHERE id = $1", [id, error]);
-  }
-
-  async createRun(taskId: string): Promise<RunRow> {
-    const id = randomUUID();
-    const result = await this.pool.query<PgRunRecord>(
-      "INSERT INTO runs (id, task_id, status, started_at) VALUES ($1, $2, 'running', now()) RETURNING *",
-      [id, taskId],
-    );
-    return runFromRecord(result.rows[0]);
-  }
-
-  async setRunSandbox(runId: string, sandboxId: string): Promise<void> {
-    await this.pool.query("UPDATE runs SET sandbox_id = $2 WHERE id = $1", [runId, sandboxId]);
-  }
-
-  async markRunSucceeded(runId: string): Promise<void> {
-    await this.pool.query("UPDATE runs SET status = 'succeeded', completed_at = now(), error = NULL WHERE id = $1", [runId]);
-  }
-
-  async markRunFailed(runId: string, error: string): Promise<void> {
-    await this.pool.query("UPDATE runs SET status = 'failed', completed_at = now(), error = $2 WHERE id = $1", [runId, error]);
-  }
-
-  async listRuns(): Promise<RunRow[]> {
-    const result = await this.pool.query<PgRunRecord>("SELECT * FROM runs ORDER BY created_at DESC");
-    return result.rows.map(runFromRecord);
-  }
-
-  async getRun(id: string): Promise<RunRow | null> {
-    const result = await this.pool.query<PgRunRecord>("SELECT * FROM runs WHERE id = $1", [id]);
-    return result.rows[0] ? runFromRecord(result.rows[0]) : null;
-  }
-
-  async appendEvent(input: AppendEventInput): Promise<EventRow> {
-    const result = await this.pool.query<PgEventRecord>(
-      [
-        "INSERT INTO events (id, task_id, run_id, type, source, message, data_json)",
-        "VALUES ($1, $2, $3, $4, $5, $6, $7)",
-        "RETURNING *",
-      ].join(" "),
-      [
-        randomUUID(),
-        input.taskId,
-        input.runId ?? null,
-        input.type,
-        input.source,
-        input.message ?? null,
-        input.data ?? null,
-      ],
-    );
-    return eventFromRecord(result.rows[0]);
-  }
-
-  async listEvents(filter: EventFilter): Promise<EventRow[]> {
-    const where: string[] = [];
-    const values: unknown[] = [];
-    if (filter.taskId) {
-      values.push(filter.taskId);
-      where.push(`task_id = $${values.length}`);
-    }
-    if (filter.runId) {
-      values.push(filter.runId);
-      where.push(`run_id = $${values.length}`);
-    }
-    if (filter.after !== undefined) {
-      values.push(filter.after);
-      where.push(`seq > $${values.length}`);
-    }
-    values.push(Math.min(filter.limit ?? 100, 500));
-    const sql = [
-      "SELECT * FROM events",
-      where.length ? `WHERE ${where.join(" AND ")}` : "",
-      "ORDER BY seq ASC",
-      `LIMIT $${values.length}`,
-    ].join(" ");
-    const result = await this.pool.query<PgEventRecord>(sql, values);
-    return result.rows.map(eventFromRecord);
-  }
-
-  async close(): Promise<void> {
-    await this.pool.end();
+export async function updateTaskStatus(id: string, status: string, error?: string) {
+  if (status === "running") {
+    await db.update(tasks).set({ status, startedAt: sql`COALESCE(${tasks.startedAt}, now())` }).where(eq(tasks.id, id));
+  } else if (status === "succeeded") {
+    await db.update(tasks).set({ status, completedAt: new Date(), error: null }).where(eq(tasks.id, id));
+  } else if (status === "failed") {
+    await db.update(tasks).set({ status, completedAt: new Date(), error }).where(eq(tasks.id, id));
   }
 }
 
-export class MemoryTaskRepository implements TaskRepository {
-  private readonly tasks: TaskRow[] = [];
-  private readonly runs: RunRow[] = [];
-  private readonly events: EventRow[] = [];
-  private nextSeq = 1;
-
-  async createTask(input: CreateTaskInput): Promise<TaskRow> {
-    const task: TaskRow = {
-      id: randomUUID(),
-      status: "queued",
-      spec: structuredClone(input.spec),
-      createdAt: nowIso(),
-      startedAt: null,
-      completedAt: null,
-      error: null,
-    };
-    this.tasks.push(task);
-    return structuredClone(task);
-  }
-
-  async listTasks(): Promise<TaskRow[]> {
-    return this.tasks.slice().reverse().map((task) => structuredClone(task));
-  }
-
-  async getTask(id: string): Promise<TaskRow | null> {
-    const task = this.tasks.find((row) => row.id === id);
-    return task ? structuredClone(task) : null;
-  }
-
-  async claimNextTask(): Promise<TaskRow | null> {
-    const task = this.tasks.find((row) => row.status === "queued");
-    if (!task) return null;
-    task.status = "claimed";
-    return structuredClone(task);
-  }
-
-  async markTaskRunning(id: string): Promise<void> {
-    const task = mustFind(this.tasks, id);
-    task.status = "running";
-    task.startedAt ??= nowIso();
-  }
-
-  async markTaskSucceeded(id: string): Promise<void> {
-    const task = mustFind(this.tasks, id);
-    task.status = "succeeded";
-    task.completedAt = nowIso();
-    task.error = null;
-  }
-
-  async markTaskFailed(id: string, error: string): Promise<void> {
-    const task = mustFind(this.tasks, id);
-    task.status = "failed";
-    task.completedAt = nowIso();
-    task.error = error;
-  }
-
-  async createRun(taskId: string): Promise<RunRow> {
-    const run: RunRow = {
-      id: randomUUID(),
-      taskId,
-      status: "running",
-      sandboxId: null,
-      createdAt: nowIso(),
-      startedAt: nowIso(),
-      completedAt: null,
-      error: null,
-    };
-    this.runs.push(run);
-    return structuredClone(run);
-  }
-
-  async setRunSandbox(runId: string, sandboxId: string): Promise<void> {
-    mustFind(this.runs, runId).sandboxId = sandboxId;
-  }
-
-  async markRunSucceeded(runId: string): Promise<void> {
-    const run = mustFind(this.runs, runId);
-    run.status = "succeeded";
-    run.completedAt = nowIso();
-    run.error = null;
-  }
-
-  async markRunFailed(runId: string, error: string): Promise<void> {
-    const run = mustFind(this.runs, runId);
-    run.status = "failed";
-    run.completedAt = nowIso();
-    run.error = error;
-  }
-
-  async listRuns(): Promise<RunRow[]> {
-    return this.runs.slice().reverse().map((run) => structuredClone(run));
-  }
-
-  async getRun(id: string): Promise<RunRow | null> {
-    const run = this.runs.find((row) => row.id === id);
-    return run ? structuredClone(run) : null;
-  }
-
-  async appendEvent(input: AppendEventInput): Promise<EventRow> {
-    const event: EventRow = {
-      id: randomUUID(),
-      seq: this.nextSeq++,
-      taskId: input.taskId,
-      runId: input.runId ?? null,
-      type: input.type,
-      source: input.source,
-      message: input.message ?? null,
-      data: input.data ?? null,
-      createdAt: nowIso(),
-    };
-    this.events.push(event);
-    return structuredClone(event);
-  }
-
-  async listEvents(filter: EventFilter): Promise<EventRow[]> {
-    return this.events
-      .filter((event) => !filter.taskId || event.taskId === filter.taskId)
-      .filter((event) => !filter.runId || event.runId === filter.runId)
-      .filter((event) => filter.after === undefined || event.seq > filter.after)
-      .slice(0, Math.min(filter.limit ?? 100, 500))
-      .map((event) => structuredClone(event));
-  }
-
-  async close(): Promise<void> {}
+export async function createRun(taskId: string) {
+  const [run] = await db.insert(runs).values({
+    id: randomUUID(),
+    taskId,
+    status: "running",
+    startedAt: new Date(),
+  }).returning();
+  return runFromRow(run);
 }
 
-const taskFromRecord = (row: PgTaskRecord): TaskRow => ({
-  id: row.id,
-  status: row.status,
-  spec: row.spec_json,
-  createdAt: row.created_at.toISOString(),
-  startedAt: row.started_at?.toISOString() ?? null,
-  completedAt: row.completed_at?.toISOString() ?? null,
-  error: row.error,
-});
+export async function updateRun(runId: string, fields: { sandboxId?: string; status?: string; error?: string }) {
+  if (fields.sandboxId) await db.update(runs).set({ sandboxId: fields.sandboxId }).where(eq(runs.id, runId));
+  if (fields.status === "succeeded") {
+    await db.update(runs).set({ status: "succeeded", completedAt: new Date(), error: null }).where(eq(runs.id, runId));
+  } else if (fields.status === "failed") {
+    await db.update(runs).set({ status: "failed", completedAt: new Date(), error: fields.error }).where(eq(runs.id, runId));
+  }
+}
 
-const runFromRecord = (row: PgRunRecord): RunRow => ({
-  id: row.id,
-  taskId: row.task_id,
-  status: row.status,
-  sandboxId: row.sandbox_id,
-  createdAt: row.created_at.toISOString(),
-  startedAt: row.started_at?.toISOString() ?? null,
-  completedAt: row.completed_at?.toISOString() ?? null,
-  error: row.error,
-});
+export async function listRuns() {
+  return (await db.select().from(runs).orderBy(desc(runs.createdAt))).map(runFromRow);
+}
 
-const eventFromRecord = (row: PgEventRecord): EventRow => ({
-  id: row.id,
-  seq: Number(row.seq),
-  taskId: row.task_id,
-  runId: row.run_id,
-  type: row.type,
-  source: row.source,
-  message: row.message,
-  data: row.data_json,
-  createdAt: row.created_at.toISOString(),
-});
+export async function getRun(id: string) {
+  const [run] = await db.select().from(runs).where(eq(runs.id, id)).limit(1);
+  return run ? runFromRow(run) : null;
+}
 
-const nowIso = (): string => new Date().toISOString();
+export async function appendEvent(
+  taskId: string,
+  type: string,
+  source: string,
+  runId?: string,
+  message?: string,
+  data?: Record<string, unknown>,
+) {
+  const [event] = await db.insert(events).values({
+    id: randomUUID(),
+    taskId,
+    runId,
+    type,
+    source,
+    message,
+    dataJson: data,
+  }).returning();
+  return eventFromRow(event);
+}
 
-const mustFind = <T extends { id: string }>(rows: T[], id: string): T => {
-  const row = rows.find((candidate) => candidate.id === id);
-  if (!row) throw new Error(`row not found: ${id}`);
-  return row;
-};
+export async function listEvents(filter: { taskId?: string; runId?: string; after?: number; limit?: number }) {
+  const clauses = [
+    filter.taskId ? eq(events.taskId, filter.taskId) : undefined,
+    filter.runId ? eq(events.runId, filter.runId) : undefined,
+    filter.after !== undefined ? gt(events.seq, filter.after) : undefined,
+  ].filter(Boolean);
+
+  const query = db
+    .select()
+    .from(events)
+    .where(clauses.length ? and(...clauses) : undefined)
+    .orderBy(asc(events.seq))
+    .limit(Math.min(filter.limit ?? 100, 500));
+
+  return (await query).map(eventFromRow);
+}
+
+export async function close() {
+  await client.end();
+}
+
+function taskFromRow(row: typeof tasks.$inferSelect) {
+  return {
+    id: row.id,
+    status: row.status,
+    spec: row.specJson,
+    createdAt: iso(row.createdAt),
+    startedAt: iso(row.startedAt),
+    completedAt: iso(row.completedAt),
+    error: row.error ?? undefined,
+  };
+}
+
+function runFromRow(row: typeof runs.$inferSelect) {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    status: row.status,
+    sandboxId: row.sandboxId ?? undefined,
+    createdAt: iso(row.createdAt),
+    startedAt: iso(row.startedAt),
+    completedAt: iso(row.completedAt),
+    error: row.error ?? undefined,
+  };
+}
+
+function eventFromRow(row: typeof events.$inferSelect) {
+  return {
+    id: row.id,
+    seq: row.seq,
+    taskId: row.taskId,
+    runId: row.runId ?? undefined,
+    type: row.type,
+    source: row.source,
+    message: row.message ?? undefined,
+    data: row.dataJson ?? undefined,
+    createdAt: iso(row.createdAt),
+  };
+}
+
+function iso(value?: Date | string | null) {
+  if (!value) return undefined;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}

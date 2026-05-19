@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_runs_task_id_created_at
-  ON runs(task_id, created_at DESC);
+  ON runs(task_id, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_runs_status_created_at
   ON runs(status, created_at);
@@ -45,3 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_events_task_seq
 
 CREATE INDEX IF NOT EXISTS idx_events_run_seq
   ON events(run_id, seq);
+
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;

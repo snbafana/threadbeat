@@ -24,9 +24,12 @@ cp .env.example .env
 Required for the server:
 
 ```bash
-DATABASE_URL=postgres://postgres:postgres@localhost:5432/threadbeat
+DATABASE_URL="postgresql://postgres.pvvmbkhdyljnkkstsfzk:[YOUR-PASSWORD]@aws-1-us-east-1.pooler.supabase.com:6543/postgres"
 DAYTONA_API_KEY=...
 ```
+
+The DB layer uses Drizzle with `postgres` and disables prepared statements for
+Supabase pooler compatibility.
 
 Optional tuning:
 
@@ -35,7 +38,6 @@ THREADBEAT_HOST=127.0.0.1
 THREADBEAT_PORT=8000
 THREADBEAT_MAX_SANDBOXES=1
 THREADBEAT_COMMAND_TIMEOUT_SECONDS=120
-THREADBEAT_RUN_TIMEOUT_SECONDS=600
 THREADBEAT_SANDBOX_ENV_ALLOWLIST=THREADBEAT_SMOKE_MARKER
 ```
 
@@ -58,6 +60,15 @@ The server bootstraps `schema/bootstrap.sql`, then exposes:
 - `GET /api/runs/:id`
 - `GET /api/events?taskId=...&runId=...&after=...`
 - `POST /api/worker/drain-once`
+
+Drizzle schema/config live in `drizzle/schema.ts` and `drizzle.config.ts`.
+Useful commands:
+
+```bash
+npm run db:generate
+npm run db:push
+npm run db:studio
+```
 
 ## Task Spec
 
@@ -95,14 +106,19 @@ By default it targets `http://127.0.0.1:8000`. Override with
 
 ## Verification
 
-Cheap local checks:
+Static local checks:
+
+```bash
+npm run typecheck
+npm run lint
+npm run build
+```
+
+HTTP checks require a running server and reachable `DATABASE_URL`:
 
 ```bash
 npm test
 npm run smoke:api
-npm run typecheck
-npm run lint
-npm run build
 ```
 
 Live Daytona checks:

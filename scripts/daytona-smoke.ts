@@ -1,29 +1,28 @@
-import { loadSettings } from "../src/config.js";
-import { DaytonaSandboxProvider } from "../src/daytonaProvider.js";
+import "../src/config.js";
+import * as sandbox from "../src/daytonaProvider.js";
 
-const settings = loadSettings();
-const provider = new DaytonaSandboxProvider(settings);
-const sandbox = await provider.createSandbox({ THREADBEAT_SMOKE_MARKER: "daytona-smoke" });
+const sandboxId = await sandbox.createSandbox({ THREADBEAT_SMOKE_MARKER: "daytona-smoke" });
 
 try {
-  const node = await provider.runCommand(sandbox, { cmd: "node --version", timeoutSeconds: 30 }, "workspace", {});
-  const env = await provider.runCommand(
-    sandbox,
-    { cmd: "test \"$THREADBEAT_SMOKE_MARKER\" = \"daytona-smoke\" && echo env-ok", timeoutSeconds: 30 },
+  const node = await sandbox.runCommand(sandboxId, "node --version", "workspace", {}, 30);
+  const env = await sandbox.runCommand(
+    sandboxId,
+    'test "$THREADBEAT_SMOKE_MARKER" = "daytona-smoke" && echo env-ok',
     "workspace",
     { THREADBEAT_SMOKE_MARKER: "daytona-smoke" },
+    30,
   );
-  await provider.cloneRepo(sandbox, { url: "https://github.com/octocat/Hello-World.git" });
-  const repo = await provider.runCommand(sandbox, { cmd: "ls -la", timeoutSeconds: 30 }, "workspace/repo", {});
+  await sandbox.cloneRepo(sandboxId, "https://github.com/octocat/Hello-World.git");
+  const repo = await sandbox.runCommand(sandboxId, "ls -la", "workspace/repo", {}, 30);
   const ok = node.exitCode === 0 && env.exitCode === 0 && repo.exitCode === 0;
   console.log(JSON.stringify({
     ok,
-    sandboxId: sandbox.id,
+    sandboxId,
     node: node.stdout.trim(),
     env: env.stdout.trim(),
     repoLines: repo.stdout.split("\n").length,
   }, null, 2));
   if (!ok) process.exitCode = 1;
 } finally {
-  await provider.deleteSandbox(sandbox);
+  await sandbox.deleteSandbox(sandboxId);
 }
