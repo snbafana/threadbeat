@@ -27,6 +27,6 @@ assert.equal(task.json.task.status, "succeeded", `task failed: ${JSON.stringify(
 
 const events = await api("GET", `/api/events?taskId=${taskId}&limit=100`);
 const types = events.json.events.map((e: { type: string }) => e.type);
-assert.ok(types.includes("sandbox_deleted"));
+assert.ok(types.includes("sandbox.deleted"));
 
 console.log(JSON.stringify({ ok: true, taskId, events: types.length }, null, 2));

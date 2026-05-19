@@ -5,11 +5,10 @@ Threadbeat is currently a minimal Daytona-backed task substrate.
 It is intentionally not an agent framework yet. V1 proves the smallest useful
 control-plane primitives:
 
-- `tasks`: queued JSON command specs
-- `runs`: one execution attempt for a task
-- `events`: lifecycle and command output rows
+- `tasks`: queued JSON command specs and execution state
+- `events`: ordered task output and lifecycle stream
 - Daytona sandboxes: ephemeral execution environments
-- Postgres: durable task/run/event storage
+- Postgres: durable task/event storage
 
 No Pi runtime, heartbeat scheduler, durable agent repo, artifacts table, replay
 system, TUI, or orchestration DAG is part of this cut.
@@ -31,6 +30,12 @@ DAYTONA_API_KEY=...
 The DB layer uses Drizzle with `postgres` and disables prepared statements for
 Supabase pooler compatibility.
 
+Before running the server against a fresh database, push the Drizzle schema:
+
+```bash
+npm run db:push
+```
+
 Optional tuning:
 
 ```bash
@@ -50,15 +55,13 @@ Daytona sandboxes.
 npm run dev
 ```
 
-The server bootstraps `schema/bootstrap.sql`, then exposes:
+The server assumes the Drizzle schema has already been pushed, then exposes:
 
 - `GET /health`
 - `POST /api/tasks`
 - `GET /api/tasks`
 - `GET /api/tasks/:id`
-- `GET /api/runs`
-- `GET /api/runs/:id`
-- `GET /api/events?taskId=...&runId=...&after=...`
+- `GET /api/events?taskId=...&after=...`
 - `POST /api/worker/drain-once`
 
 Drizzle schema/config live in `drizzle/schema.ts` and `drizzle.config.ts`.
