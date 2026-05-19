@@ -1,0 +1,90 @@
+[
+  {
+    "name": "static-octocat",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/octocat/Hello-World.git", "branch": "master" },
+      "main": { "cmd": "ls -la", "timeoutSeconds": 30 },
+      "verify": [{ "cmd": "test -f README || test -f README.md", "timeoutSeconds": 30 }]
+    }
+  },
+  {
+    "name": "node-vite",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/vitejs/vite.git" },
+      "main": { "cmd": "node --version && npm --version", "timeoutSeconds": 30 }
+    }
+  },
+  {
+    "name": "node-express",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/expressjs/express.git" },
+      "main": { "cmd": "node --version && test -f package.json", "timeoutSeconds": 45 }
+    }
+  },
+  {
+    "name": "python-sample",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/pallets/flask.git" },
+      "main": { "cmd": "python --version || python3 --version", "timeoutSeconds": 30 }
+    }
+  },
+  {
+    "name": "python-requests",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/psf/requests.git" },
+      "main": { "cmd": "python --version || python3 --version", "timeoutSeconds": 30 },
+      "verify": [{ "cmd": "test -f pyproject.toml", "timeoutSeconds": 30 }]
+    }
+  },
+  {
+    "name": "go-example",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/golang/example.git" },
+      "main": { "cmd": "git status --short && find . -maxdepth 2 -name go.mod | head -5", "timeoutSeconds": 45 }
+    }
+  },
+  {
+    "name": "rust-by-example",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/rust-lang/rust-by-example.git" },
+      "main": { "cmd": "test -f book.toml && git status --short", "timeoutSeconds": 60 }
+    }
+  },
+  {
+    "name": "branch-checkout",
+    "expect": "succeeded",
+    "spec": {
+      "repo": { "url": "https://github.com/octocat/Hello-World.git", "branch": "master" },
+      "main": { "cmd": "git branch --show-current | grep master", "timeoutSeconds": 30 }
+    }
+  },
+  {
+    "name": "no-repo-command",
+    "expect": "succeeded",
+    "spec": {
+      "main": { "cmd": "pwd && echo no-repo-ok", "timeoutSeconds": 30 }
+    }
+  },
+  {
+    "name": "missing-file-failure",
+    "expect": "failed",
+    "spec": {
+      "repo": { "url": "https://github.com/octocat/Hello-World.git", "branch": "master" },
+      "main": { "cmd": "test -f definitely-not-a-real-file", "timeoutSeconds": 30 }
+    }
+  },
+  {
+    "name": "intentional-failure",
+    "expect": "failed",
+    "spec": {
+      "main": { "cmd": "exit 7", "timeoutSeconds": 30 }
+    }
+  }
+]

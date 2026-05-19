@@ -1,384 +1,167 @@
-import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
 import path from "node:path";
-import { createClient, type Client } from "@libsql/client";
+import { fileURLToPath } from "node:url";
 
-import { nextTickIso, nowIso } from "./time.js";
-import type {
-  HeartbeatEventRow,
-  HeartbeatRow,
-  HeartbeatRunRow,
-  HeartbeatStatus,
-  RunStatus,
-  SessionRow,
-} from "./types.js";
+import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 
-type SqlValue = string | number | null;
+import { events, runs, tasks } from "../drizzle/schema.js";
+import { config } from "./config.js";
 
-export type HeartbeatUpdateInput = {
-  title: string;
-  cadence: number;
-  contents: string;
-  provider: string;
-  model: string;
-  status: HeartbeatStatus;
-};
+const client = postgres(config.databaseUrl, { prepare: false });
+const db = drizzle(client);
 
-export class Database {
-  private readonly client: Client;
+export async function bootstrap() {
+  const schemaPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../schema/bootstrap.sql");
+  await client.unsafe(await fs.readFile(schemaPath, "utf8"));
+}
 
-  constructor(
-    private readonly dbUrl: string,
-    private readonly schemaPath: string,
-    authToken?: string,
-  ) {
-    if (dbUrl.startsWith("file:")) {
-      const filePath = dbUrl.slice("file:".length);
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    }
-    this.client = createClient({ url: dbUrl, authToken });
-  }
+export async function createTask(spec: Record<string, unknown>) {
+  const [task] = await db.insert(tasks).values({
+    id: randomUUID(),
+    status: "queued",
+    specJson: spec,
+  }).returning();
+  return taskFromRow(task);
+}
 
-  async close(): Promise<void> {
-    this.client.close();
-  }
+export async function listTasks() {
+  return (await db.select().from(tasks).orderBy(desc(tasks.createdAt))).map(taskFromRow);
+}
 
-  async initSchema(): Promise<void> {
-    const schema = fs.readFileSync(this.schemaPath, "utf8");
-    for (const statement of splitSql(schema)) {
-      await this.client.execute(statement);
-    }
-    await this.ensureHeartbeatColumns();
-  }
+export async function getTask(id: string) {
+  const [task] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
+  return task ? taskFromRow(task) : null;
+}
 
-  async createSession(name: string): Promise<SessionRow> {
-    const id = randomId("ses");
-    await this.client.execute({
-      sql: "INSERT INTO sessions (id, name, status) VALUES (?, ?, 'active')",
-      args: [id, name],
-    });
-    const row = await this.getSession(id);
-    if (!row) throw new Error("created session could not be loaded");
-    return row;
-  }
+export async function claimNextTask() {
+  const [task] = await db.select().from(tasks).where(eq(tasks.status, "queued")).orderBy(asc(tasks.createdAt)).limit(1);
+  if (!task) return null;
+  const [claimed] = await db.update(tasks).set({ status: "claimed" }).where(eq(tasks.id, task.id)).returning();
+  return claimed ? taskFromRow(claimed) : null;
+}
 
-  async getSession(id: string): Promise<SessionRow | null> {
-    return this.first<SessionRow>(
-      "SELECT id, name, status, created_at, updated_at FROM sessions WHERE id = ?",
-      [id],
-    );
-  }
-
-  async listSessions(): Promise<SessionRow[]> {
-    return this.all<SessionRow>(
-      "SELECT id, name, status, created_at, updated_at FROM sessions ORDER BY created_at DESC",
-    );
-  }
-
-  async createHeartbeat(input: {
-    sessionId: string;
-    title: string;
-    cadence: number;
-    contents: string;
-    provider: string;
-    model: string;
-    status: HeartbeatStatus;
-  }): Promise<HeartbeatRow> {
-    const id = randomId("hb");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeats (
-          id, session_id, title, cadence, contents, provider, model, last_tick, next_tick, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.sessionId,
-        input.title,
-        input.cadence,
-        input.contents,
-        input.provider,
-        input.model,
-        null,
-        nextTickIso(input.cadence, input.status),
-        input.status,
-      ],
-    });
-    const row = await this.getHeartbeat(id);
-    if (!row) throw new Error("created heartbeat could not be loaded");
-    return row;
-  }
-
-  async getHeartbeat(id: string): Promise<HeartbeatRow | null> {
-    return this.first<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listHeartbeats(sessionId?: string): Promise<HeartbeatRow[]> {
-    if (sessionId) {
-      return this.all<HeartbeatRow>(
-        `
-          SELECT id, session_id, title, cadence, contents, last_tick, next_tick,
-                 provider, model, status, created_at, updated_at
-          FROM heartbeats
-          WHERE session_id = ?
-          ORDER BY created_at DESC
-        `,
-        [sessionId],
-      );
-    }
-    return this.all<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        ORDER BY created_at DESC
-      `,
-    );
-  }
-
-  async updateHeartbeat(
-    id: string,
-    input: HeartbeatUpdateInput,
-  ): Promise<HeartbeatRow | null> {
-    await this.client.execute({
-      sql: `
-        UPDATE heartbeats
-        SET title = ?, cadence = ?, contents = ?, provider = ?, model = ?, next_tick = ?,
-            status = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [
-        input.title,
-        input.cadence,
-        input.contents,
-        input.provider,
-        input.model,
-        nextTickIso(input.cadence, input.status),
-        input.status,
-        id,
-      ],
-    });
-    return this.getHeartbeat(id);
-  }
-
-  async tickHeartbeat(id: string): Promise<HeartbeatRow | null> {
-    const heartbeat = await this.getHeartbeat(id);
-    if (!heartbeat) return null;
-    await this.client.execute({
-      sql: `
-        UPDATE heartbeats
-        SET last_tick = ?, next_tick = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      args: [nowIso(), nextTickIso(heartbeat.cadence, heartbeat.status), id],
-    });
-    return this.getHeartbeat(id);
-  }
-
-  async listDueHeartbeats(limit: number): Promise<HeartbeatRow[]> {
-    return this.all<HeartbeatRow>(
-      `
-        SELECT id, session_id, title, cadence, contents, provider, model, last_tick, next_tick,
-               status, created_at, updated_at
-        FROM heartbeats
-        WHERE status = 'active'
-          AND (next_tick IS NULL OR next_tick <= ?)
-        ORDER BY COALESCE(next_tick, created_at) ASC, created_at ASC
-        LIMIT ?
-      `,
-      [nowIso(), limit],
-    );
-  }
-
-  async createRun(input: {
-    heartbeatId: string;
-    sessionId: string;
-    executor: string;
-    model: string | null;
-    status: RunStatus;
-    promptSnapshot: string;
-    output: string | null;
-    error: string | null;
-  }): Promise<HeartbeatRunRow> {
-    const id = randomId("run");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeat_runs (
-          id, heartbeat_id, session_id, executor, model, status,
-          prompt_snapshot, output, error, completed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.heartbeatId,
-        input.sessionId,
-        input.executor,
-        input.model,
-        input.status,
-        input.promptSnapshot,
-        input.output,
-        input.error,
-        nowIso(),
-      ],
-    });
-    const row = await this.getRun(id);
-    if (!row) throw new Error("created run could not be loaded");
-    return row;
-  }
-
-  async createEvent(input: {
-    heartbeatId?: string | null;
-    runId?: string | null;
-    sessionId?: string | null;
-    source: string;
-    type: string;
-    message?: string | null;
-    data?: unknown;
-  }): Promise<HeartbeatEventRow> {
-    const id = randomId("evt");
-    await this.client.execute({
-      sql: `
-        INSERT INTO heartbeat_events (
-          id, heartbeat_id, run_id, session_id, source, type, message, data
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        id,
-        input.heartbeatId ?? null,
-        input.runId ?? null,
-        input.sessionId ?? null,
-        input.source,
-        input.type,
-        input.message ?? null,
-        input.data === undefined ? null : JSON.stringify(input.data),
-      ],
-    });
-    const row = await this.getEvent(id);
-    if (!row) throw new Error("created event could not be loaded");
-    return row;
-  }
-
-  async getEvent(id: string): Promise<HeartbeatEventRow | null> {
-    return this.first<HeartbeatEventRow>(
-      `
-        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
-        FROM heartbeat_events
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listEvents(filters: {
-    heartbeatId?: string;
-    runId?: string;
-    sessionId?: string;
-    limit?: number;
-  }): Promise<HeartbeatEventRow[]> {
-    const conditions: string[] = [];
-    const args: SqlValue[] = [];
-    if (filters.heartbeatId) {
-      conditions.push("heartbeat_id = ?");
-      args.push(filters.heartbeatId);
-    }
-    if (filters.runId) {
-      conditions.push("run_id = ?");
-      args.push(filters.runId);
-    }
-    if (filters.sessionId) {
-      conditions.push("session_id = ?");
-      args.push(filters.sessionId);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    args.push(filters.limit ?? 100);
-    return this.all<HeartbeatEventRow>(
-      `
-        SELECT id, heartbeat_id, run_id, session_id, source, type, message, data, created_at
-        FROM heartbeat_events
-        ${where}
-        ORDER BY created_at DESC
-        LIMIT ?
-      `,
-      args,
-    );
-  }
-
-  async getRun(id: string): Promise<HeartbeatRunRow | null> {
-    return this.first<HeartbeatRunRow>(
-      `
-        SELECT id, heartbeat_id, session_id, executor, model, status,
-               prompt_snapshot, output, error, created_at, completed_at
-        FROM heartbeat_runs
-        WHERE id = ?
-      `,
-      [id],
-    );
-  }
-
-  async listRuns(filters: {
-    heartbeatId?: string;
-    sessionId?: string;
-  }): Promise<HeartbeatRunRow[]> {
-    const conditions: string[] = [];
-    const args: SqlValue[] = [];
-    if (filters.heartbeatId) {
-      conditions.push("heartbeat_id = ?");
-      args.push(filters.heartbeatId);
-    }
-    if (filters.sessionId) {
-      conditions.push("session_id = ?");
-      args.push(filters.sessionId);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    return this.all<HeartbeatRunRow>(
-      `
-        SELECT id, heartbeat_id, session_id, executor, model, status,
-               prompt_snapshot, output, error, created_at, completed_at
-        FROM heartbeat_runs
-        ${where}
-        ORDER BY created_at DESC
-      `,
-      args,
-    );
-  }
-
-  private async first<T>(sql: string, args: SqlValue[] = []): Promise<T | null> {
-    const result = await this.client.execute({ sql, args });
-    return (result.rows[0] as T | undefined) ?? null;
-  }
-
-  private async all<T>(sql: string, args: SqlValue[] = []): Promise<T[]> {
-    const result = await this.client.execute({ sql, args });
-    return result.rows as T[];
-  }
-
-  private async ensureHeartbeatColumns(): Promise<void> {
-    const columns = await this.all<{ name: string }>("PRAGMA table_info(heartbeats)");
-    const names = new Set(columns.map((column) => column.name));
-    if (!names.has("provider")) {
-      await this.client.execute(
-        "ALTER TABLE heartbeats ADD COLUMN provider TEXT NOT NULL DEFAULT 'deepseek'",
-      );
-    }
-    if (!names.has("model")) {
-      await this.client.execute(
-        "ALTER TABLE heartbeats ADD COLUMN model TEXT NOT NULL DEFAULT 'deepseek-v4-flash'",
-      );
-    }
+export async function updateTaskStatus(id: string, status: string, error?: string) {
+  if (status === "running") {
+    await db.update(tasks).set({ status, startedAt: sql`COALESCE(${tasks.startedAt}, now())` }).where(eq(tasks.id, id));
+  } else if (status === "succeeded") {
+    await db.update(tasks).set({ status, completedAt: new Date(), error: null }).where(eq(tasks.id, id));
+  } else if (status === "failed") {
+    await db.update(tasks).set({ status, completedAt: new Date(), error }).where(eq(tasks.id, id));
   }
 }
 
-const randomId = (prefix: string): string => `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
+export async function createRun(taskId: string) {
+  const [run] = await db.insert(runs).values({
+    id: randomUUID(),
+    taskId,
+    status: "running",
+    startedAt: new Date(),
+  }).returning();
+  return runFromRow(run);
+}
 
-const splitSql = (schema: string): string[] =>
-  schema
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter(Boolean);
+export async function updateRun(runId: string, fields: { sandboxId?: string; status?: string; error?: string }) {
+  if (fields.sandboxId) await db.update(runs).set({ sandboxId: fields.sandboxId }).where(eq(runs.id, runId));
+  if (fields.status === "succeeded") {
+    await db.update(runs).set({ status: "succeeded", completedAt: new Date(), error: null }).where(eq(runs.id, runId));
+  } else if (fields.status === "failed") {
+    await db.update(runs).set({ status: "failed", completedAt: new Date(), error: fields.error }).where(eq(runs.id, runId));
+  }
+}
+
+export async function listRuns() {
+  return (await db.select().from(runs).orderBy(desc(runs.createdAt))).map(runFromRow);
+}
+
+export async function getRun(id: string) {
+  const [run] = await db.select().from(runs).where(eq(runs.id, id)).limit(1);
+  return run ? runFromRow(run) : null;
+}
+
+export async function appendEvent(
+  taskId: string,
+  type: string,
+  source: string,
+  runId?: string,
+  message?: string,
+  data?: Record<string, unknown>,
+) {
+  const [event] = await db.insert(events).values({
+    id: randomUUID(),
+    taskId,
+    runId,
+    type,
+    source,
+    message,
+    dataJson: data,
+  }).returning();
+  return eventFromRow(event);
+}
+
+export async function listEvents(filter: { taskId?: string; runId?: string; after?: number; limit?: number }) {
+  const clauses = [
+    filter.taskId ? eq(events.taskId, filter.taskId) : undefined,
+    filter.runId ? eq(events.runId, filter.runId) : undefined,
+    filter.after !== undefined ? gt(events.seq, filter.after) : undefined,
+  ].filter(Boolean);
+
+  const query = db
+    .select()
+    .from(events)
+    .where(clauses.length ? and(...clauses) : undefined)
+    .orderBy(asc(events.seq))
+    .limit(Math.min(filter.limit ?? 100, 500));
+
+  return (await query).map(eventFromRow);
+}
+
+export async function close() {
+  await client.end();
+}
+
+function taskFromRow(row: typeof tasks.$inferSelect) {
+  return {
+    id: row.id,
+    status: row.status,
+    spec: row.specJson,
+    createdAt: iso(row.createdAt),
+    startedAt: iso(row.startedAt),
+    completedAt: iso(row.completedAt),
+    error: row.error ?? undefined,
+  };
+}
+
+function runFromRow(row: typeof runs.$inferSelect) {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    status: row.status,
+    sandboxId: row.sandboxId ?? undefined,
+    createdAt: iso(row.createdAt),
+    startedAt: iso(row.startedAt),
+    completedAt: iso(row.completedAt),
+    error: row.error ?? undefined,
+  };
+}
+
+function eventFromRow(row: typeof events.$inferSelect) {
+  return {
+    id: row.id,
+    seq: row.seq,
+    taskId: row.taskId,
+    runId: row.runId ?? undefined,
+    type: row.type,
+    source: row.source,
+    message: row.message ?? undefined,
+    data: row.dataJson ?? undefined,
+    createdAt: iso(row.createdAt),
+  };
+}
+
+function iso(value?: Date | string | null) {
+  if (!value) return undefined;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}

@@ -1,11 +1,13 @@
-import { loadSettings } from "./config.js";
-import { buildServer } from "./server.js";
+import { config } from "./config.js";
+import * as db from "./db.js";
+import { createApp } from "./server.js";
 
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled promise rejection", reason);
-});
+await db.bootstrap();
 
-const settings = loadSettings();
-const { app } = await buildServer(settings);
+const app = createApp();
 
-await app.listen({ host: "0.0.0.0", port: settings.port });
+process.on("SIGINT", () => void app.close().then(() => db.close()).then(() => process.exit(0)));
+process.on("SIGTERM", () => void app.close().then(() => db.close()).then(() => process.exit(0)));
+
+await app.listen({ host: config.host, port: config.port });
+console.log(`threadbeat listening on http://${config.host}:${config.port}`);
