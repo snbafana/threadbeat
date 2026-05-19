@@ -137,8 +137,7 @@ npm run smoke:matrix
 
 ## Current Daytona Note
 
-The Daytona `executeCommand` SDK path currently tries to execute through a zsh
-path that is missing in the default TypeScript sandbox. The adapter therefore
-runs command specs through Daytona `codeRun` with a small shell wrapper. Keep
-that workaround inside `src/daytonaProvider.ts` unless Daytona command execution
-is proven fixed.
+The Daytona adapter creates sandboxes from a small image with zsh, bash, git,
+node, and npm installed, then executes commands through short-lived Daytona shell
+sessions. Keep Daytona execution details inside `src/daytonaProvider.ts` unless
+another runtime path is proven necessary by `npm run smoke:daytona`.

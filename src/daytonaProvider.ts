@@ -1,4 +1,4 @@
-import { Daytona } from "@daytona/sdk";
+import { Daytona, Image } from "@daytona/sdk";
 
 import { config } from "./config.js";
 
@@ -7,6 +7,7 @@ const daytona = new Daytona({
   apiUrl: config.daytonaApiUrl,
   target: config.daytonaTarget,
 });
+const sandboxImage = Image.debianSlim("3.12").runCommands("apt-get install -y zsh bash git nodejs npm");
 
 const sandboxes = new Map<string, DaytonaSandbox>();
 
@@ -16,17 +17,24 @@ type DaytonaSandbox = {
     clone(url: string, path: string, branch?: string, commit?: string): Promise<void>;
   };
   process: {
-    codeRun(code: string, params?: { env?: Record<string, string> }, timeout?: number): Promise<{ exitCode: number; result: string }>;
+    createSession(sessionId: string): Promise<void>;
+    deleteSession(sessionId: string): Promise<void>;
+    executeSessionCommand(
+      sessionId: string,
+      request: { command: string; suppressInputEcho?: boolean },
+      timeout?: number,
+    ): Promise<{ exitCode?: number; output?: string; stdout?: string; stderr?: string }>;
   };
   delete(timeout?: number): Promise<void>;
 };
 
 export async function createSandbox(env: Record<string, string>) {
   const sandbox = (await daytona.create({
+    image: sandboxImage,
     language: "typescript",
     envVars: env,
     autoDeleteInterval: 60,
-  })) as DaytonaSandbox;
+  }, { timeout: 180 })) as DaytonaSandbox;
   sandboxes.set(sandbox.id, sandbox);
   return sandbox.id;
 }
@@ -36,12 +44,23 @@ export async function cloneRepo(sandboxId: string, url: string, branch?: string,
 }
 
 export async function runCommand(sandboxId: string, cmd: string, cwd: string, env: Record<string, string>, timeoutSeconds: number) {
-  const response = await lookup(sandboxId).process.codeRun(
-    shellWrapper(cmd, cwd, env, timeoutSeconds),
-    { env },
-    timeoutSeconds + 5,
-  );
-  return { exitCode: response.exitCode, stdout: response.result };
+  const sessionId = `threadbeat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const exitMarker = `__THREADBEAT_EXIT_CODE_${Math.random().toString(36).slice(2).toUpperCase()}__`;
+  const process = lookup(sandboxId).process;
+  await process.createSession(sessionId);
+  try {
+    const response = await process.executeSessionCommand(sessionId, {
+      command: commandWithContext(cmd, cwd, env, exitMarker),
+      suppressInputEcho: true,
+    }, timeoutSeconds + 5);
+    const stdout = response.stdout ?? response.output ?? "";
+    return {
+      exitCode: parseExitCode(stdout, exitMarker),
+      stdout: stripExitCode(stdout, exitMarker),
+    };
+  } finally {
+    await process.deleteSession(sessionId);
+  }
 }
 
 export async function deleteSandbox(sandboxId: string) {
@@ -57,33 +76,33 @@ function lookup(sandboxId: string): DaytonaSandbox {
   return sandbox;
 }
 
-const shellWrapper = (
-  command: string,
-  cwd: string,
-  env: Record<string, string>,
-  timeoutSeconds: number,
-): string => `
-import fs from "node:fs";
-import { spawn } from "node:child_process";
+function commandWithContext(command: string, cwd: string, env: Record<string, string>, exitMarker: string) {
+  const exports = Object.entries(env).map(([name, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`invalid environment variable name: ${name}`);
+    return `export ${name}=${shellQuote(value)}`;
+  });
+  return [
+    `mkdir -p ${shellQuote(cwd)} && cd ${shellQuote(cwd)}`,
+    ...exports,
+    `(${command})`,
+    `code=$?`,
+    `printf '\\n${exitMarker}=%s\\n' "$code"`,
+  ].join("; ");
+}
 
-const cwd = ${JSON.stringify(cwd)};
-fs.mkdirSync(cwd, { recursive: true });
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
 
-const child = spawn("/bin/sh", ["-lc", ${JSON.stringify(command)}], {
-  cwd,
-  env: { ...process.env, ...${JSON.stringify(env)} },
-  stdio: ["ignore", "pipe", "pipe"],
-});
+function parseExitCode(stdout: string, exitMarker: string) {
+  const match = stdout.match(new RegExp(`${escapeRegExp(exitMarker)}=(\\d+)`));
+  return match ? Number(match[1]) : 1;
+}
 
-const timer = setTimeout(() => {
-  child.kill("SIGTERM");
-}, ${timeoutSeconds * 1000});
+function stripExitCode(stdout: string, exitMarker: string) {
+  return stdout.replace(new RegExp(`\\n?${escapeRegExp(exitMarker)}=\\d+\\n?`, "g"), "");
+}
 
-child.stdout.on("data", (chunk) => process.stdout.write(chunk));
-child.stderr.on("data", (chunk) => process.stdout.write(chunk));
-child.on("exit", (code, signal) => {
-  clearTimeout(timer);
-  if (signal) process.exit(124);
-  process.exit(code ?? 1);
-});
-`;
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
