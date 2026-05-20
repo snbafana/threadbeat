@@ -9,6 +9,28 @@ export function createApp() {
 
   app.get("/health", async () => ({ ok: true, service: "threadbeat" }));
 
+  app.post("/api/agents", async (request, reply) => {
+    try {
+      const input = parseAgentInput(request.body);
+      const agent = await db.createAgent(input);
+      return { ok: true, agent };
+    } catch (error) {
+      reply.code(400);
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  app.get("/api/agents", async () => ({ ok: true, agents: await db.listAgents() }));
+
+  app.get<{ Params: { id: string } }>("/api/agents/:id", async (request, reply) => {
+    const agent = await db.getAgent(request.params.id);
+    if (!agent) {
+      reply.code(404);
+      return { ok: false, error: "agent not found" };
+    }
+    return { ok: true, agent };
+  });
+
   app.post("/api/tasks", async (request, reply) => {
     try {
       const spec = request.body as Record<string, unknown>;
@@ -67,4 +89,25 @@ function queryInteger(value: string | undefined, name: string) {
   if (!/^\d+$/.test(value)) throw new Error(`${name} must be a non-negative integer`);
   const number = Number(value);
   return number;
+}
+
+function parseAgentInput(body: unknown) {
+  if (!body || typeof body !== "object") throw new Error("agent body is required");
+  const input = body as Record<string, unknown>;
+  const id = optionalString(input.id, "id");
+  const name = requiredString(input.name, "name");
+  const repoUrl = requiredString(input.repoUrl ?? input.repo, "repoUrl");
+  const defaultBranch = requiredString(input.defaultBranch ?? input.default_branch, "defaultBranch");
+  return { id, name, repoUrl, defaultBranch };
+}
+
+function requiredString(value: unknown, name: string) {
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`${name} is required`);
+  return value.trim();
+}
+
+function optionalString(value: unknown, name: string) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`${name} must be a non-empty string`);
+  return value.trim();
 }

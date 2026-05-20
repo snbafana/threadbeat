@@ -4,13 +4,39 @@ import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { events, tasks, taskStatus, type EventType, type TaskStatus } from "../drizzle/schema.js";
+import { agents, events, tasks, taskStatus, type EventType, type TaskStatus } from "../drizzle/schema.js";
 import { config } from "./config.js";
 
 if (!config.databaseUrl) throw new Error("DATABASE_URL is required");
 
 const client = postgres(config.databaseUrl, { prepare: false });
 const db = drizzle(client);
+
+export type CreateAgentInput = {
+  id?: string;
+  name: string;
+  repoUrl: string;
+  defaultBranch: string;
+};
+
+export async function createAgent(input: CreateAgentInput) {
+  const [agent] = await db.insert(agents).values({
+    id: input.id ?? randomUUID(),
+    name: input.name,
+    repoUrl: input.repoUrl,
+    defaultBranch: input.defaultBranch,
+  }).returning();
+  return agentFromRow(agent);
+}
+
+export async function listAgents() {
+  return (await db.select().from(agents).orderBy(asc(agents.name))).map(agentFromRow);
+}
+
+export async function getAgent(id: string) {
+  const [agent] = await db.select().from(agents).where(eq(agents.id, id)).limit(1);
+  return agent ? agentFromRow(agent) : null;
+}
 
 export async function createTask(spec: Record<string, unknown>) {
   const [task] = await db.insert(tasks).values({
@@ -104,6 +130,15 @@ function eventFromRow(row: typeof events.$inferSelect) {
     source: row.source,
     data: row.dataJson ?? undefined,
     createdAt: iso(row.createdAt),
+  };
+}
+
+function agentFromRow(row: typeof agents.$inferSelect) {
+  return {
+    id: row.id,
+    name: row.name,
+    repoUrl: row.repoUrl,
+    defaultBranch: row.defaultBranch,
   };
 }
 

@@ -86,6 +86,13 @@ export const eventType = {
   errorRaised: "error.raised",
 } as const satisfies Record<string, EventType>;
 
+export const agents = pgTable("agents", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  repoUrl: text("repo_url").notNull(),
+  defaultBranch: text("default_branch").notNull(),
+}).enableRLS();
+
 export const tasks = pgTable("tasks", {
   id: text("id").primaryKey(),
   status: taskStatusEnum("status").notNull(),
