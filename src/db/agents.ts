@@ -5,7 +5,7 @@ import { createInsertSchema } from "drizzle-zod";
 import type { z } from "zod";
 
 import { agents } from "../../drizzle/schema.js";
-import { db } from "./db.js";
+import { db } from "./client.js";
 
 const text = (schema: z.ZodString) => schema.trim().min(1);
 

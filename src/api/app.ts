@@ -1,11 +1,11 @@
 import Fastify from "fastify";
 import { z } from "zod";
 
-import { errorMessage } from "./input.js";
+import { errorMessage } from "../input.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
-import { drainOnce } from "./worker.js";
+import { drainOnce } from "../worker/loop.js";
 
 const Drain = z.object({
   limit: z.number().int().positive().optional(),

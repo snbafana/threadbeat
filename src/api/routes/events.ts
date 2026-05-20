@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { listEvents } from "../store/events.js";
+import { listEvents } from "../../db/events.js";
 
 const EventsQuery = z.object({
   taskId: z.string().trim().min(1).optional(),

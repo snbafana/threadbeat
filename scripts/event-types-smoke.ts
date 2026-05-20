@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 
 import { eventType, eventTypeValues, taskStatus } from "../drizzle/schema.js";
-import { close } from "../src/store/db.js";
-import { appendEvent } from "../src/store/events.js";
-import { createApp } from "../src/app.js";
-import { updateTaskStatus } from "../src/store/tasks.js";
+import { close } from "../src/db/client.js";
+import { appendEvent } from "../src/db/events.js";
+import { createApp } from "../src/api/app.js";
+import { updateTaskStatus } from "../src/db/tasks.js";
 import { assertTaskEventStream, type TaskEvent } from "./smoke-helpers.js";
 
 const app = createApp();

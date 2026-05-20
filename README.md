@@ -11,6 +11,7 @@ control-plane primitives:
 - `events`: ordered task output and lifecycle stream
 - Daytona sandboxes: ephemeral execution environments
 - Postgres: durable task/event storage
+- worker loop: server-owned task claiming with explicit concurrency
 
 No Pi runtime, heartbeat scheduler, artifacts table, replay system, TUI, run
 table, repo mirror, or orchestration DAG is part of this cut.
@@ -38,7 +39,7 @@ Before running the server against a fresh database, push the Drizzle schema:
 npm run db:push
 ```
 
-Server bind address, worker limits, command timeouts, and sandbox env allowlist
+Server bind address, worker concurrency, command timeouts, and sandbox env allowlist
 live in `src/config.ts`. Only allowlisted secret env vars (for example
 `DEEPSEEK_API_KEY`) are copied into Daytona sandboxes from the host environment.
 
@@ -48,7 +49,12 @@ live in `src/config.ts`. Only allowlisted secret env vars (for example
 npm run dev
 ```
 
-The server assumes the Drizzle schema has already been pushed, then exposes:
+The server assumes the Drizzle schema has already been pushed, starts the API,
+and starts a worker loop in the same process. The worker claims queued tasks up
+to the concurrency defined in `src/config.ts`; `/api/worker/drain-once` remains
+as a manual debug path.
+
+The API exposes:
 
 - `GET /health`
 - `POST /api/agents`
@@ -160,5 +166,5 @@ npm run smoke:matrix
 
 The Daytona adapter creates sandboxes from a small image with zsh, bash, git,
 node, and npm installed, then executes commands through short-lived Daytona shell
-sessions. Keep Daytona execution details inside `src/daytonaProvider.ts` unless
+sessions. Keep Daytona execution details inside `src/sandbox/daytona.ts` unless
 another runtime path is proven necessary by `npm run smoke:daytona`.
