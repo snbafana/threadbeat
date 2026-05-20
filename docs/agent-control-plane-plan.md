@@ -1,4 +1,4 @@
-# Agent Control Plane Plan
+# Agent Control Plane State
 
 ## Current Definition
 
@@ -11,9 +11,19 @@ An agent is a registry entry for a GitHub repo:
 
 It is not a runtime, sandbox, scheduler row, attempt, or repo metadata mirror.
 
+An agent task is:
+
+1. resolve `agent_id` to `repo_url` and `default_branch`;
+2. clone that repo in Daytona;
+3. create a `runs/{task_id}` branch;
+4. materialize `.threadbeat/task.json` plus input files;
+5. run `threadbeat-agent.mjs` or `threadbeat-agent.sh`;
+6. commit and push the run branch;
+7. stream all lifecycle/output through `events`.
+
 ## Proven Primitives
 
-The script harness has already proven these primitives end to end:
+The smoke harness proves these primitives end to end:
 
 - create/delete Daytona sandboxes;
 - clone the current Threadbeat repo;
@@ -25,22 +35,35 @@ The script harness has already proven these primitives end to end:
 - run realistic Python finance graph generation and artifact checks;
 - stream task lifecycle/stdout through `events`;
 - roundtrip every declared event enum through DB/API event streaming.
+- register a GitHub repo as an agent, submit an ask, run the agent, push a
+  versioned `runs/{task_id}` branch, verify branch artifacts, and delete the
+  disposable remote.
 
-## Productionization Order
+## Current Abstraction
 
-1. Keep `agents` as the thin GitHub repo registry.
-2. Add `agent_id` to `tasks` only when task submission needs to resolve a repo from the registry.
-3. Teach `POST /api/agents/:id/tasks` to expand the agent into a normal task spec:
-   - `repo.url = agent.repo_url`
-   - `repo.branch = agent.default_branch`
-   - setup/main/verify stay in `spec_json`
-4. Move the sample Pi setup from scripts into a production step runner only after the API can express an agent-backed task.
-5. Move real Pi `createAgentSession` into an `agent` task step kind:
-   - no runtime registry;
-   - one Pi implementation;
-   - emit model/session events as it runs.
-6. Move GitHub repo create/push/clone/delete into explicit command/tool steps only if command-based execution becomes too fragile.
-7. Preserve `tasks` as the execution unit and `events` as the return stream.
+- `src/agents.ts`: CRUD for the repo registry only.
+- `src/tasks.ts`: task rows, agent link, status, and run branch.
+- `src/events.ts`: append/list event stream.
+- `src/runTask.ts`: execution owner for command tasks and agent tasks.
+- `src/steps.ts`: command execution, ask materialization, and agent entrypoint.
+- `src/gitRun.ts`: run branch, commit, and push.
+- `src/daytonaProvider.ts`: Daytona sandbox adapter.
+
+Keep this flat. Do not add a separate repo model, run table, provider registry,
+or scheduler state until a full-fidelity smoke proves the current model cannot
+carry the behavior.
+
+## Next Productionization
+
+1. Replace the script-owned sample Pi agent with a real agent repo that exposes
+   `threadbeat-agent.mjs` or `threadbeat-agent.sh`.
+2. Move the finance/Pi harness behavior into that agent repo, not into a new
+   Threadbeat runtime registry.
+3. Keep `POST /api/agents/:id/tasks` as the task assignment path: it submits an
+   ask to an agent, creates one task, and returns events.
+4. Add artifact indexing only after branch artifacts alone are insufficient for
+   a real consumer.
+5. Add attempts/runs only when retry semantics need separate durable rows.
 
 ## Tests To Keep
 

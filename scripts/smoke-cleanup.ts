@@ -1,5 +1,6 @@
-import * as db from "../src/db.js";
+import { close } from "../src/db.js";
 import { taskStatus } from "../drizzle/schema.js";
+import * as tasks from "../src/tasks.js";
 
 const smokeMarkers = [
   "event-types-smoke",
@@ -11,17 +12,17 @@ const smokeMarkers = [
 ];
 
 try {
-  const tasks = await db.listTasks();
-  const stale = tasks.filter((task) => (
+  const allTasks = await tasks.listTasks();
+  const stale = allTasks.filter((task) => (
     task.status === taskStatus.queued &&
     smokeMarkers.some((marker) => JSON.stringify(task.spec).includes(marker))
   ));
 
   for (const task of stale) {
-    await db.updateTaskStatus(task.id, taskStatus.failed, "stale smoke task cleaned before rerun");
+    await tasks.updateTaskStatus(task.id, taskStatus.failed, "stale smoke task cleaned before rerun");
   }
 
   console.log(JSON.stringify({ ok: true, cleaned: stale.length }, null, 2));
 } finally {
-  await db.close();
+  await close();
 }

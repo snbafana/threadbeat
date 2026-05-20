@@ -8,6 +8,7 @@ const scripts = [
   "scripts/pi-task-events-smoke.ts",
   "scripts/pi-agent-session-task-smoke.ts",
   "scripts/github-remote-task-smoke.ts",
+  "scripts/agent-finance-run-smoke.ts",
   "scripts/finance-graphs-task-smoke.ts",
 ];
 

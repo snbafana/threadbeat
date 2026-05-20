@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import * as db from "../src/db.js";
+import { close } from "../src/db.js";
 import { createApp } from "../src/server.js";
 import {
   assertTaskEventStream,
@@ -88,7 +88,7 @@ try {
   }, null, 2));
 } finally {
   await app.close();
-  await db.close();
+  await close();
 }
 
 function piAgentSessionCommand() {

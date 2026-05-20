@@ -95,6 +95,8 @@ export const agents = pgTable("agents", {
 
 export const tasks = pgTable("tasks", {
   id: text("id").primaryKey(),
+  agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
+  runBranch: text("run_branch"),
   status: taskStatusEnum("status").notNull(),
   specJson: jsonb("spec_json").notNull().$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

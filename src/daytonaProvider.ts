@@ -54,9 +54,11 @@ export async function runCommand(sandboxId: string, cmd: string, cwd: string, en
       suppressInputEcho: true,
     }, timeoutSeconds + 5);
     const stdout = response.stdout ?? response.output ?? "";
+    const stderr = response.stderr ?? "";
     return {
       exitCode: parseExitCode(stdout, exitMarker),
       stdout: stripExitCode(stdout, exitMarker),
+      stderr,
     };
   } finally {
     await process.deleteSession(sessionId);

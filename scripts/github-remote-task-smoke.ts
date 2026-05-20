@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-import * as db from "../src/db.js";
+import { close } from "../src/db.js";
 import { createApp } from "../src/server.js";
-import { assertTaskEventStream, piFixture, stdoutFromEvents, type TaskEvent } from "./smoke-helpers.js";
+import { allowlistWith, assertTaskEventStream, piFixture, stdoutFromEvents, type TaskEvent } from "./smoke-helpers.js";
 
 process.env.GITHUB_TOKEN ??= execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();
 process.env.THREADBEAT_SANDBOX_ENV_ALLOWLIST = allowlistWith(
@@ -82,13 +82,7 @@ try {
   }, null, 2));
 } finally {
   await app.close();
-  await db.close();
-}
-
-function allowlistWith(value: string | undefined, name: string) {
-  const entries = new Set((value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean));
-  entries.add(name);
-  return Array.from(entries).join(",");
+  await close();
 }
 
 function githubRemoteCommand() {
