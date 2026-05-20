@@ -17,6 +17,7 @@
     "lint": "eslint .",
     "test": "tsx test/smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts",
+    "railway:agent-run": "railway run tsx scripts/railway-agent-run.ts",
     "smoke:api": "tsx scripts/api-smoke.ts",
     "smoke:daytona": "tsx scripts/daytona-smoke.ts",
     "smoke:live": "tsx scripts/live-api-smoke.ts",
