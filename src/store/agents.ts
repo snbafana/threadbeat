@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { asc, eq } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
-import type { z } from "zod";
+import { z } from "zod";
 
 import { agents } from "../../drizzle/schema.js";
 import { db } from "./db.js";
@@ -16,12 +16,27 @@ export const NewAgent = createInsertSchema(agents, {
   defaultBranch: text,
 });
 
-export async function createAgent(input: z.infer<typeof NewAgent>) {
+export const AgentUpdate = z.object({
+  name: z.string().trim().min(1).optional(),
+  repoUrl: z.string().trim().min(1).optional(),
+  defaultBranch: z.string().trim().min(1).optional(),
+}).refine((input) => Object.keys(input).length > 0, {
+  message: "at least one agent field is required",
+});
+
+export async function upsertAgent(input: z.infer<typeof NewAgent>) {
   const [agent] = await db.insert(agents).values({
     id: input.id ?? randomUUID(),
     name: input.name,
     repoUrl: input.repoUrl,
     defaultBranch: input.defaultBranch,
+  }).onConflictDoUpdate({
+    target: agents.id,
+    set: {
+      name: input.name,
+      repoUrl: input.repoUrl,
+      defaultBranch: input.defaultBranch,
+    },
   }).returning();
   return agent;
 }
@@ -32,5 +47,15 @@ export async function listAgents() {
 
 export async function getAgent(id: string) {
   const [agent] = await db.select().from(agents).where(eq(agents.id, id)).limit(1);
+  return agent ?? null;
+}
+
+export async function updateAgent(id: string, input: z.infer<typeof AgentUpdate>) {
+  const [agent] = await db.update(agents).set(input).where(eq(agents.id, id)).returning();
+  return agent ?? null;
+}
+
+export async function deleteAgent(id: string) {
+  const [agent] = await db.delete(agents).where(eq(agents.id, id)).returning({ id: agents.id });
   return agent ?? null;
 }

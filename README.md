@@ -54,6 +54,8 @@ The server assumes the Drizzle schema has already been pushed, then exposes:
 - `POST /api/agents`
 - `GET /api/agents`
 - `GET /api/agents/:id`
+- `PUT /api/agents/:id`
+- `DELETE /api/agents/:id`
 - `POST /api/agents/:id/tasks`
 - `POST /api/tasks`
 - `GET /api/tasks`
