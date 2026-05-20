@@ -4,7 +4,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 
 import { tasks, taskStatus, type TaskStatus } from "../../drizzle/schema.js";
 import type { AgentTask, CommandTask } from "../input.js";
-import { db } from "./db.js";
+import { db } from "./client.js";
 
 export async function createTask(
   spec: CommandTask | AgentTask,

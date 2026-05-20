@@ -1,6 +1,6 @@
 import { Daytona, Image } from "@daytona/sdk";
 
-import { daytonaApiKey, daytonaApiUrl, daytonaTarget } from "./config.js";
+import { daytonaApiKey, daytonaApiUrl, daytonaTarget } from "../config.js";
 
 const daytona = new Daytona({
   apiKey: daytonaApiKey,

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, gt } from "drizzle-orm";
 
 import { events, type EventType } from "../../drizzle/schema.js";
-import { db } from "./db.js";
+import { db } from "./client.js";
 
 export async function appendEvent(
   taskId: string,

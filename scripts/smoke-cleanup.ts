@@ -1,6 +1,6 @@
-import { close } from "../src/store/db.js";
+import { close } from "../src/db/client.js";
 import { taskStatus } from "../drizzle/schema.js";
-import { listTasks, updateTaskStatus } from "../src/store/tasks.js";
+import { listTasks, updateTaskStatus } from "../src/db/tasks.js";
 
 const smokeMarkers = [
   "event-types-smoke",

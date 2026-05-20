@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { cloneRepo, createSandbox, deleteSandbox, runCommand } from "../src/daytonaProvider.js";
+import { cloneRepo, createSandbox, deleteSandbox, runCommand } from "../src/sandbox/daytona.js";
 
 const marker = `daytona-smoke-${Date.now()}`;
 const sandboxId = await createSandbox({ THREADBEAT_SMOKE_MARKER: marker });

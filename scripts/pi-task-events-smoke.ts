@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
-import { close } from "../src/store/db.js";
-import { createApp } from "../src/app.js";
+import { close } from "../src/db/client.js";
+import { createApp } from "../src/api/app.js";
 import {
   assertTaskEventStream,
   installSamplePiRepoCommand,

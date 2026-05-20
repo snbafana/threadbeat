@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 
-import { eventType } from "../../drizzle/schema.js";
-import { CommandTask, Id } from "../input.js";
-import { appendEvent } from "../store/events.js";
-import { createTask, getTask, listTasks } from "../store/tasks.js";
+import { eventType } from "../../../drizzle/schema.js";
+import { CommandTask, Id } from "../../input.js";
+import { appendEvent } from "../../db/events.js";
+import { createTask, getTask, listTasks } from "../../db/tasks.js";
 
 export function registerTaskRoutes(app: FastifyInstance) {
   app.post("/api/tasks", async (request) => {

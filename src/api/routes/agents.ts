@@ -1,10 +1,10 @@
 import type { FastifyInstance } from "fastify";
 
-import { eventType } from "../../drizzle/schema.js";
-import { AgentTask, Id } from "../input.js";
-import { appendEvent } from "../store/events.js";
-import { createAgent, getAgent, listAgents, NewAgent } from "../store/agents.js";
-import { createTask } from "../store/tasks.js";
+import { eventType } from "../../../drizzle/schema.js";
+import { AgentTask, Id } from "../../input.js";
+import { appendEvent } from "../../db/events.js";
+import { createAgent, getAgent, listAgents, NewAgent } from "../../db/agents.js";
+import { createTask } from "../../db/tasks.js";
 
 export function registerAgentRoutes(app: FastifyInstance) {
   app.post("/api/agents", async (request) => {

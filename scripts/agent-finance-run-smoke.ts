@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-import { close } from "../src/store/db.js";
-import { createApp } from "../src/app.js";
+import { close } from "../src/db/client.js";
+import { createApp } from "../src/api/app.js";
 import { assertTaskEventStream, stdoutFromEvents, type TaskEvent } from "./smoke-helpers.js";
 
 process.env.GITHUB_TOKEN ??= execFileSync("gh", ["auth", "token"], { encoding: "utf8" }).trim();

@@ -41,17 +41,16 @@ The smoke harness proves these primitives end to end:
 
 ## Current Abstraction
 
-- `src/store/agents.ts`: CRUD for the repo registry only.
-- `src/store/tasks.ts`: task rows, agent link, status, and run branch.
-- `src/store/events.ts`: append/list event stream.
-- `src/runTask.ts`: execution owner for command tasks and agent tasks.
-- `src/steps.ts`: command execution, ask materialization, and agent entrypoint.
-- `src/gitRun.ts`: run branch, commit, and push.
-- `src/daytonaProvider.ts`: Daytona sandbox adapter.
+- `src/api/`: HTTP routes only.
+- `src/worker/`: task claiming, manual drain, and server-owned concurrency loop.
+- `src/db/`: Drizzle client plus CRUD for agents, tasks, and events.
+- `src/sandbox/`: Daytona sandbox lifecycle and shell command event emission.
+- `src/agent/`: agent task execution, ask materialization, entrypoint invocation, and run branch push.
 
 Keep this flat. Do not add a separate repo model, run table, provider registry,
 or scheduler state until a full-fidelity smoke proves the current model cannot
-carry the behavior.
+carry the behavior. Process concurrency belongs in `src/worker/`, not in new DB
+tables.
 
 ## Next Productionization
 
