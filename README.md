@@ -38,19 +38,9 @@ Before running the server against a fresh database, push the Drizzle schema:
 npm run db:push
 ```
 
-Optional tuning:
-
-```bash
-THREADBEAT_HOST=127.0.0.1
-THREADBEAT_PORT=8000
-THREADBEAT_MAX_SANDBOXES=1
-THREADBEAT_COMMAND_TIMEOUT_SECONDS=120
-THREADBEAT_SANDBOX_ENV_ALLOWLIST=THREADBEAT_SMOKE_MARKER
-```
-
-Only env vars listed in `THREADBEAT_SANDBOX_ENV_ALLOWLIST` are injected into
-Daytona sandboxes. Live smokes add `GITHUB_TOKEN` and `DEEPSEEK_API_KEY` to the
-allowlist inside the relevant scripts instead of making those broad defaults.
+Server bind address, worker limits, command timeouts, and sandbox env allowlist
+live in `src/config.ts`. Only allowlisted secret env vars (for example
+`DEEPSEEK_API_KEY`) are copied into Daytona sandboxes from the host environment.
 
 ## Run
 

@@ -1,11 +1,11 @@
 import { Daytona, Image } from "@daytona/sdk";
 
-import { config } from "./config.js";
+import { daytonaApiKey, daytonaApiUrl, daytonaTarget } from "./config.js";
 
 const daytona = new Daytona({
-  apiKey: config.daytonaApiKey,
-  apiUrl: config.daytonaApiUrl,
-  target: config.daytonaTarget,
+  apiKey: daytonaApiKey,
+  apiUrl: daytonaApiUrl,
+  target: daytonaTarget,
 });
 const sandboxImage = Image.debianSlim("3.12").runCommands("apt-get install -y zsh bash git nodejs npm");
 

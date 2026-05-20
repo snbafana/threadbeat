@@ -1,4 +1,5 @@
 import { eventType, taskStatus } from "../drizzle/schema.js";
+import { sandboxEnvAllowlist, smokeMarker } from "./config.js";
 import type { Agent } from "./agents.js";
 import * as agents from "./agents.js";
 import * as sandbox from "./daytonaProvider.js";
@@ -119,9 +120,12 @@ async function deleteSandbox(taskId: string, sandboxId: string | undefined) {
 }
 
 function sandboxEnv(): Record<string, string> {
-  const allowlist = (process.env.THREADBEAT_SANDBOX_ENV_ALLOWLIST ?? "").split(",").map((v) => v.trim()).filter(Boolean);
   const env: Record<string, string> = {};
-  for (const name of allowlist) {
+  for (const name of sandboxEnvAllowlist) {
+    if (name === "THREADBEAT_SMOKE_MARKER") {
+      env[name] = smokeMarker;
+      continue;
+    }
     const value = process.env[name];
     if (value !== undefined) env[name] = value;
   }

@@ -1,5 +1,5 @@
 import { eventType } from "../drizzle/schema.js";
-import { config } from "./config.js";
+import { commandTimeoutSeconds } from "./config.js";
 import * as sandbox from "./daytonaProvider.js";
 import * as events from "./events.js";
 
@@ -14,7 +14,7 @@ export async function runCommandStep(
   data: Record<string, unknown> = {},
 ) {
   const cwd = step.cwd ?? defaultCwd;
-  const timeout = step.timeoutSeconds ?? config.commandTimeoutSeconds;
+  const timeout = step.timeoutSeconds ?? commandTimeoutSeconds;
   await events.appendEvent(taskId, eventType.commandStarted, sandboxId, { cmd: step.cmd, cwd, timeout, ...data });
   const result = await sandbox.runCommand(sandboxId, step.cmd, cwd, env, timeout);
   if (result.stdout) {

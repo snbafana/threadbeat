@@ -1,10 +1,10 @@
-import { config } from "./config.js";
+import { maxSandboxes } from "./config.js";
 import { runTask } from "./runTask.js";
 import * as tasks from "./tasks.js";
 
-export async function drainOnce(limit = config.maxSandboxes) {
+export async function drainOnce(limit = maxSandboxes) {
   const processed: string[] = [];
-  const count = Math.max(1, Math.min(limit, config.maxSandboxes));
+  const count = Math.max(1, Math.min(limit, maxSandboxes));
   for (let i = 0; i < count; i++) {
     const task = await tasks.claimNextTask();
     if (!task) break;
