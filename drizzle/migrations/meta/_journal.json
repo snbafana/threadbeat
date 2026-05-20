@@ -36,6 +36,13 @@
       "when": 1779245681966,
       "tag": "0004_brown_molly_hayes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1779297141220,
+      "tag": "0005_agent_registry_production",
+      "breakpoints": true
     }
   ]
 }
