@@ -5,7 +5,6 @@ const text = z.string().trim().min(1);
 export const Id = z.object({
   id: text,
 });
-export type Id = z.infer<typeof Id>;
 
 export const Command = z.object({
   cmd: text,
@@ -39,31 +38,8 @@ export const AgentTask = z.object({
       path: text.optional(),
     }).passthrough().optional(),
   }).passthrough().optional(),
-  constraints: z.object({
-    timeoutSeconds: z.number().int().positive().optional(),
-  }).passthrough().optional(),
 }).passthrough();
 export type AgentTask = z.infer<typeof AgentTask>;
-
-export const NewAgent = z.object({
-  id: text.optional(),
-  name: text,
-  repoUrl: text,
-  defaultBranch: text,
-});
-export type NewAgent = z.infer<typeof NewAgent>;
-
-export const EventsQuery = z.object({
-  taskId: text.optional(),
-  after: z.coerce.number().int().nonnegative().optional(),
-  limit: z.coerce.number().int().positive().optional(),
-});
-export type EventsQuery = z.infer<typeof EventsQuery>;
-
-export const Drain = z.object({
-  limit: z.number().int().positive().optional(),
-});
-export type Drain = z.infer<typeof Drain>;
 
 export function errorMessage(error: unknown) {
   if (error instanceof z.ZodError) return error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ");

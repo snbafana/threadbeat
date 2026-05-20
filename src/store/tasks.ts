@@ -6,38 +6,19 @@ import { tasks, taskStatus, type TaskStatus } from "../../drizzle/schema.js";
 import type { AgentTask, CommandTask } from "../input.js";
 import { db } from "./db.js";
 
-export type Task = {
-  id: string;
-  agentId?: string;
-  runBranch?: string;
-  status: TaskStatus;
-  spec: CommandTask | AgentTask;
-  createdAt?: string;
-  startedAt?: string;
-  completedAt?: string;
-  error?: string;
-};
-
-export type CreateTaskOptions = {
-  id?: string;
-  agentId?: string;
-  runBranch?: string;
-};
-
-export async function createTask(spec: CommandTask | AgentTask, options: CreateTaskOptions = {}) {
+export async function createTask(
+  spec: CommandTask | AgentTask,
+  options: { id?: string; agentId?: string; runBranch?: string } = {},
+) {
   const id = options.id ?? randomUUID();
   const [task] = await db.insert(tasks).values({
     id,
     agentId: options.agentId,
-    runBranch: options.runBranch ?? (options.agentId ? runBranchForTask(id) : undefined),
+    runBranch: options.runBranch ?? (options.agentId ? `runs/${id}` : undefined),
     status: taskStatus.queued,
     specJson: spec as Record<string, unknown>,
   }).returning();
   return fromRow(task);
-}
-
-export function runBranchForTask(id: string) {
-  return `runs/${id}`;
 }
 
 export async function listTasks() {
@@ -66,21 +47,18 @@ export async function updateTaskStatus(id: string, status: TaskStatus, error?: s
   }
 }
 
-function fromRow(row: typeof tasks.$inferSelect): Task {
+function fromRow(row: typeof tasks.$inferSelect) {
   return {
     id: row.id,
     agentId: row.agentId ?? undefined,
     runBranch: row.runBranch ?? undefined,
     status: row.status,
     spec: row.specJson as CommandTask | AgentTask,
-    createdAt: iso(row.createdAt),
-    startedAt: iso(row.startedAt),
-    completedAt: iso(row.completedAt),
+    createdAt: row.createdAt.toISOString(),
+    startedAt: row.startedAt?.toISOString(),
+    completedAt: row.completedAt?.toISOString(),
     error: row.error ?? undefined,
   };
 }
 
-function iso(value?: Date | string | null) {
-  if (!value) return undefined;
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
-}
+export type Task = ReturnType<typeof fromRow>;

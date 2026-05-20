@@ -15,7 +15,7 @@ export function registerTaskRoutes(app: FastifyInstance) {
 
   app.get("/api/tasks", async () => ({ ok: true, tasks: await listTasks() }));
 
-  app.get<{ Params: Id }>("/api/tasks/:id", async (request, reply) => {
+  app.get("/api/tasks/:id", async (request, reply) => {
     const { id } = Id.parse(request.params);
     const task = await getTask(id);
     if (!task) {

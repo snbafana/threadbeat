@@ -45,11 +45,6 @@ function fromRow(row: typeof events.$inferSelect) {
     type: row.type,
     source: row.source,
     data: row.dataJson ?? undefined,
-    createdAt: iso(row.createdAt),
+    createdAt: row.createdAt.toISOString(),
   };
-}
-
-function iso(value?: Date | string | null) {
-  if (!value) return undefined;
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }

@@ -3,7 +3,20 @@ import { runCommandStep } from "./steps.js";
 import { appendEvent } from "./store/events.js";
 import type { Task } from "./store/tasks.js";
 
-export async function createRunBranch(task: Task, sandboxId: string, cwd: string, branch: string) {
+export async function saveRunBranch(
+  task: Task,
+  sandboxId: string,
+  cwd: string,
+  branch: string,
+  repoUrl: string,
+  env: Record<string, string>,
+) {
+  await createRunBranch(task, sandboxId, cwd, branch);
+  await commitRun(task, sandboxId, cwd);
+  await pushRunBranch(task, sandboxId, cwd, branch, repoUrl, env);
+}
+
+async function createRunBranch(task: Task, sandboxId: string, cwd: string, branch: string) {
   await runGit(task, sandboxId, cwd, [
     "git config user.email threadbeat-runs@example.com",
     "git config user.name threadbeat",
@@ -11,14 +24,14 @@ export async function createRunBranch(task: Task, sandboxId: string, cwd: string
   ].join(" && "), "branch.created", { branch });
 }
 
-export async function commitRun(task: Task, sandboxId: string, cwd: string) {
+async function commitRun(task: Task, sandboxId: string, cwd: string) {
   await runGit(task, sandboxId, cwd, [
     "git add -A",
     `git commit -m ${shellQuote(`run ${task.id}`)} || echo 'no changes to commit'`,
   ].join(" && "), "committed");
 }
 
-export async function pushRunBranch(task: Task, sandboxId: string, cwd: string, branch: string, repoUrl: string, env: Record<string, string>) {
+async function pushRunBranch(task: Task, sandboxId: string, cwd: string, branch: string, repoUrl: string, env: Record<string, string>) {
   await runGit(task, sandboxId, cwd, [
     authPushUrlCommand(repoUrl),
     `git push origin HEAD:${shellQuote(branch)}`,

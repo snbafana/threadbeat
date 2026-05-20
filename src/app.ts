@@ -1,31 +1,41 @@
 import Fastify from "fastify";
+import { z } from "zod";
 
 import { errorMessage } from "./input.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerEventRoutes } from "./routes/events.js";
-import { registerHealthRoutes } from "./routes/health.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
-import { registerWorkerRoutes } from "./routes/worker.js";
+import { drainOnce } from "./worker.js";
+
+const Drain = z.object({
+  limit: z.number().int().positive().optional(),
+});
 
 export function createApp() {
   const app = Fastify({ logger: false });
 
   app.setErrorHandler((error, _request, reply) => {
-    reply.code(statusCode(error)).send({ ok: false, error: errorMessage(error) });
+    const status = error instanceof z.ZodError
+      ? 400
+      : typeof error === "object" && error && "statusCode" in error && typeof error.statusCode === "number"
+        ? error.statusCode
+        : 500;
+    reply.code(status).send({ ok: false, error: errorMessage(error) });
   });
 
-  registerHealthRoutes(app);
+  app.get("/health", async () => ({ ok: true, service: "threadbeat" }));
+
   registerAgentRoutes(app);
   registerTaskRoutes(app);
   registerEventRoutes(app);
-  registerWorkerRoutes(app);
+
+  app.post("/api/worker/drain-once", async (request) => {
+    const { limit } = Drain.parse(request.body ?? {});
+    return {
+      ok: true,
+      result: await drainOnce(limit),
+    };
+  });
 
   return app;
-}
-
-function statusCode(error: unknown) {
-  if (typeof error === "object" && error && "statusCode" in error && typeof error.statusCode === "number") {
-    return error.statusCode;
-  }
-  return 400;
 }

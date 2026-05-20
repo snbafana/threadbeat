@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 
 import { eventType } from "../../drizzle/schema.js";
-import { AgentTask, Id, NewAgent } from "../input.js";
+import { AgentTask, Id } from "../input.js";
 import { appendEvent } from "../store/events.js";
-import { createAgent, getAgent, listAgents } from "../store/agents.js";
+import { createAgent, getAgent, listAgents, NewAgent } from "../store/agents.js";
 import { createTask } from "../store/tasks.js";
 
 export function registerAgentRoutes(app: FastifyInstance) {
@@ -14,7 +14,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.get("/api/agents", async () => ({ ok: true, agents: await listAgents() }));
 
-  app.get<{ Params: Id }>("/api/agents/:id", async (request, reply) => {
+  app.get("/api/agents/:id", async (request, reply) => {
     const { id } = Id.parse(request.params);
     const agent = await getAgent(id);
     if (!agent) {
@@ -24,7 +24,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
     return { ok: true, agent };
   });
 
-  app.post<{ Params: Id }>("/api/agents/:id/tasks", async (request, reply) => {
+  app.post("/api/agents/:id/tasks", async (request, reply) => {
     const { id } = Id.parse(request.params);
     const agent = await getAgent(id);
     if (!agent) {

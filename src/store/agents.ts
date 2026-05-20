@@ -1,42 +1,36 @@
 import { randomUUID } from "node:crypto";
 
 import { asc, eq } from "drizzle-orm";
+import { createInsertSchema } from "drizzle-zod";
+import type { z } from "zod";
 
 import { agents } from "../../drizzle/schema.js";
-import type { NewAgent } from "../input.js";
 import { db } from "./db.js";
 
-export type Agent = {
-  id: string;
-  name: string;
-  repoUrl: string;
-  defaultBranch: string;
-};
+const text = (schema: z.ZodString) => schema.trim().min(1);
 
-export async function createAgent(input: NewAgent) {
+export const NewAgent = createInsertSchema(agents, {
+  id: (schema) => text(schema).optional(),
+  name: text,
+  repoUrl: text,
+  defaultBranch: text,
+});
+
+export async function createAgent(input: z.infer<typeof NewAgent>) {
   const [agent] = await db.insert(agents).values({
     id: input.id ?? randomUUID(),
     name: input.name,
     repoUrl: input.repoUrl,
     defaultBranch: input.defaultBranch,
   }).returning();
-  return fromRow(agent);
+  return agent;
 }
 
 export async function listAgents() {
-  return (await db.select().from(agents).orderBy(asc(agents.name))).map(fromRow);
+  return await db.select().from(agents).orderBy(asc(agents.name));
 }
 
 export async function getAgent(id: string) {
   const [agent] = await db.select().from(agents).where(eq(agents.id, id)).limit(1);
-  return agent ? fromRow(agent) : null;
-}
-
-function fromRow(row: typeof agents.$inferSelect): Agent {
-  return {
-    id: row.id,
-    name: row.name,
-    repoUrl: row.repoUrl,
-    defaultBranch: row.defaultBranch,
-  };
+  return agent ?? null;
 }

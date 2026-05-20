@@ -1,7 +1,13 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 
-import { EventsQuery } from "../input.js";
 import { listEvents } from "../store/events.js";
+
+const EventsQuery = z.object({
+  taskId: z.string().trim().min(1).optional(),
+  after: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().positive().optional(),
+});
 
 export function registerEventRoutes(app: FastifyInstance) {
   app.get<{

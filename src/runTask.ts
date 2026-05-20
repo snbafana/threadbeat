@@ -1,10 +1,9 @@
 import { eventType, taskStatus } from "../drizzle/schema.js";
 import { sandboxEnvAllowlist, smokeMarker } from "./config.js";
 import { cloneRepo, createSandbox as openSandbox, deleteSandbox as closeSandbox } from "./daytonaProvider.js";
-import { createRunBranch, commitRun, pushRunBranch } from "./gitRun.js";
+import { saveRunBranch } from "./gitRun.js";
 import type { AgentTask, CommandTask } from "./input.js";
 import { materializeAsk, runAgentEntrypoint, runCommandStep } from "./steps.js";
-import type { Agent } from "./store/agents.js";
 import { getAgent } from "./store/agents.js";
 import { appendEvent } from "./store/events.js";
 import type { Task } from "./store/tasks.js";
@@ -59,11 +58,9 @@ async function runAgentTask(task: Task) {
     await cloneRepo(sandboxId, agent.repoUrl, agent.defaultBranch);
     await appendEvent(task.id, eventType.repoCloned, sandboxId, { repo: { url: agent.repoUrl, branch: agent.defaultBranch }, agentId: agent.id });
 
-    await createRunBranch(task, sandboxId, REPO_DIR, branch);
     await materializeAsk(task.id, sandboxId, spec, REPO_DIR, env);
     await runAgentEntrypoint(task.id, sandboxId, REPO_DIR, env);
-    await commitRun(task, sandboxId, REPO_DIR);
-    await pushRunBranch(task, sandboxId, REPO_DIR, branch, agent.repoUrl, env);
+    await saveRunBranch(task, sandboxId, REPO_DIR, branch, agent.repoUrl, env);
 
     await completeTask(task.id);
   } catch (error) {
@@ -73,7 +70,7 @@ async function runAgentTask(task: Task) {
   }
 }
 
-async function loadAgent(task: Task): Promise<Agent> {
+async function loadAgent(task: Task) {
   if (!task.agentId) throw new Error(`task ${task.id} missing agentId`);
   const agent = await getAgent(task.agentId);
   if (!agent) throw new Error(`agent not found: ${task.agentId}`);
