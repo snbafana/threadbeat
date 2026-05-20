@@ -4,6 +4,7 @@ import { z } from "zod";
 import { errorMessage } from "./input.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerEventRoutes } from "./routes/events.js";
+import { registerHeartbeatRoutes } from "./routes/heartbeats.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { drainOnce } from "./worker.js";
 
@@ -26,6 +27,7 @@ export function createApp() {
   app.get("/health", async () => ({ ok: true, service: "threadbeat" }));
 
   registerAgentRoutes(app);
+  registerHeartbeatRoutes(app);
   registerTaskRoutes(app);
   registerEventRoutes(app);
 

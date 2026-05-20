@@ -20,6 +20,7 @@
     "railway:agent-run": "railway run tsx scripts/railway-agent-run.ts",
     "smoke:api": "tsx scripts/api-smoke.ts",
     "smoke:daytona": "tsx scripts/daytona-smoke.ts",
+    "smoke:heartbeat-crud": "tsx scripts/heartbeat-crud-smoke.ts",
     "smoke:live": "tsx scripts/live-api-smoke.ts",
     "smoke:matrix": "tsx scripts/matrix-smoke.ts",
     "smoke:pi-full": "tsx scripts/pi-full-smoke.ts"
