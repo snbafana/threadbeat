@@ -1,17 +1,19 @@
 # threadbeat
 
-Threadbeat is currently a minimal Daytona-backed task substrate.
+Threadbeat is currently a minimal Daytona-backed task substrate with a thin
+agent registry.
 
 It is intentionally not an agent framework yet. V1 proves the smallest useful
 control-plane primitives:
 
-- `tasks`: queued JSON command specs and execution state
+- `agents`: names and ids for GitHub agent repos
+- `tasks`: queued JSON command/ask specs and execution state
 - `events`: ordered task output and lifecycle stream
 - Daytona sandboxes: ephemeral execution environments
 - Postgres: durable task/event storage
 
-No Pi runtime, heartbeat scheduler, durable agent repo, artifacts table, replay
-system, TUI, or orchestration DAG is part of this cut.
+No Pi runtime, heartbeat scheduler, artifacts table, replay system, TUI, run
+table, repo mirror, or orchestration DAG is part of this cut.
 
 ## Local Setup
 
@@ -47,7 +49,8 @@ THREADBEAT_SANDBOX_ENV_ALLOWLIST=THREADBEAT_SMOKE_MARKER
 ```
 
 Only env vars listed in `THREADBEAT_SANDBOX_ENV_ALLOWLIST` are injected into
-Daytona sandboxes.
+Daytona sandboxes. Live smokes add `GITHUB_TOKEN` and `DEEPSEEK_API_KEY` to the
+allowlist inside the relevant scripts instead of making those broad defaults.
 
 ## Run
 
@@ -58,6 +61,10 @@ npm run dev
 The server assumes the Drizzle schema has already been pushed, then exposes:
 
 - `GET /health`
+- `POST /api/agents`
+- `GET /api/agents`
+- `GET /api/agents/:id`
+- `POST /api/agents/:id/tasks`
 - `POST /api/tasks`
 - `GET /api/tasks`
 - `GET /api/tasks/:id`
@@ -74,6 +81,26 @@ npm run db:studio
 ```
 
 ## Task Spec
+
+`POST /api/agents/:id/tasks` accepts an ask and optional inputs, then resolves
+the agent repo from the registry, creates a task, creates a `runs/{task_id}`
+branch in the agent repo, materializes `.threadbeat/task.json`, runs
+`threadbeat-agent.mjs` or `threadbeat-agent.sh`, commits, pushes, and streams
+the lifecycle back through `/api/events`.
+
+```json
+{
+  "ask": "Create finance graphs for AAPL, MSFT, NVDA, and SPY.",
+  "inputs": {
+    "files": [
+      {
+        "path": ".threadbeat/symbols.txt",
+        "content": "AAPL\nMSFT\nNVDA\nSPY\n"
+      }
+    ]
+  }
+}
+```
 
 `POST /api/tasks` accepts a flexible JSON spec:
 
@@ -129,6 +156,7 @@ Live Daytona checks:
 ```bash
 npm run smoke:daytona
 npm run smoke:live
+npm run smoke:pi-full
 ```
 
 The repo matrix is defined in `test/fixtures/repo-matrix.json` and expects a
