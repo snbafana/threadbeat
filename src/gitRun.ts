@@ -1,7 +1,7 @@
 import { eventType } from "../drizzle/schema.js";
-import * as events from "./events.js";
 import { runCommandStep } from "./steps.js";
-import type { Task } from "./tasks.js";
+import { appendEvent } from "./store/events.js";
+import type { Task } from "./store/tasks.js";
 
 export async function createRunBranch(task: Task, sandboxId: string, cwd: string, branch: string) {
   await runGit(task, sandboxId, cwd, [
@@ -35,7 +35,7 @@ async function runGit(
   env: Record<string, string> = {},
 ) {
   await runCommandStep(task.id, sandboxId, { cmd, timeoutSeconds: 120 }, cwd, env, { checkpoint });
-  await events.appendEvent(task.id, eventType.checkpointCreated, "git", { checkpoint: `repo.${checkpoint}`, ...data });
+  await appendEvent(task.id, eventType.checkpointCreated, "git", { checkpoint: `repo.${checkpoint}`, ...data });
 }
 
 function authPushUrlCommand(repoUrl: string) {

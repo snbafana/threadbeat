@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import * as sandbox from "../src/daytonaProvider.js";
+import { cloneRepo, createSandbox, deleteSandbox, runCommand } from "../src/daytonaProvider.js";
 import {
   installSamplePiRepoCommand,
   materializeSamplePiRepoCommand,
@@ -20,11 +20,11 @@ results.push(await cloneCurrentRepoAndCheckSamplePiInjection());
 console.log(JSON.stringify({ ok: true, results }, null, 2));
 
 async function cloneAndDeletePlainRepo() {
-  const sandboxId = await sandbox.createSandbox({});
+  const sandboxId = await createSandbox({});
   let deleted = false;
   try {
-    await sandbox.cloneRepo(sandboxId, "https://github.com/octocat/Hello-World.git", "master");
-    const readme = await sandbox.runCommand(
+    await cloneRepo(sandboxId, "https://github.com/octocat/Hello-World.git", "master");
+    const readme = await runCommand(
       sandboxId,
       "pwd && (test -f README || test -f README.md) && git rev-parse --is-inside-work-tree",
       "workspace/repo",
@@ -35,18 +35,18 @@ async function cloneAndDeletePlainRepo() {
     assert.match(readme.stdout, /true/);
     return { name: "plain clone/delete", sandboxId, cloned: true, deleted: true };
   } finally {
-    await sandbox.deleteSandbox(sandboxId);
+    await deleteSandbox(sandboxId);
     deleted = true;
     assert.equal(deleted, true);
   }
 }
 
 async function cloneCurrentRepoAndCheckSamplePiInjection() {
-  const sandboxId = await sandbox.createSandbox({ DEEPSEEK_API_KEY: deepseekKey ?? "" });
+  const sandboxId = await createSandbox({ DEEPSEEK_API_KEY: deepseekKey ?? "" });
   let deleted = false;
   try {
-    await sandbox.cloneRepo(sandboxId, piFixture.repoUrl, piFixture.branch);
-    const shape = await sandbox.runCommand(
+    await cloneRepo(sandboxId, piFixture.repoUrl, piFixture.branch);
+    const shape = await runCommand(
       sandboxId,
       [
         "git rev-parse --is-inside-work-tree",
@@ -61,7 +61,7 @@ async function cloneCurrentRepoAndCheckSamplePiInjection() {
     );
     assert.equal(shape.exitCode, 0, shape.stdout);
 
-    const fixture = await sandbox.runCommand(
+    const fixture = await runCommand(
       sandboxId,
       materializeSamplePiRepoCommand(),
       "workspace/repo",
@@ -71,7 +71,7 @@ async function cloneCurrentRepoAndCheckSamplePiInjection() {
     assert.equal(fixture.exitCode, 0, fixture.stdout);
     assert.match(fixture.stdout, /sample-pi-repo-created/);
 
-    const node = await sandbox.runCommand(
+    const node = await runCommand(
       sandboxId,
       installSamplePiRepoCommand(),
       "workspace/repo",
@@ -81,7 +81,7 @@ async function cloneCurrentRepoAndCheckSamplePiInjection() {
     assert.equal(node.exitCode, 0, node.stdout);
     assert.match(node.stdout, /v2[2-9]\./);
 
-    const piCheck = await sandbox.runCommand(
+    const piCheck = await runCommand(
       sandboxId,
       piInjectionCheckCommand(),
       samplePiRepoPath,
@@ -93,7 +93,7 @@ async function cloneCurrentRepoAndCheckSamplePiInjection() {
 
     return { name: "sample pi repo with credential injection", sandboxId, cloned: true, injected: true, deleted: true };
   } finally {
-    await sandbox.deleteSandbox(sandboxId);
+    await deleteSandbox(sandboxId);
     deleted = true;
     assert.equal(deleted, true);
   }

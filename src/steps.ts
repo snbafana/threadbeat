@@ -1,31 +1,30 @@
 import { eventType } from "../drizzle/schema.js";
 import { commandTimeoutSeconds } from "./config.js";
-import * as sandbox from "./daytonaProvider.js";
-import * as events from "./events.js";
-
-export type CommandSpec = { cmd: string; cwd?: string; timeoutSeconds?: number };
+import { runCommand } from "./daytonaProvider.js";
+import type { AgentTask, Command } from "./input.js";
+import { appendEvent } from "./store/events.js";
 
 export async function runCommandStep(
   taskId: string,
   sandboxId: string,
-  step: CommandSpec,
+  step: Command,
   defaultCwd: string,
   env: Record<string, string>,
   data: Record<string, unknown> = {},
 ) {
   const cwd = step.cwd ?? defaultCwd;
   const timeout = step.timeoutSeconds ?? commandTimeoutSeconds;
-  await events.appendEvent(taskId, eventType.commandStarted, sandboxId, { cmd: step.cmd, cwd, timeout, ...data });
-  const result = await sandbox.runCommand(sandboxId, step.cmd, cwd, env, timeout);
+  await appendEvent(taskId, eventType.commandStarted, sandboxId, { cmd: step.cmd, cwd, timeout, ...data });
+  const result = await runCommand(sandboxId, step.cmd, cwd, env, timeout);
   if (result.stdout) {
-    await events.appendEvent(taskId, eventType.commandStdout, sandboxId, { stdout: result.stdout });
+    await appendEvent(taskId, eventType.commandStdout, sandboxId, { stdout: result.stdout });
   }
   if (result.stderr) {
-    await events.appendEvent(taskId, eventType.commandStderr, sandboxId, { stderr: result.stderr });
+    await appendEvent(taskId, eventType.commandStderr, sandboxId, { stderr: result.stderr });
   }
-  await events.appendEvent(taskId, eventType.commandCompleted, sandboxId, { exitCode: result.exitCode, ...data });
+  await appendEvent(taskId, eventType.commandCompleted, sandboxId, { exitCode: result.exitCode, ...data });
   if (result.exitCode !== 0) {
-    await events.appendEvent(taskId, eventType.commandFailed, sandboxId, { exitCode: result.exitCode, cmd: step.cmd, ...data });
+    await appendEvent(taskId, eventType.commandFailed, sandboxId, { exitCode: result.exitCode, cmd: step.cmd, ...data });
     throw new Error(`command failed with exit code ${result.exitCode}: ${step.cmd}`);
   }
 }
@@ -33,7 +32,7 @@ export async function runCommandStep(
 export async function materializeAsk(
   taskId: string,
   sandboxId: string,
-  spec: AgentTaskSpec,
+  spec: AgentTask,
   cwd: string,
   env: Record<string, string>,
 ) {
@@ -76,17 +75,6 @@ export async function runAgentEntrypoint(
     timeoutSeconds: 300,
   }, cwd, env);
 }
-
-export type AgentTaskSpec = {
-  ask: string;
-  inputs?: {
-    files?: Array<{ path: string; content: string }>;
-    repo?: { url: string; branch?: string; path?: string };
-  };
-  constraints?: {
-    timeoutSeconds?: number;
-  };
-};
 
 function shellQuote(value: string) {
   return `'${value.replace(/'/g, "'\\''")}'`;

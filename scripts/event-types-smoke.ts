@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 
 import { eventType, eventTypeValues, taskStatus } from "../drizzle/schema.js";
-import { close } from "../src/db.js";
-import * as eventStore from "../src/events.js";
-import { createApp } from "../src/server.js";
-import * as tasks from "../src/tasks.js";
+import { close } from "../src/store/db.js";
+import { appendEvent } from "../src/store/events.js";
+import { createApp } from "../src/app.js";
+import { updateTaskStatus } from "../src/store/tasks.js";
 import { assertTaskEventStream, type TaskEvent } from "./smoke-helpers.js";
 
 const app = createApp();
@@ -21,11 +21,11 @@ try {
   });
   assert.equal(create.statusCode, 200, create.body);
   const taskId = create.json<{ task: { id: string } }>().task.id;
-  await tasks.updateTaskStatus(taskId, taskStatus.succeeded);
+  await updateTaskStatus(taskId, taskStatus.succeeded);
 
   for (const type of eventTypeValues) {
     if (type === eventType.taskCreated) continue;
-    await eventStore.appendEvent(taskId, type, `event-types-smoke:${type}`, {
+    await appendEvent(taskId, type, `event-types-smoke:${type}`, {
       eventType: type,
       marker: "event-types-ok",
     });

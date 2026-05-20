@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 
-import { tasks, taskStatus, type TaskStatus } from "../drizzle/schema.js";
+import { tasks, taskStatus, type TaskStatus } from "../../drizzle/schema.js";
+import type { AgentTask, CommandTask } from "../input.js";
 import { db } from "./db.js";
 
 export type Task = {
@@ -10,7 +11,7 @@ export type Task = {
   agentId?: string;
   runBranch?: string;
   status: TaskStatus;
-  spec: Record<string, unknown>;
+  spec: CommandTask | AgentTask;
   createdAt?: string;
   startedAt?: string;
   completedAt?: string;
@@ -23,14 +24,14 @@ export type CreateTaskOptions = {
   runBranch?: string;
 };
 
-export async function createTask(spec: Record<string, unknown>, options: CreateTaskOptions = {}) {
+export async function createTask(spec: CommandTask | AgentTask, options: CreateTaskOptions = {}) {
   const id = options.id ?? randomUUID();
   const [task] = await db.insert(tasks).values({
     id,
     agentId: options.agentId,
     runBranch: options.runBranch ?? (options.agentId ? runBranchForTask(id) : undefined),
     status: taskStatus.queued,
-    specJson: spec,
+    specJson: spec as Record<string, unknown>,
   }).returning();
   return fromRow(task);
 }
@@ -71,7 +72,7 @@ function fromRow(row: typeof tasks.$inferSelect): Task {
     agentId: row.agentId ?? undefined,
     runBranch: row.runBranch ?? undefined,
     status: row.status,
-    spec: row.specJson,
+    spec: row.specJson as CommandTask | AgentTask,
     createdAt: iso(row.createdAt),
     startedAt: iso(row.startedAt),
     completedAt: iso(row.completedAt),

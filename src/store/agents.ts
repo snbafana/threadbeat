@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { asc, eq } from "drizzle-orm";
 
-import { agents } from "../drizzle/schema.js";
+import { agents } from "../../drizzle/schema.js";
+import type { NewAgent } from "../input.js";
 import { db } from "./db.js";
 
 export type Agent = {
@@ -12,14 +13,7 @@ export type Agent = {
   defaultBranch: string;
 };
 
-export type CreateAgentInput = {
-  id?: string;
-  name: string;
-  repoUrl: string;
-  defaultBranch: string;
-};
-
-export async function createAgent(input: CreateAgentInput) {
+export async function createAgent(input: NewAgent) {
   const [agent] = await db.insert(agents).values({
     id: input.id ?? randomUUID(),
     name: input.name,

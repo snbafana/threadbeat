@@ -6,7 +6,7 @@ export const host = "127.0.0.1";
 export const port = 8000;
 export const maxSandboxes = 1;
 export const commandTimeoutSeconds = 120;
-export const sandboxEnvAllowlist = ["THREADBEAT_SMOKE_MARKER", "DEEPSEEK_API_KEY"];
+export const sandboxEnvAllowlist = ["THREADBEAT_SMOKE_MARKER", "DEEPSEEK_API_KEY", "GITHUB_TOKEN"];
 export const smokeMarker = "daytona-smoke";
 
 export const databaseUrl = process.env.DATABASE_URL;

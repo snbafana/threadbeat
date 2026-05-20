@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
-import { close } from "../src/db.js";
-import { createApp } from "../src/server.js";
+import { close } from "../src/store/db.js";
+import { createApp } from "../src/app.js";
 import { assertTaskEventStream, stdoutFromEvents, type TaskEvent } from "./smoke-helpers.js";
 
 const app = createApp();

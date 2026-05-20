@@ -21,12 +21,6 @@ export function requireDeepseekKey() {
   return process.env.DEEPSEEK_API_KEY;
 }
 
-export function allowlistWith(value: string | undefined, name: string) {
-  const entries = new Set((value ?? "").split(",").map((entry) => entry.trim()).filter(Boolean));
-  entries.add(name);
-  return Array.from(entries).join(",");
-}
-
 export function ensureNode22Command() {
   return "apt-get update >/dev/null && apt-get install -y curl ca-certificates 2>&1 && npm install -g n 2>&1 && n 22 2>&1 && hash -r && node --version && npm --version";
 }

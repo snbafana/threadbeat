@@ -7,4 +7,5 @@ disable-model-invocation: true
 - Read every file before cleanup; preserve behavior while deleting dead code and needless indirection.
 - Prefer functional TypeScript: module constants, direct data, no one-off env helpers, and no one-implementation interfaces.
 - Inventory files/imports first, then simplify bottom-up from leaf modules toward the entrypoint.
+- Prefer short domain nouns over filler suffixes: `Command`, `CommandTask`, `AgentTask`, `NewAgent`; avoid parallel `Spec`, `Input`, `DTO`, or `Contract` names for the same shape.
 - After long cleanup threads, update and reload this skill with durable rules the user repeated.

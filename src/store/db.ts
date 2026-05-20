@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
-import { databaseUrl } from "./config.js";
+import { databaseUrl } from "../config.js";
 
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 

@@ -41,9 +41,9 @@ The smoke harness proves these primitives end to end:
 
 ## Current Abstraction
 
-- `src/agents.ts`: CRUD for the repo registry only.
-- `src/tasks.ts`: task rows, agent link, status, and run branch.
-- `src/events.ts`: append/list event stream.
+- `src/store/agents.ts`: CRUD for the repo registry only.
+- `src/store/tasks.ts`: task rows, agent link, status, and run branch.
+- `src/store/events.ts`: append/list event stream.
 - `src/runTask.ts`: execution owner for command tasks and agent tasks.
 - `src/steps.ts`: command execution, ask materialization, and agent entrypoint.
 - `src/gitRun.ts`: run branch, commit, and push.

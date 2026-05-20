@@ -1,23 +1,17 @@
 import { eventType, taskStatus } from "../drizzle/schema.js";
 import { sandboxEnvAllowlist, smokeMarker } from "./config.js";
-import type { Agent } from "./agents.js";
-import * as agents from "./agents.js";
-import * as sandbox from "./daytonaProvider.js";
-import * as events from "./events.js";
-import * as gitRun from "./gitRun.js";
-import { materializeAsk, runAgentEntrypoint, runCommandStep, type AgentTaskSpec, type CommandSpec } from "./steps.js";
-import type { Task } from "./tasks.js";
-import * as tasks from "./tasks.js";
+import { cloneRepo, createSandbox as openSandbox, deleteSandbox as closeSandbox } from "./daytonaProvider.js";
+import { createRunBranch, commitRun, pushRunBranch } from "./gitRun.js";
+import type { AgentTask, CommandTask } from "./input.js";
+import { materializeAsk, runAgentEntrypoint, runCommandStep } from "./steps.js";
+import type { Agent } from "./store/agents.js";
+import { getAgent } from "./store/agents.js";
+import { appendEvent } from "./store/events.js";
+import type { Task } from "./store/tasks.js";
+import { updateTaskStatus } from "./store/tasks.js";
 
 const WORKSPACE_DIR = "workspace";
 const REPO_DIR = "workspace/repo";
-
-type CommandTaskSpec = {
-  repo?: { url: string; branch?: string; commit?: string };
-  setup?: CommandSpec[];
-  main: CommandSpec;
-  verify?: CommandSpec[];
-};
 
 export async function runTask(task: Task) {
   if (task.agentId) return runAgentTask(task);
@@ -26,7 +20,7 @@ export async function runTask(task: Task) {
 
 async function runCommandTask(task: Task) {
   let sandboxId: string | undefined;
-  const spec = task.spec as CommandTaskSpec;
+  const spec = task.spec as CommandTask;
   const defaultCwd = spec.repo ? REPO_DIR : WORKSPACE_DIR;
   const env = sandboxEnv();
 
@@ -35,8 +29,8 @@ async function runCommandTask(task: Task) {
     sandboxId = await createSandbox(task.id, env);
 
     if (spec.repo) {
-      await sandbox.cloneRepo(sandboxId, spec.repo.url, spec.repo.branch, spec.repo.commit);
-      await events.appendEvent(task.id, eventType.repoCloned, sandboxId, { repo: spec.repo });
+      await cloneRepo(sandboxId, spec.repo.url, spec.repo.branch, spec.repo.commit);
+      await appendEvent(task.id, eventType.repoCloned, sandboxId, { repo: spec.repo });
     }
 
     for (const cmd of spec.setup ?? []) await runCommandStep(task.id, sandboxId, cmd, defaultCwd, env);
@@ -54,7 +48,7 @@ async function runCommandTask(task: Task) {
 async function runAgentTask(task: Task) {
   let sandboxId: string | undefined;
   const agent = await loadAgent(task);
-  const spec = task.spec as AgentTaskSpec;
+  const spec = task.spec as AgentTask;
   const branch = task.runBranch ?? `runs/${task.id}`;
   const env = sandboxEnv();
 
@@ -62,14 +56,14 @@ async function runAgentTask(task: Task) {
     await startTask(task.id);
     sandboxId = await createSandbox(task.id, env);
 
-    await sandbox.cloneRepo(sandboxId, agent.repoUrl, agent.defaultBranch);
-    await events.appendEvent(task.id, eventType.repoCloned, sandboxId, { repo: { url: agent.repoUrl, branch: agent.defaultBranch }, agentId: agent.id });
+    await cloneRepo(sandboxId, agent.repoUrl, agent.defaultBranch);
+    await appendEvent(task.id, eventType.repoCloned, sandboxId, { repo: { url: agent.repoUrl, branch: agent.defaultBranch }, agentId: agent.id });
 
-    await gitRun.createRunBranch(task, sandboxId, REPO_DIR, branch);
+    await createRunBranch(task, sandboxId, REPO_DIR, branch);
     await materializeAsk(task.id, sandboxId, spec, REPO_DIR, env);
     await runAgentEntrypoint(task.id, sandboxId, REPO_DIR, env);
-    await gitRun.commitRun(task, sandboxId, REPO_DIR);
-    await gitRun.pushRunBranch(task, sandboxId, REPO_DIR, branch, agent.repoUrl, env);
+    await commitRun(task, sandboxId, REPO_DIR);
+    await pushRunBranch(task, sandboxId, REPO_DIR, branch, agent.repoUrl, env);
 
     await completeTask(task.id);
   } catch (error) {
@@ -81,41 +75,41 @@ async function runAgentTask(task: Task) {
 
 async function loadAgent(task: Task): Promise<Agent> {
   if (!task.agentId) throw new Error(`task ${task.id} missing agentId`);
-  const agent = await agents.getAgent(task.agentId);
+  const agent = await getAgent(task.agentId);
   if (!agent) throw new Error(`agent not found: ${task.agentId}`);
   return agent;
 }
 
 async function startTask(taskId: string) {
-  await tasks.updateTaskStatus(taskId, taskStatus.running);
-  await events.appendEvent(taskId, eventType.taskStarted, "worker");
+  await updateTaskStatus(taskId, taskStatus.running);
+  await appendEvent(taskId, eventType.taskStarted, "worker");
 }
 
 async function createSandbox(taskId: string, env: Record<string, string>) {
-  const sandboxId = await sandbox.createSandbox(env);
-  await events.appendEvent(taskId, eventType.sandboxCreated, sandboxId, { sandboxId });
+  const sandboxId = await openSandbox(env);
+  await appendEvent(taskId, eventType.sandboxCreated, sandboxId, { sandboxId });
   return sandboxId;
 }
 
 async function completeTask(taskId: string) {
-  await tasks.updateTaskStatus(taskId, taskStatus.succeeded);
-  await events.appendEvent(taskId, eventType.taskCompleted, "worker", { status: taskStatus.succeeded });
+  await updateTaskStatus(taskId, taskStatus.succeeded);
+  await appendEvent(taskId, eventType.taskCompleted, "worker", { status: taskStatus.succeeded });
 }
 
 async function failTask(taskId: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  await tasks.updateTaskStatus(taskId, taskStatus.failed, message);
-  await events.appendEvent(taskId, eventType.taskFailed, "worker", { error: message });
+  await updateTaskStatus(taskId, taskStatus.failed, message);
+  await appendEvent(taskId, eventType.taskFailed, "worker", { error: message });
 }
 
 async function deleteSandbox(taskId: string, sandboxId: string | undefined) {
   if (!sandboxId) return;
   try {
-    await sandbox.deleteSandbox(sandboxId);
-    await events.appendEvent(taskId, eventType.sandboxDeleted, sandboxId, { sandboxId });
+    await closeSandbox(sandboxId);
+    await appendEvent(taskId, eventType.sandboxDeleted, sandboxId, { sandboxId });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await events.appendEvent(taskId, eventType.sandboxDeleteFailed, sandboxId, { error: message, sandboxId });
+    await appendEvent(taskId, eventType.sandboxDeleteFailed, sandboxId, { error: message, sandboxId });
   }
 }
 
