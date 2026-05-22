@@ -89,7 +89,7 @@ thread/message model cannot carry the behavior.
    - artifact pointers;
    - thread heartbeat drain into a heartbeat message;
    - thread event enum roundtrip.
-4. Add the goal-inference smoke:
+4. Keep the goal-inference smoke:
    - create a thread;
    - append multiple human messages;
    - run the inference step;

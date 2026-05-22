@@ -152,6 +152,7 @@ HTTP checks require a running server and reachable `DATABASE_URL`:
 ```bash
 npm test
 npm run smoke:threads
+npm run smoke:goal
 npm run smoke:events
 ```
 

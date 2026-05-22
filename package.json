@@ -19,6 +19,7 @@
     "cli": "tsx scripts/threadbeat-cli.ts",
     "smoke:daytona": "tsx scripts/daytona-smoke.ts",
     "smoke:events": "tsx scripts/event-types-smoke.ts",
+    "smoke:goal": "tsx scripts/goal-inference-smoke.ts",
     "smoke:pi-daytona": "tsx scripts/pi-daytona-smoke.ts",
     "smoke:threads": "tsx scripts/thread-state-crud-smoke.ts"
   },

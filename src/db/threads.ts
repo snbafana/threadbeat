@@ -34,6 +34,14 @@ export async function updateThreadStatus(id: string, status: ThreadStatus) {
   return thread ? fromRow(thread) : null;
 }
 
+export async function updateThreadGoal(id: string, goalJson: Record<string, unknown>) {
+  const [thread] = await db.update(threads).set({
+    goalJson,
+    updatedAt: new Date(),
+  }).where(eq(threads.id, id)).returning();
+  return thread ? fromRow(thread) : null;
+}
+
 function fromRow(row: typeof threads.$inferSelect) {
   return {
     id: row.id,
