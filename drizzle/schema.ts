@@ -1,28 +1,12 @@
-import { bigserial, index, integer, jsonb, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
-
-export const taskStatusValues = [
-  "queued",
-  "claimed",
-  "running",
-  "waiting",
-  "succeeded",
-  "failed",
-  "cancelled",
-  "expired",
-] as const;
+import { bigserial, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const eventTypeValues = [
-  "task.created",
-  "task.leased",
-  "task.started",
-  "task.completed",
-  "task.failed",
-  "task.cancelled",
-  "task.expired",
+  "thread.started",
+  "thread.idle",
+  "thread.completed",
+  "thread.failed",
   "message.created",
-  "model.started",
-  "model.delta",
-  "model.completed",
+  "agent.started",
   "tool.started",
   "tool.completed",
   "tool.failed",
@@ -43,39 +27,42 @@ export const eventTypeValues = [
 export const heartbeatStatusValues = [
   "active",
   "paused",
+  "disabled",
 ] as const;
 
-export const taskStatusEnum = pgEnum("task_status", taskStatusValues);
+export const threadStatusValues = [
+  "queued",
+  "running",
+  "idle",
+  "paused",
+  "completed",
+  "failed",
+  "archived",
+] as const;
+
+export const messageRoleValues = [
+  "human",
+  "agent",
+  "heartbeat",
+] as const;
+
 export const eventTypeEnum = pgEnum("event_type", eventTypeValues);
 export const heartbeatStatusEnum = pgEnum("heartbeat_status", heartbeatStatusValues);
+export const threadStatusEnum = pgEnum("thread_status", threadStatusValues);
+export const messageRoleEnum = pgEnum("message_role", messageRoleValues);
 
-export type TaskStatus = (typeof taskStatusValues)[number];
 export type EventType = (typeof eventTypeValues)[number];
 export type HeartbeatStatus = (typeof heartbeatStatusValues)[number];
-
-export const taskStatus = {
-  queued: "queued",
-  claimed: "claimed",
-  running: "running",
-  waiting: "waiting",
-  succeeded: "succeeded",
-  failed: "failed",
-  cancelled: "cancelled",
-  expired: "expired",
-} as const satisfies Record<string, TaskStatus>;
+export type ThreadStatus = (typeof threadStatusValues)[number];
+export type MessageRole = (typeof messageRoleValues)[number];
 
 export const eventType = {
-  taskCreated: "task.created",
-  taskLeased: "task.leased",
-  taskStarted: "task.started",
-  taskCompleted: "task.completed",
-  taskFailed: "task.failed",
-  taskCancelled: "task.cancelled",
-  taskExpired: "task.expired",
+  threadStarted: "thread.started",
+  threadIdle: "thread.idle",
+  threadCompleted: "thread.completed",
+  threadFailed: "thread.failed",
   messageCreated: "message.created",
-  modelStarted: "model.started",
-  modelDelta: "model.delta",
-  modelCompleted: "model.completed",
+  agentStarted: "agent.started",
   toolStarted: "tool.started",
   toolCompleted: "tool.completed",
   toolFailed: "tool.failed",
@@ -96,7 +83,18 @@ export const eventType = {
 export const heartbeatStatus = {
   active: "active",
   paused: "paused",
+  disabled: "disabled",
 } as const satisfies Record<string, HeartbeatStatus>;
+
+export const threadStatus = {
+  queued: "queued",
+  running: "running",
+  idle: "idle",
+  paused: "paused",
+  completed: "completed",
+  failed: "failed",
+  archived: "archived",
+} as const satisfies Record<string, ThreadStatus>;
 
 export const agents = pgTable("agents", {
   id: text("id").primaryKey(),
@@ -105,44 +103,83 @@ export const agents = pgTable("agents", {
   defaultBranch: text("default_branch").notNull(),
 }).enableRLS();
 
-export const tasks = pgTable("tasks", {
+export const threads = pgTable("threads", {
   id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  status: threadStatusEnum("status").notNull().default(threadStatus.queued),
   agentId: text("agent_id").references(() => agents.id, { onDelete: "set null" }),
-  runBranch: text("run_branch"),
-  status: taskStatusEnum("status").notNull(),
-  specJson: jsonb("spec_json").notNull().$type<Record<string, unknown>>(),
+  goalJson: jsonb("goal_json").notNull().$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  startedAt: timestamp("started_at", { withTimezone: true }),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  error: text("error"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  index("idx_tasks_status_created_at").on(table.status, table.createdAt),
+  index("idx_threads_agent_id").on(table.agentId),
+  index("idx_threads_status_updated_at").on(table.status, table.updatedAt),
+]).enableRLS();
+
+export const sandboxes = pgTable("sandboxes", {
+  id: text("id").primaryKey(),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  externalId: text("external_id").notNull(),
+  idleExpiresAt: timestamp("idle_expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  index: integer("index").notNull(),
+}, (table) => [
+  uniqueIndex("idx_sandboxes_thread_index").on(table.threadId, table.index),
+  index("idx_sandboxes_thread_created_at").on(table.threadId, table.createdAt),
+]).enableRLS();
+
+export const messages = pgTable("messages", {
+  id: text("id").primaryKey(),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  role: messageRoleEnum("role").notNull(),
+  contentJson: jsonb("content_json").notNull().$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_messages_thread_created_at").on(table.threadId, table.createdAt),
+]).enableRLS();
+
+export const artifacts = pgTable("artifacts", {
+  id: text("id").primaryKey(),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  uri: text("uri").notNull(),
+  contentType: text("content_type"),
+  sha256: text("sha256"),
+  sizeBytes: integer("size_bytes"),
+  summaryJson: jsonb("summary_json").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_artifacts_thread_created_at").on(table.threadId, table.createdAt),
+  index("idx_artifacts_kind").on(table.kind),
 ]).enableRLS();
 
 export const heartbeats = pgTable("heartbeats", {
   id: text("id").primaryKey(),
-  agentId: text("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   status: heartbeatStatusEnum("status").notNull().default(heartbeatStatus.active),
   cadenceSeconds: integer("cadence_seconds").notNull(),
-  specJson: jsonb("spec_json").notNull().$type<Record<string, unknown>>(),
+  messageJson: jsonb("message_json").notNull().$type<Record<string, unknown>>(),
   lastTickAt: timestamp("last_tick_at", { withTimezone: true }),
   nextTickAt: timestamp("next_tick_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  index("idx_heartbeats_agent_id").on(table.agentId),
+  index("idx_heartbeats_thread_id").on(table.threadId),
   index("idx_heartbeats_due").on(table.status, table.nextTickAt, table.createdAt),
 ]).enableRLS();
 
 export const events = pgTable("events", {
   id: text("id").primaryKey(),
   seq: bigserial("seq", { mode: "number" }).notNull().unique(),
-  taskId: text("task_id").notNull().references(() => tasks.id, { onDelete: "cascade" }),
+  threadId: text("thread_id").notNull().references(() => threads.id, { onDelete: "cascade" }),
   type: eventTypeEnum("type").notNull(),
   source: text("source").notNull(),
   dataJson: jsonb("data_json").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  index("idx_events_task_seq").on(table.taskId, table.seq),
+  index("idx_events_thread_seq").on(table.threadId, table.seq),
 ]).enableRLS();

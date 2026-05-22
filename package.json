@@ -17,13 +17,10 @@
     "lint": "eslint .",
     "test": "tsx test/smoke.ts",
     "cli": "tsx scripts/threadbeat-cli.ts",
-    "railway:agent-run": "railway run tsx scripts/railway-agent-run.ts",
-    "smoke:api": "tsx scripts/api-smoke.ts",
     "smoke:daytona": "tsx scripts/daytona-smoke.ts",
-    "smoke:heartbeats": "tsx scripts/heartbeat-drain-smoke.ts",
-    "smoke:live": "tsx scripts/live-api-smoke.ts",
-    "smoke:matrix": "tsx scripts/matrix-smoke.ts",
-    "smoke:pi-full": "tsx scripts/pi-full-smoke.ts"
+    "smoke:events": "tsx scripts/event-types-smoke.ts",
+    "smoke:pi-daytona": "tsx scripts/pi-daytona-smoke.ts",
+    "smoke:threads": "tsx scripts/thread-state-crud-smoke.ts"
   },
   "dependencies": {
     "@daytona/sdk": "^0.175.0",

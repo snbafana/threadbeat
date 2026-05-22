@@ -1,21 +1,23 @@
 # threadbeat
 
-Threadbeat is currently a minimal Daytona-backed task substrate with a thin
-agent registry.
+Threadbeat is a minimal Daytona-backed agent control plane with SQL-backed
+thread state.
 
 It is intentionally not an agent framework yet. V1 proves the smallest useful
-control-plane primitives:
+message-first primitives:
 
 - `agents`: names and ids for GitHub agent repos
-- `tasks`: queued JSON command/ask specs and execution state
-- `heartbeats`: durable timers that create ordinary agent tasks
-- `events`: ordered task output and lifecycle stream
-- Daytona sandboxes: ephemeral execution environments
-- Postgres: durable task/event storage
-- worker loop: server-owned task claiming with explicit concurrency
+- `threads`: durable human-facing continuity for one agent goal
+- `messages`: append-only JSON interaction payloads
+- `sandboxes`: provider runtime rows attached to a thread and ordered by `index`
+- `artifacts`: object-storage pointers for traces, outputs, screenshots, and run bundles
+- `heartbeats`: durable timers that append JSON messages to threads
+- `events`: ordered thread telemetry
 
-No Pi runtime, artifacts table, replay system, TUI, run table, repo mirror, or
-orchestration DAG is part of this cut.
+No task table, run table, replay system, TUI, repo mirror, provider registry, or
+orchestration DAG is part of this cut. A message starts or resumes work on a
+thread; the current goal is inferred from the ordered message set and stored as
+`threads.goal_json`.
 
 ## Local Setup
 
@@ -34,15 +36,15 @@ DAYTONA_API_KEY=...
 The DB layer uses Drizzle with `postgres` and disables prepared statements for
 Supabase pooler compatibility.
 
-Before running the server against a fresh database, push the Drizzle schema:
+Before running the server against a fresh database, run Drizzle migrations:
 
 ```bash
-npm run db:push
+npm exec drizzle-kit migrate
 ```
 
-Server bind address, worker concurrency, command timeouts, and sandbox env allowlist
-live in `src/config.ts`. Only allowlisted secret env vars (for example
-`DEEPSEEK_API_KEY`) are copied into Daytona sandboxes from the host environment.
+Server bind address, worker timing, command timeouts, and sandbox env allowlist
+live in `src/config.ts`. Only allowlisted secret env vars are copied into
+Daytona sandboxes.
 
 ## Run
 
@@ -50,101 +52,86 @@ live in `src/config.ts`. Only allowlisted secret env vars (for example
 npm run dev
 ```
 
-The server assumes the Drizzle schema has already been pushed, starts the API,
-and starts a worker loop in the same process. The worker claims queued tasks up
-to the concurrency defined in `src/config.ts`; `/api/worker/drain-once` remains
-as a manual debug path.
-
 The API exposes:
 
 - `GET /health`
 - `POST /api/agents`
 - `GET /api/agents`
 - `GET /api/agents/:id`
-- `POST /api/agents/:id/tasks`
-- `POST /api/agents/:id/heartbeats`
-- `GET /api/agents/:id/heartbeats`
+- `POST /api/threads`
+- `GET /api/threads`
+- `GET /api/threads/:id`
+- `POST /api/threads/:id/messages`
+- `GET /api/threads/:id/messages`
+- `POST /api/threads/:id/sandboxes`
+- `GET /api/threads/:id/sandboxes`
+- `POST /api/threads/:id/sandboxes/current/close`
+- `POST /api/threads/:id/artifacts`
+- `GET /api/threads/:id/artifacts`
+- `POST /api/threads/:id/heartbeats`
+- `GET /api/threads/:id/heartbeats`
 - `GET /api/heartbeats`
 - `GET /api/heartbeats/:id`
 - `POST /api/heartbeats/drain-due`
-- `POST /api/tasks`
-- `GET /api/tasks`
-- `GET /api/tasks/:id`
-- `GET /api/events?taskId=...&after=...`
+- `GET /api/events?threadId=...&after=...`
 - `POST /api/worker/drain-once`
 
-Drizzle schema/config live in `drizzle/schema.ts` and `drizzle.config.ts`.
-Useful commands:
+## Message-First Thread Flow
 
-```bash
-npm run db:generate
-npm run db:push
-npm run db:studio
-```
-
-## Task Spec
-
-`POST /api/agents/:id/tasks` accepts an ask and optional inputs, then resolves
-the agent repo from the registry, creates a task, creates a `runs/{task_id}`
-branch in the agent repo, materializes `.threadbeat/task.json`, runs
-`threadbeat-agent.mjs` or `threadbeat-agent.sh`, commits, pushes, and streams
-the lifecycle back through `/api/events`.
-
-Agent heartbeats are SQL-backed recurring messages attached to an agent. A due
-heartbeat does not run its own agent loop; it creates a normal queued agent task,
-records a `task.created` event with source `heartbeat:<id>`, advances
-`nextTickAt`, and lets the existing worker/Daytona path execute the task.
+Create a thread:
 
 ```json
 {
-  "title": "research heartbeat",
-  "cadenceSeconds": 60,
-  "prompt": "Continue the research task from the current repo context.",
-  "nextTickAt": "2026-05-22T21:00:00.000Z"
-}
-```
-
-```json
-{
-  "ask": "Create finance graphs for AAPL, MSFT, NVDA, and SPY.",
-  "inputs": {
-    "files": [
-      {
-        "path": ".threadbeat/symbols.txt",
-        "content": "AAPL\nMSFT\nNVDA\nSPY\n"
-      }
-    ]
+  "title": "research agent harness",
+  "agentId": "agent_123",
+  "goalJson": {
+    "text": "Build a repo-backed research agent that can search, save traces, and resume from heartbeats."
   }
 }
 ```
 
-`POST /api/tasks` accepts a flexible JSON spec:
+Append human input as JSON:
 
 ```json
 {
-  "repo": {
-    "url": "https://github.com/octocat/Hello-World.git",
-    "branch": "master"
-  },
-  "setup": [{ "cmd": "echo setup", "timeoutSeconds": 30 }],
-  "main": { "cmd": "ls -la", "timeoutSeconds": 30 },
-  "verify": [{ "cmd": "test -f README", "timeoutSeconds": 30 }]
+  "role": "human",
+  "contentJson": {
+    "text": "continue from the latest trace and focus on search tool reliability"
+  }
 }
 ```
 
-`repo` is optional. If present, commands default to `workspace/repo`; otherwise
-they default to `workspace`. Individual commands can override `cwd`.
+Heartbeats are scheduled JSON messages:
+
+```json
+{
+  "title": "continue research loop",
+  "cadenceSeconds": 60,
+  "messageJson": {
+    "text": "continue this thread",
+    "reason": "scheduled heartbeat"
+  },
+  "nextTickAt": "2026-05-22T21:00:00.000Z"
+}
+```
+
+The next implementation step is script-first: add a goal-inference script that
+reads ordered messages and updates `threads.goal_json`, then add a repo-start
+smoke that clones the agent repo, materializes thread context, runs
+`threadbeat-agent.mjs` or `threadbeat-agent.sh`, streams thread events, and
+appends an agent checkpoint message.
 
 ## CLI
 
 The CLI is a smoke driver, not a full operator UI.
 
 ```bash
-npm run cli -- task create task.json
-npm run cli -- task list
-npm run cli -- task get <task_id>
+npm run cli -- thread create thread.json
+npm run cli -- thread list
+npm run cli -- thread get <thread_id>
+npm run cli -- message append <thread_id> message.json
 npm run cli -- worker drain-once
-npm run cli -- events follow --task <task_id>
+npm run cli -- events follow --thread <thread_id>
 ```
 
 By default it targets `http://127.0.0.1:8000`. Override with
@@ -164,23 +151,15 @@ HTTP checks require a running server and reachable `DATABASE_URL`:
 
 ```bash
 npm test
-npm run smoke:api
+npm run smoke:threads
+npm run smoke:events
 ```
 
 Live Daytona checks:
 
 ```bash
 npm run smoke:daytona
-npm run smoke:heartbeats
-npm run smoke:live
-npm run smoke:pi-full
-```
-
-The repo matrix is defined in `test/fixtures/repo-matrix.json` and expects a
-running server:
-
-```bash
-npm run smoke:matrix
+npm run smoke:pi-daytona
 ```
 
 ## Current Daytona Note

@@ -6,14 +6,14 @@ import { events, type EventType } from "../../drizzle/schema.js";
 import { db } from "./client.js";
 
 export async function appendEvent(
-  taskId: string,
+  threadId: string,
   type: EventType,
   source: string,
   data?: Record<string, unknown>,
 ) {
   const [event] = await db.insert(events).values({
     id: randomUUID(),
-    taskId,
+    threadId,
     type,
     source,
     dataJson: data,
@@ -21,9 +21,9 @@ export async function appendEvent(
   return fromRow(event);
 }
 
-export async function listEvents(filter: { taskId?: string; after?: number; limit?: number }) {
+export async function listEvents(filter: { threadId?: string; after?: number; limit?: number }) {
   const clauses = [
-    filter.taskId ? eq(events.taskId, filter.taskId) : undefined,
+    filter.threadId ? eq(events.threadId, filter.threadId) : undefined,
     filter.after !== undefined ? gt(events.seq, filter.after) : undefined,
   ].filter(Boolean);
 
@@ -41,7 +41,7 @@ function fromRow(row: typeof events.$inferSelect) {
   return {
     id: row.id,
     seq: row.seq,
-    taskId: row.taskId,
+    threadId: row.threadId,
     type: row.type,
     source: row.source,
     data: row.dataJson ?? undefined,

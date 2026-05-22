@@ -1,76 +1,35 @@
 import { workerConcurrency, workerPollMs } from "../config.js";
-import { runTask } from "../agent/run.js";
 import { drainDueHeartbeats } from "../db/heartbeats.js";
-import { claimNextTask } from "../db/tasks.js";
 
-const active = new Set<Promise<void>>();
-let filling: Promise<void> | undefined;
-let claiming = 0;
-let autoFill = false;
+let draining: Promise<void> | undefined;
+let autoDrain = false;
 
 export function startWorkerLoop() {
-  autoFill = true;
+  autoDrain = true;
 
-  const timer = setInterval(() => scheduleFill(), workerPollMs);
-  scheduleFill();
+  const timer = setInterval(() => scheduleDrain(), workerPollMs);
+  scheduleDrain();
 
   return async function stopWorkerLoop() {
-    autoFill = false;
+    autoDrain = false;
     clearInterval(timer);
-    await filling;
-    await Promise.allSettled(active);
+    await draining;
   };
 }
 
 export async function drainOnce(limit = workerConcurrency) {
-  const started: Array<{ id: string; run: Promise<void> }> = [];
   const count = Math.max(1, Math.min(limit, workerConcurrency));
   const heartbeats = await drainDueHeartbeats(count);
-  for (let i = 0; i < count; i++) {
-    const task = await claimAndStart();
-    if (!task) break;
-    started.push(task);
-  }
-  await Promise.allSettled(started.map((task) => task.run));
-  return { processed: started.length, taskIds: started.map((task) => task.id), heartbeats };
+  return { processed: heartbeats.processed, heartbeats };
 }
 
-function scheduleFill() {
-  if (!autoFill || filling) return;
-  filling = fillSlots()
+function scheduleDrain() {
+  if (!autoDrain || draining) return;
+  draining = drainDueHeartbeats(workerConcurrency).then(() => undefined)
     .catch((error) => {
-      console.error("worker fill failed", error);
+      console.error("worker heartbeat drain failed", error);
     })
     .finally(() => {
-      filling = undefined;
+      draining = undefined;
     });
-}
-
-async function fillSlots() {
-  await drainDueHeartbeats(workerConcurrency);
-  while (autoFill) {
-    const task = await claimAndStart();
-    if (!task) return;
-  }
-}
-
-async function claimAndStart() {
-  if (active.size + claiming >= workerConcurrency) return null;
-
-  claiming += 1;
-  const task = await claimNextTask().finally(() => {
-    claiming -= 1;
-  });
-  if (!task) return null;
-
-  const run = runTask(task)
-    .catch((error) => {
-      console.error(`worker task ${task.id} failed`, error);
-    })
-    .finally(() => {
-      active.delete(run);
-      scheduleFill();
-    });
-  active.add(run);
-  return { id: task.id, run };
 }

@@ -7,15 +7,6 @@ export const piFixture = {
 
 export const samplePiRepoPath = "workspace/repo/.threadbeat-smoke/pi-sample-repo";
 
-export type TaskEvent = {
-  id?: string;
-  seq: number;
-  taskId: string;
-  type: string;
-  source: string;
-  data?: Record<string, unknown>;
-};
-
 export function requireDeepseekKey() {
   assert.ok(process.env.DEEPSEEK_API_KEY, "DEEPSEEK_API_KEY is required");
   return process.env.DEEPSEEK_API_KEY;
@@ -109,44 +100,4 @@ export function installSamplePiRepoCommand() {
     "npm install --no-audit --no-fund",
     "test -d node_modules/@mariozechner/pi-coding-agent",
   ].join(" && ");
-}
-
-export function assertTaskEventStream(events: TaskEvent[], requiredTypes: string[]) {
-  assert.ok(events.length > 0, "expected task events");
-
-  let previousSeq = 0;
-  const types = events.map((event) => event.type);
-  const taskIds = new Set(events.map((event) => event.taskId));
-
-  assert.equal(taskIds.size, 1, `events span multiple tasks: ${Array.from(taskIds).join(", ")}`);
-
-  for (const event of events) {
-    assert.equal(typeof event.seq, "number", `missing numeric seq on ${event.type}`);
-    assert.ok(event.seq > previousSeq, `events are not strictly seq ordered at ${event.type}`);
-    assert.ok(event.taskId, `missing taskId on ${event.type}`);
-    assert.ok(event.source, `missing source on ${event.type}`);
-    assert.equal(Object.hasOwn(event, "runId"), false, `event ${event.type} leaked runId`);
-    assert.equal(Object.hasOwn(event, "run_id"), false, `event ${event.type} leaked run_id`);
-    assert.equal(Object.hasOwn(event, "message"), false, `event ${event.type} leaked message`);
-    previousSeq = event.seq;
-  }
-
-  for (const expected of requiredTypes) {
-    assert.ok(types.includes(expected), `missing event ${expected}: ${types.join(", ")}`);
-  }
-
-  const taskCompletedIndex = types.indexOf("task.completed");
-  const sandboxDeletedIndex = types.indexOf("sandbox.deleted");
-  if (taskCompletedIndex !== -1 && sandboxDeletedIndex !== -1) {
-    assert.ok(sandboxDeletedIndex > taskCompletedIndex, "sandbox.deleted should follow task.completed");
-  }
-
-  return types;
-}
-
-export function stdoutFromEvents(events: TaskEvent[]) {
-  return events
-    .filter((event) => event.type === "command.stdout")
-    .map((event) => String(event.data?.stdout ?? ""))
-    .join("\n");
 }

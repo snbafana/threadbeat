@@ -1,80 +1,124 @@
-# Agent Control Plane State
+# Agent Control Plane Plan
 
-## Current Definition
+## Source Of Truth
 
-An agent is a registry entry for a GitHub repo:
+Threadbeat is moving away from a task-based model.
 
-- `id`
-- `name`
-- `repo_url`
-- `default_branch`
+The product primitive is:
 
-It is not a runtime, sandbox, scheduler row, attempt, or repo metadata mirror.
+```text
+human/heartbeat message -> thread -> inferred goal -> repo-backed agent sandbox
+```
 
-An agent task is:
+A message starts or resumes work. A task does not. If the implementation needs an
+execution attempt boundary later, that boundary should be represented in thread
+events and artifacts, not as a public or private `tasks` table.
 
-1. resolve `agent_id` to `repo_url` and `default_branch`;
-2. clone that repo in Daytona;
-3. create a `runs/{task_id}` branch;
-4. materialize `.threadbeat/task.json` plus input files;
-5. run `threadbeat-agent.mjs` or `threadbeat-agent.sh`;
-6. commit and push the run branch;
-7. stream all lifecycle/output through `events`.
+## Core Flow
 
-## Proven Primitives
+1. A human creates a thread with an agent repo and an initial JSON message.
+2. Threadbeat appends the message to `messages`.
+3. A goal-inference step reads the ordered message history and writes the current
+   goal back onto the thread as JSON.
+4. The worker decides whether the thread should run:
+   - if the latest sandbox row is reachable and inside its idle window, reuse it;
+   - otherwise create a new Daytona sandbox and append a new `sandboxes` row with
+     the next `index`.
+5. The sandbox clones the agent repo from `agents.repo_url` and
+   `agents.default_branch`.
+6. Threadbeat materializes thread context for the agent:
+   - current inferred goal JSON;
+   - ordered message history;
+   - current artifact manifest;
+   - thread and sandbox identifiers.
+7. The agent runs `threadbeat-agent.mjs` or `threadbeat-agent.sh`.
+8. Events stream back as thread events.
+9. Large evidence uploads to object storage and is indexed in `artifacts`.
+10. The agent appends an `agent` message or checkpoint when it yields.
+11. The thread becomes `idle`, `completed`, or `failed`.
 
-The smoke harness proves these primitives end to end:
+## Message Semantics
 
-- create/delete Daytona sandboxes;
-- clone the current Threadbeat repo;
-- materialize a sample Pi repo inside the sandbox;
-- inject allowlisted credentials without printing them;
-- validate Pi `AuthStorage` and `ModelRegistry`;
-- run a real Pi `createAgentSession`;
-- create, push, clone, verify, and delete a disposable GitHub repo;
-- run realistic Python finance graph generation and artifact checks;
-- stream task lifecycle/stdout through `events`;
-- roundtrip every declared event enum through DB/API event streaming.
-- register a GitHub repo as an agent, submit an ask, run the agent, push a
-  versioned `runs/{task_id}` branch, verify branch artifacts, and delete the
-  disposable remote.
+Messages are the interaction API. They are append-only JSON payloads.
+
+Human text is still JSON:
+
+```json
+{
+  "text": "research this, keep going from the last trace"
+}
+```
+
+Heartbeats are also messages:
+
+```json
+{
+  "text": "continue this thread",
+  "reason": "scheduled heartbeat"
+}
+```
+
+The LLM-facing goal is inferred from the full message set, not manually supplied
+as a separate task body. `threads.goal_json` is the current distilled goal, and
+older goal versions remain recoverable from message history and events.
 
 ## Current Abstraction
 
-- `src/api/`: HTTP routes only.
-- `src/worker/`: task claiming, manual drain, and server-owned concurrency loop.
-- `src/db/`: Drizzle client plus CRUD for agents, tasks, and events.
-- `src/sandbox/`: Daytona sandbox lifecycle and shell command event emission.
-- `src/agent/`: agent task execution, ask materialization, entrypoint invocation, and run branch push.
+- `src/api/`: HTTP routes for agents, threads, messages, sandboxes, artifacts,
+  heartbeats, and events.
+- `src/db/`: Drizzle client plus CRUD for the same SQL primitives.
+- `src/sandbox/`: Daytona sandbox lifecycle and shell execution.
+- `src/worker/`: heartbeat draining now; next owner for thread resume/start
+  decisions.
 
-Keep this flat. Do not add a separate repo model, run table, provider registry,
-or scheduler state until a full-fidelity smoke proves the current model cannot
-carry the behavior. Process concurrency belongs in `src/worker/`, not in new DB
-tables.
+Keep this flat. Do not add a repo model, run table, task table, provider
+registry, or scheduler runtime until a full-fidelity smoke proves the current
+thread/message model cannot carry the behavior.
 
-## Next Productionization
+## Implementation Sequence
 
-1. Replace the script-owned sample Pi agent with a real agent repo that exposes
-   `threadbeat-agent.mjs` or `threadbeat-agent.sh`.
-2. Move the finance/Pi harness behavior into that agent repo, not into a new
-   Threadbeat runtime registry.
-3. Keep `POST /api/agents/:id/tasks` as the task assignment path: it submits an
-   ask to an agent, creates one task, and returns events.
-4. Add artifact indexing only after branch artifacts alone are insufficient for
-   a real consumer.
-5. Add attempts/runs only when retry semantics need separate durable rows.
+1. Finish deleting task-shaped API, DB, scripts, docs, and event filters.
+2. Generate and apply a migration that drops `tasks`, removes `events.task_id`,
+   makes `events.thread_id` required, and makes heartbeats thread-only with
+   required `message_json`.
+3. Keep CRUD smokes for:
+   - agent registry;
+   - thread creation;
+   - JSON message append/list;
+   - sandbox row indexing/current lookup;
+   - artifact pointers;
+   - thread heartbeat drain into a heartbeat message;
+   - thread event enum roundtrip.
+4. Add the goal-inference smoke:
+   - create a thread;
+   - append multiple human messages;
+   - run the inference step;
+   - assert `threads.goal_json` captures the current goal as JSON.
+5. Add the repo-start smoke:
+   - create a thread with an agent repo;
+   - append a human message;
+   - start or resume the thread through the worker;
+   - create/reuse a Daytona sandbox;
+   - clone the repo;
+   - materialize thread context;
+   - run the agent entrypoint;
+   - stream thread events;
+   - append an agent checkpoint message.
+6. Only after the repo-start smoke works, decide whether attempt boundaries need
+   a simple `execution_id` field on events/artifacts.
 
 ## Tests To Keep
 
 Every productionized primitive should keep the matching smoke:
 
 - agent registry CRUD;
-- event enum roundtrip;
+- thread state CRUD;
+- event enum roundtrip on `thread_id`;
 - Daytona clone/delete;
-- Pi auth/model registry;
-- real Pi session;
-- real disposable GitHub remote;
-- finance/Python artifacts;
-- full suite runner.
+- Pi auth/model registry in Daytona;
+- thread heartbeat message injection;
+- goal inference from messages;
+- repo-backed agent start/resume from a message.
 
-Delete a script when a stronger full-fidelity script proves the same behavior.
+Delete any task-based script when it has no unique coverage after the thread
+smoke exists.

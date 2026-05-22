@@ -1,10 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
-import { eventType } from "../../../drizzle/schema.js";
-import { AgentTask, Id } from "../../input.js";
-import { appendEvent } from "../../db/events.js";
+import { Id } from "../../input.js";
 import { createAgent, getAgent, listAgents, NewAgent } from "../../db/agents.js";
-import { createTask } from "../../db/tasks.js";
 
 export function registerAgentRoutes(app: FastifyInstance) {
   app.post("/api/agents", async (request) => {
@@ -22,22 +19,5 @@ export function registerAgentRoutes(app: FastifyInstance) {
       return { ok: false, error: "agent not found" };
     }
     return { ok: true, agent };
-  });
-
-  app.post("/api/agents/:id/tasks", async (request, reply) => {
-    const { id } = Id.parse(request.params);
-    const agent = await getAgent(id);
-    if (!agent) {
-      reply.code(404);
-      return { ok: false, error: "agent not found" };
-    }
-    const taskSpec = AgentTask.parse(request.body);
-    const task = await createTask(taskSpec, { agentId: agent.id });
-    await appendEvent(task.id, eventType.taskCreated, "api", {
-      agentId: agent.id,
-      spec: taskSpec,
-      runBranch: task.runBranch,
-    });
-    return { ok: true, task };
   });
 }

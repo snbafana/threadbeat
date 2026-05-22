@@ -12,67 +12,61 @@ async function api(method: string, path: string, body?: unknown) {
   return { status: response.status, json };
 }
 
-async function testHealth() {
-  const { status, json } = await api("GET", "/health");
-  assert.equal(status, 200);
-  assert.equal(json.ok, true);
-  console.log("  health: ok");
-}
-
-async function testTaskLifecycle() {
-  const { status, json } = await api("POST", "/api/tasks", {
-    main: { cmd: "echo hello" },
-  });
-  assert.equal(status, 200);
-  assert.equal(json.ok, true);
-  const taskId = json.task.id as string;
-  assert.ok(taskId);
-
-  const get = await api("GET", `/api/tasks/${taskId}`);
-  assert.equal(get.json.task.status, "queued");
-
-  const list = await api("GET", "/api/tasks");
-  assert.ok(list.json.tasks.some((t: { id: string }) => t.id === taskId));
-
-  console.log(`  task lifecycle: ok (${taskId})`);
-  return taskId;
-}
-
-async function testDrainAndEvents(taskId: string) {
-  const drain = await api("POST", "/api/worker/drain-once", {});
-  assert.equal(drain.status, 200);
-  assert.ok(drain.json.result.processed >= 1);
-
-  const task = await api("GET", `/api/tasks/${taskId}`);
-  assert.ok(["succeeded", "failed"].includes(task.json.task.status), `unexpected status: ${task.json.task.status}`);
-
-  const events = await api("GET", `/api/events?taskId=${taskId}`);
-  assert.ok(events.json.events.length > 0, "expected at least one event");
-
-  const types = events.json.events.map((e: { type: string }) => e.type);
-  assert.ok(types.includes("task.created"));
-  assert.ok(types.includes("task.started"));
-
-  console.log(`  drain + events: ok (${events.json.events.length} events, task ${task.json.task.status})`);
-}
-
-async function testBadRequest() {
-  const { status, json } = await api("POST", "/api/tasks", { noMain: true });
-  assert.equal(status, 400);
-  assert.equal(json.ok, false);
-  console.log("  bad request: ok");
-}
-
-async function testNotFound() {
-  const { status } = await api("GET", "/api/tasks/nonexistent");
-  assert.equal(status, 404);
-  console.log("  not found: ok");
-}
-
 console.log(`smoke tests against ${BASE}`);
-await testHealth();
-const taskId = await testTaskLifecycle();
-await testDrainAndEvents(taskId);
-await testBadRequest();
-await testNotFound();
+
+const health = await api("GET", "/health");
+assert.equal(health.status, 200);
+assert.equal(health.json.ok, true);
+console.log("  health: ok");
+
+const createThread = await api("POST", "/api/threads", {
+  title: "http smoke thread",
+  goalJson: { text: "prove message-first HTTP smoke" },
+});
+assert.equal(createThread.status, 200);
+const threadId = createThread.json.thread.id as string;
+assert.ok(threadId);
+console.log(`  thread create: ok (${threadId})`);
+
+const message = await api("POST", `/api/threads/${threadId}/messages`, {
+  role: "human",
+  contentJson: { text: "start this repo-backed agent from messages" },
+});
+assert.equal(message.status, 200);
+assert.equal(message.json.message.content.text, "start this repo-backed agent from messages");
+console.log("  message append: ok");
+
+const heartbeat = await api("POST", `/api/threads/${threadId}/heartbeats`, {
+  title: "http smoke heartbeat",
+  cadenceSeconds: 60,
+  messageJson: { text: "continue from heartbeat" },
+  nextTickAt: new Date(Date.now() - 1000).toISOString(),
+});
+assert.equal(heartbeat.status, 200);
+const heartbeatId = heartbeat.json.heartbeat.id as string;
+
+const drain = await api("POST", "/api/heartbeats/drain-due", { limit: 20 });
+assert.equal(drain.status, 200);
+assert.ok(drain.json.result.messages.some((item: { heartbeatId: string }) => item.heartbeatId === heartbeatId));
+console.log("  heartbeat drain: ok");
+
+const events = await api("GET", `/api/events?threadId=${threadId}`);
+assert.equal(events.status, 200);
+assert.ok(events.json.events.some((event: { type: string; source: string }) => (
+  event.type === "message.created" && event.source === `heartbeat:${heartbeatId}`
+)));
+console.log("  thread events: ok");
+
+const badMessage = await api("POST", `/api/threads/${threadId}/messages`, {
+  role: "human",
+  content: "not json-only",
+});
+assert.equal(badMessage.status, 400);
+assert.equal(badMessage.json.ok, false);
+console.log("  bad request: ok");
+
+const missing = await api("GET", "/api/threads/nonexistent");
+assert.equal(missing.status, 404);
+console.log("  not found: ok");
+
 console.log("all smoke tests passed");

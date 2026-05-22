@@ -43,6 +43,27 @@
       "when": 1779485942803,
       "tag": "0005_many_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1779491965415,
+      "tag": "0006_wonderful_talos",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779493135175,
+      "tag": "0007_ancient_nick_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1779493500000,
+      "tag": "0008_clean_thread_events",
+      "breakpoints": true
     }
   ]
 }

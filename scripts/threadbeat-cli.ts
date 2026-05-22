@@ -5,16 +5,20 @@ const baseUrl = process.env.THREADBEAT_API_URL ?? "http://127.0.0.1:8000";
 const [command, subcommand, ...args] = process.argv.slice(2);
 
 try {
-  if (command === "task" && subcommand === "create") {
+  if (command === "thread" && subcommand === "create") {
     const file = args[0];
-    if (!file) throw new Error("usage: task create <json-file>");
-    await print(await request("POST", "/api/tasks", JSON.parse(await fs.readFile(file, "utf8"))));
-  } else if (command === "task" && subcommand === "list") {
-    await print(await request("GET", "/api/tasks"));
-  } else if (command === "task" && subcommand === "get") {
+    if (!file) throw new Error("usage: thread create <json-file>");
+    await print(await request("POST", "/api/threads", JSON.parse(await fs.readFile(file, "utf8"))));
+  } else if (command === "thread" && subcommand === "list") {
+    await print(await request("GET", "/api/threads"));
+  } else if (command === "thread" && subcommand === "get") {
     const id = args[0];
-    if (!id) throw new Error("usage: task get <id>");
-    await print(await request("GET", `/api/tasks/${encodeURIComponent(id)}`));
+    if (!id) throw new Error("usage: thread get <id>");
+    await print(await request("GET", `/api/threads/${encodeURIComponent(id)}`));
+  } else if (command === "message" && subcommand === "append") {
+    const [threadId, file] = args;
+    if (!threadId || !file) throw new Error("usage: message append <thread-id> <json-file>");
+    await print(await request("POST", `/api/threads/${encodeURIComponent(threadId)}/messages`, JSON.parse(await fs.readFile(file, "utf8"))));
   } else if (command === "events" && subcommand === "follow") {
     await followEvents(args);
   } else if (command === "worker" && subcommand === "drain-once") {
@@ -29,15 +33,15 @@ try {
 }
 
 async function followEvents(args: string[]): Promise<void> {
-  const taskIndex = args.indexOf("--task");
-  const taskId = taskIndex >= 0 ? args[taskIndex + 1] : undefined;
-  if (!taskId) throw new Error("usage: events follow --task <id>");
+  const threadIndex = args.indexOf("--thread");
+  const threadId = threadIndex >= 0 ? args[threadIndex + 1] : undefined;
+  if (!threadId) throw new Error("usage: events follow --thread <id>");
   let after = 0;
   let emptyPolls = 0;
   while (emptyPolls < 30) {
     const response = await request<{ events: Array<{ seq: number; type: string; source: string; data?: unknown }> }>(
       "GET",
-      `/api/events?taskId=${encodeURIComponent(taskId)}&after=${after}&limit=100`,
+      `/api/events?threadId=${encodeURIComponent(threadId)}&after=${after}&limit=100`,
     );
     if (response.events.length === 0) {
       emptyPolls += 1;
@@ -72,9 +76,10 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 function usage(): void {
   console.log(`Usage:
-  npm run cli -- task create <json-file>
-  npm run cli -- task list
-  npm run cli -- task get <id>
-  npm run cli -- events follow --task <id>
+  npm run cli -- thread create <json-file>
+  npm run cli -- thread list
+  npm run cli -- thread get <id>
+  npm run cli -- message append <thread-id> <json-file>
+  npm run cli -- events follow --thread <id>
   npm run cli -- worker drain-once`);
 }
