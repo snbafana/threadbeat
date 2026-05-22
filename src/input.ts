@@ -41,6 +41,16 @@ export const AgentTask = z.object({
 }).passthrough();
 export type AgentTask = z.infer<typeof AgentTask>;
 
+export const HeartbeatInput = z.object({
+  title: text,
+  cadenceSeconds: z.number().int().positive(),
+  prompt: text,
+  inputs: AgentTask.shape.inputs.optional(),
+  nextTickAt: z.coerce.date().optional(),
+  status: z.enum(["active", "paused"]).optional(),
+});
+export type HeartbeatInput = z.infer<typeof HeartbeatInput>;
+
 export function errorMessage(error: unknown) {
   if (error instanceof z.ZodError) return error.issues.map((issue) => `${issue.path.join(".") || "body"}: ${issue.message}`).join("; ");
   return error instanceof Error ? error.message : String(error);

@@ -1,5 +1,6 @@
 import { workerConcurrency, workerPollMs } from "../config.js";
 import { runTask } from "../agent/run.js";
+import { drainDueHeartbeats } from "../db/heartbeats.js";
 import { claimNextTask } from "../db/tasks.js";
 
 const active = new Set<Promise<void>>();
@@ -24,13 +25,14 @@ export function startWorkerLoop() {
 export async function drainOnce(limit = workerConcurrency) {
   const started: Array<{ id: string; run: Promise<void> }> = [];
   const count = Math.max(1, Math.min(limit, workerConcurrency));
+  const heartbeats = await drainDueHeartbeats(count);
   for (let i = 0; i < count; i++) {
     const task = await claimAndStart();
     if (!task) break;
     started.push(task);
   }
   await Promise.allSettled(started.map((task) => task.run));
-  return { processed: started.length, taskIds: started.map((task) => task.id) };
+  return { processed: started.length, taskIds: started.map((task) => task.id), heartbeats };
 }
 
 function scheduleFill() {
@@ -45,6 +47,7 @@ function scheduleFill() {
 }
 
 async function fillSlots() {
+  await drainDueHeartbeats(workerConcurrency);
   while (autoFill) {
     const task = await claimAndStart();
     if (!task) return;

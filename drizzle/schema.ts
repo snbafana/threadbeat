@@ -1,4 +1,4 @@
-import { bigserial, index, jsonb, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigserial, index, integer, jsonb, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const taskStatusValues = [
   "queued",
@@ -40,11 +40,18 @@ export const eventTypeValues = [
   "error.raised",
 ] as const;
 
+export const heartbeatStatusValues = [
+  "active",
+  "paused",
+] as const;
+
 export const taskStatusEnum = pgEnum("task_status", taskStatusValues);
 export const eventTypeEnum = pgEnum("event_type", eventTypeValues);
+export const heartbeatStatusEnum = pgEnum("heartbeat_status", heartbeatStatusValues);
 
 export type TaskStatus = (typeof taskStatusValues)[number];
 export type EventType = (typeof eventTypeValues)[number];
+export type HeartbeatStatus = (typeof heartbeatStatusValues)[number];
 
 export const taskStatus = {
   queued: "queued",
@@ -86,6 +93,11 @@ export const eventType = {
   errorRaised: "error.raised",
 } as const satisfies Record<string, EventType>;
 
+export const heartbeatStatus = {
+  active: "active",
+  paused: "paused",
+} as const satisfies Record<string, HeartbeatStatus>;
+
 export const agents = pgTable("agents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -105,6 +117,22 @@ export const tasks = pgTable("tasks", {
   error: text("error"),
 }, (table) => [
   index("idx_tasks_status_created_at").on(table.status, table.createdAt),
+]).enableRLS();
+
+export const heartbeats = pgTable("heartbeats", {
+  id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull().references(() => agents.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  status: heartbeatStatusEnum("status").notNull().default(heartbeatStatus.active),
+  cadenceSeconds: integer("cadence_seconds").notNull(),
+  specJson: jsonb("spec_json").notNull().$type<Record<string, unknown>>(),
+  lastTickAt: timestamp("last_tick_at", { withTimezone: true }),
+  nextTickAt: timestamp("next_tick_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index("idx_heartbeats_agent_id").on(table.agentId),
+  index("idx_heartbeats_due").on(table.status, table.nextTickAt, table.createdAt),
 ]).enableRLS();
 
 export const events = pgTable("events", {
