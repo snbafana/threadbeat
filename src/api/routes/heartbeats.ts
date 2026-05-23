@@ -1,12 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { z } from "zod";
 
 import { Id } from "../../input.js";
-import { drainDueHeartbeats, getHeartbeat, listHeartbeats } from "../../db/heartbeats.js";
-
-const DrainDue = z.object({
-  limit: z.number().int().positive().optional(),
-});
+import { getHeartbeat, listHeartbeats } from "../../db/heartbeats.js";
 
 export function registerHeartbeatRoutes(app: FastifyInstance) {
   app.get("/api/heartbeats", async () => ({ ok: true, heartbeats: await listHeartbeats() }));
@@ -19,10 +14,5 @@ export function registerHeartbeatRoutes(app: FastifyInstance) {
       return { ok: false, error: "heartbeat not found" };
     }
     return { ok: true, heartbeat };
-  });
-
-  app.post("/api/heartbeats/drain-due", async (request) => {
-    const { limit } = DrainDue.parse(request.body ?? {});
-    return { ok: true, result: await drainDueHeartbeats(limit) };
   });
 }

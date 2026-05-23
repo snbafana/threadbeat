@@ -1,10 +1,10 @@
 import { drizzle } from "drizzle-orm/postgres-js";
+import "dotenv/config";
 import postgres from "postgres";
 
-import { databaseUrl } from "../config.js";
+const databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
-
 export const client = postgres(databaseUrl, { prepare: false });
 export const db = drizzle(client);
 

@@ -7,12 +7,13 @@ export const Id = z.object({
   id: text,
 });
 
-export const Command = z.object({
-  cmd: text,
-  cwd: text.optional(),
-  timeoutSeconds: z.number().int().positive().optional(),
-}).passthrough();
-export type Command = z.infer<typeof Command>;
+export const AgentInput = z.object({
+  id: text.optional(),
+  name: text,
+  repoUrl: text,
+  defaultBranch: text,
+});
+export type AgentInput = z.infer<typeof AgentInput>;
 
 export const HeartbeatInput = z.object({
   title: text,

@@ -7,28 +7,16 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/src/server.js",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push",
+    "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint .",
-    "test": "tsx test/smoke.ts",
-    "cli": "tsx scripts/threadbeat-cli.ts",
-    "smoke:daytona": "tsx scripts/daytona-smoke.ts",
-    "smoke:events": "tsx scripts/event-types-smoke.ts",
-    "smoke:goal": "tsx scripts/goal-inference-smoke.ts",
-    "smoke:pi-daytona": "tsx scripts/pi-daytona-smoke.ts",
-    "smoke:repo-start": "tsx scripts/repo-start-smoke.ts",
-    "smoke:threads": "tsx scripts/thread-state-crud-smoke.ts"
+    "lint": "eslint ."
   },
   "dependencies": {
-    "@daytona/sdk": "^0.175.0",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.2",
-    "drizzle-zod": "^0.8.3",
     "fastify": "^5.6.2",
     "postgres": "^3.4.9",
     "zod": "^4.4.3"
@@ -38,7 +26,6 @@
     "@types/node": "^24.10.1",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.1",
-    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.59.2"
   }

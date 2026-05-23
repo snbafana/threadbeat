@@ -6,11 +6,6 @@ import { registerAgentRoutes } from "./routes/agents.js";
 import { registerEventRoutes } from "./routes/events.js";
 import { registerHeartbeatRoutes } from "./routes/heartbeats.js";
 import { registerThreadRoutes } from "./routes/threads.js";
-import { drainOnce } from "../worker/loop.js";
-
-const Drain = z.object({
-  limit: z.number().int().positive().optional(),
-});
 
 export function createApp() {
   const app = Fastify({ logger: false });
@@ -30,14 +25,6 @@ export function createApp() {
   registerThreadRoutes(app);
   registerHeartbeatRoutes(app);
   registerEventRoutes(app);
-
-  app.post("/api/worker/drain-once", async (request) => {
-    const { limit } = Drain.parse(request.body ?? {});
-    return {
-      ok: true,
-      result: await drainOnce(limit),
-    };
-  });
 
   return app;
 }

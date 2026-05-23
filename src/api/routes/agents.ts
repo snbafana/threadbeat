@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 
-import { Id } from "../../input.js";
-import { createAgent, getAgent, listAgents, NewAgent } from "../../db/agents.js";
+import { AgentInput, Id } from "../../input.js";
+import { createAgent, getAgent, listAgents } from "../../db/agents.js";
 
 export function registerAgentRoutes(app: FastifyInstance) {
   app.post("/api/agents", async (request) => {
-    const agent = await createAgent(NewAgent.parse(request.body));
+    const agent = await createAgent(AgentInput.parse(request.body));
     return { ok: true, agent };
   });
 
