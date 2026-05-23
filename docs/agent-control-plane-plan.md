@@ -118,7 +118,8 @@ Every productionized primitive should keep the matching smoke:
 - Pi auth/model registry in Daytona;
 - thread heartbeat message injection;
 - goal inference from messages;
-- repo-backed agent start/resume from a message.
+- repo-backed agent start/resume from a message, including truthful failure
+  evidence when the sandbox cannot reach public web targets.
 
 Delete any task-based script when it has no unique coverage after the thread
 smoke exists.

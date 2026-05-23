@@ -21,6 +21,7 @@
     "smoke:events": "tsx scripts/event-types-smoke.ts",
     "smoke:goal": "tsx scripts/goal-inference-smoke.ts",
     "smoke:pi-daytona": "tsx scripts/pi-daytona-smoke.ts",
+    "smoke:repo-start": "tsx scripts/repo-start-smoke.ts",
     "smoke:threads": "tsx scripts/thread-state-crud-smoke.ts"
   },
   "dependencies": {

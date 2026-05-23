@@ -154,6 +154,7 @@ npm test
 npm run smoke:threads
 npm run smoke:goal
 npm run smoke:events
+npm run smoke:repo-start
 ```
 
 Live Daytona checks:
@@ -162,6 +163,12 @@ Live Daytona checks:
 npm run smoke:daytona
 npm run smoke:pi-daytona
 ```
+
+`smoke:repo-start` is intentionally evidence-first: it starts the real research
+agent repo from materialized thread messages in Daytona and passes if Threadbeat
+records either successful run artifacts or truthful failure evidence on the
+thread. Current Daytona generic HTTPS egress can fail inside Node/curl, so the
+failure path is part of the smoke rather than hidden by a fake success.
 
 ## Current Daytona Note
 
